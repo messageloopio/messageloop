@@ -6,7 +6,10 @@ replace github.com/deeploopdev/messageloop-protocol => ../messageloop-protocol
 
 require (
 	github.com/deeploopdev/messageloop-protocol v0.0.0-20250703125811-d05df1d5c209
+	github.com/google/uuid v1.6.0
 	github.com/lynx-go/lynx v0.1.0
+	github.com/lynx-go/lynx/contrib/log/zap v0.1.0
+	github.com/lynx-go/x v0.0.4
 	google.golang.org/grpc v1.71.0
 	google.golang.org/protobuf v1.36.6
 )
@@ -15,8 +18,6 @@ require (
 	github.com/AdamSLevy/flagbind v0.0.0-20241102175934-70a5d83327aa // indirect
 	github.com/fsnotify/fsnotify v1.8.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.2.1 // indirect
-	github.com/lynx-go/lynx/contrib/log/zap v0.1.0 // indirect
-	github.com/lynx-go/x v0.0.4 // indirect
 	github.com/oklog/run v1.1.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.3 // indirect
 	github.com/sagikazarmark/locafero v0.7.0 // indirect
