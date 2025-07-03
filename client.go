@@ -6,6 +6,7 @@ import (
 	clientv1 "github.com/deeploopdev/messageloop-protocol/gen/proto/go/client/v1"
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"sync"
 )
@@ -54,6 +55,11 @@ func (c *Client) ID() string {
 	return c.session
 }
 
+func marshalJson(msg proto.Message) string {
+	bytes, _ := protojson.Marshal(msg)
+	return string(bytes)
+}
+
 func (c *Client) HandleMessage(ctx context.Context, in *clientv1.ClientMessage) error {
 
 	c.mu.Lock()
@@ -63,7 +69,7 @@ func (c *Client) HandleMessage(ctx context.Context, in *clientv1.ClientMessage) 
 	}
 	c.mu.Unlock()
 
-	log.DebugContext(ctx, "handling message", "message", in)
+	log.DebugContext(ctx, "handling message", "message", marshalJson(in))
 
 	select {
 	case <-c.ctx.Done():
