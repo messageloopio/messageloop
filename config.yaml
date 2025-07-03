@@ -1,0 +1,7 @@
+server:
+  http:
+    addr: ":8080"
+  websocket:
+    addr: ":9080"
+  grpc:
+    addr: ":9090"
