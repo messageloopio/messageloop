@@ -3,6 +3,7 @@ package grpcstream
 import (
 	"github.com/deeploopdev/messageloop"
 	clientv1 "github.com/deeploopdev/messageloop-protocol/gen/proto/go/client/v1"
+	"github.com/lynx-go/x/log"
 	"google.golang.org/grpc"
 	"io"
 )
@@ -19,6 +20,9 @@ func (h *gRPCHandler) MessageLoop(stream grpc.BidiStreamingServer[clientv1.Clien
 		return err
 	}
 	defer closeFn()
+	ctx := stream.Context()
+	ctx = log.Context(ctx, log.FromContext(ctx), "client_id", client.ID())
+
 	for {
 		select {
 		case <-stream.Context().Done():
@@ -34,7 +38,7 @@ func (h *gRPCHandler) MessageLoop(stream grpc.BidiStreamingServer[clientv1.Clien
 			if err != nil {
 				return err
 			}
-			if err := client.HandleMessage(in); err != nil {
+			if err := client.HandleMessage(ctx, in); err != nil {
 				return err
 			}
 		}

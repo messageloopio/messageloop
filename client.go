@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	clientv1 "github.com/deeploopdev/messageloop-protocol/gen/proto/go/client/v1"
+	"github.com/google/uuid"
+	"github.com/lynx-go/x/log"
 	"google.golang.org/protobuf/proto"
 	"sync"
 )
@@ -13,6 +15,7 @@ func NewClient(ctx context.Context, node *Node, t Transport) (*Client, ClientClo
 		ctx:       ctx,
 		node:      node,
 		transport: t,
+		session:   uuid.NewString(),
 	}
 	return client, func() error {
 		return client.close(Disconnect{})
@@ -47,7 +50,11 @@ func (c *Client) close(disconnect Disconnect) error {
 	return nil
 }
 
-func (c *Client) HandleMessage(in *clientv1.ClientMessage) error {
+func (c *Client) ID() string {
+	return c.session
+}
+
+func (c *Client) HandleMessage(ctx context.Context, in *clientv1.ClientMessage) error {
 
 	c.mu.Lock()
 	if c.status == statusClosed {
@@ -55,6 +62,8 @@ func (c *Client) HandleMessage(in *clientv1.ClientMessage) error {
 		return errors.New("client is closed")
 	}
 	c.mu.Unlock()
+
+	log.DebugContext(ctx, "handling message", "message", in)
 
 	select {
 	case <-c.ctx.Done():
