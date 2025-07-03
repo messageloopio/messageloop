@@ -87,11 +87,11 @@ func (c *Client) onPublish(in *clientv1.ClientMessage, publish *clientv1.Publish
 		Body: &clientv1.ServerMessage_Publication{
 			Publication: &clientv1.Publication{Messages: []*clientv1.Message{
 				{
-					Id:          in.Id,
-					Channel:     publish.Channel,
-					Offset:      0,
-					Payload:     publish.Payload,
-					PayloadJson: publish.PayloadJson,
+					Id:            in.Id,
+					Channel:       publish.Channel,
+					Offset:        0,
+					PayloadBytes:  publish.PayloadBytes,
+					PayloadString: publish.PayloadString,
 				},
 			}},
 		},
