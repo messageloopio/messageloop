@@ -7,18 +7,18 @@ import (
 	"sync"
 )
 
-type gRPCTransport struct {
+type Transport struct {
 	stream  grpc.BidiStreamingServer[clientv1.ClientMessage, clientv1.ServerMessage]
 	mu      sync.RWMutex
 	closed  bool
 	closeCh chan struct{}
 }
 
-func (t *gRPCTransport) Write(message []byte) error {
+func (t *Transport) Write(message []byte) error {
 	return t.WriteMany(message)
 }
 
-func (t *gRPCTransport) WriteMany(messages ...[]byte) error {
+func (t *Transport) WriteMany(messages ...[]byte) error {
 	t.mu.RLock()
 	if t.closed {
 		t.mu.RUnlock()
@@ -33,7 +33,7 @@ func (t *gRPCTransport) WriteMany(messages ...[]byte) error {
 	return nil
 }
 
-func (t *gRPCTransport) Close(disconnect messageloop.Disconnect) error {
+func (t *Transport) Close(disconnect messageloop.Disconnect) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.closed {
@@ -43,12 +43,12 @@ func (t *gRPCTransport) Close(disconnect messageloop.Disconnect) error {
 	return nil
 }
 
-var _ messageloop.Transport = new(gRPCTransport)
+var _ messageloop.Transport = new(Transport)
 
 func newGRPCTransport(
 	stream grpc.BidiStreamingServer[clientv1.ClientMessage, clientv1.ServerMessage],
-) *gRPCTransport {
-	return &gRPCTransport{
+) *Transport {
+	return &Transport{
 		stream:  stream,
 		closeCh: make(chan struct{}),
 	}
