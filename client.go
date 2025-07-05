@@ -79,7 +79,22 @@ func (c *Client) Send(ctx context.Context, msg *clientv1.ServerMessage) error {
 }
 
 func (c *Client) HandleMessage(ctx context.Context, in *clientv1.ClientMessage) error {
-	if err := c.handleMessage(ctx, in); err != nil {
+	c.mu.Lock()
+	if c.status == statusClosed {
+		c.mu.Unlock()
+		return errors.New("client is closed")
+	}
+	c.mu.Unlock()
+
+	log.DebugContext(ctx, "handling message", "message", c.jsonLog(in))
+
+	select {
+	case <-c.ctx.Done():
+		return nil
+	default:
+	}
+
+	if err := c.dispatchMessage(ctx, in); err != nil {
 		_ = c.Send(ctx, MakeServerMessage(in, func(out *clientv1.ServerMessage) {
 			out.Body = &clientv1.ServerMessage_Error{
 				Error: &sharedv1.Error{
@@ -95,21 +110,7 @@ func (c *Client) HandleMessage(ctx context.Context, in *clientv1.ClientMessage) 
 	return nil
 }
 
-func (c *Client) handleMessage(ctx context.Context, in *clientv1.ClientMessage) error {
-	c.mu.Lock()
-	if c.status == statusClosed {
-		c.mu.Unlock()
-		return errors.New("client is closed")
-	}
-	c.mu.Unlock()
-
-	log.DebugContext(ctx, "handling message", "message", c.jsonLog(in))
-
-	select {
-	case <-c.ctx.Done():
-		return nil
-	default:
-	}
+func (c *Client) dispatchMessage(ctx context.Context, in *clientv1.ClientMessage) error {
 
 	switch msg := in.Body.(type) {
 	case *clientv1.ClientMessage_Connect:
