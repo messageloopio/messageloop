@@ -21,7 +21,7 @@ func (h *gRPCHandler) MessageLoop(stream grpc.BidiStreamingServer[clientv1.Clien
 	}
 	defer closeFn()
 	ctx := stream.Context()
-	ctx = log.Context(ctx, log.FromContext(ctx), "client_id", client.ID())
+	ctx = log.Context(ctx, log.FromContext(ctx), "client_id", client.SessionID())
 
 	for {
 		select {

@@ -50,7 +50,7 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		rw.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	ctx = log.Context(ctx, log.FromContext(ctx), "client_id", client.ID())
+	ctx = log.Context(ctx, log.FromContext(ctx), "client_id", client.SessionID())
 	defer closeFn()
 	for {
 		_, data, err := conn.ReadMessage()
@@ -61,7 +61,7 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		if err := marshaler.Unmarshal(data, msg); err != nil {
 			log.ErrorContext(ctx, "decode client message error", err)
 			_ = client.Send(ctx, messageloop.MakeServerMessage(nil, func(out *clientv1.ServerMessage) {
-				out.Body = &clientv1.ServerMessage_Error{
+				out.Envelope = &clientv1.ServerMessage_Error{
 					Error: &sharedv1.Error{
 						Code:    int32(messageloop.DisconnectBadRequest.Code),
 						Reason:  messageloop.DisconnectBadRequest.Reason,

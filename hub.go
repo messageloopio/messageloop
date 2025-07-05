@@ -1,6 +1,10 @@
 package messageloop
 
 import (
+	"context"
+	clientv1 "github.com/deeploopdev/messageloop-protocol/gen/proto/go/client/v1"
+	"github.com/google/uuid"
+	"github.com/lynx-go/x/log"
 	"hash/fnv"
 	"sync"
 )
@@ -60,6 +64,22 @@ func newConnShard() *connShard {
 	}
 }
 
+// Add connection into clientHub connections registry.
+func (h *connShard) add(c *Client) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	uid := c.SessionID()
+	user := c.UserID()
+
+	h.clients[uid] = c
+
+	if _, ok := h.users[user]; !ok {
+		h.users[user] = make(map[string]struct{})
+	}
+	h.users[user][uid] = struct{}{}
+}
+
 type subShard struct {
 	mu sync.RWMutex
 	// registry to hold active subscriptions of clients to channels with some additional info.
@@ -79,12 +99,23 @@ type subscriber struct {
 	ephemeral bool
 }
 
+// NumSubscribers returns number of current subscribers for a given channel.
+func (h *subShard) NumSubscribers(ch string) int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	clients, ok := h.subs[ch]
+	if !ok {
+		return 0
+	}
+	return len(clients)
+}
+
 // addSub adds connection into clientHub subscriptions registry.
 func (h *subShard) addSub(ch string, sub subscriber) (bool, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	uid := sub.client.ID()
+	uid := sub.client.SessionID()
 
 	_, ok := h.subs[ch]
 	if !ok {
@@ -97,6 +128,18 @@ func (h *subShard) addSub(ch string, sub subscriber) (bool, error) {
 	return false, nil
 }
 
+//func pubToProto(pub *Publication) *clientv1.Publication {
+//	if pub == nil {
+//		return nil
+//	}
+//	return &clientv1.Publication{
+//		Offset: pub.Offset,
+//		Data:   pub.Data,
+//		Info:   infoToProto(pub.Info),
+//		Tags:   pub.Tags,
+//	}
+//}
+
 // removeSub removes connection from clientHub subscriptions registry.
 // Returns true if channel does not have any subscribers left in first return value.
 // Returns true if found and really removed from registry in second return value.
@@ -104,7 +147,7 @@ func (h *subShard) removeSub(ch string, c *Client) (bool, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	uid := c.ID()
+	uid := c.SessionID()
 
 	// try to find subscription to delete, return early if not found.
 	if _, ok := h.subs[ch]; !ok {
@@ -124,4 +167,58 @@ func (h *subShard) removeSub(ch string, c *Client) (bool, bool) {
 	}
 
 	return false, true
+}
+
+func (h *subShard) broadcastPublication(channel string, pub *Publication) error {
+	channelSubscribers, ok := h.subs[channel]
+	if !ok {
+		return nil
+	}
+
+	//if pub.Channel != channel {
+	//	fullPub.Channel = pub.Channel
+	//}
+	ctx := context.TODO()
+	msg := &clientv1.Message{
+		Channel: channel,
+		Id:      uuid.NewString(),
+	}
+	if pub.AsBytes {
+		msg.PayloadBytes = pub.Payload
+	} else {
+		msg.PayloadString = string(pub.Payload)
+	}
+	out := MakeServerMessage(nil, func(out *clientv1.ServerMessage) {
+		out.Envelope = &clientv1.ServerMessage_Publication{Publication: &clientv1.Publication{
+			Messages: []*clientv1.Message{msg},
+		}}
+	})
+
+	for _, sub := range channelSubscribers {
+		if err := sub.client.Send(ctx, out); err != nil {
+			log.ErrorContext(ctx, "send publication error", err)
+			continue
+		}
+	}
+
+	return nil
+}
+
+// Add connection into clientHub connections registry.
+func (h *Hub) add(c *Client) {
+	h.mu.Lock()
+	if c.SessionID() != "" {
+		h.sessions[c.SessionID()] = c
+	}
+	h.mu.Unlock()
+	h.connShards[index(c.UserID(), numHubShards)].add(c)
+}
+
+// NumSubscribers returns number of current subscribers for a given channel.
+func (h *Hub) NumSubscribers(ch string) int {
+	return h.subShards[index(ch, numHubShards)].NumSubscribers(ch)
+}
+
+func (h *Hub) broadcastPublication(ch string, pub *Publication) error {
+	return h.subShards[index(ch, numHubShards)].broadcastPublication(ch, pub)
 }

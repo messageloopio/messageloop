@@ -19,6 +19,9 @@ func main() {
 		lx.SetLogger(slogger)
 
 		node := messageloop.NewNode()
+		if err := node.Run(); err != nil {
+			return err
+		}
 		grpcServer, err := grpcstream.NewServer(node)
 		if err != nil {
 			return err

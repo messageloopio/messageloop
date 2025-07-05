@@ -3,12 +3,12 @@ package messageloop
 import "time"
 
 type Publication struct {
-	Channel       string
-	Offset        uint64
-	Metadata      map[string]interface{}
-	PayloadBytes  []byte
-	PayloadString string
-	Time          int64
+	Channel  string
+	Offset   uint64
+	Metadata map[string]interface{}
+	AsBytes  bool
+	Payload  []byte
+	Time     int64
 }
 type StreamPosition struct {
 	// Offset defines publication incremental offset inside a stream.
@@ -45,18 +45,30 @@ type HistoryOptions struct {
 	MetaTTL time.Duration
 }
 
-type ClientInfo struct {
-	ClientID string
-	UserID   string
+type PublishOption func(*PublishOptions)
+
+// WithClientInfo adds ClientInfo to Publication.
+func WithClientInfo(info *ClientInfo) PublishOption {
+	return func(opts *PublishOptions) {
+		opts.ClientInfo = info
+	}
+}
+
+func WithAsBytes(asBytes bool) PublishOption {
+	return func(opts *PublishOptions) {
+		opts.AsBytes = asBytes
+	}
 }
 
 type PublishOptions struct {
+	ClientInfo *ClientInfo
+	AsBytes    bool
 }
 
 // BrokerEventHandler can handle messages received from PUB/SUB system.
 type BrokerEventHandler interface {
 	// HandlePublication to handle received Publications.
-	HandlePublication(ch string, pub *Publication, sp StreamPosition, useDelta bool, prevPub *Publication) error
+	HandlePublication(ch string, pub *Publication) error
 	// HandleJoin to handle received Join messages.
 	HandleJoin(ch string, info *ClientInfo) error
 	// HandleLeave to handle received Leave messages.

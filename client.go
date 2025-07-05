@@ -10,6 +10,7 @@ import (
 	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
 	"sync"
+	"time"
 )
 
 func NewClient(ctx context.Context, node *Node, t Transport, marshaler Marshaler) (*Client, ClientCloseFunc, error) {
@@ -34,14 +35,20 @@ const (
 
 type ClientCloseFunc func() error
 
+type ClientInfo struct {
+	ClientID  string `json:"client_id"`
+	SessionID string `json:"session_id"`
+	UserID    string `json:"user_id"`
+}
+
 type Client struct {
 	mu            sync.RWMutex
 	connectMu     sync.Mutex // allows syncing connect with disconnect.
 	ctx           context.Context
 	transport     Transport
-	uid           string
-	session       string
-	user          string
+	client        string // 客户端上传的
+	session       string // 服务端生成
+	user          string // 用户 ID
 	info          []byte
 	status        status
 	node          *Node
@@ -49,7 +56,7 @@ type Client struct {
 	authenticated bool
 }
 
-func (c *Client) jsonLog(msg proto.Message) string {
+func jsonLog(msg proto.Message) string {
 	data, _ := DefaultProtoJsonMarshaler.Marshal(msg)
 	return string(data)
 }
@@ -70,8 +77,16 @@ func (c *Client) close(disconnect Disconnect) error {
 	return c.transport.Close(disconnect)
 }
 
-func (c *Client) ID() string {
+func (c *Client) ClientID() string {
+	return c.client
+}
+
+func (c *Client) SessionID() string {
 	return c.session
+}
+
+func (c *Client) UserID() string {
+	return c.user
 }
 
 func (c *Client) Send(ctx context.Context, msg *clientv1.ServerMessage) error {
@@ -86,7 +101,7 @@ func (c *Client) HandleMessage(ctx context.Context, in *clientv1.ClientMessage) 
 	}
 	c.mu.Unlock()
 
-	log.DebugContext(ctx, "handling message", "message", c.jsonLog(in))
+	log.DebugContext(ctx, "handling message", "message", jsonLog(in))
 
 	select {
 	case <-c.ctx.Done():
@@ -96,7 +111,7 @@ func (c *Client) HandleMessage(ctx context.Context, in *clientv1.ClientMessage) 
 
 	if err := c.dispatchMessage(ctx, in); err != nil {
 		_ = c.Send(ctx, MakeServerMessage(in, func(out *clientv1.ServerMessage) {
-			out.Body = &clientv1.ServerMessage_Error{
+			out.Envelope = &clientv1.ServerMessage_Error{
 				Error: &sharedv1.Error{
 					Code:     501,
 					Reason:   err.Error(),
@@ -112,7 +127,7 @@ func (c *Client) HandleMessage(ctx context.Context, in *clientv1.ClientMessage) 
 
 func (c *Client) dispatchMessage(ctx context.Context, in *clientv1.ClientMessage) error {
 
-	switch msg := in.Body.(type) {
+	switch msg := in.Envelope.(type) {
 	case *clientv1.ClientMessage_Connect:
 		if err := c.onConnect(ctx, in, msg.Connect); err != nil {
 			var dis Disconnect
@@ -154,11 +169,13 @@ func (c *Client) onConnect(ctx context.Context, in *clientv1.ClientMessage, conn
 
 	c.mu.Lock()
 	c.authenticated = true
+	c.node.addClient(c)
 	c.mu.Unlock()
+
 	return c.Send(ctx, MakeServerMessage(in, func(out *clientv1.ServerMessage) {
-		out.Body = &clientv1.ServerMessage_Connected{
+		out.Envelope = &clientv1.ServerMessage_Connected{
 			Connected: &clientv1.Connected{
-				SessionId: c.session,
+				SessionId: c.SessionID(),
 				Subscriptions: lo.Map(c.Channels(), func(it string, i int) *clientv1.Subscription {
 					return &clientv1.Subscription{
 						Channel: it,
@@ -167,31 +184,53 @@ func (c *Client) onConnect(ctx context.Context, in *clientv1.ClientMessage, conn
 			},
 		}
 	}))
-
 }
 
 func MakeServerMessage(in *clientv1.ClientMessage, bodyFunc func(out *clientv1.ServerMessage)) *clientv1.ServerMessage {
 	var out *clientv1.ServerMessage
 	if in != nil {
 		out = &clientv1.ServerMessage{
-			Id:      in.Id,
-			Headers: in.Headers,
+			Id:       in.Id,
+			Metadata: in.Metadata,
+			Time:     uint64(time.Now().UnixMilli()),
 		}
 	} else {
 		out = &clientv1.ServerMessage{
-			Id:      uuid.New().String(),
-			Headers: map[string]string{},
+			Id:       uuid.New().String(),
+			Metadata: map[string]string{},
+			Time:     uint64(time.Now().UnixMilli()),
 		}
 	}
 	bodyFunc(out)
 	return out
 }
 
-func (c *Client) onPublish(ctx context.Context, in *clientv1.ClientMessage, publish *clientv1.Publish) error {
+func (c *Client) payload(payloadBytes []byte, payloadString string) ([]byte, bool) {
+	if len(payloadBytes) > 0 {
+		return payloadBytes, true
+	} else if len(payloadString) > 0 {
+		return []byte(payloadString), false
+	}
+	return nil, true
+}
+
+func (c *Client) ClientInfo() *ClientInfo {
+	return &ClientInfo{
+		ClientID:  c.client,
+		SessionID: c.session,
+		UserID:    c.user,
+	}
+}
+
+func (c *Client) onPublish(ctx context.Context, in *clientv1.ClientMessage, pub *clientv1.Publish) error {
+	payload, asBytes := c.payload(pub.PayloadBytes, pub.PayloadString)
+	if err := c.node.Publish(pub.Channel, payload, WithClientInfo(c.ClientInfo()), WithAsBytes(asBytes)); err != nil {
+		return err
+	}
 	return c.Send(ctx, MakeServerMessage(in, func(out *clientv1.ServerMessage) {
-		out.Body = &clientv1.ServerMessage_PublishAck{
+		out.Envelope = &clientv1.ServerMessage_PublishAck{
 			PublishAck: &clientv1.PublishAck{
-				Channel: publish.Channel,
+				Channel: pub.Channel,
 				Offset:  0,
 			},
 		}
@@ -210,7 +249,7 @@ func (c *Client) onSubscribe(ctx context.Context, in *clientv1.ClientMessage, su
 		subs = append(subs, ch.Channel)
 	}
 	return c.Send(ctx, MakeServerMessage(in, func(out *clientv1.ServerMessage) {
-		out.Body = &clientv1.ServerMessage_SubscribeAck{
+		out.Envelope = &clientv1.ServerMessage_SubscribeAck{
 			SubscribeAck: &clientv1.SubscribeAck{
 				Subscriptions: lo.Map(subs, func(it string, i int) *clientv1.Subscription {
 					return &clientv1.Subscription{
@@ -223,7 +262,7 @@ func (c *Client) onSubscribe(ctx context.Context, in *clientv1.ClientMessage, su
 }
 
 func (c *Client) write(ctx context.Context, msg proto.Message) error {
-	log.DebugContext(ctx, "sending message", "message", c.jsonLog(msg))
+	log.DebugContext(ctx, "sending message", "message", jsonLog(msg))
 	bytes, err := c.marshal(msg)
 	if err != nil {
 		return err
