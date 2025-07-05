@@ -11,17 +11,25 @@ import (
 	"sync"
 )
 
-func NewClient(ctx context.Context, node *Node, t Transport) (*Client, ClientCloseFunc, error) {
+func NewClient(ctx context.Context, node *Node, t Transport, marshaler Marshaler) (*Client, ClientCloseFunc, error) {
 	client := &Client{
 		ctx:       ctx,
 		node:      node,
 		transport: t,
 		session:   uuid.NewString(),
+		marshaler: marshaler,
 	}
 	return client, func() error {
 		return client.close(Disconnect{})
 	}, nil
 }
+
+type EncodingType int
+
+const (
+	EncodingTypeJSON     EncodingType = 1
+	EncodingTypeProtobuf EncodingType = 2
+)
 
 type ClientCloseFunc func() error
 
@@ -36,6 +44,11 @@ type Client struct {
 	info      []byte
 	status    status
 	node      *Node
+	marshaler Marshaler
+}
+
+func (c *Client) marshal(msg any) ([]byte, error) {
+	return c.marshaler.Marshal(msg)
 }
 
 type status uint8
@@ -102,7 +115,11 @@ func (c *Client) onPublish(in *clientv1.ClientMessage, publish *clientv1.Publish
 			}},
 		},
 	}
-	bytes, err := proto.Marshal(out)
+	return c.write(out)
+}
+
+func (c *Client) write(msg any) error {
+	bytes, err := c.marshal(msg)
 	if err != nil {
 		return err
 	}

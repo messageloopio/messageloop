@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/deeploopdev/messageloop"
 	"github.com/deeploopdev/messageloop/grpcstream"
+	"github.com/deeploopdev/messageloop/websocket"
 	"github.com/lynx-go/lynx"
 	"github.com/lynx-go/lynx/contrib/log/zap"
 )
@@ -25,7 +26,10 @@ func main() {
 		if err := lx.Load(grpcServer); err != nil {
 			return err
 		}
-
+		wsServer := websocket.NewServer(websocket.DefaultOptions(), node)
+		if err := lx.Load(wsServer); err != nil {
+			return err
+		}
 		return nil
 	})
 

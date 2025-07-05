@@ -15,7 +15,7 @@ type gRPCHandler struct {
 
 func (h *gRPCHandler) MessageLoop(stream grpc.BidiStreamingServer[clientv1.ClientMessage, clientv1.ServerMessage]) error {
 	transport := newGRPCTransport(stream)
-	client, closeFn, err := messageloop.NewClient(stream.Context(), h.node, transport)
+	client, closeFn, err := messageloop.NewClient(stream.Context(), h.node, transport, messageloop.DefaultProtoMarshaler)
 	if err != nil {
 		return err
 	}
