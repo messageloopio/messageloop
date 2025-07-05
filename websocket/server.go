@@ -55,12 +55,12 @@ func (s *Server) Init(lx lynx.Lynx) error {
 }
 
 func (s *Server) Start(ctx context.Context) error {
-	log.InfoContext(ctx, "websocket server starting", "addr", s.opts.Addr)
+	log.InfoContext(ctx, "starting websocket server", "addr", s.opts.Addr)
 	return s.s.ListenAndServe()
 }
 
 func (s *Server) Stop(ctx context.Context) {
-	log.InfoContext(ctx, "websocket server stopping", "addr", s.opts.Addr)
+	log.InfoContext(ctx, "stopping websocket server", "addr", s.opts.Addr)
 	if err := s.s.Shutdown(ctx); err != nil {
 		log.ErrorContext(ctx, "shutting down websocket server failed", err)
 	}

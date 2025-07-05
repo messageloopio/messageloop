@@ -1,13 +1,11 @@
 package websocket
 
 import (
-	"context"
 	"github.com/deeploopdev/messageloop"
 	clientv1 "github.com/deeploopdev/messageloop-protocol/gen/proto/go/client/v1"
+	sharedv1 "github.com/deeploopdev/messageloop-protocol/gen/proto/go/shared/v1"
 	"github.com/gorilla/websocket"
 	"github.com/lynx-go/x/log"
-	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/proto"
 	"net/http"
 	"strings"
 )
@@ -27,7 +25,7 @@ func NewHandler(node *messageloop.Node, opt Options) *Handler {
 				"messageloop",
 				"messageloop+json",
 				"messageloop+proto",
-				"messageloop+protojson",
+				//"messageloop+protojson",
 			},
 		},
 	}
@@ -61,7 +59,16 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		}
 		msg := &clientv1.ClientMessage{}
 		if err := marshaler.Unmarshal(data, msg); err != nil {
-			log.ErrorContext(ctx, "decode error", err)
+			log.ErrorContext(ctx, "decode client message error", err)
+			_ = client.Send(ctx, messageloop.MakeServerMessage(nil, func(out *clientv1.ServerMessage) {
+				out.Body = &clientv1.ServerMessage_Error{
+					Error: &sharedv1.Error{
+						Code:    int32(messageloop.DisconnectBadRequest.Code),
+						Reason:  messageloop.DisconnectBadRequest.Reason,
+						Message: "BadRequest",
+					},
+				}
+			}))
 			continue
 		}
 
@@ -70,22 +77,6 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 			continue
 		}
 	}
-}
-
-func (h *Handler) decodeMessage(ctx context.Context, data []byte, useProto bool) (*clientv1.ClientMessage, error) {
-	var msg = &clientv1.ClientMessage{}
-	if useProto {
-		if err := proto.Unmarshal(data, msg); err != nil {
-			return nil, err
-		}
-		return msg, nil
-	} else {
-		if err := protojson.Unmarshal(data, msg); err != nil {
-			return nil, err
-		}
-	}
-
-	return msg, nil
 }
 
 // 通过 subProtocols 确定 marshaler

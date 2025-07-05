@@ -5,6 +5,7 @@ go 1.24.3
 replace github.com/deeploopdev/messageloop-protocol => ../messageloop-protocol
 
 require (
+	github.com/RoaringBitmap/roaring v1.9.4
 	github.com/deeploopdev/messageloop-protocol v0.0.0-20250703125811-d05df1d5c209
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.0
@@ -18,12 +19,14 @@ require (
 
 require (
 	github.com/AdamSLevy/flagbind v0.0.0-20241102175934-70a5d83327aa // indirect
+	github.com/bits-and-blooms/bitset v1.12.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/fsnotify/fsnotify v1.8.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.2.1 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180228061459-e0a39a4cb421 // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
+	github.com/mschoch/smat v0.2.0 // indirect
 	github.com/oklog/run v1.1.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.3 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect

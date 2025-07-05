@@ -4,9 +4,10 @@ import (
 	"context"
 	"errors"
 	clientv1 "github.com/deeploopdev/messageloop-protocol/gen/proto/go/client/v1"
+	sharedv1 "github.com/deeploopdev/messageloop-protocol/gen/proto/go/shared/v1"
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
-	"google.golang.org/protobuf/encoding/protojson"
+	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
 	"sync"
 )
@@ -34,17 +35,23 @@ const (
 type ClientCloseFunc func() error
 
 type Client struct {
-	mu        sync.RWMutex
-	connectMu sync.Mutex // allows syncing connect with disconnect.
-	ctx       context.Context
-	transport Transport
-	uid       string
-	session   string
-	user      string
-	info      []byte
-	status    status
-	node      *Node
-	marshaler Marshaler
+	mu            sync.RWMutex
+	connectMu     sync.Mutex // allows syncing connect with disconnect.
+	ctx           context.Context
+	transport     Transport
+	uid           string
+	session       string
+	user          string
+	info          []byte
+	status        status
+	node          *Node
+	marshaler     Marshaler
+	authenticated bool
+}
+
+func (c *Client) jsonLog(msg proto.Message) string {
+	data, _ := DefaultProtoJsonMarshaler.Marshal(msg)
+	return string(data)
 }
 
 func (c *Client) marshal(msg any) ([]byte, error) {
@@ -60,21 +67,35 @@ const (
 )
 
 func (c *Client) close(disconnect Disconnect) error {
-	// TODO
-	return nil
+	return c.transport.Close(disconnect)
 }
 
 func (c *Client) ID() string {
 	return c.session
 }
 
-func marshalJson(msg proto.Message) string {
-	bytes, _ := protojson.Marshal(msg)
-	return string(bytes)
+func (c *Client) Send(ctx context.Context, msg *clientv1.ServerMessage) error {
+	return c.write(ctx, msg)
 }
 
 func (c *Client) HandleMessage(ctx context.Context, in *clientv1.ClientMessage) error {
+	if err := c.handleMessage(ctx, in); err != nil {
+		_ = c.Send(ctx, MakeServerMessage(in, func(out *clientv1.ServerMessage) {
+			out.Body = &clientv1.ServerMessage_Error{
+				Error: &sharedv1.Error{
+					Code:     501,
+					Reason:   err.Error(),
+					Message:  "服务异常",
+					Metadata: nil,
+				},
+			}
+		}))
+		return err
+	}
+	return nil
+}
 
+func (c *Client) handleMessage(ctx context.Context, in *clientv1.ClientMessage) error {
 	c.mu.Lock()
 	if c.status == statusClosed {
 		c.mu.Unlock()
@@ -82,7 +103,7 @@ func (c *Client) HandleMessage(ctx context.Context, in *clientv1.ClientMessage) 
 	}
 	c.mu.Unlock()
 
-	log.DebugContext(ctx, "handling message", "message", marshalJson(in))
+	log.DebugContext(ctx, "handling message", "message", c.jsonLog(in))
 
 	select {
 	case <-c.ctx.Done():
@@ -91,34 +112,117 @@ func (c *Client) HandleMessage(ctx context.Context, in *clientv1.ClientMessage) 
 	}
 
 	switch msg := in.Body.(type) {
+	case *clientv1.ClientMessage_Connect:
+		if err := c.onConnect(ctx, in, msg.Connect); err != nil {
+			var dis Disconnect
+			if errors.As(err, &dis) {
+				_ = c.close(dis)
+			} else {
+				return err
+			}
+		}
 	case *clientv1.ClientMessage_Publish:
-		if err := c.onPublish(in, msg.Publish); err != nil {
+		if err := c.onPublish(ctx, in, msg.Publish); err != nil {
+			return err
+		}
+	case *clientv1.ClientMessage_Subscribe:
+		if err := c.onSubscribe(ctx, in, msg.Subscribe); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (c *Client) onPublish(in *clientv1.ClientMessage, publish *clientv1.Publish) error {
-	out := &clientv1.ServerMessage{
-		Id:      in.Id,
-		Headers: in.Headers,
-		Body: &clientv1.ServerMessage_Publication{
-			Publication: &clientv1.Publication{Messages: []*clientv1.Message{
-				{
-					Id:            in.Id,
-					Channel:       publish.Channel,
-					Offset:        0,
-					PayloadBytes:  publish.PayloadBytes,
-					PayloadString: publish.PayloadString,
-				},
-			}},
-		},
-	}
-	return c.write(out)
+func (c *Client) Channels() []string {
+	return []string{}
 }
 
-func (c *Client) write(msg any) error {
+func (c *Client) onConnect(ctx context.Context, in *clientv1.ClientMessage, connect *clientv1.Connect) error {
+	c.mu.RLock()
+	authenticated := c.authenticated
+	closed := c.status == statusClosed
+	c.mu.RUnlock()
+
+	if closed {
+		return DisconnectConnectionClosed
+	}
+
+	if authenticated {
+		return DisconnectBadRequest
+	}
+
+	c.mu.Lock()
+	c.authenticated = true
+	c.mu.Unlock()
+	return c.Send(ctx, MakeServerMessage(in, func(out *clientv1.ServerMessage) {
+		out.Body = &clientv1.ServerMessage_Connected{
+			Connected: &clientv1.Connected{
+				SessionId: c.session,
+				Subscriptions: lo.Map(c.Channels(), func(it string, i int) *clientv1.Subscription {
+					return &clientv1.Subscription{
+						Channel: it,
+					}
+				}),
+			},
+		}
+	}))
+
+}
+
+func MakeServerMessage(in *clientv1.ClientMessage, bodyFunc func(out *clientv1.ServerMessage)) *clientv1.ServerMessage {
+	var out *clientv1.ServerMessage
+	if in != nil {
+		out = &clientv1.ServerMessage{
+			Id:      in.Id,
+			Headers: in.Headers,
+		}
+	} else {
+		out = &clientv1.ServerMessage{
+			Id:      uuid.New().String(),
+			Headers: map[string]string{},
+		}
+	}
+	bodyFunc(out)
+	return out
+}
+
+func (c *Client) onPublish(ctx context.Context, in *clientv1.ClientMessage, publish *clientv1.Publish) error {
+	return c.Send(ctx, MakeServerMessage(in, func(out *clientv1.ServerMessage) {
+		out.Body = &clientv1.ServerMessage_PublishAck{
+			PublishAck: &clientv1.PublishAck{
+				Channel: publish.Channel,
+				Offset:  0,
+			},
+		}
+	}))
+}
+
+func (c *Client) onSubscribe(ctx context.Context, in *clientv1.ClientMessage, sub *clientv1.Subscribe) error {
+	subs := []string{}
+	for _, ch := range sub.Subscriptions {
+		if err := c.node.addSubscription(ch.Channel, subscriber{client: c, ephemeral: ch.Ephemeral}); err != nil {
+			for _, s := range subs {
+				_ = c.node.removeSubscription(s, c)
+			}
+			return err
+		}
+		subs = append(subs, ch.Channel)
+	}
+	return c.Send(ctx, MakeServerMessage(in, func(out *clientv1.ServerMessage) {
+		out.Body = &clientv1.ServerMessage_SubscribeAck{
+			SubscribeAck: &clientv1.SubscribeAck{
+				Subscriptions: lo.Map(subs, func(it string, i int) *clientv1.Subscription {
+					return &clientv1.Subscription{
+						Channel: it,
+					}
+				}),
+			},
+		}
+	}))
+}
+
+func (c *Client) write(ctx context.Context, msg proto.Message) error {
+	log.DebugContext(ctx, "sending message", "message", c.jsonLog(msg))
 	bytes, err := c.marshal(msg)
 	if err != nil {
 		return err
