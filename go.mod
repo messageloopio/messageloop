@@ -1,12 +1,12 @@
-module github.com/deeploopdev/messageloop
+module github.com/deeplooplabs/messageloop
 
 go 1.24.3
 
-replace github.com/deeploopdev/messageloop-protocol => ../messageloop-protocol
+replace github.com/deeplooplabs/messageloop-protocol => ../messageloop-protocol
 
 require (
 	github.com/RoaringBitmap/roaring v1.9.4
-	github.com/deeploopdev/messageloop-protocol v0.0.0-20250703125811-d05df1d5c209
+	github.com/deeplooplabs/messageloop-protocol v0.0.0-20250703125811-d05df1d5c209
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.0
 	github.com/lynx-go/lynx v0.1.0

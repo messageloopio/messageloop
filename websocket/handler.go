@@ -1,9 +1,9 @@
 package websocket
 
 import (
-	"github.com/deeploopdev/messageloop"
-	clientv1 "github.com/deeploopdev/messageloop-protocol/gen/proto/go/client/v1"
-	sharedv1 "github.com/deeploopdev/messageloop-protocol/gen/proto/go/shared/v1"
+	"github.com/deeplooplabs/messageloop"
+	clientv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/client/v1"
+	sharedv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/shared/v1"
 	"github.com/gorilla/websocket"
 	"github.com/lynx-go/x/log"
 	"net/http"

@@ -2,9 +2,9 @@ package main
 
 import (
 	"context"
-	"github.com/deeploopdev/messageloop"
-	"github.com/deeploopdev/messageloop/grpcstream"
-	"github.com/deeploopdev/messageloop/websocket"
+	"github.com/deeplooplabs/messageloop"
+	"github.com/deeplooplabs/messageloop/grpcstream"
+	"github.com/deeplooplabs/messageloop/websocket"
 	"github.com/lynx-go/lynx"
 	"github.com/lynx-go/lynx/contrib/log/zap"
 )

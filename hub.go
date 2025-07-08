@@ -2,7 +2,7 @@ package messageloop
 
 import (
 	"context"
-	clientv1 "github.com/deeploopdev/messageloop-protocol/gen/proto/go/client/v1"
+	clientv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/client/v1"
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
 	"hash/fnv"

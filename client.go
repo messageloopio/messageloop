@@ -3,8 +3,8 @@ package messageloop
 import (
 	"context"
 	"errors"
-	clientv1 "github.com/deeploopdev/messageloop-protocol/gen/proto/go/client/v1"
-	sharedv1 "github.com/deeploopdev/messageloop-protocol/gen/proto/go/shared/v1"
+	clientv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/client/v1"
+	sharedv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/shared/v1"
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
 	"github.com/samber/lo"

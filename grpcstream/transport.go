@@ -1,8 +1,8 @@
 package grpcstream
 
 import (
-	"github.com/deeploopdev/messageloop"
-	clientv1 "github.com/deeploopdev/messageloop-protocol/gen/proto/go/client/v1"
+	"github.com/deeplooplabs/messageloop"
+	clientv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/client/v1"
 	"google.golang.org/grpc"
 	"sync"
 )
