@@ -2,8 +2,8 @@ package grpcstream
 
 import (
 	"context"
-	"github.com/deeplooplabs/messageloop"
 	clientv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/client/v1"
+	"github.com/deeplooplabs/messageloop/messageloop"
 	"github.com/lynx-go/lynx"
 	"github.com/lynx-go/x/log"
 	"google.golang.org/grpc"

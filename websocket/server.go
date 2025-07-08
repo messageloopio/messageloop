@@ -2,7 +2,7 @@ package websocket
 
 import (
 	"context"
-	"github.com/deeplooplabs/messageloop"
+	"github.com/deeplooplabs/messageloop/messageloop"
 	"github.com/lynx-go/lynx"
 	"github.com/lynx-go/x/log"
 	"net/http"

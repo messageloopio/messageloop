@@ -1,8 +1,8 @@
 package websocket
 
 import (
-	"github.com/deeplooplabs/messageloop"
 	clientv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/client/v1"
+	"github.com/deeplooplabs/messageloop/messageloop"
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/encoding/json"
 	"github.com/stretchr/testify/require"
