@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
+	"github.com/deeplooplabs/messageloop/engine"
 	"github.com/deeplooplabs/messageloop/grpcstream"
-	"github.com/deeplooplabs/messageloop/messageloop"
 	"github.com/deeplooplabs/messageloop/websocket"
 	"github.com/lynx-go/lynx"
 	"github.com/lynx-go/lynx/contrib/log/zap"
@@ -18,7 +18,7 @@ func main() {
 		slogger := zap.NewLogger(lx, o.LogLevel)
 		lx.SetLogger(slogger)
 
-		node := messageloop.NewNode()
+		node := engine.NewNode()
 		if err := node.Run(); err != nil {
 			return err
 		}

@@ -3,7 +3,7 @@ package websocket
 import (
 	clientv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/client/v1"
 	sharedv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/shared/v1"
-	messageloop2 "github.com/deeplooplabs/messageloop/messageloop"
+	"github.com/deeplooplabs/messageloop/engine"
 	"github.com/gorilla/websocket"
 	"github.com/lynx-go/x/log"
 	"net/http"
@@ -11,12 +11,12 @@ import (
 )
 
 type Handler struct {
-	node     *messageloop2.Node
+	node     *engine.Node
 	opt      *Options
 	upgrader *websocket.Upgrader
 }
 
-func NewHandler(node *messageloop2.Node, opt Options) *Handler {
+func NewHandler(node *engine.Node, opt Options) *Handler {
 	handler := &Handler{
 		node: node,
 		opt:  &opt,
@@ -44,7 +44,7 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	marshaler := h.marshaler(subProtocols)
 	transport := newTransport(conn, marshaler)
 	ctx := r.Context()
-	client, closeFn, err := messageloop2.NewClient(ctx, h.node, transport, marshaler)
+	client, closeFn, err := engine.NewClient(ctx, h.node, transport, marshaler)
 	if err != nil {
 		log.ErrorContext(r.Context(), "create client error", err)
 		rw.WriteHeader(http.StatusInternalServerError)
@@ -60,11 +60,11 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		msg := &clientv1.ClientMessage{}
 		if err := marshaler.Unmarshal(data, msg); err != nil {
 			log.ErrorContext(ctx, "decode client message error", err)
-			_ = client.Send(ctx, messageloop2.MakeServerMessage(nil, func(out *clientv1.ServerMessage) {
+			_ = client.Send(ctx, engine.MakeServerMessage(nil, func(out *clientv1.ServerMessage) {
 				out.Envelope = &clientv1.ServerMessage_Error{
 					Error: &sharedv1.Error{
-						Code:    int32(messageloop2.DisconnectBadRequest.Code),
-						Reason:  messageloop2.DisconnectBadRequest.Reason,
+						Code:    int32(engine.DisconnectBadRequest.Code),
+						Reason:  engine.DisconnectBadRequest.Reason,
 						Message: "BadRequest",
 					},
 				}
@@ -80,13 +80,13 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 }
 
 // 通过 subProtocols 确定 marshaler
-func (h *Handler) marshaler(subProtocols []string) messageloop2.Marshaler {
+func (h *Handler) marshaler(subProtocols []string) engine.Marshaler {
 	for _, subProtocol := range subProtocols {
-		for _, marshaler := range messageloop2.Marshalers {
+		for _, marshaler := range engine.Marshalers {
 			if strings.Contains(subProtocol, marshaler.Name()) {
 				return marshaler
 			}
 		}
 	}
-	return messageloop2.DefaultProtoJsonMarshaler
+	return engine.DefaultProtoJsonMarshaler
 }

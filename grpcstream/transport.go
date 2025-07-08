@@ -2,7 +2,7 @@ package grpcstream
 
 import (
 	clientv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/client/v1"
-	messageloop2 "github.com/deeplooplabs/messageloop/messageloop"
+	"github.com/deeplooplabs/messageloop/engine"
 	"google.golang.org/grpc"
 	"sync"
 )
@@ -33,7 +33,7 @@ func (t *Transport) WriteMany(messages ...[]byte) error {
 	return nil
 }
 
-func (t *Transport) Close(disconnect messageloop2.Disconnect) error {
+func (t *Transport) Close(disconnect engine.Disconnect) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.closed {
@@ -43,7 +43,7 @@ func (t *Transport) Close(disconnect messageloop2.Disconnect) error {
 	return nil
 }
 
-var _ messageloop2.Transport = new(Transport)
+var _ engine.Transport = new(Transport)
 
 func newGRPCTransport(
 	stream grpc.BidiStreamingServer[clientv1.ClientMessage, clientv1.ServerMessage],
