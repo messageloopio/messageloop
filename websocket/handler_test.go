@@ -16,9 +16,9 @@ func TestHandler_marshaler(t *testing.T) {
 	}
 	bytes, _ := json.Marshal(payload)
 	out := &clientv1.ServerMessage{
-		Id:      uuid.NewString(),
-		Headers: map[string]string{},
-		Body: &clientv1.ServerMessage_Publication{
+		Id:       uuid.NewString(),
+		Metadata: map[string]string{},
+		Envelope: &clientv1.ServerMessage_Publication{
 			Publication: &clientv1.Publication{Messages: []*clientv1.Message{
 				{
 					Id:            uuid.NewString(),
