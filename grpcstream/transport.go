@@ -2,9 +2,11 @@ package grpcstream
 
 import (
 	clientv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/client/v1"
+	sharedv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/shared/v1"
 	"github.com/deeplooplabs/messageloop/engine"
 	"google.golang.org/grpc"
 	"sync"
+	"time"
 )
 
 type Transport struct {
@@ -39,8 +41,22 @@ func (t *Transport) Close(disconnect engine.Disconnect) error {
 	if t.closed {
 		return nil
 	}
+	t.writeError(int32(disconnect.Code), disconnect.Reason)
+	time.Sleep(100 * time.Millisecond)
 	close(t.closeCh)
 	return nil
+}
+
+func (t *Transport) writeError(code int32, reason string) {
+	msg := engine.MakeServerMessage(nil, func(out *clientv1.ServerMessage) {
+		out.Envelope = &clientv1.ServerMessage_Error{
+			Error: &sharedv1.Error{
+				Code:   code,
+				Reason: reason,
+			},
+		}
+	})
+	_ = t.stream.Send(msg)
 }
 
 var _ engine.Transport = new(Transport)
