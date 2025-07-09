@@ -134,9 +134,7 @@ func (c *Client) handleMessage(ctx context.Context, in *clientv1.ClientMessage) 
 
 	switch msg := in.Envelope.(type) {
 	case *clientv1.ClientMessage_Connect:
-		if err := c.onConnect(ctx, in, msg.Connect); err != nil {
-
-		}
+		return c.onConnect(ctx, in, msg.Connect)
 	case *clientv1.ClientMessage_Publish:
 		return c.onPublish(ctx, in, msg.Publish)
 	case *clientv1.ClientMessage_Subscribe:

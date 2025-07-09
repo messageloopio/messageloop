@@ -44,6 +44,7 @@ func (t *Transport) Close(disconnect engine.Disconnect) error {
 	t.writeError(int32(disconnect.Code), disconnect.Reason)
 	time.Sleep(100 * time.Millisecond)
 	close(t.closeCh)
+	t.closed = true
 	return nil
 }
 
