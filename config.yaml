@@ -1,7 +1,10 @@
 server:
   http:
     addr: ":8080"
+
+transport:
   websocket:
     addr: ":9080"
+    path: "/ws"
   grpc:
     addr: ":9090"

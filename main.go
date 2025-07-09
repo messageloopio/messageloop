@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"github.com/deeplooplabs/messageloop/config"
 	"github.com/deeplooplabs/messageloop/engine"
 	"github.com/deeplooplabs/messageloop/grpcstream"
 	"github.com/deeplooplabs/messageloop/websocket"
@@ -18,18 +19,28 @@ func main() {
 		slogger := zap.NewLogger(lx, o.LogLevel)
 		lx.SetLogger(slogger)
 
+		cfg := &config.Config{}
+		if err := lx.Config().Unmarshal(cfg); err != nil {
+			return err
+		}
+
 		node := engine.NewNode()
 		if err := node.Run(); err != nil {
 			return err
 		}
-		grpcServer, err := grpcstream.NewServer(node)
+		grpcServer, err := grpcstream.NewServer(grpcstream.Options{
+			Addr: cfg.Transport.GRPC.Addr,
+		}, node)
 		if err != nil {
 			return err
 		}
 		if err := lx.Load(grpcServer); err != nil {
 			return err
 		}
-		wsServer := websocket.NewServer(websocket.DefaultOptions(), node)
+		wsServer := websocket.NewServer(websocket.Options{
+			Addr:   cfg.Transport.WebSocket.Addr,
+			WsPath: cfg.Transport.WebSocket.Path,
+		}, node)
 		if err := lx.Load(wsServer); err != nil {
 			return err
 		}

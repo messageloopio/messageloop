@@ -11,23 +11,28 @@ import (
 	"net"
 )
 
-func NewServer(node *engine.Node) (*Server, error) {
+type Options struct {
+	Addr string `yaml:"addr" json:"addr"`
+}
+
+func NewServer(opts Options, node *engine.Node) (*Server, error) {
 	encoding.RegisterCodec(&RawCodec{})
 	grpcOpts := []grpc.ServerOption{}
 	grpcServer := grpc.NewServer(grpcOpts...)
 	handler := NewGRPCHandler(node)
 	clientv1.RegisterMessageLoopServiceServer(grpcServer, handler)
-	return newServer(grpcServer, ":9090")
+	return newServer(grpcServer, opts)
 }
 
-func newServer(grpcServer *grpc.Server, addr string) (*Server, error) {
-	conn, err := net.Listen("tcp", addr)
+func newServer(grpcServer *grpc.Server, opts Options) (*Server, error) {
+	conn, err := net.Listen("tcp", opts.Addr)
 	if err != nil {
 		return nil, err
 	}
 	return &Server{
 		grpc: grpcServer,
 		conn: conn,
+		opts: &opts,
 	}, nil
 }
 
@@ -35,6 +40,7 @@ type Server struct {
 	grpc *grpc.Server
 	lx   lynx.Lynx
 	conn net.Listener
+	opts *Options
 }
 
 func (s *Server) Name() string {
@@ -47,12 +53,12 @@ func (s *Server) Init(lx lynx.Lynx) error {
 }
 
 func (s *Server) Start(ctx context.Context) error {
-	log.InfoContext(ctx, "starting gRPC streaming server", "addr", s.conn.Addr())
+	log.InfoContext(ctx, "starting gRPC streaming server", "addr", s.opts.Addr)
 	return s.grpc.Serve(s.conn)
 }
 
 func (s *Server) Stop(ctx context.Context) {
-	log.InfoContext(ctx, "stopping gRPC streaming server")
+	log.InfoContext(ctx, "stopping gRPC streaming server", "addr", s.opts.Addr)
 	s.grpc.GracefulStop()
 }
 
