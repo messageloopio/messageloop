@@ -1,6 +1,7 @@
 package websocket
 
 import (
+	protocol "github.com/deeplooplabs/messageloop-protocol"
 	clientv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/client/v1"
 	sharedv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/shared/v1"
 	"github.com/deeplooplabs/messageloop/engine"
@@ -25,7 +26,6 @@ func NewHandler(node *engine.Node, opt Options) *Handler {
 				"messageloop",
 				"messageloop+json",
 				"messageloop+proto",
-				//"messageloop+protojson",
 			},
 		},
 	}
@@ -80,13 +80,13 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 }
 
 // 通过 subProtocols 确定 marshaler
-func (h *Handler) marshaler(subProtocols []string) engine.Marshaler {
+func (h *Handler) marshaler(subProtocols []string) protocol.Marshaler {
 	for _, subProtocol := range subProtocols {
-		for _, marshaler := range engine.Marshalers {
+		for _, marshaler := range protocol.Marshalers {
 			if strings.Contains(subProtocol, marshaler.Name()) {
 				return marshaler
 			}
 		}
 	}
-	return engine.DefaultProtoJsonMarshaler
+	return protocol.ProtoJSONMarshaler
 }

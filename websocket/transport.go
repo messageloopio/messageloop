@@ -1,17 +1,18 @@
 package websocket
 
 import (
-	messageloop2 "github.com/deeplooplabs/messageloop/engine"
+	protocol "github.com/deeplooplabs/messageloop-protocol"
+	"github.com/deeplooplabs/messageloop/engine"
 	"github.com/gorilla/websocket"
 	"time"
 )
 
 type Transport struct {
 	conn      *websocket.Conn
-	marshaler messageloop2.Marshaler
+	marshaler protocol.Marshaler
 }
 
-func newTransport(conn *websocket.Conn, marshaler messageloop2.Marshaler) *Transport {
+func newTransport(conn *websocket.Conn, marshaler protocol.Marshaler) *Transport {
 	return &Transport{conn: conn, marshaler: marshaler}
 }
 
@@ -21,7 +22,7 @@ func (t *Transport) Write(msg []byte) error {
 
 func (t *Transport) WriteMany(msgs ...[]byte) error {
 	msgType := websocket.TextMessage
-	if t.marshaler.Binary() {
+	if t.marshaler.UseBytes() {
 		msgType = websocket.BinaryMessage
 	}
 	for _, msg := range msgs {
@@ -32,7 +33,7 @@ func (t *Transport) WriteMany(msgs ...[]byte) error {
 	return nil
 }
 
-func (t *Transport) Close(disconnect messageloop2.Disconnect) error {
+func (t *Transport) Close(disconnect engine.Disconnect) error {
 	// 正确的关闭 WebSocket 连接: https://medium.com/@blackhorseya/properly-closing-websocket-connections-in-golang-a902f97716c1
 
 	// Send a WebSocket close message
@@ -69,4 +70,4 @@ func (t *Transport) Close(disconnect messageloop2.Disconnect) error {
 	return nil
 }
 
-var _ messageloop2.Transport = (*Transport)(nil)
+var _ engine.Transport = (*Transport)(nil)

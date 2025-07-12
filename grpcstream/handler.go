@@ -1,6 +1,7 @@
 package grpcstream
 
 import (
+	protocol "github.com/deeplooplabs/messageloop-protocol"
 	clientv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/client/v1"
 	"github.com/deeplooplabs/messageloop/engine"
 	"github.com/lynx-go/x/log"
@@ -15,7 +16,7 @@ type gRPCHandler struct {
 
 func (h *gRPCHandler) MessageLoop(stream grpc.BidiStreamingServer[clientv1.ClientMessage, clientv1.ServerMessage]) error {
 	transport := newGRPCTransport(stream)
-	client, closeFn, err := engine.NewClient(stream.Context(), h.node, transport, engine.DefaultProtoMarshaler)
+	client, closeFn, err := engine.NewClient(stream.Context(), h.node, transport, protocol.ProtobufMarshaler)
 	if err != nil {
 		return err
 	}

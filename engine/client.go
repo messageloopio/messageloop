@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	protocol "github.com/deeplooplabs/messageloop-protocol"
 	clientv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/client/v1"
 	sharedv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/shared/v1"
 	"github.com/google/uuid"
@@ -13,7 +14,7 @@ import (
 	"time"
 )
 
-func NewClient(ctx context.Context, node *Node, t Transport, marshaler Marshaler) (*Client, ClientCloseFunc, error) {
+func NewClient(ctx context.Context, node *Node, t Transport, marshaler protocol.Marshaler) (*Client, ClientCloseFunc, error) {
 	client := &Client{
 		ctx:       ctx,
 		node:      node,
@@ -52,12 +53,12 @@ type Client struct {
 	info          []byte
 	status        status
 	node          *Node
-	marshaler     Marshaler
+	marshaler     protocol.Marshaler
 	authenticated bool
 }
 
 func jsonLog(msg proto.Message) string {
-	data, _ := DefaultProtoJsonMarshaler.Marshal(msg)
+	data, _ := protocol.ProtoJSONMarshaler.Marshal(msg)
 	return string(data)
 }
 
