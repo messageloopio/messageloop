@@ -60,7 +60,7 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		msg := &clientv1.ClientMessage{}
 		if err := marshaler.Unmarshal(data, msg); err != nil {
 			log.ErrorContext(ctx, "decode client message error", err)
-			_ = client.Send(ctx, messageloop.MakeServerMessage(nil, func(out *clientv1.ServerMessage) {
+			_ = client.Send(ctx, messageloop.BuildServerMessage(nil, func(out *clientv1.ServerMessage) {
 				out.Envelope = &clientv1.ServerMessage_Error{
 					Error: &sharedv1.Error{
 						Code:    int32(messageloop.DisconnectBadRequest.Code),

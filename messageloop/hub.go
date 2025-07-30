@@ -170,7 +170,7 @@ func (h *subShard) removeSub(ch string, c *Client) (bool, bool) {
 }
 
 func (h *subShard) broadcastPublication(channel string, pub *Publication) error {
-	channelSubscribers, ok := h.subs[channel]
+	subscribers, ok := h.subs[channel]
 	if !ok {
 		return nil
 	}
@@ -188,13 +188,13 @@ func (h *subShard) broadcastPublication(channel string, pub *Publication) error 
 	} else {
 		msg.PayloadText = string(pub.Payload)
 	}
-	out := MakeServerMessage(nil, func(out *clientv1.ServerMessage) {
+	out := BuildServerMessage(nil, func(out *clientv1.ServerMessage) {
 		out.Envelope = &clientv1.ServerMessage_Publication{Publication: &clientv1.Publication{
 			Messages: []*clientv1.Message{msg},
 		}}
 	})
 
-	for _, sub := range channelSubscribers {
+	for _, sub := range subscribers {
 		if err := sub.client.Send(ctx, out); err != nil {
 			log.ErrorContext(ctx, "send publication error", err)
 			continue

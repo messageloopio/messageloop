@@ -49,7 +49,7 @@ func (t *Transport) Close(disconnect messageloop.Disconnect) error {
 }
 
 func (t *Transport) writeError(code int32, reason string) {
-	msg := messageloop.MakeServerMessage(nil, func(out *clientv1.ServerMessage) {
+	msg := messageloop.BuildServerMessage(nil, func(out *clientv1.ServerMessage) {
 		out.Envelope = &clientv1.ServerMessage_Error{
 			Error: &sharedv1.Error{
 				Code:   code,

@@ -116,7 +116,7 @@ func (c *Client) HandleMessage(ctx context.Context, in *clientv1.ClientMessage) 
 			_ = c.close(dis)
 			return nil
 		}
-		_ = c.Send(ctx, MakeServerMessage(in, func(out *clientv1.ServerMessage) {
+		_ = c.Send(ctx, BuildServerMessage(in, func(out *clientv1.ServerMessage) {
 			out.Envelope = &clientv1.ServerMessage_Error{
 				Error: &sharedv1.Error{
 					Code:     501,
@@ -175,7 +175,7 @@ func (c *Client) onConnect(ctx context.Context, in *clientv1.ClientMessage, conn
 	c.node.addClient(c)
 	c.mu.Unlock()
 
-	return c.Send(ctx, MakeServerMessage(in, func(out *clientv1.ServerMessage) {
+	return c.Send(ctx, BuildServerMessage(in, func(out *clientv1.ServerMessage) {
 		out.Envelope = &clientv1.ServerMessage_Connected{
 			Connected: &clientv1.Connected{
 				SessionId: c.SessionID(),
@@ -189,7 +189,7 @@ func (c *Client) onConnect(ctx context.Context, in *clientv1.ClientMessage, conn
 	}))
 }
 
-func MakeServerMessage(in *clientv1.ClientMessage, bodyFunc func(out *clientv1.ServerMessage)) *clientv1.ServerMessage {
+func BuildServerMessage(in *clientv1.ClientMessage, bodyFunc func(out *clientv1.ServerMessage)) *clientv1.ServerMessage {
 	var out *clientv1.ServerMessage
 	if in != nil {
 		out = &clientv1.ServerMessage{
@@ -231,7 +231,7 @@ func (c *Client) Authenticated() bool {
 }
 
 func (c *Client) onRPC(ctx context.Context, in *clientv1.ClientMessage, req *clientv1.RPCRequest) error {
-	return c.Send(ctx, MakeServerMessage(in, func(out *clientv1.ServerMessage) {
+	return c.Send(ctx, BuildServerMessage(in, func(out *clientv1.ServerMessage) {
 		out.Envelope = &clientv1.ServerMessage_RpcReply{
 			RpcReply: &clientv1.RPCReply{
 				Error:       nil,
@@ -251,7 +251,7 @@ func (c *Client) onPublish(ctx context.Context, in *clientv1.ClientMessage, pub 
 	if err := c.node.Publish(pub.Channel, payload, WithClientInfo(c.ClientInfo()), WithAsBytes(isBlob)); err != nil {
 		return err
 	}
-	return c.Send(ctx, MakeServerMessage(in, func(out *clientv1.ServerMessage) {
+	return c.Send(ctx, BuildServerMessage(in, func(out *clientv1.ServerMessage) {
 		out.Envelope = &clientv1.ServerMessage_PublishAck{
 			PublishAck: &clientv1.PublishAck{
 				Channel: pub.Channel,
@@ -272,7 +272,7 @@ func (c *Client) onSubscribe(ctx context.Context, in *clientv1.ClientMessage, su
 		}
 		subs = append(subs, ch.Channel)
 	}
-	return c.Send(ctx, MakeServerMessage(in, func(out *clientv1.ServerMessage) {
+	return c.Send(ctx, BuildServerMessage(in, func(out *clientv1.ServerMessage) {
 		out.Envelope = &clientv1.ServerMessage_SubscribeAck{
 			SubscribeAck: &clientv1.SubscribeAck{
 				Subscriptions: lo.Map(subs, func(it string, i int) *clientv1.Subscription {
@@ -299,7 +299,7 @@ func (c *Client) onUnsubscribe(ctx context.Context, in *clientv1.ClientMessage, 
 }
 
 func (c *Client) onPing(ctx context.Context, in *clientv1.ClientMessage, ping *clientv1.Ping) error {
-	return c.Send(ctx, MakeServerMessage(in, func(out *clientv1.ServerMessage) {
+	return c.Send(ctx, BuildServerMessage(in, func(out *clientv1.ServerMessage) {
 		out.Envelope = &clientv1.ServerMessage_Pong{
 			Pong: &clientv1.Pong{},
 		}
