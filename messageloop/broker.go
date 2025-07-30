@@ -1,4 +1,4 @@
-package engine
+package messageloop
 
 import "time"
 
@@ -6,7 +6,7 @@ type Publication struct {
 	Channel  string
 	Offset   uint64
 	Metadata map[string]interface{}
-	AsBytes  bool
+	IsBlob   bool
 	Payload  []byte
 	Time     int64
 }

@@ -4,7 +4,7 @@ import (
 	protocol "github.com/deeplooplabs/messageloop-protocol"
 	clientv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/client/v1"
 	sharedv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/shared/v1"
-	"github.com/deeplooplabs/messageloop/engine"
+	"github.com/deeplooplabs/messageloop/messageloop"
 	"github.com/gorilla/websocket"
 	"github.com/lynx-go/x/log"
 	"net/http"
@@ -12,12 +12,12 @@ import (
 )
 
 type Handler struct {
-	node     *engine.Node
+	node     *messageloop.Node
 	opt      *Options
 	upgrader *websocket.Upgrader
 }
 
-func NewHandler(node *engine.Node, opt Options) *Handler {
+func NewHandler(node *messageloop.Node, opt Options) *Handler {
 	handler := &Handler{
 		node: node,
 		opt:  &opt,
@@ -44,7 +44,7 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	marshaler := h.marshaler(subProtocols)
 	transport := newTransport(conn, marshaler)
 	ctx := r.Context()
-	client, closeFn, err := engine.NewClient(ctx, h.node, transport, marshaler)
+	client, closeFn, err := messageloop.NewClient(ctx, h.node, transport, marshaler)
 	if err != nil {
 		log.ErrorContext(r.Context(), "create client error", err)
 		rw.WriteHeader(http.StatusInternalServerError)
@@ -60,11 +60,11 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		msg := &clientv1.ClientMessage{}
 		if err := marshaler.Unmarshal(data, msg); err != nil {
 			log.ErrorContext(ctx, "decode client message error", err)
-			_ = client.Send(ctx, engine.MakeServerMessage(nil, func(out *clientv1.ServerMessage) {
+			_ = client.Send(ctx, messageloop.MakeServerMessage(nil, func(out *clientv1.ServerMessage) {
 				out.Envelope = &clientv1.ServerMessage_Error{
 					Error: &sharedv1.Error{
-						Code:    int32(engine.DisconnectBadRequest.Code),
-						Reason:  engine.DisconnectBadRequest.Reason,
+						Code:    int32(messageloop.DisconnectBadRequest.Code),
+						Reason:  messageloop.DisconnectBadRequest.Reason,
 						Message: "BadRequest",
 					},
 				}

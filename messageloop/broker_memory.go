@@ -1,4 +1,4 @@
-package engine
+package messageloop
 
 import (
 	"time"
@@ -35,7 +35,7 @@ func (b *memoryBroker) Publish(ch string, payload []byte, opts PublishOptions) (
 		Metadata: nil,
 		Payload:  payload,
 		Time:     time.Now().UnixMilli(),
-		AsBytes:  opts.AsBytes,
+		IsBlob:   opts.AsBytes,
 	})
 }
 

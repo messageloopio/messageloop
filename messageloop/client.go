@@ -1,4 +1,4 @@
-package engine
+package messageloop
 
 import (
 	"context"
@@ -208,9 +208,9 @@ func MakeServerMessage(in *clientv1.ClientMessage, bodyFunc func(out *clientv1.S
 	return out
 }
 
-func (c *Client) payload(payloadBytes []byte, payloadString string) ([]byte, bool) {
-	if len(payloadBytes) > 0 {
-		return payloadBytes, true
+func (c *Client) payload(payloadBlob []byte, payloadString string) ([]byte, bool) {
+	if len(payloadBlob) > 0 {
+		return payloadBlob, true
 	} else if len(payloadString) > 0 {
 		return []byte(payloadString), false
 	}
@@ -234,9 +234,9 @@ func (c *Client) onRPC(ctx context.Context, in *clientv1.ClientMessage, req *cli
 	return c.Send(ctx, MakeServerMessage(in, func(out *clientv1.ServerMessage) {
 		out.Envelope = &clientv1.ServerMessage_RpcReply{
 			RpcReply: &clientv1.RPCReply{
-				Error:         nil,
-				PayloadBytes:  req.PayloadBytes,
-				PayloadString: req.PayloadString,
+				Error:       nil,
+				PayloadBlob: req.PayloadBlob,
+				PayloadText: req.PayloadText,
 			},
 		}
 	}))
@@ -247,8 +247,8 @@ func (c *Client) onPublish(ctx context.Context, in *clientv1.ClientMessage, pub 
 		return DisconnectStale
 	}
 
-	payload, asBytes := c.payload(pub.PayloadBytes, pub.PayloadString)
-	if err := c.node.Publish(pub.Channel, payload, WithClientInfo(c.ClientInfo()), WithAsBytes(asBytes)); err != nil {
+	payload, isBlob := c.payload(pub.PayloadBlob, pub.PayloadText)
+	if err := c.node.Publish(pub.Channel, payload, WithClientInfo(c.ClientInfo()), WithAsBytes(isBlob)); err != nil {
 		return err
 	}
 	return c.Send(ctx, MakeServerMessage(in, func(out *clientv1.ServerMessage) {

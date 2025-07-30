@@ -3,7 +3,7 @@ package grpcstream
 import (
 	"context"
 	clientv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/client/v1"
-	"github.com/deeplooplabs/messageloop/engine"
+	"github.com/deeplooplabs/messageloop/messageloop"
 	"github.com/lynx-go/lynx"
 	"github.com/lynx-go/x/log"
 	"google.golang.org/grpc"
@@ -15,7 +15,7 @@ type Options struct {
 	Addr string `yaml:"addr" json:"addr"`
 }
 
-func NewServer(opts Options, node *engine.Node) (*Server, error) {
+func NewServer(opts Options, node *messageloop.Node) (*Server, error) {
 	encoding.RegisterCodec(&RawCodec{})
 	grpcOpts := []grpc.ServerOption{}
 	grpcServer := grpc.NewServer(grpcOpts...)

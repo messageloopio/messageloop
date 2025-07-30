@@ -2,7 +2,7 @@ package websocket
 
 import (
 	"context"
-	"github.com/deeplooplabs/messageloop/engine"
+	"github.com/deeplooplabs/messageloop/messageloop"
 	"github.com/lynx-go/lynx"
 	"github.com/lynx-go/x/log"
 	"net/http"
@@ -29,7 +29,7 @@ func DefaultOptions() Options {
 
 func NewServer(
 	opts Options,
-	node *engine.Node,
+	node *messageloop.Node,
 ) *Server {
 	mux := http.NewServeMux()
 	handler := NewHandler(node, opts)

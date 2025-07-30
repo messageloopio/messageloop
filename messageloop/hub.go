@@ -1,4 +1,4 @@
-package engine
+package messageloop
 
 import (
 	"context"
@@ -183,10 +183,10 @@ func (h *subShard) broadcastPublication(channel string, pub *Publication) error 
 		Channel: channel,
 		Id:      uuid.NewString(),
 	}
-	if pub.AsBytes {
-		msg.PayloadBytes = pub.Payload
+	if pub.IsBlob {
+		msg.PayloadBlob = pub.Payload
 	} else {
-		msg.PayloadString = string(pub.Payload)
+		msg.PayloadText = string(pub.Payload)
 	}
 	out := MakeServerMessage(nil, func(out *clientv1.ServerMessage) {
 		out.Envelope = &clientv1.ServerMessage_Publication{Publication: &clientv1.Publication{

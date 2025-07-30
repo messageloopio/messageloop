@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 	"github.com/deeplooplabs/messageloop/config"
-	"github.com/deeplooplabs/messageloop/engine"
 	"github.com/deeplooplabs/messageloop/grpcstream"
+	"github.com/deeplooplabs/messageloop/messageloop"
 	"github.com/deeplooplabs/messageloop/websocket"
 	"github.com/lynx-go/lynx"
 	"github.com/lynx-go/lynx/contrib/log/zap"
@@ -24,7 +24,7 @@ func main() {
 			return err
 		}
 
-		node := engine.NewNode()
+		node := messageloop.NewNode()
 		if err := node.Run(); err != nil {
 			return err
 		}
