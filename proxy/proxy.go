@@ -45,17 +45,17 @@ func (r *RPCProxyRequest) ToProtoRequest() *proxypb.RPCRequest {
 		Id:      r.ID,
 		Channel: r.Channel,
 		Method:  r.Method,
-		Event:   r.Event,
+		Request: r.Event,
 	}
 }
 
-// FromProtoResponse creates an RPCProxyResponse from the protobuf RPCReply.
-func FromProtoReply(reply *proxypb.RPCReply) *RPCProxyResponse {
+// FromProtoResponse creates an RPCProxyResponse from the protobuf RPCResponse.
+func FromProtoReply(reply *proxypb.RPCResponse) *RPCProxyResponse {
 	if reply == nil {
 		return &RPCProxyResponse{}
 	}
 	return &RPCProxyResponse{
-		Event: reply.Event,
+		Event: reply.Reply,
 		Error: reply.Error,
 	}
 }

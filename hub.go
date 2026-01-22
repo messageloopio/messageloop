@@ -186,7 +186,7 @@ func (h *subShard) broadcastPublication(channel string, pub *Publication) error 
 
 	// Create CloudEvent from publication payload
 	if len(pub.Payload) > 0 {
-		msg.Event = &cloudevents.CloudEvent{
+		msg.Payload = &cloudevents.CloudEvent{
 			Id:          msg.Id,
 			Source:      channel,
 			SpecVersion: "1.0",

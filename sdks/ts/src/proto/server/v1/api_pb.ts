@@ -2,15 +2,19 @@
 // @generated from file server/v1/api.proto (package messageloop.server.v1, syntax proto3)
 /* eslint-disable */
 
+// buf:lint:ignore PACKAGE_DIRECTORY_MATCH
+
 import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { CloudEvent } from "../../includes/cloudevents/cloudevents_pb";
+import { file_includes_cloudevents_cloudevents } from "../../includes/cloudevents/cloudevents_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file server/v1/api.proto.
  */
 export const file_server_v1_api: GenFile = /*@__PURE__*/
-  fileDesc("ChNzZXJ2ZXIvdjEvYXBpLnByb3RvEhVtZXNzYWdlbG9vcC5zZXJ2ZXIudjEimgIKC1B1YmxpY2F0aW9uEgoKAmlkGAEgASgJEkMKC2Rlc3RpbmF0aW9uGAIgASgLMi4ubWVzc2FnZWxvb3Auc2VydmVyLnYxLlB1YmxpY2F0aW9uLkRlc3RpbmF0aW9uEjsKB29wdGlvbnMYAyABKAsyKi5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuUHVibGljYXRpb24uT3B0aW9ucxIUCgxwYXlsb2FkX2Jsb2IYBCABKAwSFAoMcGF5bG9hZF90ZXh0GAUgASgJGh4KB09wdGlvbnMSEwoLYWRkX2hpc3RvcnkYASABKAgaMQoLRGVzdGluYXRpb24SEAoIc2Vzc2lvbnMYASADKAkSEAoIY2hhbm5lbHMYAiADKAki1gEKDlB1Ymxpc2hSZXF1ZXN0EhIKCnJlcXVlc3RfaWQYASABKAkSRQoIbWV0YWRhdGEYAiADKAsyMy5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuUHVibGlzaFJlcXVlc3QuTWV0YWRhdGFFbnRyeRI4CgxwdWJsaWNhdGlvbnMYAyADKAsyIi5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuUHVibGljYXRpb24aLwoNTWV0YWRhdGFFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBIg4KDFB1Ymxpc2hSZXBseSITChFEaXNjb25uZWN0UmVxdWVzdCIRCg9EaXNjb25uZWN0UmVwbHkiEgoQU3Vic2NyaWJlUmVxdWVzdCIQCg5TdWJzY3JpYmVSZXBseSIUChJVbnN1YnNjcmliZVJlcXVlc3QiEgoQVW5zdWJzY3JpYmVSZXBseTKBAwoKQVBJU2VydmljZRJVCgdQdWJsaXNoEiUubWVzc2FnZWxvb3Auc2VydmVyLnYxLlB1Ymxpc2hSZXF1ZXN0GiMubWVzc2FnZWxvb3Auc2VydmVyLnYxLlB1Ymxpc2hSZXBseRJeCgpEaXNjb25uZWN0EigubWVzc2FnZWxvb3Auc2VydmVyLnYxLkRpc2Nvbm5lY3RSZXF1ZXN0GiYubWVzc2FnZWxvb3Auc2VydmVyLnYxLkRpc2Nvbm5lY3RSZXBseRJbCglTdWJzY3JpYmUSJy5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuU3Vic2NyaWJlUmVxdWVzdBolLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5TdWJzY3JpYmVSZXBseRJfCgtVbnN1YnNjcmliZRInLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5TdWJzY3JpYmVSZXF1ZXN0GicubWVzc2FnZWxvb3Auc2VydmVyLnYxLlVuc3Vic2NyaWJlUmVwbHlCRFpCZ2l0aHViLmNvbS9kZWVwbG9vcGxhYnMvbWVzc2FnZWxvb3AvZ2VucHJvdG8vZ28vc2VydmVyL3YxO3NlcnZlcnBiYgZwcm90bzM");
+  fileDesc("ChNzZXJ2ZXIvdjEvYXBpLnByb3RvEhVtZXNzYWdlbG9vcC5zZXJ2ZXIudjEingIKC1B1YmxpY2F0aW9uEgoKAmlkGAEgASgJEkMKC2Rlc3RpbmF0aW9uGAIgASgLMi4ubWVzc2FnZWxvb3Auc2VydmVyLnYxLlB1YmxpY2F0aW9uLkRlc3RpbmF0aW9uEjsKB29wdGlvbnMYAyABKAsyKi5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuUHVibGljYXRpb24uT3B0aW9ucxIuCgdtZXNzYWdlGAQgASgLMh0uaW8uY2xvdWRldmVudHMudjEuQ2xvdWRFdmVudBoeCgdPcHRpb25zEhMKC2FkZF9oaXN0b3J5GAEgASgIGjEKC0Rlc3RpbmF0aW9uEhAKCHNlc3Npb25zGAEgAygJEhAKCGNoYW5uZWxzGAIgAygJItYBCg5QdWJsaXNoUmVxdWVzdBISCgpyZXF1ZXN0X2lkGAEgASgJEkUKCG1ldGFkYXRhGAIgAygLMjMubWVzc2FnZWxvb3Auc2VydmVyLnYxLlB1Ymxpc2hSZXF1ZXN0Lk1ldGFkYXRhRW50cnkSOAoMcHVibGljYXRpb25zGAMgAygLMiIubWVzc2FnZWxvb3Auc2VydmVyLnYxLlB1YmxpY2F0aW9uGi8KDU1ldGFkYXRhRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASIRCg9QdWJsaXNoUmVzcG9uc2UiEwoRRGlzY29ubmVjdFJlcXVlc3QiFAoSRGlzY29ubmVjdFJlc3BvbnNlIhIKEFN1YnNjcmliZVJlcXVlc3QiEwoRU3Vic2NyaWJlUmVzcG9uc2UiFAoSVW5zdWJzY3JpYmVSZXF1ZXN0IhUKE1Vuc3Vic2NyaWJlUmVzcG9uc2UyjQMKCkFQSVNlcnZpY2USWAoHUHVibGlzaBIlLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5QdWJsaXNoUmVxdWVzdBomLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5QdWJsaXNoUmVzcG9uc2USYQoKRGlzY29ubmVjdBIoLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5EaXNjb25uZWN0UmVxdWVzdBopLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5EaXNjb25uZWN0UmVzcG9uc2USXgoJU3Vic2NyaWJlEicubWVzc2FnZWxvb3Auc2VydmVyLnYxLlN1YnNjcmliZVJlcXVlc3QaKC5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuU3Vic2NyaWJlUmVzcG9uc2USYgoLVW5zdWJzY3JpYmUSJy5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuU3Vic2NyaWJlUmVxdWVzdBoqLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5VbnN1YnNjcmliZVJlc3BvbnNlQkRaQmdpdGh1Yi5jb20vZGVlcGxvb3BsYWJzL21lc3NhZ2Vsb29wL2dlbnByb3RvL2dvL3NlcnZlci92MTtzZXJ2ZXJwYmIGcHJvdG8z", [file_includes_cloudevents_cloudevents]);
 
 /**
  * @generated from message messageloop.server.v1.Publication
@@ -32,14 +36,9 @@ export type Publication = Message<"messageloop.server.v1.Publication"> & {
   options?: Publication_Options;
 
   /**
-   * @generated from field: bytes payload_blob = 4;
+   * @generated from field: io.cloudevents.v1.CloudEvent message = 4;
    */
-  payloadBlob: Uint8Array;
-
-  /**
-   * @generated from field: string payload_text = 5;
-   */
-  payloadText: string;
+  message?: CloudEvent;
 };
 
 /**
@@ -116,16 +115,16 @@ export const PublishRequestSchema: GenMessage<PublishRequest> = /*@__PURE__*/
   messageDesc(file_server_v1_api, 1);
 
 /**
- * @generated from message messageloop.server.v1.PublishReply
+ * @generated from message messageloop.server.v1.PublishResponse
  */
-export type PublishReply = Message<"messageloop.server.v1.PublishReply"> & {
+export type PublishResponse = Message<"messageloop.server.v1.PublishResponse"> & {
 };
 
 /**
- * Describes the message messageloop.server.v1.PublishReply.
- * Use `create(PublishReplySchema)` to create a new message.
+ * Describes the message messageloop.server.v1.PublishResponse.
+ * Use `create(PublishResponseSchema)` to create a new message.
  */
-export const PublishReplySchema: GenMessage<PublishReply> = /*@__PURE__*/
+export const PublishResponseSchema: GenMessage<PublishResponse> = /*@__PURE__*/
   messageDesc(file_server_v1_api, 2);
 
 /**
@@ -142,16 +141,16 @@ export const DisconnectRequestSchema: GenMessage<DisconnectRequest> = /*@__PURE_
   messageDesc(file_server_v1_api, 3);
 
 /**
- * @generated from message messageloop.server.v1.DisconnectReply
+ * @generated from message messageloop.server.v1.DisconnectResponse
  */
-export type DisconnectReply = Message<"messageloop.server.v1.DisconnectReply"> & {
+export type DisconnectResponse = Message<"messageloop.server.v1.DisconnectResponse"> & {
 };
 
 /**
- * Describes the message messageloop.server.v1.DisconnectReply.
- * Use `create(DisconnectReplySchema)` to create a new message.
+ * Describes the message messageloop.server.v1.DisconnectResponse.
+ * Use `create(DisconnectResponseSchema)` to create a new message.
  */
-export const DisconnectReplySchema: GenMessage<DisconnectReply> = /*@__PURE__*/
+export const DisconnectResponseSchema: GenMessage<DisconnectResponse> = /*@__PURE__*/
   messageDesc(file_server_v1_api, 4);
 
 /**
@@ -168,16 +167,16 @@ export const SubscribeRequestSchema: GenMessage<SubscribeRequest> = /*@__PURE__*
   messageDesc(file_server_v1_api, 5);
 
 /**
- * @generated from message messageloop.server.v1.SubscribeReply
+ * @generated from message messageloop.server.v1.SubscribeResponse
  */
-export type SubscribeReply = Message<"messageloop.server.v1.SubscribeReply"> & {
+export type SubscribeResponse = Message<"messageloop.server.v1.SubscribeResponse"> & {
 };
 
 /**
- * Describes the message messageloop.server.v1.SubscribeReply.
- * Use `create(SubscribeReplySchema)` to create a new message.
+ * Describes the message messageloop.server.v1.SubscribeResponse.
+ * Use `create(SubscribeResponseSchema)` to create a new message.
  */
-export const SubscribeReplySchema: GenMessage<SubscribeReply> = /*@__PURE__*/
+export const SubscribeResponseSchema: GenMessage<SubscribeResponse> = /*@__PURE__*/
   messageDesc(file_server_v1_api, 6);
 
 /**
@@ -194,16 +193,16 @@ export const UnsubscribeRequestSchema: GenMessage<UnsubscribeRequest> = /*@__PUR
   messageDesc(file_server_v1_api, 7);
 
 /**
- * @generated from message messageloop.server.v1.UnsubscribeReply
+ * @generated from message messageloop.server.v1.UnsubscribeResponse
  */
-export type UnsubscribeReply = Message<"messageloop.server.v1.UnsubscribeReply"> & {
+export type UnsubscribeResponse = Message<"messageloop.server.v1.UnsubscribeResponse"> & {
 };
 
 /**
- * Describes the message messageloop.server.v1.UnsubscribeReply.
- * Use `create(UnsubscribeReplySchema)` to create a new message.
+ * Describes the message messageloop.server.v1.UnsubscribeResponse.
+ * Use `create(UnsubscribeResponseSchema)` to create a new message.
  */
-export const UnsubscribeReplySchema: GenMessage<UnsubscribeReply> = /*@__PURE__*/
+export const UnsubscribeResponseSchema: GenMessage<UnsubscribeResponse> = /*@__PURE__*/
   messageDesc(file_server_v1_api, 8);
 
 /**
@@ -216,7 +215,7 @@ export const APIService: GenService<{
   publish: {
     methodKind: "unary";
     input: typeof PublishRequestSchema;
-    output: typeof PublishReplySchema;
+    output: typeof PublishResponseSchema;
   },
   /**
    * @generated from rpc messageloop.server.v1.APIService.Disconnect
@@ -224,7 +223,7 @@ export const APIService: GenService<{
   disconnect: {
     methodKind: "unary";
     input: typeof DisconnectRequestSchema;
-    output: typeof DisconnectReplySchema;
+    output: typeof DisconnectResponseSchema;
   },
   /**
    * @generated from rpc messageloop.server.v1.APIService.Subscribe
@@ -232,7 +231,7 @@ export const APIService: GenService<{
   subscribe: {
     methodKind: "unary";
     input: typeof SubscribeRequestSchema;
-    output: typeof SubscribeReplySchema;
+    output: typeof SubscribeResponseSchema;
   },
   /**
    * @generated from rpc messageloop.server.v1.APIService.Unsubscribe
@@ -240,7 +239,7 @@ export const APIService: GenService<{
   unsubscribe: {
     methodKind: "unary";
     input: typeof SubscribeRequestSchema;
-    output: typeof UnsubscribeReplySchema;
+    output: typeof UnsubscribeResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_server_v1_api, 0);

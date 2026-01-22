@@ -4,6 +4,8 @@
 // - protoc             (unknown)
 // source: server/v1/api.proto
 
+// buf:lint:ignore PACKAGE_DIRECTORY_MATCH
+
 package serverpb
 
 import (
@@ -29,10 +31,10 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type APIServiceClient interface {
-	Publish(ctx context.Context, in *PublishRequest, opts ...grpc.CallOption) (*PublishReply, error)
-	Disconnect(ctx context.Context, in *DisconnectRequest, opts ...grpc.CallOption) (*DisconnectReply, error)
-	Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (*SubscribeReply, error)
-	Unsubscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (*UnsubscribeReply, error)
+	Publish(ctx context.Context, in *PublishRequest, opts ...grpc.CallOption) (*PublishResponse, error)
+	Disconnect(ctx context.Context, in *DisconnectRequest, opts ...grpc.CallOption) (*DisconnectResponse, error)
+	Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (*SubscribeResponse, error)
+	Unsubscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (*UnsubscribeResponse, error)
 }
 
 type aPIServiceClient struct {
@@ -43,9 +45,9 @@ func NewAPIServiceClient(cc grpc.ClientConnInterface) APIServiceClient {
 	return &aPIServiceClient{cc}
 }
 
-func (c *aPIServiceClient) Publish(ctx context.Context, in *PublishRequest, opts ...grpc.CallOption) (*PublishReply, error) {
+func (c *aPIServiceClient) Publish(ctx context.Context, in *PublishRequest, opts ...grpc.CallOption) (*PublishResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(PublishReply)
+	out := new(PublishResponse)
 	err := c.cc.Invoke(ctx, APIService_Publish_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -53,9 +55,9 @@ func (c *aPIServiceClient) Publish(ctx context.Context, in *PublishRequest, opts
 	return out, nil
 }
 
-func (c *aPIServiceClient) Disconnect(ctx context.Context, in *DisconnectRequest, opts ...grpc.CallOption) (*DisconnectReply, error) {
+func (c *aPIServiceClient) Disconnect(ctx context.Context, in *DisconnectRequest, opts ...grpc.CallOption) (*DisconnectResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(DisconnectReply)
+	out := new(DisconnectResponse)
 	err := c.cc.Invoke(ctx, APIService_Disconnect_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -63,9 +65,9 @@ func (c *aPIServiceClient) Disconnect(ctx context.Context, in *DisconnectRequest
 	return out, nil
 }
 
-func (c *aPIServiceClient) Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (*SubscribeReply, error) {
+func (c *aPIServiceClient) Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (*SubscribeResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(SubscribeReply)
+	out := new(SubscribeResponse)
 	err := c.cc.Invoke(ctx, APIService_Subscribe_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -73,9 +75,9 @@ func (c *aPIServiceClient) Subscribe(ctx context.Context, in *SubscribeRequest, 
 	return out, nil
 }
 
-func (c *aPIServiceClient) Unsubscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (*UnsubscribeReply, error) {
+func (c *aPIServiceClient) Unsubscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (*UnsubscribeResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(UnsubscribeReply)
+	out := new(UnsubscribeResponse)
 	err := c.cc.Invoke(ctx, APIService_Unsubscribe_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -87,10 +89,10 @@ func (c *aPIServiceClient) Unsubscribe(ctx context.Context, in *SubscribeRequest
 // All implementations must embed UnimplementedAPIServiceServer
 // for forward compatibility.
 type APIServiceServer interface {
-	Publish(context.Context, *PublishRequest) (*PublishReply, error)
-	Disconnect(context.Context, *DisconnectRequest) (*DisconnectReply, error)
-	Subscribe(context.Context, *SubscribeRequest) (*SubscribeReply, error)
-	Unsubscribe(context.Context, *SubscribeRequest) (*UnsubscribeReply, error)
+	Publish(context.Context, *PublishRequest) (*PublishResponse, error)
+	Disconnect(context.Context, *DisconnectRequest) (*DisconnectResponse, error)
+	Subscribe(context.Context, *SubscribeRequest) (*SubscribeResponse, error)
+	Unsubscribe(context.Context, *SubscribeRequest) (*UnsubscribeResponse, error)
 	mustEmbedUnimplementedAPIServiceServer()
 }
 
@@ -101,16 +103,16 @@ type APIServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedAPIServiceServer struct{}
 
-func (UnimplementedAPIServiceServer) Publish(context.Context, *PublishRequest) (*PublishReply, error) {
+func (UnimplementedAPIServiceServer) Publish(context.Context, *PublishRequest) (*PublishResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Publish not implemented")
 }
-func (UnimplementedAPIServiceServer) Disconnect(context.Context, *DisconnectRequest) (*DisconnectReply, error) {
+func (UnimplementedAPIServiceServer) Disconnect(context.Context, *DisconnectRequest) (*DisconnectResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Disconnect not implemented")
 }
-func (UnimplementedAPIServiceServer) Subscribe(context.Context, *SubscribeRequest) (*SubscribeReply, error) {
+func (UnimplementedAPIServiceServer) Subscribe(context.Context, *SubscribeRequest) (*SubscribeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Subscribe not implemented")
 }
-func (UnimplementedAPIServiceServer) Unsubscribe(context.Context, *SubscribeRequest) (*UnsubscribeReply, error) {
+func (UnimplementedAPIServiceServer) Unsubscribe(context.Context, *SubscribeRequest) (*UnsubscribeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Unsubscribe not implemented")
 }
 func (UnimplementedAPIServiceServer) mustEmbedUnimplementedAPIServiceServer() {}

@@ -80,7 +80,7 @@ func (p *HTTPProxy) ProxyRPC(ctx context.Context, req *RPCProxyRequest) (*RPCPro
 		"id":      protoReq.Id,
 		"channel": protoReq.Channel,
 		"method":  protoReq.Method,
-		"event":   protoReq.Event,
+		"request": protoReq.Request,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
@@ -122,7 +122,7 @@ func (p *HTTPProxy) ProxyRPC(ctx context.Context, req *RPCProxyRequest) (*RPCPro
 	}
 
 	// Parse response
-	var protoResp proxypb.RPCReply
+	var protoResp proxypb.RPCResponse
 	if err := json.Unmarshal(respBody, &protoResp); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}

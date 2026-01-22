@@ -246,7 +246,7 @@
           "type": "string",
           "format": "uint64"
         },
-        "event": {
+        "payload": {
           "$ref": "#/definitions/v1CloudEvent"
         }
       }

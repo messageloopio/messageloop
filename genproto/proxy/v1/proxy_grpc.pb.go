@@ -4,6 +4,8 @@
 // - protoc             (unknown)
 // source: proxy/v1/proxy.proto
 
+// buf:lint:ignore PACKAGE_DIRECTORY_MATCH
+
 package proxypb
 
 import (
@@ -33,15 +35,15 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ProxyServiceClient interface {
 	// 远程调用
-	RPC(ctx context.Context, in *RPCRequest, opts ...grpc.CallOption) (*RPCReply, error)
+	RPC(ctx context.Context, in *RPCRequest, opts ...grpc.CallOption) (*RPCResponse, error)
 	// 认证
-	Authenticate(ctx context.Context, in *AuthenticateRequest, opts ...grpc.CallOption) (*AuthenticateReply, error)
+	Authenticate(ctx context.Context, in *AuthenticateRequest, opts ...grpc.CallOption) (*AuthenticateResponse, error)
 	// 订阅权限校验
-	SubscribeAcl(ctx context.Context, in *SubscribeAclRequest, opts ...grpc.CallOption) (*SubscribeAclReply, error)
-	OnConnected(ctx context.Context, in *OnConnectedRequest, opts ...grpc.CallOption) (*OnConnectedReply, error)
-	OnSubscribed(ctx context.Context, in *OnSubscribedRequest, opts ...grpc.CallOption) (*OnSubscribedReply, error)
-	OnUnsubscribed(ctx context.Context, in *OnUnsubscribedRequest, opts ...grpc.CallOption) (*OnUnsubscribedReply, error)
-	OnDisconnected(ctx context.Context, in *OnDisconnectedRequest, opts ...grpc.CallOption) (*OnDisconnectedReply, error)
+	SubscribeAcl(ctx context.Context, in *SubscribeAclRequest, opts ...grpc.CallOption) (*SubscribeAclResponse, error)
+	OnConnected(ctx context.Context, in *OnConnectedRequest, opts ...grpc.CallOption) (*OnConnectedResponse, error)
+	OnSubscribed(ctx context.Context, in *OnSubscribedRequest, opts ...grpc.CallOption) (*OnSubscribedResponse, error)
+	OnUnsubscribed(ctx context.Context, in *OnUnsubscribedRequest, opts ...grpc.CallOption) (*OnUnsubscribedResponse, error)
+	OnDisconnected(ctx context.Context, in *OnDisconnectedRequest, opts ...grpc.CallOption) (*OnDisconnectedResponse, error)
 }
 
 type proxyServiceClient struct {
@@ -52,9 +54,9 @@ func NewProxyServiceClient(cc grpc.ClientConnInterface) ProxyServiceClient {
 	return &proxyServiceClient{cc}
 }
 
-func (c *proxyServiceClient) RPC(ctx context.Context, in *RPCRequest, opts ...grpc.CallOption) (*RPCReply, error) {
+func (c *proxyServiceClient) RPC(ctx context.Context, in *RPCRequest, opts ...grpc.CallOption) (*RPCResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(RPCReply)
+	out := new(RPCResponse)
 	err := c.cc.Invoke(ctx, ProxyService_RPC_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -62,9 +64,9 @@ func (c *proxyServiceClient) RPC(ctx context.Context, in *RPCRequest, opts ...gr
 	return out, nil
 }
 
-func (c *proxyServiceClient) Authenticate(ctx context.Context, in *AuthenticateRequest, opts ...grpc.CallOption) (*AuthenticateReply, error) {
+func (c *proxyServiceClient) Authenticate(ctx context.Context, in *AuthenticateRequest, opts ...grpc.CallOption) (*AuthenticateResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(AuthenticateReply)
+	out := new(AuthenticateResponse)
 	err := c.cc.Invoke(ctx, ProxyService_Authenticate_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -72,9 +74,9 @@ func (c *proxyServiceClient) Authenticate(ctx context.Context, in *AuthenticateR
 	return out, nil
 }
 
-func (c *proxyServiceClient) SubscribeAcl(ctx context.Context, in *SubscribeAclRequest, opts ...grpc.CallOption) (*SubscribeAclReply, error) {
+func (c *proxyServiceClient) SubscribeAcl(ctx context.Context, in *SubscribeAclRequest, opts ...grpc.CallOption) (*SubscribeAclResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(SubscribeAclReply)
+	out := new(SubscribeAclResponse)
 	err := c.cc.Invoke(ctx, ProxyService_SubscribeAcl_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -82,9 +84,9 @@ func (c *proxyServiceClient) SubscribeAcl(ctx context.Context, in *SubscribeAclR
 	return out, nil
 }
 
-func (c *proxyServiceClient) OnConnected(ctx context.Context, in *OnConnectedRequest, opts ...grpc.CallOption) (*OnConnectedReply, error) {
+func (c *proxyServiceClient) OnConnected(ctx context.Context, in *OnConnectedRequest, opts ...grpc.CallOption) (*OnConnectedResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(OnConnectedReply)
+	out := new(OnConnectedResponse)
 	err := c.cc.Invoke(ctx, ProxyService_OnConnected_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -92,9 +94,9 @@ func (c *proxyServiceClient) OnConnected(ctx context.Context, in *OnConnectedReq
 	return out, nil
 }
 
-func (c *proxyServiceClient) OnSubscribed(ctx context.Context, in *OnSubscribedRequest, opts ...grpc.CallOption) (*OnSubscribedReply, error) {
+func (c *proxyServiceClient) OnSubscribed(ctx context.Context, in *OnSubscribedRequest, opts ...grpc.CallOption) (*OnSubscribedResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(OnSubscribedReply)
+	out := new(OnSubscribedResponse)
 	err := c.cc.Invoke(ctx, ProxyService_OnSubscribed_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -102,9 +104,9 @@ func (c *proxyServiceClient) OnSubscribed(ctx context.Context, in *OnSubscribedR
 	return out, nil
 }
 
-func (c *proxyServiceClient) OnUnsubscribed(ctx context.Context, in *OnUnsubscribedRequest, opts ...grpc.CallOption) (*OnUnsubscribedReply, error) {
+func (c *proxyServiceClient) OnUnsubscribed(ctx context.Context, in *OnUnsubscribedRequest, opts ...grpc.CallOption) (*OnUnsubscribedResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(OnUnsubscribedReply)
+	out := new(OnUnsubscribedResponse)
 	err := c.cc.Invoke(ctx, ProxyService_OnUnsubscribed_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -112,9 +114,9 @@ func (c *proxyServiceClient) OnUnsubscribed(ctx context.Context, in *OnUnsubscri
 	return out, nil
 }
 
-func (c *proxyServiceClient) OnDisconnected(ctx context.Context, in *OnDisconnectedRequest, opts ...grpc.CallOption) (*OnDisconnectedReply, error) {
+func (c *proxyServiceClient) OnDisconnected(ctx context.Context, in *OnDisconnectedRequest, opts ...grpc.CallOption) (*OnDisconnectedResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(OnDisconnectedReply)
+	out := new(OnDisconnectedResponse)
 	err := c.cc.Invoke(ctx, ProxyService_OnDisconnected_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -127,15 +129,15 @@ func (c *proxyServiceClient) OnDisconnected(ctx context.Context, in *OnDisconnec
 // for forward compatibility.
 type ProxyServiceServer interface {
 	// 远程调用
-	RPC(context.Context, *RPCRequest) (*RPCReply, error)
+	RPC(context.Context, *RPCRequest) (*RPCResponse, error)
 	// 认证
-	Authenticate(context.Context, *AuthenticateRequest) (*AuthenticateReply, error)
+	Authenticate(context.Context, *AuthenticateRequest) (*AuthenticateResponse, error)
 	// 订阅权限校验
-	SubscribeAcl(context.Context, *SubscribeAclRequest) (*SubscribeAclReply, error)
-	OnConnected(context.Context, *OnConnectedRequest) (*OnConnectedReply, error)
-	OnSubscribed(context.Context, *OnSubscribedRequest) (*OnSubscribedReply, error)
-	OnUnsubscribed(context.Context, *OnUnsubscribedRequest) (*OnUnsubscribedReply, error)
-	OnDisconnected(context.Context, *OnDisconnectedRequest) (*OnDisconnectedReply, error)
+	SubscribeAcl(context.Context, *SubscribeAclRequest) (*SubscribeAclResponse, error)
+	OnConnected(context.Context, *OnConnectedRequest) (*OnConnectedResponse, error)
+	OnSubscribed(context.Context, *OnSubscribedRequest) (*OnSubscribedResponse, error)
+	OnUnsubscribed(context.Context, *OnUnsubscribedRequest) (*OnUnsubscribedResponse, error)
+	OnDisconnected(context.Context, *OnDisconnectedRequest) (*OnDisconnectedResponse, error)
 	mustEmbedUnimplementedProxyServiceServer()
 }
 
@@ -146,25 +148,25 @@ type ProxyServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedProxyServiceServer struct{}
 
-func (UnimplementedProxyServiceServer) RPC(context.Context, *RPCRequest) (*RPCReply, error) {
+func (UnimplementedProxyServiceServer) RPC(context.Context, *RPCRequest) (*RPCResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RPC not implemented")
 }
-func (UnimplementedProxyServiceServer) Authenticate(context.Context, *AuthenticateRequest) (*AuthenticateReply, error) {
+func (UnimplementedProxyServiceServer) Authenticate(context.Context, *AuthenticateRequest) (*AuthenticateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Authenticate not implemented")
 }
-func (UnimplementedProxyServiceServer) SubscribeAcl(context.Context, *SubscribeAclRequest) (*SubscribeAclReply, error) {
+func (UnimplementedProxyServiceServer) SubscribeAcl(context.Context, *SubscribeAclRequest) (*SubscribeAclResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SubscribeAcl not implemented")
 }
-func (UnimplementedProxyServiceServer) OnConnected(context.Context, *OnConnectedRequest) (*OnConnectedReply, error) {
+func (UnimplementedProxyServiceServer) OnConnected(context.Context, *OnConnectedRequest) (*OnConnectedResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method OnConnected not implemented")
 }
-func (UnimplementedProxyServiceServer) OnSubscribed(context.Context, *OnSubscribedRequest) (*OnSubscribedReply, error) {
+func (UnimplementedProxyServiceServer) OnSubscribed(context.Context, *OnSubscribedRequest) (*OnSubscribedResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method OnSubscribed not implemented")
 }
-func (UnimplementedProxyServiceServer) OnUnsubscribed(context.Context, *OnUnsubscribedRequest) (*OnUnsubscribedReply, error) {
+func (UnimplementedProxyServiceServer) OnUnsubscribed(context.Context, *OnUnsubscribedRequest) (*OnUnsubscribedResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method OnUnsubscribed not implemented")
 }
-func (UnimplementedProxyServiceServer) OnDisconnected(context.Context, *OnDisconnectedRequest) (*OnDisconnectedReply, error) {
+func (UnimplementedProxyServiceServer) OnDisconnected(context.Context, *OnDisconnectedRequest) (*OnDisconnectedResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method OnDisconnected not implemented")
 }
 func (UnimplementedProxyServiceServer) mustEmbedUnimplementedProxyServiceServer() {}

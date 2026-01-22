@@ -525,7 +525,7 @@ type RPCRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Channel       string                 `protobuf:"bytes,1,opt,name=channel,proto3" json:"channel,omitempty"`
 	Method        string                 `protobuf:"bytes,2,opt,name=method,proto3" json:"method,omitempty"`
-	Event         *pb.CloudEvent         `protobuf:"bytes,3,opt,name=event,proto3" json:"event,omitempty"`
+	Payload       *pb.CloudEvent         `protobuf:"bytes,3,opt,name=payload,proto3" json:"payload,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -574,9 +574,9 @@ func (x *RPCRequest) GetMethod() string {
 	return ""
 }
 
-func (x *RPCRequest) GetEvent() *pb.CloudEvent {
+func (x *RPCRequest) GetPayload() *pb.CloudEvent {
 	if x != nil {
-		return x.Event
+		return x.Payload
 	}
 	return nil
 }
@@ -584,7 +584,7 @@ func (x *RPCRequest) GetEvent() *pb.CloudEvent {
 type RPCReply struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Error         *v1.Error              `protobuf:"bytes,1,opt,name=error,proto3" json:"error,omitempty"`
-	Event         *pb.CloudEvent         `protobuf:"bytes,3,opt,name=event,proto3" json:"event,omitempty"`
+	Payload       *pb.CloudEvent         `protobuf:"bytes,3,opt,name=payload,proto3" json:"payload,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -626,9 +626,9 @@ func (x *RPCReply) GetError() *v1.Error {
 	return nil
 }
 
-func (x *RPCReply) GetEvent() *pb.CloudEvent {
+func (x *RPCReply) GetPayload() *pb.CloudEvent {
 	if x != nil {
-		return x.Event
+		return x.Payload
 	}
 	return nil
 }
@@ -638,7 +638,7 @@ type Message struct {
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Channel       string                 `protobuf:"bytes,2,opt,name=channel,proto3" json:"channel,omitempty"`
 	Offset        uint64                 `protobuf:"varint,3,opt,name=offset,proto3" json:"offset,omitempty"`
-	Event         *pb.CloudEvent         `protobuf:"bytes,4,opt,name=event,proto3" json:"event,omitempty"`
+	Payload       *pb.CloudEvent         `protobuf:"bytes,4,opt,name=payload,proto3" json:"payload,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -694,9 +694,9 @@ func (x *Message) GetOffset() uint64 {
 	return 0
 }
 
-func (x *Message) GetEvent() *pb.CloudEvent {
+func (x *Message) GetPayload() *pb.CloudEvent {
 	if x != nil {
-		return x.Event
+		return x.Payload
 	}
 	return nil
 }
@@ -1327,20 +1327,20 @@ const file_v1_service_proto_rawDesc = "" +
 	"\vclient_type\x18\x02 \x01(\tR\vclient_type\x12\x14\n" +
 	"\x05token\x18\x03 \x01(\tR\x05token\x12\x18\n" +
 	"\aversion\x18\x04 \x01(\tR\aversion\x12B\n" +
-	"\rsubscriptions\x18\x05 \x03(\v2\x1c.messageloop.v1.SubscriptionR\rsubscriptions\"s\n" +
+	"\rsubscriptions\x18\x05 \x03(\v2\x1c.messageloop.v1.SubscriptionR\rsubscriptions\"w\n" +
 	"\n" +
 	"RPCRequest\x12\x18\n" +
 	"\achannel\x18\x01 \x01(\tR\achannel\x12\x16\n" +
-	"\x06method\x18\x02 \x01(\tR\x06method\x123\n" +
-	"\x05event\x18\x03 \x01(\v2\x1d.io.cloudevents.v1.CloudEventR\x05event\"s\n" +
+	"\x06method\x18\x02 \x01(\tR\x06method\x127\n" +
+	"\apayload\x18\x03 \x01(\v2\x1d.io.cloudevents.v1.CloudEventR\apayload\"w\n" +
 	"\bRPCReply\x122\n" +
-	"\x05error\x18\x01 \x01(\v2\x1c.messageloop.shared.v1.ErrorR\x05error\x123\n" +
-	"\x05event\x18\x03 \x01(\v2\x1d.io.cloudevents.v1.CloudEventR\x05event\"\x80\x01\n" +
+	"\x05error\x18\x01 \x01(\v2\x1c.messageloop.shared.v1.ErrorR\x05error\x127\n" +
+	"\apayload\x18\x03 \x01(\v2\x1d.io.cloudevents.v1.CloudEventR\apayload\"\x84\x01\n" +
 	"\aMessage\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
 	"\achannel\x18\x02 \x01(\tR\achannel\x12\x16\n" +
-	"\x06offset\x18\x03 \x01(\x04R\x06offset\x123\n" +
-	"\x05event\x18\x04 \x01(\v2\x1d.io.cloudevents.v1.CloudEventR\x05event\"D\n" +
+	"\x06offset\x18\x03 \x01(\x04R\x06offset\x127\n" +
+	"\apayload\x18\x04 \x01(\v2\x1d.io.cloudevents.v1.CloudEventR\apayload\"D\n" +
 	"\vPublication\x125\n" +
 	"\tenvelopes\x18\x03 \x03(\v2\x17.messageloop.v1.MessageR\tenvelopes\"\xb0\x01\n" +
 	"\tConnected\x12\x1e\n" +
@@ -1434,10 +1434,10 @@ var file_v1_service_proto_depIdxs = []int32{
 	6,  // 16: messageloop.v1.OutboundMessage.publication:type_name -> messageloop.v1.Publication
 	18, // 17: messageloop.v1.OutboundMessage.sub_refresh_ack:type_name -> messageloop.v1.SubRefreshAck
 	8,  // 18: messageloop.v1.Connect.subscriptions:type_name -> messageloop.v1.Subscription
-	21, // 19: messageloop.v1.RPCRequest.event:type_name -> io.cloudevents.v1.CloudEvent
+	21, // 19: messageloop.v1.RPCRequest.payload:type_name -> io.cloudevents.v1.CloudEvent
 	22, // 20: messageloop.v1.RPCReply.error:type_name -> messageloop.shared.v1.Error
-	21, // 21: messageloop.v1.RPCReply.event:type_name -> io.cloudevents.v1.CloudEvent
-	21, // 22: messageloop.v1.Message.event:type_name -> io.cloudevents.v1.CloudEvent
+	21, // 21: messageloop.v1.RPCReply.payload:type_name -> io.cloudevents.v1.CloudEvent
+	21, // 22: messageloop.v1.Message.payload:type_name -> io.cloudevents.v1.CloudEvent
 	5,  // 23: messageloop.v1.Publication.envelopes:type_name -> messageloop.v1.Message
 	8,  // 24: messageloop.v1.Connected.subscriptions:type_name -> messageloop.v1.Subscription
 	6,  // 25: messageloop.v1.Connected.publications:type_name -> messageloop.v1.Publication

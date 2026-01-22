@@ -60,19 +60,19 @@ message Connect {
 message RPCRequest {
   string channel = 1;
   string method = 2;
-  io.cloudevents.v1.CloudEvent event = 3;
+  io.cloudevents.v1.CloudEvent payload = 3;
 }
 
 message RPCReply {
   messageloop.shared.v1.Error error = 1;
-  io.cloudevents.v1.CloudEvent event = 3;
+  io.cloudevents.v1.CloudEvent payload = 3;
 }
 
 message Message {
   string id = 1;
   string channel = 2;
   uint64 offset = 3;
-  io.cloudevents.v1.CloudEvent event = 4;
+  io.cloudevents.v1.CloudEvent payload = 4;
 }
 
 message Publication {

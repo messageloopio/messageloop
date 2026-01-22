@@ -1,7 +1,7 @@
 {
   "swagger": "2.0",
   "info": {
-    "title": "server/v1/api.proto",
+    "title": "buf:lint:ignore PACKAGE_DIRECTORY_MATCH",
     "version": "version not set"
   },
   "tags": [
@@ -54,12 +54,8 @@
         "options": {
           "$ref": "#/definitions/PublicationOptions"
         },
-        "payloadBlob": {
-          "type": "string",
-          "format": "byte"
-        },
-        "payloadText": {
-          "type": "string"
+        "message": {
+          "$ref": "#/definitions/v1CloudEvent"
         }
       }
     },
@@ -93,16 +89,95 @@
         }
       }
     },
-    "v1DisconnectReply": {
+    "v1CloudEvent": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique event identifier."
+        },
+        "source": {
+          "type": "string",
+          "description": "URI of the event source."
+        },
+        "specVersion": {
+          "type": "string",
+          "description": "Version of the spec in use."
+        },
+        "type": {
+          "type": "string",
+          "description": "Event type identifier."
+        },
+        "attributes": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/v1CloudEventAttributeValue"
+          },
+          "title": "Optional \u0026 Extension Attributes"
+        },
+        "binaryData": {
+          "type": "string",
+          "format": "byte",
+          "description": "If the event is binary data then the datacontenttype attribute\r\nshould be set to an appropriate media-type."
+        },
+        "textData": {
+          "type": "string",
+          "description": "If the event is string data then the datacontenttype attribute\r\nshould be set to an appropriate media-type such as application/json."
+        },
+        "protoData": {
+          "$ref": "#/definitions/protobufAny",
+          "description": "If the event is a protobuf then it must be encoded using this Any\r\ntype. The datacontenttype attribute should be set to\r\napplication/protobuf and the dataschema attribute set to the message\r\ntype."
+        }
+      },
+      "description": "CloudEvent is copied from\r\nhttps://github.com/cloudevents/spec/blob/main/cloudevents/formats/protobuf-format.md."
+    },
+    "v1CloudEventAttributeValue": {
+      "type": "object",
+      "properties": {
+        "ceBoolean": {
+          "type": "boolean",
+          "description": "Boolean value."
+        },
+        "ceInteger": {
+          "type": "integer",
+          "format": "int32",
+          "description": "Integer value."
+        },
+        "ceString": {
+          "type": "string",
+          "description": "String value."
+        },
+        "ceBytes": {
+          "type": "string",
+          "format": "byte",
+          "description": "Byte string value."
+        },
+        "ceUri": {
+          "type": "string",
+          "description": "URI value."
+        },
+        "ceUriRef": {
+          "type": "string",
+          "description": "URI reference value."
+        },
+        "ceTimestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp value."
+        }
+      },
+      "description": "CloudEventAttribute enables extensions to use any of the seven allowed\r\ndata types as the value of an envelope key."
+    },
+    "v1DisconnectResponse": {
       "type": "object"
     },
-    "v1PublishReply": {
+    "v1PublishResponse": {
       "type": "object"
     },
-    "v1SubscribeReply": {
+    "v1SubscribeResponse": {
       "type": "object"
     },
-    "v1UnsubscribeReply": {
+    "v1UnsubscribeResponse": {
       "type": "object"
     }
   }

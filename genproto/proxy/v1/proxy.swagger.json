@@ -1,7 +1,7 @@
 {
   "swagger": "2.0",
   "info": {
-    "title": "proxy/v1/proxy.proto",
+    "title": "buf:lint:ignore PACKAGE_DIRECTORY_MATCH",
     "version": "version not set"
   },
   "tags": [
@@ -17,20 +17,6 @@
   ],
   "paths": {},
   "definitions": {
-    "messageloopproxyv1RPCReply": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string"
-        },
-        "error": {
-          "$ref": "#/definitions/v1Error"
-        },
-        "event": {
-          "$ref": "#/definitions/v1CloudEvent"
-        }
-      }
-    },
     "protobufAny": {
       "type": "object",
       "properties": {
@@ -69,7 +55,7 @@
         }
       }
     },
-    "v1AuthenticateReply": {
+    "v1AuthenticateResponse": {
       "type": "object",
       "properties": {
         "error": {
@@ -176,19 +162,33 @@
         }
       }
     },
-    "v1OnConnectedReply": {
+    "v1OnConnectedResponse": {
       "type": "object"
     },
-    "v1OnDisconnectedReply": {
+    "v1OnDisconnectedResponse": {
       "type": "object"
     },
-    "v1OnSubscribedReply": {
+    "v1OnSubscribedResponse": {
       "type": "object"
     },
-    "v1OnUnsubscribedReply": {
+    "v1OnUnsubscribedResponse": {
       "type": "object"
     },
-    "v1SubscribeAclReply": {
+    "v1RPCResponse": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "error": {
+          "$ref": "#/definitions/v1Error"
+        },
+        "reply": {
+          "$ref": "#/definitions/v1CloudEvent"
+        }
+      }
+    },
+    "v1SubscribeAclResponse": {
       "type": "object"
     },
     "v1UserInfo": {

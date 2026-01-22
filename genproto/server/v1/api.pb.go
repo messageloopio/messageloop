@@ -4,9 +4,12 @@
 // 	protoc        (unknown)
 // source: server/v1/api.proto
 
+// buf:lint:ignore PACKAGE_DIRECTORY_MATCH
+
 package serverpb
 
 import (
+	pb "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -26,8 +29,7 @@ type Publication struct {
 	Id            string                   `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Destination   *Publication_Destination `protobuf:"bytes,2,opt,name=destination,proto3" json:"destination,omitempty"`
 	Options       *Publication_Options     `protobuf:"bytes,3,opt,name=options,proto3" json:"options,omitempty"`
-	PayloadBlob   []byte                   `protobuf:"bytes,4,opt,name=payload_blob,json=payloadBlob,proto3" json:"payload_blob,omitempty"`
-	PayloadText   string                   `protobuf:"bytes,5,opt,name=payload_text,json=payloadText,proto3" json:"payload_text,omitempty"`
+	Message       *pb.CloudEvent           `protobuf:"bytes,4,opt,name=message,proto3" json:"message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -83,18 +85,11 @@ func (x *Publication) GetOptions() *Publication_Options {
 	return nil
 }
 
-func (x *Publication) GetPayloadBlob() []byte {
+func (x *Publication) GetMessage() *pb.CloudEvent {
 	if x != nil {
-		return x.PayloadBlob
+		return x.Message
 	}
 	return nil
-}
-
-func (x *Publication) GetPayloadText() string {
-	if x != nil {
-		return x.PayloadText
-	}
-	return ""
 }
 
 type PublishRequest struct {
@@ -157,26 +152,26 @@ func (x *PublishRequest) GetPublications() []*Publication {
 	return nil
 }
 
-type PublishReply struct {
+type PublishResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *PublishReply) Reset() {
-	*x = PublishReply{}
+func (x *PublishResponse) Reset() {
+	*x = PublishResponse{}
 	mi := &file_server_v1_api_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *PublishReply) String() string {
+func (x *PublishResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*PublishReply) ProtoMessage() {}
+func (*PublishResponse) ProtoMessage() {}
 
-func (x *PublishReply) ProtoReflect() protoreflect.Message {
+func (x *PublishResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_server_v1_api_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -188,8 +183,8 @@ func (x *PublishReply) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use PublishReply.ProtoReflect.Descriptor instead.
-func (*PublishReply) Descriptor() ([]byte, []int) {
+// Deprecated: Use PublishResponse.ProtoReflect.Descriptor instead.
+func (*PublishResponse) Descriptor() ([]byte, []int) {
 	return file_server_v1_api_proto_rawDescGZIP(), []int{2}
 }
 
@@ -229,26 +224,26 @@ func (*DisconnectRequest) Descriptor() ([]byte, []int) {
 	return file_server_v1_api_proto_rawDescGZIP(), []int{3}
 }
 
-type DisconnectReply struct {
+type DisconnectResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *DisconnectReply) Reset() {
-	*x = DisconnectReply{}
+func (x *DisconnectResponse) Reset() {
+	*x = DisconnectResponse{}
 	mi := &file_server_v1_api_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *DisconnectReply) String() string {
+func (x *DisconnectResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*DisconnectReply) ProtoMessage() {}
+func (*DisconnectResponse) ProtoMessage() {}
 
-func (x *DisconnectReply) ProtoReflect() protoreflect.Message {
+func (x *DisconnectResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_server_v1_api_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -260,8 +255,8 @@ func (x *DisconnectReply) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use DisconnectReply.ProtoReflect.Descriptor instead.
-func (*DisconnectReply) Descriptor() ([]byte, []int) {
+// Deprecated: Use DisconnectResponse.ProtoReflect.Descriptor instead.
+func (*DisconnectResponse) Descriptor() ([]byte, []int) {
 	return file_server_v1_api_proto_rawDescGZIP(), []int{4}
 }
 
@@ -301,26 +296,26 @@ func (*SubscribeRequest) Descriptor() ([]byte, []int) {
 	return file_server_v1_api_proto_rawDescGZIP(), []int{5}
 }
 
-type SubscribeReply struct {
+type SubscribeResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *SubscribeReply) Reset() {
-	*x = SubscribeReply{}
+func (x *SubscribeResponse) Reset() {
+	*x = SubscribeResponse{}
 	mi := &file_server_v1_api_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *SubscribeReply) String() string {
+func (x *SubscribeResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*SubscribeReply) ProtoMessage() {}
+func (*SubscribeResponse) ProtoMessage() {}
 
-func (x *SubscribeReply) ProtoReflect() protoreflect.Message {
+func (x *SubscribeResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_server_v1_api_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -332,8 +327,8 @@ func (x *SubscribeReply) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use SubscribeReply.ProtoReflect.Descriptor instead.
-func (*SubscribeReply) Descriptor() ([]byte, []int) {
+// Deprecated: Use SubscribeResponse.ProtoReflect.Descriptor instead.
+func (*SubscribeResponse) Descriptor() ([]byte, []int) {
 	return file_server_v1_api_proto_rawDescGZIP(), []int{6}
 }
 
@@ -373,26 +368,26 @@ func (*UnsubscribeRequest) Descriptor() ([]byte, []int) {
 	return file_server_v1_api_proto_rawDescGZIP(), []int{7}
 }
 
-type UnsubscribeReply struct {
+type UnsubscribeResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *UnsubscribeReply) Reset() {
-	*x = UnsubscribeReply{}
+func (x *UnsubscribeResponse) Reset() {
+	*x = UnsubscribeResponse{}
 	mi := &file_server_v1_api_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *UnsubscribeReply) String() string {
+func (x *UnsubscribeResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*UnsubscribeReply) ProtoMessage() {}
+func (*UnsubscribeResponse) ProtoMessage() {}
 
-func (x *UnsubscribeReply) ProtoReflect() protoreflect.Message {
+func (x *UnsubscribeResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_server_v1_api_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -404,8 +399,8 @@ func (x *UnsubscribeReply) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use UnsubscribeReply.ProtoReflect.Descriptor instead.
-func (*UnsubscribeReply) Descriptor() ([]byte, []int) {
+// Deprecated: Use UnsubscribeResponse.ProtoReflect.Descriptor instead.
+func (*UnsubscribeResponse) Descriptor() ([]byte, []int) {
 	return file_server_v1_api_proto_rawDescGZIP(), []int{8}
 }
 
@@ -509,13 +504,12 @@ var File_server_v1_api_proto protoreflect.FileDescriptor
 
 const file_server_v1_api_proto_rawDesc = "" +
 	"\n" +
-	"\x13server/v1/api.proto\x12\x15messageloop.server.v1\"\xee\x02\n" +
+	"\x13server/v1/api.proto\x12\x15messageloop.server.v1\x1a&includes/cloudevents/cloudevents.proto\"\xe1\x02\n" +
 	"\vPublication\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12P\n" +
 	"\vdestination\x18\x02 \x01(\v2..messageloop.server.v1.Publication.DestinationR\vdestination\x12D\n" +
-	"\aoptions\x18\x03 \x01(\v2*.messageloop.server.v1.Publication.OptionsR\aoptions\x12!\n" +
-	"\fpayload_blob\x18\x04 \x01(\fR\vpayloadBlob\x12!\n" +
-	"\fpayload_text\x18\x05 \x01(\tR\vpayloadText\x1a*\n" +
+	"\aoptions\x18\x03 \x01(\v2*.messageloop.server.v1.Publication.OptionsR\aoptions\x127\n" +
+	"\amessage\x18\x04 \x01(\v2\x1d.io.cloudevents.v1.CloudEventR\amessage\x1a*\n" +
 	"\aOptions\x12\x1f\n" +
 	"\vadd_history\x18\x01 \x01(\bR\n" +
 	"addHistory\x1aE\n" +
@@ -529,21 +523,21 @@ const file_server_v1_api_proto_rawDesc = "" +
 	"\fpublications\x18\x03 \x03(\v2\".messageloop.server.v1.PublicationR\fpublications\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x0e\n" +
-	"\fPublishReply\"\x13\n" +
-	"\x11DisconnectRequest\"\x11\n" +
-	"\x0fDisconnectReply\"\x12\n" +
-	"\x10SubscribeRequest\"\x10\n" +
-	"\x0eSubscribeReply\"\x14\n" +
-	"\x12UnsubscribeRequest\"\x12\n" +
-	"\x10UnsubscribeReply2\x81\x03\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x11\n" +
+	"\x0fPublishResponse\"\x13\n" +
+	"\x11DisconnectRequest\"\x14\n" +
+	"\x12DisconnectResponse\"\x12\n" +
+	"\x10SubscribeRequest\"\x13\n" +
+	"\x11SubscribeResponse\"\x14\n" +
+	"\x12UnsubscribeRequest\"\x15\n" +
+	"\x13UnsubscribeResponse2\x8d\x03\n" +
 	"\n" +
-	"APIService\x12U\n" +
-	"\aPublish\x12%.messageloop.server.v1.PublishRequest\x1a#.messageloop.server.v1.PublishReply\x12^\n" +
+	"APIService\x12X\n" +
+	"\aPublish\x12%.messageloop.server.v1.PublishRequest\x1a&.messageloop.server.v1.PublishResponse\x12a\n" +
 	"\n" +
-	"Disconnect\x12(.messageloop.server.v1.DisconnectRequest\x1a&.messageloop.server.v1.DisconnectReply\x12[\n" +
-	"\tSubscribe\x12'.messageloop.server.v1.SubscribeRequest\x1a%.messageloop.server.v1.SubscribeReply\x12_\n" +
-	"\vUnsubscribe\x12'.messageloop.server.v1.SubscribeRequest\x1a'.messageloop.server.v1.UnsubscribeReplyBDZBgithub.com/deeplooplabs/messageloop/genproto/go/server/v1;serverpbb\x06proto3"
+	"Disconnect\x12(.messageloop.server.v1.DisconnectRequest\x1a).messageloop.server.v1.DisconnectResponse\x12^\n" +
+	"\tSubscribe\x12'.messageloop.server.v1.SubscribeRequest\x1a(.messageloop.server.v1.SubscribeResponse\x12b\n" +
+	"\vUnsubscribe\x12'.messageloop.server.v1.SubscribeRequest\x1a*.messageloop.server.v1.UnsubscribeResponseBDZBgithub.com/deeplooplabs/messageloop/genproto/go/server/v1;serverpbb\x06proto3"
 
 var (
 	file_server_v1_api_proto_rawDescOnce sync.Once
@@ -561,35 +555,37 @@ var file_server_v1_api_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_server_v1_api_proto_goTypes = []any{
 	(*Publication)(nil),             // 0: messageloop.server.v1.Publication
 	(*PublishRequest)(nil),          // 1: messageloop.server.v1.PublishRequest
-	(*PublishReply)(nil),            // 2: messageloop.server.v1.PublishReply
+	(*PublishResponse)(nil),         // 2: messageloop.server.v1.PublishResponse
 	(*DisconnectRequest)(nil),       // 3: messageloop.server.v1.DisconnectRequest
-	(*DisconnectReply)(nil),         // 4: messageloop.server.v1.DisconnectReply
+	(*DisconnectResponse)(nil),      // 4: messageloop.server.v1.DisconnectResponse
 	(*SubscribeRequest)(nil),        // 5: messageloop.server.v1.SubscribeRequest
-	(*SubscribeReply)(nil),          // 6: messageloop.server.v1.SubscribeReply
+	(*SubscribeResponse)(nil),       // 6: messageloop.server.v1.SubscribeResponse
 	(*UnsubscribeRequest)(nil),      // 7: messageloop.server.v1.UnsubscribeRequest
-	(*UnsubscribeReply)(nil),        // 8: messageloop.server.v1.UnsubscribeReply
+	(*UnsubscribeResponse)(nil),     // 8: messageloop.server.v1.UnsubscribeResponse
 	(*Publication_Options)(nil),     // 9: messageloop.server.v1.Publication.Options
 	(*Publication_Destination)(nil), // 10: messageloop.server.v1.Publication.Destination
 	nil,                             // 11: messageloop.server.v1.PublishRequest.MetadataEntry
+	(*pb.CloudEvent)(nil),           // 12: io.cloudevents.v1.CloudEvent
 }
 var file_server_v1_api_proto_depIdxs = []int32{
 	10, // 0: messageloop.server.v1.Publication.destination:type_name -> messageloop.server.v1.Publication.Destination
 	9,  // 1: messageloop.server.v1.Publication.options:type_name -> messageloop.server.v1.Publication.Options
-	11, // 2: messageloop.server.v1.PublishRequest.metadata:type_name -> messageloop.server.v1.PublishRequest.MetadataEntry
-	0,  // 3: messageloop.server.v1.PublishRequest.publications:type_name -> messageloop.server.v1.Publication
-	1,  // 4: messageloop.server.v1.APIService.Publish:input_type -> messageloop.server.v1.PublishRequest
-	3,  // 5: messageloop.server.v1.APIService.Disconnect:input_type -> messageloop.server.v1.DisconnectRequest
-	5,  // 6: messageloop.server.v1.APIService.Subscribe:input_type -> messageloop.server.v1.SubscribeRequest
-	5,  // 7: messageloop.server.v1.APIService.Unsubscribe:input_type -> messageloop.server.v1.SubscribeRequest
-	2,  // 8: messageloop.server.v1.APIService.Publish:output_type -> messageloop.server.v1.PublishReply
-	4,  // 9: messageloop.server.v1.APIService.Disconnect:output_type -> messageloop.server.v1.DisconnectReply
-	6,  // 10: messageloop.server.v1.APIService.Subscribe:output_type -> messageloop.server.v1.SubscribeReply
-	8,  // 11: messageloop.server.v1.APIService.Unsubscribe:output_type -> messageloop.server.v1.UnsubscribeReply
-	8,  // [8:12] is the sub-list for method output_type
-	4,  // [4:8] is the sub-list for method input_type
-	4,  // [4:4] is the sub-list for extension type_name
-	4,  // [4:4] is the sub-list for extension extendee
-	0,  // [0:4] is the sub-list for field type_name
+	12, // 2: messageloop.server.v1.Publication.message:type_name -> io.cloudevents.v1.CloudEvent
+	11, // 3: messageloop.server.v1.PublishRequest.metadata:type_name -> messageloop.server.v1.PublishRequest.MetadataEntry
+	0,  // 4: messageloop.server.v1.PublishRequest.publications:type_name -> messageloop.server.v1.Publication
+	1,  // 5: messageloop.server.v1.APIService.Publish:input_type -> messageloop.server.v1.PublishRequest
+	3,  // 6: messageloop.server.v1.APIService.Disconnect:input_type -> messageloop.server.v1.DisconnectRequest
+	5,  // 7: messageloop.server.v1.APIService.Subscribe:input_type -> messageloop.server.v1.SubscribeRequest
+	5,  // 8: messageloop.server.v1.APIService.Unsubscribe:input_type -> messageloop.server.v1.SubscribeRequest
+	2,  // 9: messageloop.server.v1.APIService.Publish:output_type -> messageloop.server.v1.PublishResponse
+	4,  // 10: messageloop.server.v1.APIService.Disconnect:output_type -> messageloop.server.v1.DisconnectResponse
+	6,  // 11: messageloop.server.v1.APIService.Subscribe:output_type -> messageloop.server.v1.SubscribeResponse
+	8,  // 12: messageloop.server.v1.APIService.Unsubscribe:output_type -> messageloop.server.v1.UnsubscribeResponse
+	9,  // [9:13] is the sub-list for method output_type
+	5,  // [5:9] is the sub-list for method input_type
+	5,  // [5:5] is the sub-list for extension type_name
+	5,  // [5:5] is the sub-list for extension extendee
+	0,  // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_server_v1_api_proto_init() }

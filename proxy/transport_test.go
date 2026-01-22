@@ -54,7 +54,7 @@ func TestHTTPProxy_ProxyRPC(t *testing.T) {
 		// Build response using JSON directly to avoid protobuf marshaling issues
 		respJSON := `{
 			"id": "` + reqBody["id"].(string) + `",
-			"event": {
+			"reply": {
 				"id": "resp-123",
 				"source": "proxy-test",
 				"type": "test.response",
@@ -165,12 +165,12 @@ func TestGRPCProxy_ProxyRPC(t *testing.T) {
 	serverReady := make(chan struct{})
 
 	mockSrv := &mockGRPCServer{
-		handler: func(ctx context.Context, req *proxypb.RPCRequest) (*proxypb.RPCReply, error) {
+		handler: func(ctx context.Context, req *proxypb.RPCRequest) (*proxypb.RPCResponse, error) {
 			expectedReq = req
 			close(serverReady)
-			return &proxypb.RPCReply{
+			return &proxypb.RPCResponse{
 				Id: req.Id,
-				Event: &cloudevents.CloudEvent{
+				Reply: &cloudevents.CloudEvent{
 					Id:          "resp-grpc-123",
 					Source:      "grpc-proxy-test",
 					Type:        "test.response",
@@ -232,37 +232,37 @@ func TestGRPCProxy_ProxyRPC(t *testing.T) {
 // mockGRPCServer is a mock implementation of proxypb.ProxyServiceServer.
 type mockGRPCServer struct {
 	proxypb.UnimplementedProxyServiceServer
-	handler func(context.Context, *proxypb.RPCRequest) (*proxypb.RPCReply, error)
+	handler func(context.Context, *proxypb.RPCRequest) (*proxypb.RPCResponse, error)
 }
 
-func (m *mockGRPCServer) RPC(ctx context.Context, req *proxypb.RPCRequest) (*proxypb.RPCReply, error) {
+func (m *mockGRPCServer) RPC(ctx context.Context, req *proxypb.RPCRequest) (*proxypb.RPCResponse, error) {
 	if m.handler != nil {
 		return m.handler(ctx, req)
 	}
-	return &proxypb.RPCReply{}, nil
+	return &proxypb.RPCResponse{}, nil
 }
 
-func (m *mockGRPCServer) Authenticate(ctx context.Context, req *proxypb.AuthenticateRequest) (*proxypb.AuthenticateReply, error) {
+func (m *mockGRPCServer) Authenticate(ctx context.Context, req *proxypb.AuthenticateRequest) (*proxypb.AuthenticateResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (m *mockGRPCServer) SubscribeAcl(ctx context.Context, req *proxypb.SubscribeAclRequest) (*proxypb.SubscribeAclReply, error) {
+func (m *mockGRPCServer) SubscribeAcl(ctx context.Context, req *proxypb.SubscribeAclRequest) (*proxypb.SubscribeAclResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (m *mockGRPCServer) OnConnected(ctx context.Context, req *proxypb.OnConnectedRequest) (*proxypb.OnConnectedReply, error) {
+func (m *mockGRPCServer) OnConnected(ctx context.Context, req *proxypb.OnConnectedRequest) (*proxypb.OnConnectedResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (m *mockGRPCServer) OnSubscribed(ctx context.Context, req *proxypb.OnSubscribedRequest) (*proxypb.OnSubscribedReply, error) {
+func (m *mockGRPCServer) OnSubscribed(ctx context.Context, req *proxypb.OnSubscribedRequest) (*proxypb.OnSubscribedResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (m *mockGRPCServer) OnUnsubscribed(ctx context.Context, req *proxypb.OnUnsubscribedRequest) (*proxypb.OnUnsubscribedReply, error) {
+func (m *mockGRPCServer) OnUnsubscribed(ctx context.Context, req *proxypb.OnUnsubscribedRequest) (*proxypb.OnUnsubscribedResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (m *mockGRPCServer) OnDisconnected(ctx context.Context, req *proxypb.OnDisconnectedRequest) (*proxypb.OnDisconnectedReply, error) {
+func (m *mockGRPCServer) OnDisconnected(ctx context.Context, req *proxypb.OnDisconnectedRequest) (*proxypb.OnDisconnectedResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
@@ -290,13 +290,13 @@ func TestRPCProxyRequest_ToProtoRequest(t *testing.T) {
 	assert.Equal(t, "test-id", protoReq.Id)
 	assert.Equal(t, "test.channel", protoReq.Channel)
 	assert.Equal(t, "testMethod", protoReq.Method)
-	assert.Equal(t, "event-1", protoReq.Event.Id)
+	assert.Equal(t, "event-1", protoReq.Request.Id)
 }
 
 func TestFromProtoReply(t *testing.T) {
-	reply := &proxypb.RPCReply{
+	reply := &proxypb.RPCResponse{
 		Id: "reply-id",
-		Event: &cloudevents.CloudEvent{
+		Reply: &cloudevents.CloudEvent{
 			Id:          "event-1",
 			Source:      "source",
 			Type:        "type",

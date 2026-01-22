@@ -4,6 +4,8 @@
 // 	protoc        (unknown)
 // source: proxy/v1/proxy.proto
 
+// buf:lint:ignore PACKAGE_DIRECTORY_MATCH
+
 package proxypb
 
 import (
@@ -28,7 +30,7 @@ type RPCRequest struct {
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Channel       string                 `protobuf:"bytes,2,opt,name=channel,proto3" json:"channel,omitempty"`
 	Method        string                 `protobuf:"bytes,3,opt,name=method,proto3" json:"method,omitempty"`
-	Event         *pb.CloudEvent         `protobuf:"bytes,4,opt,name=event,proto3" json:"event,omitempty"`
+	Request       *pb.CloudEvent         `protobuf:"bytes,4,opt,name=request,proto3" json:"request,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -84,36 +86,36 @@ func (x *RPCRequest) GetMethod() string {
 	return ""
 }
 
-func (x *RPCRequest) GetEvent() *pb.CloudEvent {
+func (x *RPCRequest) GetRequest() *pb.CloudEvent {
 	if x != nil {
-		return x.Event
+		return x.Request
 	}
 	return nil
 }
 
-type RPCReply struct {
+type RPCResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Error         *v1.Error              `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
-	Event         *pb.CloudEvent         `protobuf:"bytes,3,opt,name=event,proto3" json:"event,omitempty"`
+	Reply         *pb.CloudEvent         `protobuf:"bytes,3,opt,name=reply,proto3" json:"reply,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *RPCReply) Reset() {
-	*x = RPCReply{}
+func (x *RPCResponse) Reset() {
+	*x = RPCResponse{}
 	mi := &file_proxy_v1_proxy_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *RPCReply) String() string {
+func (x *RPCResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*RPCReply) ProtoMessage() {}
+func (*RPCResponse) ProtoMessage() {}
 
-func (x *RPCReply) ProtoReflect() protoreflect.Message {
+func (x *RPCResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_proxy_v1_proxy_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -125,28 +127,28 @@ func (x *RPCReply) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RPCReply.ProtoReflect.Descriptor instead.
-func (*RPCReply) Descriptor() ([]byte, []int) {
+// Deprecated: Use RPCResponse.ProtoReflect.Descriptor instead.
+func (*RPCResponse) Descriptor() ([]byte, []int) {
 	return file_proxy_v1_proxy_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *RPCReply) GetId() string {
+func (x *RPCResponse) GetId() string {
 	if x != nil {
 		return x.Id
 	}
 	return ""
 }
 
-func (x *RPCReply) GetError() *v1.Error {
+func (x *RPCResponse) GetError() *v1.Error {
 	if x != nil {
 		return x.Error
 	}
 	return nil
 }
 
-func (x *RPCReply) GetEvent() *pb.CloudEvent {
+func (x *RPCResponse) GetReply() *pb.CloudEvent {
 	if x != nil {
-		return x.Event
+		return x.Reply
 	}
 	return nil
 }
@@ -219,7 +221,7 @@ func (x *AuthenticateRequest) GetClientId() string {
 	return ""
 }
 
-type AuthenticateReply struct {
+type AuthenticateResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Error         *v1.Error              `protobuf:"bytes,1,opt,name=error,proto3" json:"error,omitempty"`
 	UserInfo      *UserInfo              `protobuf:"bytes,2,opt,name=user_info,json=userInfo,proto3" json:"user_info,omitempty"`
@@ -227,20 +229,20 @@ type AuthenticateReply struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *AuthenticateReply) Reset() {
-	*x = AuthenticateReply{}
+func (x *AuthenticateResponse) Reset() {
+	*x = AuthenticateResponse{}
 	mi := &file_proxy_v1_proxy_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *AuthenticateReply) String() string {
+func (x *AuthenticateResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*AuthenticateReply) ProtoMessage() {}
+func (*AuthenticateResponse) ProtoMessage() {}
 
-func (x *AuthenticateReply) ProtoReflect() protoreflect.Message {
+func (x *AuthenticateResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_proxy_v1_proxy_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -252,19 +254,19 @@ func (x *AuthenticateReply) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use AuthenticateReply.ProtoReflect.Descriptor instead.
-func (*AuthenticateReply) Descriptor() ([]byte, []int) {
+// Deprecated: Use AuthenticateResponse.ProtoReflect.Descriptor instead.
+func (*AuthenticateResponse) Descriptor() ([]byte, []int) {
 	return file_proxy_v1_proxy_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *AuthenticateReply) GetError() *v1.Error {
+func (x *AuthenticateResponse) GetError() *v1.Error {
 	if x != nil {
 		return x.Error
 	}
 	return nil
 }
 
-func (x *AuthenticateReply) GetUserInfo() *UserInfo {
+func (x *AuthenticateResponse) GetUserInfo() *UserInfo {
 	if x != nil {
 		return x.UserInfo
 	}
@@ -399,26 +401,26 @@ func (x *SubscribeAclRequest) GetToken() string {
 	return ""
 }
 
-type SubscribeAclReply struct {
+type SubscribeAclResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *SubscribeAclReply) Reset() {
-	*x = SubscribeAclReply{}
+func (x *SubscribeAclResponse) Reset() {
+	*x = SubscribeAclResponse{}
 	mi := &file_proxy_v1_proxy_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *SubscribeAclReply) String() string {
+func (x *SubscribeAclResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*SubscribeAclReply) ProtoMessage() {}
+func (*SubscribeAclResponse) ProtoMessage() {}
 
-func (x *SubscribeAclReply) ProtoReflect() protoreflect.Message {
+func (x *SubscribeAclResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_proxy_v1_proxy_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -430,8 +432,8 @@ func (x *SubscribeAclReply) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use SubscribeAclReply.ProtoReflect.Descriptor instead.
-func (*SubscribeAclReply) Descriptor() ([]byte, []int) {
+// Deprecated: Use SubscribeAclResponse.ProtoReflect.Descriptor instead.
+func (*SubscribeAclResponse) Descriptor() ([]byte, []int) {
 	return file_proxy_v1_proxy_proto_rawDescGZIP(), []int{6}
 }
 
@@ -487,26 +489,26 @@ func (x *OnConnectedRequest) GetUsername() string {
 	return ""
 }
 
-type OnConnectedReply struct {
+type OnConnectedResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *OnConnectedReply) Reset() {
-	*x = OnConnectedReply{}
+func (x *OnConnectedResponse) Reset() {
+	*x = OnConnectedResponse{}
 	mi := &file_proxy_v1_proxy_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *OnConnectedReply) String() string {
+func (x *OnConnectedResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*OnConnectedReply) ProtoMessage() {}
+func (*OnConnectedResponse) ProtoMessage() {}
 
-func (x *OnConnectedReply) ProtoReflect() protoreflect.Message {
+func (x *OnConnectedResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_proxy_v1_proxy_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -518,8 +520,8 @@ func (x *OnConnectedReply) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use OnConnectedReply.ProtoReflect.Descriptor instead.
-func (*OnConnectedReply) Descriptor() ([]byte, []int) {
+// Deprecated: Use OnConnectedResponse.ProtoReflect.Descriptor instead.
+func (*OnConnectedResponse) Descriptor() ([]byte, []int) {
 	return file_proxy_v1_proxy_proto_rawDescGZIP(), []int{8}
 }
 
@@ -559,26 +561,26 @@ func (*OnSubscribedRequest) Descriptor() ([]byte, []int) {
 	return file_proxy_v1_proxy_proto_rawDescGZIP(), []int{9}
 }
 
-type OnSubscribedReply struct {
+type OnSubscribedResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *OnSubscribedReply) Reset() {
-	*x = OnSubscribedReply{}
+func (x *OnSubscribedResponse) Reset() {
+	*x = OnSubscribedResponse{}
 	mi := &file_proxy_v1_proxy_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *OnSubscribedReply) String() string {
+func (x *OnSubscribedResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*OnSubscribedReply) ProtoMessage() {}
+func (*OnSubscribedResponse) ProtoMessage() {}
 
-func (x *OnSubscribedReply) ProtoReflect() protoreflect.Message {
+func (x *OnSubscribedResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_proxy_v1_proxy_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -590,8 +592,8 @@ func (x *OnSubscribedReply) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use OnSubscribedReply.ProtoReflect.Descriptor instead.
-func (*OnSubscribedReply) Descriptor() ([]byte, []int) {
+// Deprecated: Use OnSubscribedResponse.ProtoReflect.Descriptor instead.
+func (*OnSubscribedResponse) Descriptor() ([]byte, []int) {
 	return file_proxy_v1_proxy_proto_rawDescGZIP(), []int{10}
 }
 
@@ -631,26 +633,26 @@ func (*OnUnsubscribedRequest) Descriptor() ([]byte, []int) {
 	return file_proxy_v1_proxy_proto_rawDescGZIP(), []int{11}
 }
 
-type OnUnsubscribedReply struct {
+type OnUnsubscribedResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *OnUnsubscribedReply) Reset() {
-	*x = OnUnsubscribedReply{}
+func (x *OnUnsubscribedResponse) Reset() {
+	*x = OnUnsubscribedResponse{}
 	mi := &file_proxy_v1_proxy_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *OnUnsubscribedReply) String() string {
+func (x *OnUnsubscribedResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*OnUnsubscribedReply) ProtoMessage() {}
+func (*OnUnsubscribedResponse) ProtoMessage() {}
 
-func (x *OnUnsubscribedReply) ProtoReflect() protoreflect.Message {
+func (x *OnUnsubscribedResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_proxy_v1_proxy_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -662,8 +664,8 @@ func (x *OnUnsubscribedReply) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use OnUnsubscribedReply.ProtoReflect.Descriptor instead.
-func (*OnUnsubscribedReply) Descriptor() ([]byte, []int) {
+// Deprecated: Use OnUnsubscribedResponse.ProtoReflect.Descriptor instead.
+func (*OnUnsubscribedResponse) Descriptor() ([]byte, []int) {
 	return file_proxy_v1_proxy_proto_rawDescGZIP(), []int{12}
 }
 
@@ -719,26 +721,26 @@ func (x *OnDisconnectedRequest) GetUsername() string {
 	return ""
 }
 
-type OnDisconnectedReply struct {
+type OnDisconnectedResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *OnDisconnectedReply) Reset() {
-	*x = OnDisconnectedReply{}
+func (x *OnDisconnectedResponse) Reset() {
+	*x = OnDisconnectedResponse{}
 	mi := &file_proxy_v1_proxy_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *OnDisconnectedReply) String() string {
+func (x *OnDisconnectedResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*OnDisconnectedReply) ProtoMessage() {}
+func (*OnDisconnectedResponse) ProtoMessage() {}
 
-func (x *OnDisconnectedReply) ProtoReflect() protoreflect.Message {
+func (x *OnDisconnectedResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_proxy_v1_proxy_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -750,8 +752,8 @@ func (x *OnDisconnectedReply) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use OnDisconnectedReply.ProtoReflect.Descriptor instead.
-func (*OnDisconnectedReply) Descriptor() ([]byte, []int) {
+// Deprecated: Use OnDisconnectedResponse.ProtoReflect.Descriptor instead.
+func (*OnDisconnectedResponse) Descriptor() ([]byte, []int) {
 	return file_proxy_v1_proxy_proto_rawDescGZIP(), []int{14}
 }
 
@@ -759,24 +761,24 @@ var File_proxy_v1_proxy_proto protoreflect.FileDescriptor
 
 const file_proxy_v1_proxy_proto_rawDesc = "" +
 	"\n" +
-	"\x14proxy/v1/proxy.proto\x12\x14messageloop.proxy.v1\x1a\x16shared/v1/errors.proto\x1a&includes/cloudevents/cloudevents.proto\"\x83\x01\n" +
+	"\x14proxy/v1/proxy.proto\x12\x14messageloop.proxy.v1\x1a\x16shared/v1/errors.proto\x1a&includes/cloudevents/cloudevents.proto\"\x87\x01\n" +
 	"\n" +
 	"RPCRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
 	"\achannel\x18\x02 \x01(\tR\achannel\x12\x16\n" +
-	"\x06method\x18\x03 \x01(\tR\x06method\x123\n" +
-	"\x05event\x18\x04 \x01(\v2\x1d.io.cloudevents.v1.CloudEventR\x05event\"\x83\x01\n" +
-	"\bRPCReply\x12\x0e\n" +
+	"\x06method\x18\x03 \x01(\tR\x06method\x127\n" +
+	"\arequest\x18\x04 \x01(\v2\x1d.io.cloudevents.v1.CloudEventR\arequest\"\x86\x01\n" +
+	"\vRPCResponse\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x122\n" +
 	"\x05error\x18\x02 \x01(\v2\x1c.messageloop.shared.v1.ErrorR\x05error\x123\n" +
-	"\x05event\x18\x03 \x01(\v2\x1d.io.cloudevents.v1.CloudEventR\x05event\"\x8b\x01\n" +
+	"\x05reply\x18\x03 \x01(\v2\x1d.io.cloudevents.v1.CloudEventR\x05reply\"\x8b\x01\n" +
 	"\x13AuthenticateRequest\x12\x1a\n" +
 	"\busername\x18\x01 \x01(\tR\busername\x12\x1a\n" +
 	"\bpassword\x18\x02 \x01(\tR\bpassword\x12\x1f\n" +
 	"\vclient_type\x18\x03 \x01(\tR\n" +
 	"clientType\x12\x1b\n" +
-	"\tclient_id\x18\x04 \x01(\tR\bclientId\"\x84\x01\n" +
-	"\x11AuthenticateReply\x122\n" +
+	"\tclient_id\x18\x04 \x01(\tR\bclientId\"\x87\x01\n" +
+	"\x14AuthenticateResponse\x122\n" +
 	"\x05error\x18\x01 \x01(\v2\x1c.messageloop.shared.v1.ErrorR\x05error\x12;\n" +
 	"\tuser_info\x18\x02 \x01(\v2\x1e.messageloop.proxy.v1.UserInfoR\buserInfo\"\x8a\x01\n" +
 	"\bUserInfo\x12\x0e\n" +
@@ -788,30 +790,30 @@ const file_proxy_v1_proxy_proto_rawDesc = "" +
 	"\tclient_id\x18\x05 \x01(\tR\bclientId\"E\n" +
 	"\x13SubscribeAclRequest\x12\x18\n" +
 	"\achannel\x18\x01 \x01(\tR\achannel\x12\x14\n" +
-	"\x05token\x18\x02 \x01(\tR\x05token\"\x13\n" +
-	"\x11SubscribeAclReply\"O\n" +
+	"\x05token\x18\x02 \x01(\tR\x05token\"\x16\n" +
+	"\x14SubscribeAclResponse\"O\n" +
 	"\x12OnConnectedRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1a\n" +
-	"\busername\x18\x02 \x01(\tR\busername\"\x12\n" +
-	"\x10OnConnectedReply\"\x15\n" +
-	"\x13OnSubscribedRequest\"\x13\n" +
-	"\x11OnSubscribedReply\"\x17\n" +
-	"\x15OnUnsubscribedRequest\"\x15\n" +
-	"\x13OnUnsubscribedReply\"R\n" +
+	"\busername\x18\x02 \x01(\tR\busername\"\x15\n" +
+	"\x13OnConnectedResponse\"\x15\n" +
+	"\x13OnSubscribedRequest\"\x16\n" +
+	"\x14OnSubscribedResponse\"\x17\n" +
+	"\x15OnUnsubscribedRequest\"\x18\n" +
+	"\x16OnUnsubscribedResponse\"R\n" +
 	"\x15OnDisconnectedRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1a\n" +
-	"\busername\x18\x02 \x01(\tR\busername\"\x15\n" +
-	"\x13OnDisconnectedReply2\xb8\x05\n" +
-	"\fProxyService\x12G\n" +
-	"\x03RPC\x12 .messageloop.proxy.v1.RPCRequest\x1a\x1e.messageloop.proxy.v1.RPCReply\x12b\n" +
-	"\fAuthenticate\x12).messageloop.proxy.v1.AuthenticateRequest\x1a'.messageloop.proxy.v1.AuthenticateReply\x12b\n" +
-	"\fSubscribeAcl\x12).messageloop.proxy.v1.SubscribeAclRequest\x1a'.messageloop.proxy.v1.SubscribeAclReply\x12_\n" +
-	"\vOnConnected\x12(.messageloop.proxy.v1.OnConnectedRequest\x1a&.messageloop.proxy.v1.OnConnectedReply\x12b\n" +
-	"\fOnSubscribed\x12).messageloop.proxy.v1.OnSubscribedRequest\x1a'.messageloop.proxy.v1.OnSubscribedReply\x12h\n" +
-	"\x0eOnUnsubscribed\x12+.messageloop.proxy.v1.OnUnsubscribedRequest\x1a).messageloop.proxy.v1.OnUnsubscribedReply\x12h\n" +
-	"\x0eOnDisconnected\x12+.messageloop.proxy.v1.OnDisconnectedRequest\x1a).messageloop.proxy.v1.OnDisconnectedReplyBBZ@github.com/deeplooplabs/messageloop/genproto/go/proxy/v1;proxypbb\x06proto3"
+	"\busername\x18\x02 \x01(\tR\busername\"\x18\n" +
+	"\x16OnDisconnectedResponse2\xcd\x05\n" +
+	"\fProxyService\x12J\n" +
+	"\x03RPC\x12 .messageloop.proxy.v1.RPCRequest\x1a!.messageloop.proxy.v1.RPCResponse\x12e\n" +
+	"\fAuthenticate\x12).messageloop.proxy.v1.AuthenticateRequest\x1a*.messageloop.proxy.v1.AuthenticateResponse\x12e\n" +
+	"\fSubscribeAcl\x12).messageloop.proxy.v1.SubscribeAclRequest\x1a*.messageloop.proxy.v1.SubscribeAclResponse\x12b\n" +
+	"\vOnConnected\x12(.messageloop.proxy.v1.OnConnectedRequest\x1a).messageloop.proxy.v1.OnConnectedResponse\x12e\n" +
+	"\fOnSubscribed\x12).messageloop.proxy.v1.OnSubscribedRequest\x1a*.messageloop.proxy.v1.OnSubscribedResponse\x12k\n" +
+	"\x0eOnUnsubscribed\x12+.messageloop.proxy.v1.OnUnsubscribedRequest\x1a,.messageloop.proxy.v1.OnUnsubscribedResponse\x12k\n" +
+	"\x0eOnDisconnected\x12+.messageloop.proxy.v1.OnDisconnectedRequest\x1a,.messageloop.proxy.v1.OnDisconnectedResponseBBZ@github.com/deeplooplabs/messageloop/genproto/go/proxy/v1;proxypbb\x06proto3"
 
 var (
 	file_proxy_v1_proxy_proto_rawDescOnce sync.Once
@@ -827,30 +829,30 @@ func file_proxy_v1_proxy_proto_rawDescGZIP() []byte {
 
 var file_proxy_v1_proxy_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_proxy_v1_proxy_proto_goTypes = []any{
-	(*RPCRequest)(nil),            // 0: messageloop.proxy.v1.RPCRequest
-	(*RPCReply)(nil),              // 1: messageloop.proxy.v1.RPCReply
-	(*AuthenticateRequest)(nil),   // 2: messageloop.proxy.v1.AuthenticateRequest
-	(*AuthenticateReply)(nil),     // 3: messageloop.proxy.v1.AuthenticateReply
-	(*UserInfo)(nil),              // 4: messageloop.proxy.v1.UserInfo
-	(*SubscribeAclRequest)(nil),   // 5: messageloop.proxy.v1.SubscribeAclRequest
-	(*SubscribeAclReply)(nil),     // 6: messageloop.proxy.v1.SubscribeAclReply
-	(*OnConnectedRequest)(nil),    // 7: messageloop.proxy.v1.OnConnectedRequest
-	(*OnConnectedReply)(nil),      // 8: messageloop.proxy.v1.OnConnectedReply
-	(*OnSubscribedRequest)(nil),   // 9: messageloop.proxy.v1.OnSubscribedRequest
-	(*OnSubscribedReply)(nil),     // 10: messageloop.proxy.v1.OnSubscribedReply
-	(*OnUnsubscribedRequest)(nil), // 11: messageloop.proxy.v1.OnUnsubscribedRequest
-	(*OnUnsubscribedReply)(nil),   // 12: messageloop.proxy.v1.OnUnsubscribedReply
-	(*OnDisconnectedRequest)(nil), // 13: messageloop.proxy.v1.OnDisconnectedRequest
-	(*OnDisconnectedReply)(nil),   // 14: messageloop.proxy.v1.OnDisconnectedReply
-	(*pb.CloudEvent)(nil),         // 15: io.cloudevents.v1.CloudEvent
-	(*v1.Error)(nil),              // 16: messageloop.shared.v1.Error
+	(*RPCRequest)(nil),             // 0: messageloop.proxy.v1.RPCRequest
+	(*RPCResponse)(nil),            // 1: messageloop.proxy.v1.RPCResponse
+	(*AuthenticateRequest)(nil),    // 2: messageloop.proxy.v1.AuthenticateRequest
+	(*AuthenticateResponse)(nil),   // 3: messageloop.proxy.v1.AuthenticateResponse
+	(*UserInfo)(nil),               // 4: messageloop.proxy.v1.UserInfo
+	(*SubscribeAclRequest)(nil),    // 5: messageloop.proxy.v1.SubscribeAclRequest
+	(*SubscribeAclResponse)(nil),   // 6: messageloop.proxy.v1.SubscribeAclResponse
+	(*OnConnectedRequest)(nil),     // 7: messageloop.proxy.v1.OnConnectedRequest
+	(*OnConnectedResponse)(nil),    // 8: messageloop.proxy.v1.OnConnectedResponse
+	(*OnSubscribedRequest)(nil),    // 9: messageloop.proxy.v1.OnSubscribedRequest
+	(*OnSubscribedResponse)(nil),   // 10: messageloop.proxy.v1.OnSubscribedResponse
+	(*OnUnsubscribedRequest)(nil),  // 11: messageloop.proxy.v1.OnUnsubscribedRequest
+	(*OnUnsubscribedResponse)(nil), // 12: messageloop.proxy.v1.OnUnsubscribedResponse
+	(*OnDisconnectedRequest)(nil),  // 13: messageloop.proxy.v1.OnDisconnectedRequest
+	(*OnDisconnectedResponse)(nil), // 14: messageloop.proxy.v1.OnDisconnectedResponse
+	(*pb.CloudEvent)(nil),          // 15: io.cloudevents.v1.CloudEvent
+	(*v1.Error)(nil),               // 16: messageloop.shared.v1.Error
 }
 var file_proxy_v1_proxy_proto_depIdxs = []int32{
-	15, // 0: messageloop.proxy.v1.RPCRequest.event:type_name -> io.cloudevents.v1.CloudEvent
-	16, // 1: messageloop.proxy.v1.RPCReply.error:type_name -> messageloop.shared.v1.Error
-	15, // 2: messageloop.proxy.v1.RPCReply.event:type_name -> io.cloudevents.v1.CloudEvent
-	16, // 3: messageloop.proxy.v1.AuthenticateReply.error:type_name -> messageloop.shared.v1.Error
-	4,  // 4: messageloop.proxy.v1.AuthenticateReply.user_info:type_name -> messageloop.proxy.v1.UserInfo
+	15, // 0: messageloop.proxy.v1.RPCRequest.request:type_name -> io.cloudevents.v1.CloudEvent
+	16, // 1: messageloop.proxy.v1.RPCResponse.error:type_name -> messageloop.shared.v1.Error
+	15, // 2: messageloop.proxy.v1.RPCResponse.reply:type_name -> io.cloudevents.v1.CloudEvent
+	16, // 3: messageloop.proxy.v1.AuthenticateResponse.error:type_name -> messageloop.shared.v1.Error
+	4,  // 4: messageloop.proxy.v1.AuthenticateResponse.user_info:type_name -> messageloop.proxy.v1.UserInfo
 	0,  // 5: messageloop.proxy.v1.ProxyService.RPC:input_type -> messageloop.proxy.v1.RPCRequest
 	2,  // 6: messageloop.proxy.v1.ProxyService.Authenticate:input_type -> messageloop.proxy.v1.AuthenticateRequest
 	5,  // 7: messageloop.proxy.v1.ProxyService.SubscribeAcl:input_type -> messageloop.proxy.v1.SubscribeAclRequest
@@ -858,13 +860,13 @@ var file_proxy_v1_proxy_proto_depIdxs = []int32{
 	9,  // 9: messageloop.proxy.v1.ProxyService.OnSubscribed:input_type -> messageloop.proxy.v1.OnSubscribedRequest
 	11, // 10: messageloop.proxy.v1.ProxyService.OnUnsubscribed:input_type -> messageloop.proxy.v1.OnUnsubscribedRequest
 	13, // 11: messageloop.proxy.v1.ProxyService.OnDisconnected:input_type -> messageloop.proxy.v1.OnDisconnectedRequest
-	1,  // 12: messageloop.proxy.v1.ProxyService.RPC:output_type -> messageloop.proxy.v1.RPCReply
-	3,  // 13: messageloop.proxy.v1.ProxyService.Authenticate:output_type -> messageloop.proxy.v1.AuthenticateReply
-	6,  // 14: messageloop.proxy.v1.ProxyService.SubscribeAcl:output_type -> messageloop.proxy.v1.SubscribeAclReply
-	8,  // 15: messageloop.proxy.v1.ProxyService.OnConnected:output_type -> messageloop.proxy.v1.OnConnectedReply
-	10, // 16: messageloop.proxy.v1.ProxyService.OnSubscribed:output_type -> messageloop.proxy.v1.OnSubscribedReply
-	12, // 17: messageloop.proxy.v1.ProxyService.OnUnsubscribed:output_type -> messageloop.proxy.v1.OnUnsubscribedReply
-	14, // 18: messageloop.proxy.v1.ProxyService.OnDisconnected:output_type -> messageloop.proxy.v1.OnDisconnectedReply
+	1,  // 12: messageloop.proxy.v1.ProxyService.RPC:output_type -> messageloop.proxy.v1.RPCResponse
+	3,  // 13: messageloop.proxy.v1.ProxyService.Authenticate:output_type -> messageloop.proxy.v1.AuthenticateResponse
+	6,  // 14: messageloop.proxy.v1.ProxyService.SubscribeAcl:output_type -> messageloop.proxy.v1.SubscribeAclResponse
+	8,  // 15: messageloop.proxy.v1.ProxyService.OnConnected:output_type -> messageloop.proxy.v1.OnConnectedResponse
+	10, // 16: messageloop.proxy.v1.ProxyService.OnSubscribed:output_type -> messageloop.proxy.v1.OnSubscribedResponse
+	12, // 17: messageloop.proxy.v1.ProxyService.OnUnsubscribed:output_type -> messageloop.proxy.v1.OnUnsubscribedResponse
+	14, // 18: messageloop.proxy.v1.ProxyService.OnDisconnected:output_type -> messageloop.proxy.v1.OnDisconnectedResponse
 	12, // [12:19] is the sub-list for method output_type
 	5,  // [5:12] is the sub-list for method input_type
 	5,  // [5:5] is the sub-list for extension type_name
