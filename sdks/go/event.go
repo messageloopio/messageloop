@@ -1,4 +1,4 @@
-package messageloopsdk
+package messageloopgo
 
 import (
 	pb "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"

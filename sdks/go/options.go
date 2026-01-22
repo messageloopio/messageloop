@@ -1,4 +1,4 @@
-package messageloopsdk
+package messageloopgo
 
 import (
 	"time"

@@ -13,11 +13,11 @@ import (
 // BasicWebSocketExample demonstrates a basic WebSocket connection.
 func BasicWebSocketExample() error {
 	// Create a WebSocket client with JSON encoding
-	client, err := messageloopsdk.Dial(
+	client, err := messageloopgo.Dial(
 		"ws://localhost:8080/ws",
-		messageloopsdk.WithEncoding(messageloopsdk.EncodingJSON),
-		messageloopsdk.WithClientID("example-client"),
-		messageloopsdk.WithAutoSubscribe("chat.messages"),
+		messageloopgo.WithEncoding(messageloopgo.EncodingJSON),
+		messageloopgo.WithClientID("example-client"),
+		messageloopgo.WithAutoSubscribe("chat.messages"),
 	)
 	if err != nil {
 		return fmt.Errorf("dial failed: %w", err)
@@ -29,7 +29,7 @@ func BasicWebSocketExample() error {
 		log.Printf("Connected! Session ID: %s", sessionID)
 	})
 
-	client.OnMessage(func(messages []*messageloopsdk.Message) {
+	client.OnMessage(func(messages []*messageloopgo.Message) {
 		for _, msg := range messages {
 			log.Printf("Received from %s: %s", msg.Channel, msg.String())
 		}
@@ -51,7 +51,7 @@ func BasicWebSocketExample() error {
 	}
 
 	// Publish a message
-	event := messageloopsdk.NewCloudEvent(
+	event := messageloopgo.NewCloudEvent(
 		"msg-123",
 		"/client/example",
 		"chat.message",
@@ -73,9 +73,9 @@ func BasicWebSocketExample() error {
 // BasicGRPCExample demonstrates a basic gRPC connection.
 func BasicGRPCExample() error {
 	// Create a gRPC client
-	client, err := messageloopsdk.DialGRPC(
+	client, err := messageloopgo.DialGRPC(
 		"localhost:9090",
-		messageloopsdk.WithClientID("example-grpc-client"),
+		messageloopgo.WithClientID("example-grpc-client"),
 	)
 	if err != nil {
 		return fmt.Errorf("dial grpc failed: %w", err)
@@ -87,7 +87,7 @@ func BasicGRPCExample() error {
 		log.Printf("Connected via gRPC! Session ID: %s", sessionID)
 	})
 
-	client.OnMessage(func(messages []*messageloopsdk.Message) {
+	client.OnMessage(func(messages []*messageloopgo.Message) {
 		for _, msg := range messages {
 			log.Printf("Received from %s: %s", msg.Channel, msg.Data)
 		}
@@ -104,7 +104,7 @@ func BasicGRPCExample() error {
 	}
 
 	// Publish a message
-	event := messageloopsdk.NewTextCloudEvent(
+	event := messageloopgo.NewTextCloudEvent(
 		"msg-456",
 		"/client/example",
 		"chat.message",
@@ -126,9 +126,9 @@ func BasicGRPCExample() error {
 // RPCExample demonstrates making RPC calls.
 func RPCExample() error {
 	// Create a WebSocket client
-	client, err := messageloopsdk.Dial(
+	client, err := messageloopgo.Dial(
 		"ws://localhost:8080/ws",
-		messageloopsdk.WithClientID("rpc-example"),
+		messageloopgo.WithClientID("rpc-example"),
 	)
 	if err != nil {
 		return fmt.Errorf("dial failed: %w", err)
@@ -142,13 +142,13 @@ func RPCExample() error {
 	}
 
 	// Make an RPC call
-	req := messageloopsdk.NewCloudEvent(
+	req := messageloopgo.NewCloudEvent(
 		"rpc-req-123",
 		"/client/example",
 		"getUser",
 		[]byte(`{"user_id": "123"}`),
 	)
-	messageloopsdk.SetEventAttribute(req, "datacontenttype", "application/json")
+	messageloopgo.SetEventAttribute(req, "datacontenttype", "application/json")
 
 	var resp pb.CloudEvent
 	err = client.RPC(ctx, "user.service", "GetUser", req, &resp)
@@ -164,10 +164,10 @@ func RPCExample() error {
 // ProtobufEncodingExample demonstrates using protobuf encoding.
 func ProtobufEncodingExample() error {
 	// Create a WebSocket client with protobuf encoding
-	client, err := messageloopsdk.Dial(
+	client, err := messageloopgo.Dial(
 		"ws://localhost:8080/ws",
-		messageloopsdk.WithEncoding(messageloopsdk.EncodingProtobuf),
-		messageloopsdk.WithClientID("protobuf-example"),
+		messageloopgo.WithEncoding(messageloopgo.EncodingProtobuf),
+		messageloopgo.WithClientID("protobuf-example"),
 	)
 	if err != nil {
 		return fmt.Errorf("dial failed: %w", err)
@@ -181,7 +181,7 @@ func ProtobufEncodingExample() error {
 	}
 
 	// Publish messages with protobuf encoding
-	event := messageloopsdk.NewCloudEvent(
+	event := messageloopgo.NewCloudEvent(
 		"msg-789",
 		"/client/example",
 		"chat.message",
@@ -198,9 +198,9 @@ func ProtobufEncodingExample() error {
 
 // DynamicSubscriptionExample demonstrates dynamic subscription management.
 func DynamicSubscriptionExample() error {
-	client, err := messageloopsdk.Dial(
+	client, err := messageloopgo.Dial(
 		"ws://localhost:8080/ws",
-		messageloopsdk.WithClientID("dynamic-sub-example"),
+		messageloopgo.WithClientID("dynamic-sub-example"),
 	)
 	if err != nil {
 		return fmt.Errorf("dial failed: %w", err)
@@ -210,7 +210,7 @@ func DynamicSubscriptionExample() error {
 	// Track received messages
 	messageCount := 0
 
-	client.OnMessage(func(messages []*messageloopsdk.Message) {
+	client.OnMessage(func(messages []*messageloopgo.Message) {
 		messageCount += len(messages)
 		log.Printf("Received %d messages (total: %d)", len(messages), messageCount)
 	})

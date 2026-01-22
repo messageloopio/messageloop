@@ -21,26 +21,26 @@ import (
 // MyRPCHandler implements custom RPC handling.
 type MyRPCHandler struct{}
 
-func (h *MyRPCHandler) HandleRPC(ctx context.Context, req *messageloopsdk.RPCRequest) (*messageloopsdk.RPCResponse, error) {
+func (h *MyRPCHandler) HandleRPC(ctx context.Context, req *messageloopgo.RPCRequest) (*messageloopgo.RPCResponse, error) {
 	log.Printf("[RPC] channel=%s method=%s", req.Channel, req.Method)
 
 	switch req.Method {
 	case "echo":
 		// Echo back the request
-		return &messageloopsdk.RPCResponse{
+		return &messageloopgo.RPCResponse{
 			Event: req.Event.Event,
 		}, nil
 
 	case "getUser":
 		// Example: Get user by ID
 		userID := req.Event.Event.GetTextData()
-		responseEvent := messageloopsdk.NewTextCloudEvent(
+		responseEvent := messageloopgo.NewTextCloudEvent(
 			req.ID,
 			"/proxy/echo",
 			"getUser.response",
 			"User: "+userID,
 		)
-		return &messageloopsdk.RPCResponse{
+		return &messageloopgo.RPCResponse{
 			Event: responseEvent,
 		}, nil
 
@@ -50,17 +50,17 @@ func (h *MyRPCHandler) HandleRPC(ctx context.Context, req *messageloopsdk.RPCReq
 		var a, b int
 		if _, err := fmt.Sscanf(data, "%d,%d", &a, &b); err == nil {
 			result := fmt.Sprintf("%d", a+b)
-			responseEvent := messageloopsdk.NewTextCloudEvent(
+			responseEvent := messageloopgo.NewTextCloudEvent(
 				req.ID,
 				"/proxy/sum",
 				"sum.response",
 				result,
 			)
-			return &messageloopsdk.RPCResponse{
+			return &messageloopgo.RPCResponse{
 				Event: responseEvent,
 			}, nil
 		}
-		return &messageloopsdk.RPCResponse{
+		return &messageloopgo.RPCResponse{
 			Error: &sharedpb.Error{
 				Code:    "INVALID_INPUT",
 				Type:    "validation_error",
@@ -69,7 +69,7 @@ func (h *MyRPCHandler) HandleRPC(ctx context.Context, req *messageloopsdk.RPCReq
 		}, nil
 
 	default:
-		return &messageloopsdk.RPCResponse{
+		return &messageloopgo.RPCResponse{
 			Error: &sharedpb.Error{
 				Code:    "UNKNOWN_METHOD",
 				Type:    "rpc_error",
@@ -82,12 +82,12 @@ func (h *MyRPCHandler) HandleRPC(ctx context.Context, req *messageloopsdk.RPCReq
 // MyAuthHandler implements custom authentication.
 type MyAuthHandler struct{}
 
-func (h *MyAuthHandler) Authenticate(ctx context.Context, req *messageloopsdk.AuthenticateRequest) (*messageloopsdk.AuthenticateResponse, error) {
+func (h *MyAuthHandler) Authenticate(ctx context.Context, req *messageloopgo.AuthenticateRequest) (*messageloopgo.AuthenticateResponse, error) {
 	log.Printf("[Auth] username=%s client_type=%s", req.Username, req.ClientType)
 
 	// Simple authentication: accept any non-empty username/password
 	if req.Username == "" || req.Password == "" {
-		return &messageloopsdk.AuthenticateResponse{
+		return &messageloopgo.AuthenticateResponse{
 			Error: &sharedpb.Error{
 				Code:    "INVALID_CREDENTIALS",
 				Type:    "auth_error",
@@ -97,8 +97,8 @@ func (h *MyAuthHandler) Authenticate(ctx context.Context, req *messageloopsdk.Au
 	}
 
 	// Return user info on successful auth
-	return &messageloopsdk.AuthenticateResponse{
-		UserInfo: &messageloopsdk.UserInfo{
+	return &messageloopgo.AuthenticateResponse{
+		UserInfo: &messageloopgo.UserInfo{
 			ID:         "user-" + req.Username,
 			Username:   req.Username,
 			Token:      "token-" + req.Username,
@@ -149,21 +149,21 @@ func (h *MyLifecycleHandler) OnUnsubscribed(ctx context.Context) error {
 // MyProxyService combines all handlers.
 type MyProxyService struct {
 	proxypb.UnimplementedProxyServiceServer
-	rpcHandler       messageloopsdk.RPCHandler
-	authHandler      messageloopsdk.AuthHandler
-	aclHandler       messageloopsdk.ACLHandler
-	lifecycleHandler messageloopsdk.LifecycleHandler
+	rpcHandler       messageloopgo.RPCHandler
+	authHandler      messageloopgo.AuthHandler
+	aclHandler       messageloopgo.ACLHandler
+	lifecycleHandler messageloopgo.LifecycleHandler
 }
 
 // RPC implements ProxyServiceServer.RPC.
 func (s *MyProxyService) RPC(ctx context.Context, req *proxypb.RPCRequest) (*proxypb.RPCResponse, error) {
 	log.Printf("[RPC Request] id=%s channel=%s method=%s", req.Id, req.Channel, req.Method)
 
-	rpcReq := &messageloopsdk.RPCRequest{
+	rpcReq := &messageloopgo.RPCRequest{
 		ID:      req.Id,
 		Channel: req.Channel,
 		Method:  req.Method,
-		Event: &messageloopsdk.RPCProxyEvent{
+		Event: &messageloopgo.RPCProxyEvent{
 			ID:      req.Id,
 			Channel: req.Channel,
 			Method:  req.Method,
@@ -208,7 +208,7 @@ func (s *MyProxyService) RPC(ctx context.Context, req *proxypb.RPCRequest) (*pro
 func (s *MyProxyService) Authenticate(ctx context.Context, req *proxypb.AuthenticateRequest) (*proxypb.AuthenticateResponse, error) {
 	log.Printf("[Authenticate Request] username=%s client_type=%s client_id=%s", req.Username, req.ClientType, req.ClientId)
 
-	authReq := &messageloopsdk.AuthenticateRequest{
+	authReq := &messageloopgo.AuthenticateRequest{
 		Username:   req.Username,
 		Password:   req.Password,
 		ClientType: req.ClientType,
