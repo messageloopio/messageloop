@@ -5,6 +5,7 @@ import (
 	"github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	clientpb "github.com/fleetlit/messageloop/genproto/v1"
+	"github.com/google/uuid"
 )
 
 // Message represents a received message from a subscribed channel.
@@ -63,6 +64,30 @@ func NewCloudEvent(id, source, eventType string, data []byte) *cloudevents.Event
 	}
 
 	return &event
+}
+
+func NewJSONMessage(eventType string, data any) (*cloudevents.Event, error) {
+	event := cloudevents.NewEvent()
+	event.SetID(uuid.NewString())
+	event.SetSource("messageloop/go-sdk")
+	event.SetSpecVersion("1.0")
+	event.SetType(eventType)
+	if err := event.SetData(cloudevents.ApplicationJSON, data); err != nil {
+		return nil, err
+	}
+	return &event, nil
+}
+
+func NewProtoMessage(eventType string, data any) (*cloudevents.Event, error) {
+	event := cloudevents.NewEvent()
+	event.SetID(uuid.NewString())
+	event.SetSource("messageloop/go-sdk")
+	event.SetSpecVersion("1.0")
+	event.SetType(eventType)
+	if err := event.SetData(format.ContentTypeProtobuf, data); err != nil {
+		return nil, err
+	}
+	return &event, nil
 }
 
 // NewTextCloudEvent creates a new CloudEvent with text data for publishing.

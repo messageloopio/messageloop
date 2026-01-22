@@ -1,4 +1,4 @@
-package main
+package example
 
 import (
 	"context"
@@ -125,44 +125,6 @@ func BasicGRPCExample() error {
 	}
 }
 
-// RPCExample demonstrates making RPC calls.
-func RPCExample() error {
-	// Create a WebSocket client
-	client, err := messageloopgo.Dial(
-		"ws://localhost:8080/ws",
-		messageloopgo.WithClientID("rpc-example"),
-	)
-	if err != nil {
-		return fmt.Errorf("dial failed: %w", err)
-	}
-	defer client.Close()
-
-	// Connect to the server (waits for connection to be established)
-	ctx := context.Background()
-	if err := client.Connect(ctx); err != nil {
-		return fmt.Errorf("connect failed: %w", err)
-	}
-
-	// Make an RPC call
-	req := messageloopgo.NewCloudEvent(
-		"rpc-req-123",
-		"/client/example",
-		"getUser",
-		[]byte(`{"user_id": "123"}`),
-	)
-	messageloopgo.SetEventAttribute(req, "datacontenttype", "application/json")
-
-	resp := cloudevents.NewEvent()
-	err = client.RPC(ctx, "user.service", "GetUser", req, &resp)
-	if err != nil {
-		return fmt.Errorf("rpc failed: %w", err)
-	}
-
-	log.Printf("RPC response: %s", resp.Data())
-
-	return nil
-}
-
 // ProtobufEncodingExample demonstrates using protobuf encoding.
 func ProtobufEncodingExample() error {
 	// Create a WebSocket client with protobuf encoding
@@ -250,8 +212,9 @@ func DynamicSubscriptionExample() error {
 	return nil
 }
 
-func main() {
-	if err := BasicGRPCExample(); err != nil {
-		log.Printf("Failed to connect to gRPC server: %v", err)
-	}
-}
+//
+//func main() {
+//	if err := BasicGRPCExample(); err != nil {
+//		log.Printf("Failed to connect to gRPC server: %v", err)
+//	}
+//}
