@@ -16,7 +16,7 @@ broker:
     password: ""
     db: 10
 
-proxies:
+proxy:
   - name: example
     endpoint: 127.0.0.1:9091
     timeout: 30s

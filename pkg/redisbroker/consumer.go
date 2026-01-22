@@ -13,7 +13,8 @@ func (b *redisBroker) consume() {
 	defer b.wg.Done()
 
 	// Subscribe to pub/sub channel for new messages
-	pubSub := b.client.Subscribe(b.ctx, b.options.PubSubPrefix+"*")
+	// Use PSubscribe for pattern matching (e.g., "messageloop:*")
+	pubSub := b.client.PSubscribe(b.ctx, b.options.PubSubPrefix+"*")
 	defer pubSub.Close()
 
 	// Create a separate channel for the consumer
