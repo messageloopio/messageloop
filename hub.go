@@ -5,6 +5,7 @@ import (
 	"hash/fnv"
 	"sync"
 
+	cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	clientpb "github.com/deeplooplabs/messageloop/genproto/v1"
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
@@ -182,6 +183,27 @@ func (h *subShard) broadcastPublication(channel string, pub *Publication) error 
 		Id:      uuid.NewString(),
 		Offset:  pub.Offset,
 	}
+
+	// Create CloudEvent from publication payload
+	if len(pub.Payload) > 0 {
+		msg.Event = &cloudevents.CloudEvent{
+			Id:          msg.Id,
+			Source:      channel,
+			SpecVersion: "1.0",
+			Type:        channel + ".message",
+			Attributes: map[string]*cloudevents.CloudEventAttributeValue{
+				"datacontenttype": {
+					Attr: &cloudevents.CloudEventAttributeValue_CeString{
+						CeString: "application/octet-stream",
+					},
+				},
+			},
+			Data: &cloudevents.CloudEvent_BinaryData{
+				BinaryData: pub.Payload,
+			},
+		}
+	}
+
 	out := MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_Publication{Publication: &clientpb.Publication{
 			Envelopes: []*clientpb.Message{msg},

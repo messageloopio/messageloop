@@ -8,3 +8,8 @@ transport:
     path: "/ws"
   grpc:
     addr: ":9090"
+
+# Proxy server configuration (implements ProxyService for backend integrations)
+proxy:
+  addr: ":9001"
+  insecure: true

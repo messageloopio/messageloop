@@ -61,7 +61,7 @@ func extractData(event *pb.CloudEvent) ([]byte, string) {
 
 	// Try BinaryData first
 	if bd := event.GetBinaryData(); len(bd) > 0 {
-		contentType := ""
+		contentType := "application/octet-stream"
 		if attrs := event.GetAttributes(); attrs != nil {
 			if val := attrs["datacontenttype"]; val != nil {
 				if ct := val.GetCeString(); ct != "" {
@@ -85,8 +85,13 @@ func extractData(event *pb.CloudEvent) ([]byte, string) {
 		return []byte(td), contentType
 	}
 
-	// ProtoData is not supported for simple data extraction
-	// Users should access Event.ProtoData directly
+	// Try ProtoData (any protobuf message)
+	if pd := event.GetProtoData(); pd != nil {
+		// Return as JSON representation for logging
+		// Users should access Event.ProtoData directly for typed data
+		return []byte(pd.String()), "application/protobuf"
+	}
+
 	return nil, ""
 }
 
@@ -153,4 +158,18 @@ func SetEventAttribute(event *pb.CloudEvent, key, value string) {
 			CeString: value,
 		},
 	}
+}
+
+// String returns a string representation of the message for debugging.
+func (m *Message) String() string {
+	if m == nil {
+		return ""
+	}
+	if m.Event != nil {
+		return m.Event.String()
+	}
+	if len(m.Data) > 0 {
+		return string(m.Data)
+	}
+	return ""
 }

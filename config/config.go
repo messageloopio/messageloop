@@ -3,9 +3,10 @@ package config
 import "github.com/deeplooplabs/messageloop/proxy"
 
 type Config struct {
-	Server    Server        `yaml:"server" json:"server"`
-	Transport Transport     `yaml:"transport" json:"transport"`
-	Proxies   []ProxyConfig `yaml:"proxies" json:"proxies"`
+	Server     Server           `yaml:"server" json:"server"`
+	Transport  Transport        `yaml:"transport" json:"transport"`
+	Proxy      *ProxyServer     `yaml:"proxy" json:"proxy"`
+	Proxies    []ProxyConfig    `yaml:"proxies" json:"proxies"`
 }
 
 type Server struct {
@@ -28,6 +29,15 @@ type WebSocketTransport struct {
 
 type GRPCTransport struct {
 	Addr string `yaml:"addr" json:"addr"`
+}
+
+// ProxyServer configures the built-in proxy gRPC server.
+// This server implements the ProxyService interface for backend integrations.
+type ProxyServer struct {
+	// Addr is the address to listen on (e.g., ":9001")
+	Addr string `yaml:"addr" json:"addr"`
+	// Insecure disables TLS (default: true for development)
+	Insecure bool `yaml:"insecure" json:"insecure"`
 }
 
 // ProxyConfig wraps the proxy.ProxyConfig for YAML unmarshaling.

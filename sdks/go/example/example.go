@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	pb "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
+	"github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	"github.com/deeplooplabs/messageloop/sdks/go"
 )
 
@@ -31,7 +31,7 @@ func BasicWebSocketExample() error {
 
 	client.OnMessage(func(messages []*messageloopsdk.Message) {
 		for _, msg := range messages {
-			log.Printf("Received from %s: %s", msg.Channel, msg.Data)
+			log.Printf("Received from %s: %s", msg.Channel, msg.String())
 		}
 	})
 
@@ -97,6 +97,10 @@ func BasicGRPCExample() error {
 	ctx := context.Background()
 	if err := client.Connect(ctx); err != nil {
 		return fmt.Errorf("connect failed: %w", err)
+	}
+
+	if err := client.Subscribe("chat.messages", "chat.presence", "chat.typing"); err != nil {
+		return fmt.Errorf("subscribe failed: %w", err)
 	}
 
 	// Publish a message
