@@ -7,7 +7,6 @@ import (
 	"github.com/deeplooplabs/messageloop"
 	sharedpb "github.com/deeplooplabs/messageloop/genproto/shared/v1"
 	clientpb "github.com/deeplooplabs/messageloop/genproto/v1"
-	"github.com/deeplooplabs/messageloop/protocol"
 	"github.com/gorilla/websocket"
 	"github.com/lynx-go/x/log"
 )
@@ -81,13 +80,13 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 }
 
 // 通过 subProtocols 确定 marshaler
-func (h *Handler) marshaler(subProtocols []string) protocol.Marshaler {
+func (h *Handler) marshaler(subProtocols []string) messageloop.Marshaler {
 	for _, subProtocol := range subProtocols {
-		for _, marshaler := range protocol.Marshalers {
+		for _, marshaler := range messageloop.Marshalers {
 			if strings.Contains(subProtocol, marshaler.Name()) {
 				return marshaler
 			}
 		}
 	}
-	return protocol.ProtoJSONMarshaler
+	return messageloop.ProtoJSONMarshaler
 }

@@ -30,3 +30,6 @@ go.work.sum
 # Editor/IDE
 .idea/
 .vscode/
+
+/nul
+.claude/settings.local.json

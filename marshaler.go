@@ -1,4 +1,4 @@
-package protocol
+package messageloop
 
 import (
 	"encoding/json"
@@ -74,6 +74,7 @@ func (ProtobufMarshaler) UseBytes() bool {
 // ProtoJSONMarshaler is a JSON marshaler that uses protobuf JSON encoding.
 var ProtoJSONMarshaler = &protoJSONMarshaler{
 	Marshaler: protojson.MarshalOptions{
+		UseProtoNames:   true,
 		EmitUnpopulated: false,
 	},
 	Unmarshaler: protojson.UnmarshalOptions{

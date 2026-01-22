@@ -1,13 +1,13 @@
 package websocket
 
 import (
-	clientpb "github.com/deeplooplabs/messageloop/genproto/v1"
+	"testing"
+
 	"github.com/deeplooplabs/messageloop"
-	"github.com/deeplooplabs/messageloop/protocol"
+	clientpb "github.com/deeplooplabs/messageloop/genproto/v1"
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/encoding/json"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func TestHandler_marshaler(t *testing.T) {
@@ -31,10 +31,10 @@ func TestHandler_marshaler(t *testing.T) {
 			}},
 		},
 	}
-	data, err := protocol.JSONMarshaler{}.Marshal(out)
+	data, err := messageloop.JSONMarshaler{}.Marshal(out)
 	require.NoError(t, err)
 	t.Logf("json marshal: %s", string(data))
-	data, err = protocol.ProtoJSONMarshaler.Marshal(out)
+	data, err = messageloop.ProtoJSONMarshaler.Marshal(out)
 	require.NoError(t, err)
 	t.Logf("protojson marshal: %s", string(data))
 }

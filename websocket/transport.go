@@ -4,16 +4,15 @@ import (
 	"time"
 
 	"github.com/deeplooplabs/messageloop"
-	"github.com/deeplooplabs/messageloop/protocol"
 	"github.com/gorilla/websocket"
 )
 
 type Transport struct {
 	conn      *websocket.Conn
-	marshaler protocol.Marshaler
+	marshaler messageloop.Marshaler
 }
 
-func newTransport(conn *websocket.Conn, marshaler protocol.Marshaler) *Transport {
+func newTransport(conn *websocket.Conn, marshaler messageloop.Marshaler) *Transport {
 	return &Transport{conn: conn, marshaler: marshaler}
 }
 
