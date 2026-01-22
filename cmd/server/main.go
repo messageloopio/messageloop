@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/deeplooplabs/messageloop"
 	"github.com/deeplooplabs/messageloop/config"
 	"github.com/deeplooplabs/messageloop/grpcstream"
+	redisbroker "github.com/deeplooplabs/messageloop/pkg/redisbroker"
 	"github.com/deeplooplabs/messageloop/websocket"
 	"github.com/lynx-go/lynx"
 	"github.com/lynx-go/lynx/contrib/zap"
@@ -36,6 +38,26 @@ func main() {
 		}
 
 		node := messageloop.NewNode()
+
+		// Configure broker based on config
+		brokerType := cfg.Broker.Type
+		if brokerType == "" {
+			brokerType = "memory" // default
+		}
+
+		var broker messageloop.Broker
+		switch brokerType {
+		case "redis":
+			// Generate a unique node ID for this instance
+			nodeID := fmt.Sprintf("node-%d", time.Now().UnixNano())
+			broker = redisbroker.New(cfg.Broker.Redis, nodeID)
+		case "memory":
+			broker = messageloop.NewMemoryBroker()
+		default:
+			return fmt.Errorf("unknown broker type: %s", brokerType)
+		}
+		node.SetBroker(broker)
+
 		if err := node.Run(); err != nil {
 			return err
 		}

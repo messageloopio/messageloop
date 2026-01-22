@@ -4,6 +4,10 @@ import (
 	"time"
 )
 
+func NewMemoryBroker() Broker {
+	return &memoryBroker{}
+}
+
 func newMemoryBroker(node *Node) *memoryBroker {
 	return &memoryBroker{
 		node: node,

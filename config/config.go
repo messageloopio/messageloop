@@ -5,6 +5,7 @@ import "github.com/deeplooplabs/messageloop/proxy"
 type Config struct {
 	Server     Server           `yaml:"server" json:"server"`
 	Transport  Transport        `yaml:"transport" json:"transport"`
+	Broker     BrokerConfig     `yaml:"broker" json:"broker"`
 	Proxy      *ProxyServer     `yaml:"proxy" json:"proxy"`
 	Proxies    []ProxyConfig    `yaml:"proxies" json:"proxies"`
 }
@@ -59,4 +60,25 @@ func (c *ProxyConfig) ToProxyConfig() (*proxy.ProxyConfig, error) {
 		GRPC:     c.GRPC,
 		Routes:   c.Routes,
 	}, nil
+}
+
+type BrokerConfig struct {
+	Type  string      `yaml:"type" json:"type"` // "memory" or "redis"
+	Redis RedisConfig `yaml:"redis" json:"redis"`
+}
+
+type RedisConfig struct {
+	Addr              string `yaml:"addr" json:"addr"`
+	Password          string `yaml:"password" json:"password"`
+	DB                int    `yaml:"db" json:"db"`
+	PoolSize          int    `yaml:"pool_size" json:"pool_size"`
+	MinIdleConns      int    `yaml:"min_idle_conns" json:"min_idle_conns"`
+	MaxRetries        int    `yaml:"max_retries" json:"max_retries"`
+	DialTimeout       string `yaml:"dial_timeout" json:"dial_timeout"`
+	ReadTimeout       string `yaml:"read_timeout" json:"read_timeout"`
+	WriteTimeout      string `yaml:"write_timeout" json:"write_timeout"`
+	StreamMaxLength   int64  `yaml:"stream_max_length" json:"stream_max_length"`
+	StreamApproximate bool   `yaml:"stream_approximate" json:"stream_approximate"`
+	HistoryTTL        string `yaml:"history_ttl" json:"history_ttl"`
+	ConsumerGroup     string `yaml:"consumer_group" json:"consumer_group"`
 }
