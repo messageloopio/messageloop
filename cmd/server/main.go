@@ -19,10 +19,10 @@ var (
 
 func main() {
 	opts := lynx.NewOptions(
-		lynx.WithName("fleetlit-api"),
+		lynx.WithName("MessageLoop"),
 		lynx.WithVersion(version),
 		lynx.WithSetFlagsFunc(func(f *pflag.FlagSet) {
-			f.String("config-dir", "./configs", "config file path")
+			f.String("config", "./config.yaml", "config file path")
 			f.String("log-level", "info", "log level, default info")
 		}),
 		lynx.WithBindConfigFunc(lynx.DefaultBindConfigFunc),
