@@ -2,10 +2,11 @@ package websocket
 
 import (
 	"context"
-	"github.com/deeplooplabs/messageloop/messageloop"
+	"net/http"
+
+	"github.com/deeplooplabs/messageloop"
 	"github.com/lynx-go/lynx"
 	"github.com/lynx-go/x/log"
-	"net/http"
 )
 
 type Server struct {

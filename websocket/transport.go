@@ -1,10 +1,11 @@
 package websocket
 
 import (
-	protocol "github.com/deeplooplabs/messageloop-protocol"
-	"github.com/deeplooplabs/messageloop/messageloop"
-	"github.com/gorilla/websocket"
 	"time"
+
+	"github.com/deeplooplabs/messageloop"
+	protocol "github.com/deeplooplabs/messageloop-protocol"
+	"github.com/gorilla/websocket"
 )
 
 type Transport struct {

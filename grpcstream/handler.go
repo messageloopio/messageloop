@@ -1,12 +1,13 @@
 package grpcstream
 
 import (
+	"io"
+
+	"github.com/deeplooplabs/messageloop"
 	protocol "github.com/deeplooplabs/messageloop-protocol"
 	clientv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/client/v1"
-	"github.com/deeplooplabs/messageloop/messageloop"
 	"github.com/lynx-go/x/log"
 	"google.golang.org/grpc"
-	"io"
 )
 
 type gRPCHandler struct {

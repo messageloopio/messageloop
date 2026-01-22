@@ -6,46 +6,48 @@ replace github.com/deeplooplabs/messageloop-protocol => ../messageloop-protocol
 
 require (
 	github.com/RoaringBitmap/roaring v1.9.4
+	github.com/cloudevents/sdk-go/binding/format/protobuf/v2 v2.16.2
 	github.com/deeplooplabs/messageloop-protocol v0.0.0-20250703125811-d05df1d5c209
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.0
-	github.com/lynx-go/lynx v0.1.0
-	github.com/lynx-go/lynx/contrib/log/zap v0.1.0
-	github.com/lynx-go/x v0.0.4
-	github.com/samber/lo v1.47.0
-	github.com/stretchr/testify v1.10.0
-	google.golang.org/grpc v1.73.0
-	google.golang.org/protobuf v1.36.6
+	github.com/lynx-go/lynx v0.7.0
+	github.com/lynx-go/lynx/contrib/zap v0.7.0
+	github.com/lynx-go/x v0.1.0
+	github.com/samber/lo v1.52.0
+	github.com/spf13/pflag v1.0.10
+	github.com/stretchr/testify v1.11.1
+	google.golang.org/grpc v1.74.2
+	google.golang.org/protobuf v1.36.8
 )
 
 require (
-	github.com/AdamSLevy/flagbind v0.0.0-20241102175934-70a5d83327aa // indirect
 	github.com/bits-and-blooms/bitset v1.12.0 // indirect
+	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/fsnotify/fsnotify v1.8.0 // indirect
-	github.com/go-viper/mapstructure/v2 v2.2.1 // indirect
+	github.com/fsnotify/fsnotify v1.9.0 // indirect
+	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
-	github.com/modern-go/concurrent v0.0.0-20180228061459-e0a39a4cb421 // indirect
+	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/mschoch/smat v0.2.0 // indirect
-	github.com/oklog/run v1.1.0 // indirect
-	github.com/pelletier/go-toml/v2 v2.2.3 // indirect
+	github.com/oklog/run v1.2.0 // indirect
+	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
+	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
-	github.com/sagikazarmark/locafero v0.7.0 // indirect
-	github.com/samber/slog-common v0.18.1 // indirect
+	github.com/sagikazarmark/locafero v0.12.0 // indirect
+	github.com/samber/slog-common v0.19.0 // indirect
 	github.com/samber/slog-zap/v2 v2.6.2 // indirect
-	github.com/sourcegraph/conc v0.3.0 // indirect
-	github.com/spf13/afero v1.12.0 // indirect
-	github.com/spf13/cast v1.7.1 // indirect
-	github.com/spf13/pflag v1.0.6 // indirect
-	github.com/spf13/viper v1.20.1 // indirect
+	github.com/spf13/afero v1.15.0 // indirect
+	github.com/spf13/cast v1.10.0 // indirect
+	github.com/spf13/viper v1.21.0 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	go.uber.org/zap v1.27.0 // indirect
-	gocloud.dev v0.41.0 // indirect
-	golang.org/x/net v0.41.0 // indirect
-	golang.org/x/sys v0.33.0 // indirect
-	golang.org/x/text v0.26.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20250707201910-8d1bb00bc6a7 // indirect
+	go.uber.org/zap v1.27.1 // indirect
+	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	gocloud.dev v0.44.0 // indirect
+	golang.org/x/net v0.43.0 // indirect
+	golang.org/x/sys v0.40.0 // indirect
+	golang.org/x/text v0.33.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20250811230008-5f3141c8851a // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

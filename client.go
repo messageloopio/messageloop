@@ -3,6 +3,9 @@ package messageloop
 import (
 	"context"
 	"errors"
+	"sync"
+	"time"
+
 	protocol "github.com/deeplooplabs/messageloop-protocol"
 	clientv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/client/v1"
 	sharedv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/shared/v1"
@@ -10,8 +13,6 @@ import (
 	"github.com/lynx-go/x/log"
 	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
-	"sync"
-	"time"
 )
 
 func NewClient(ctx context.Context, node *Node, t Transport, marshaler protocol.Marshaler) (*Client, ClientCloseFunc, error) {

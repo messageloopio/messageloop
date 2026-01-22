@@ -1,12 +1,13 @@
 package grpcstream
 
 import (
-	clientv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/client/v1"
-	sharedv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/shared/v1"
-	"github.com/deeplooplabs/messageloop/messageloop"
-	"google.golang.org/grpc"
 	"sync"
 	"time"
+
+	"github.com/deeplooplabs/messageloop"
+	clientv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/client/v1"
+	sharedv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/shared/v1"
+	"google.golang.org/grpc"
 )
 
 type Transport struct {

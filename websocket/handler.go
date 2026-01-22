@@ -1,14 +1,15 @@
 package websocket
 
 import (
+	"net/http"
+	"strings"
+
+	"github.com/deeplooplabs/messageloop"
 	protocol "github.com/deeplooplabs/messageloop-protocol"
 	clientv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/client/v1"
 	sharedv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/shared/v1"
-	"github.com/deeplooplabs/messageloop/messageloop"
 	"github.com/gorilla/websocket"
 	"github.com/lynx-go/x/log"
-	"net/http"
-	"strings"
 )
 
 type Handler struct {

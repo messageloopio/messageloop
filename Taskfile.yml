@@ -1,0 +1,34 @@
+version: '3'
+
+env:
+  POSTGRES_USER: fleetlit
+  POSTGRES_PASSWORD: fleetlit
+  POSTGRES_HOST: localhost
+  POSTGRES_PORT: 5432
+  POSTGRES_DB: fleetlit
+
+tasks:
+
+  init:
+    dir: '{{.USER_WORKING_DIR}}'
+    cmds:
+      - go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+      - go install github.com/bufbuild/buf/cmd/buf@v1.63.0
+
+  # 重新生成 protobuf
+  generate-protocol:
+    dir: '{{.USER_WORKING_DIR}}'
+    cmds:
+      - buf generate
+
+  # 更新依赖
+  upgrade-lynx:
+    dir: '{{.USER_WORKING_DIR}}'
+    cmds:
+      - go get -u github.com/lynx-go/x
+      - go get -u github.com/lynx-go/lynx
+      - go get -u github.com/lynx-go/lynx/contrib/zap
+      - go get -u github.com/lynx-go/lynx/contrib/pubsub
+      - go get -u github.com/lynx-go/lynx/contrib/kafka
+      - go get -u github.com/lynx-go/lynx/contrib/schedule
+      - go mod tidy
