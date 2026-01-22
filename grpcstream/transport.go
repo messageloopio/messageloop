@@ -4,14 +4,14 @@ import (
 	"sync"
 	"time"
 
+	clientpb "github.com/deeplooplabs/messageloop/genproto/v1"
+	sharedpb "github.com/deeplooplabs/messageloop/genproto/shared/v1"
 	"github.com/deeplooplabs/messageloop"
-	clientv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/client/v1"
-	sharedv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/shared/v1"
 	"google.golang.org/grpc"
 )
 
 type Transport struct {
-	stream  grpc.BidiStreamingServer[clientv1.ClientMessage, clientv1.ServerMessage]
+	stream  grpc.BidiStreamingServer[clientpb.InboundMessage, clientpb.OutboundMessage]
 	mu      sync.RWMutex
 	closed  bool
 	closeCh chan struct{}
@@ -50,11 +50,12 @@ func (t *Transport) Close(disconnect messageloop.Disconnect) error {
 }
 
 func (t *Transport) writeError(code int32, reason string) {
-	msg := messageloop.BuildServerMessage(nil, func(out *clientv1.ServerMessage) {
-		out.Envelope = &clientv1.ServerMessage_Error{
-			Error: &sharedv1.Error{
-				Code:   code,
-				Reason: reason,
+	msg := messageloop.BuildOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
+		out.Envelope = &clientpb.OutboundMessage_Error{
+			Error: &sharedpb.Error{
+				Code:    "DISCONNECT_ERROR",
+				Type:    "transport_error",
+				Message: reason,
 			},
 		}
 	})
@@ -64,7 +65,7 @@ func (t *Transport) writeError(code int32, reason string) {
 var _ messageloop.Transport = new(Transport)
 
 func newGRPCTransport(
-	stream grpc.BidiStreamingServer[clientv1.ClientMessage, clientv1.ServerMessage],
+	stream grpc.BidiStreamingServer[clientpb.InboundMessage, clientpb.OutboundMessage],
 ) *Transport {
 	return &Transport{
 		stream:  stream,

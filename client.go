@@ -6,9 +6,10 @@ import (
 	"sync"
 	"time"
 
-	protocol "github.com/deeplooplabs/messageloop-protocol"
-	clientv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/client/v1"
-	sharedv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/shared/v1"
+	cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
+	clientpb "github.com/deeplooplabs/messageloop/genproto/v1"
+	sharedpb "github.com/deeplooplabs/messageloop/genproto/shared/v1"
+	"github.com/deeplooplabs/messageloop/protocol"
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
 	"github.com/samber/lo"
@@ -91,11 +92,11 @@ func (c *Client) UserID() string {
 	return c.user
 }
 
-func (c *Client) Send(ctx context.Context, msg *clientv1.ServerMessage) error {
+func (c *Client) Send(ctx context.Context, msg *clientpb.OutboundMessage) error {
 	return c.write(ctx, msg)
 }
 
-func (c *Client) HandleMessage(ctx context.Context, in *clientv1.ClientMessage) error {
+func (c *Client) HandleMessage(ctx context.Context, in *clientpb.InboundMessage) error {
 	c.mu.Lock()
 	if c.status == statusClosed {
 		c.mu.Unlock()
@@ -117,13 +118,12 @@ func (c *Client) HandleMessage(ctx context.Context, in *clientv1.ClientMessage) 
 			_ = c.close(dis)
 			return nil
 		}
-		_ = c.Send(ctx, BuildServerMessage(in, func(out *clientv1.ServerMessage) {
-			out.Envelope = &clientv1.ServerMessage_Error{
-				Error: &sharedv1.Error{
-					Code:     501,
-					Reason:   err.Error(),
-					Message:  "服务异常",
-					Metadata: nil,
+		_ = c.Send(ctx, BuildOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+			out.Envelope = &clientpb.OutboundMessage_Error{
+				Error: &sharedpb.Error{
+					Code:    "INTERNAL_ERROR",
+					Type:    "server_error",
+					Message: err.Error(),
 				},
 			}
 		}))
@@ -132,22 +132,22 @@ func (c *Client) HandleMessage(ctx context.Context, in *clientv1.ClientMessage) 
 	return nil
 }
 
-func (c *Client) handleMessage(ctx context.Context, in *clientv1.ClientMessage) error {
+func (c *Client) handleMessage(ctx context.Context, in *clientpb.InboundMessage) error {
 
 	switch msg := in.Envelope.(type) {
-	case *clientv1.ClientMessage_Connect:
+	case *clientpb.InboundMessage_Connect:
 		return c.onConnect(ctx, in, msg.Connect)
-	case *clientv1.ClientMessage_Publish:
+	case *clientpb.InboundMessage_Publish:
 		return c.onPublish(ctx, in, msg.Publish)
-	case *clientv1.ClientMessage_Subscribe:
+	case *clientpb.InboundMessage_Subscribe:
 		return c.onSubscribe(ctx, in, msg.Subscribe)
-	case *clientv1.ClientMessage_RpcRequest:
+	case *clientpb.InboundMessage_RpcRequest:
 		return c.onRPC(ctx, in, msg.RpcRequest)
-	case *clientv1.ClientMessage_Unsubscribe:
+	case *clientpb.InboundMessage_Unsubscribe:
 		return c.onUnsubscribe(ctx, in, msg.Unsubscribe)
-	case *clientv1.ClientMessage_Ping:
+	case *clientpb.InboundMessage_Ping:
 		return c.onPing(ctx, in, msg.Ping)
-	case *clientv1.ClientMessage_SubRefresh:
+	case *clientpb.InboundMessage_SubRefresh:
 		return c.onSubRefresh(ctx, in, msg.SubRefresh)
 	}
 	return nil
@@ -157,7 +157,7 @@ func (c *Client) Channels() []string {
 	return []string{}
 }
 
-func (c *Client) onConnect(ctx context.Context, in *clientv1.ClientMessage, connect *clientv1.Connect) error {
+func (c *Client) onConnect(ctx context.Context, in *clientpb.InboundMessage, connect *clientpb.Connect) error {
 	c.mu.RLock()
 	authenticated := c.authenticated
 	closed := c.status == statusClosed
@@ -176,12 +176,12 @@ func (c *Client) onConnect(ctx context.Context, in *clientv1.ClientMessage, conn
 	c.node.addClient(c)
 	c.mu.Unlock()
 
-	return c.Send(ctx, BuildServerMessage(in, func(out *clientv1.ServerMessage) {
-		out.Envelope = &clientv1.ServerMessage_Connected{
-			Connected: &clientv1.Connected{
+	return c.Send(ctx, BuildOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+		out.Envelope = &clientpb.OutboundMessage_Connected{
+			Connected: &clientpb.Connected{
 				SessionId: c.SessionID(),
-				Subscriptions: lo.Map(c.Channels(), func(it string, i int) *clientv1.Subscription {
-					return &clientv1.Subscription{
+				Subscriptions: lo.Map(c.Channels(), func(it string, i int) *clientpb.Subscription {
+					return &clientpb.Subscription{
 						Channel: it,
 					}
 				}),
@@ -190,16 +190,16 @@ func (c *Client) onConnect(ctx context.Context, in *clientv1.ClientMessage, conn
 	}))
 }
 
-func BuildServerMessage(in *clientv1.ClientMessage, bodyFunc func(out *clientv1.ServerMessage)) *clientv1.ServerMessage {
-	var out *clientv1.ServerMessage
+func BuildOutboundMessage(in *clientpb.InboundMessage, bodyFunc func(out *clientpb.OutboundMessage)) *clientpb.OutboundMessage {
+	var out *clientpb.OutboundMessage
 	if in != nil {
-		out = &clientv1.ServerMessage{
+		out = &clientpb.OutboundMessage{
 			Id:       in.Id,
 			Metadata: in.Metadata,
 			Time:     uint64(time.Now().UnixMilli()),
 		}
 	} else {
-		out = &clientv1.ServerMessage{
+		out = &clientpb.OutboundMessage{
 			Id:       uuid.New().String(),
 			Metadata: map[string]string{},
 			Time:     uint64(time.Now().UnixMilli()),
@@ -209,15 +209,6 @@ func BuildServerMessage(in *clientv1.ClientMessage, bodyFunc func(out *clientv1.
 	return out
 }
 
-func (c *Client) payload(payloadBlob []byte, payloadString string) ([]byte, bool) {
-	if len(payloadBlob) > 0 {
-		return payloadBlob, true
-	} else if len(payloadString) > 0 {
-		return []byte(payloadString), false
-	}
-	return nil, true
-}
-
 func (c *Client) ClientInfo() *ClientInfo {
 	return &ClientInfo{
 		ClientID:  c.client,
@@ -225,44 +216,59 @@ func (c *Client) ClientInfo() *ClientInfo {
 		UserID:    c.user,
 	}
 }
+
 func (c *Client) Authenticated() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.authenticated
 }
 
-func (c *Client) onRPC(ctx context.Context, in *clientv1.ClientMessage, req *clientv1.RPCRequest) error {
-	return c.Send(ctx, BuildServerMessage(in, func(out *clientv1.ServerMessage) {
-		out.Envelope = &clientv1.ServerMessage_RpcReply{
-			RpcReply: &clientv1.RPCReply{
-				Error:       nil,
-				PayloadBlob: req.PayloadBlob,
-				PayloadText: req.PayloadText,
-			},
+func (c *Client) onRPC(ctx context.Context, in *clientpb.InboundMessage, event *cloudevents.CloudEvent) error {
+	// Echo back the RPC request as the reply for now
+	return c.Send(ctx, BuildOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+		out.Envelope = &clientpb.OutboundMessage_RpcReply{
+			RpcReply: event,
 		}
 	}))
 }
 
-func (c *Client) onPublish(ctx context.Context, in *clientv1.ClientMessage, pub *clientv1.Publish) error {
+func (c *Client) onPublish(ctx context.Context, in *clientpb.InboundMessage, event *cloudevents.CloudEvent) error {
 	if !c.Authenticated() {
 		return DisconnectStale
 	}
 
-	payload, isBlob := c.payload(pub.PayloadBlob, pub.PayloadText)
-	if err := c.node.Publish(pub.Channel, payload, WithClientInfo(c.ClientInfo()), WithAsBytes(isBlob)); err != nil {
+	// Extract channel from InboundMessage
+	channel := in.Channel
+	if channel == "" {
+		// Fallback to event source if channel is not set
+		if event != nil && event.Source != "" {
+			channel = event.Source
+		}
+	}
+
+	// Extract data from CloudEvent
+	var data []byte
+	if event != nil {
+		if binaryData := event.GetBinaryData(); len(binaryData) > 0 {
+			data = binaryData
+		} else if textData := event.GetTextData(); textData != "" {
+			data = []byte(textData)
+		}
+	}
+
+	if err := c.node.Publish(channel, data, WithClientInfo(c.ClientInfo()), WithAsBytes(true)); err != nil {
 		return err
 	}
-	return c.Send(ctx, BuildServerMessage(in, func(out *clientv1.ServerMessage) {
-		out.Envelope = &clientv1.ServerMessage_PublishAck{
-			PublishAck: &clientv1.PublishAck{
-				Channel: pub.Channel,
-				Offset:  0,
+	return c.Send(ctx, BuildOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+		out.Envelope = &clientpb.OutboundMessage_PublishAck{
+			PublishAck: &clientpb.PublishAck{
+				Offset: 0,
 			},
 		}
 	}))
 }
 
-func (c *Client) onSubscribe(ctx context.Context, in *clientv1.ClientMessage, sub *clientv1.Subscribe) error {
+func (c *Client) onSubscribe(ctx context.Context, in *clientpb.InboundMessage, sub *clientpb.Subscribe) error {
 	subs := []string{}
 	for _, ch := range sub.Subscriptions {
 		if err := c.node.addSubscription(ch.Channel, subscriber{client: c, ephemeral: ch.Ephemeral}); err != nil {
@@ -273,11 +279,11 @@ func (c *Client) onSubscribe(ctx context.Context, in *clientv1.ClientMessage, su
 		}
 		subs = append(subs, ch.Channel)
 	}
-	return c.Send(ctx, BuildServerMessage(in, func(out *clientv1.ServerMessage) {
-		out.Envelope = &clientv1.ServerMessage_SubscribeAck{
-			SubscribeAck: &clientv1.SubscribeAck{
-				Subscriptions: lo.Map(subs, func(it string, i int) *clientv1.Subscription {
-					return &clientv1.Subscription{
+	return c.Send(ctx, BuildOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+		out.Envelope = &clientpb.OutboundMessage_SubscribeAck{
+			SubscribeAck: &clientpb.SubscribeAck{
+				Subscriptions: lo.Map(subs, func(it string, i int) *clientpb.Subscription {
+					return &clientpb.Subscription{
 						Channel: it,
 					}
 				}),
@@ -295,18 +301,18 @@ func (c *Client) write(ctx context.Context, msg proto.Message) error {
 	return c.transport.Write(bytes)
 }
 
-func (c *Client) onUnsubscribe(ctx context.Context, in *clientv1.ClientMessage, unsubscribe *clientv1.Unsubscribe) error {
+func (c *Client) onUnsubscribe(ctx context.Context, in *clientpb.InboundMessage, unsubscribe *clientpb.Unsubscribe) error {
 	return errors.New("TODO")
 }
 
-func (c *Client) onPing(ctx context.Context, in *clientv1.ClientMessage, ping *clientv1.Ping) error {
-	return c.Send(ctx, BuildServerMessage(in, func(out *clientv1.ServerMessage) {
-		out.Envelope = &clientv1.ServerMessage_Pong{
-			Pong: &clientv1.Pong{},
+func (c *Client) onPing(ctx context.Context, in *clientpb.InboundMessage, ping *clientpb.Ping) error {
+	return c.Send(ctx, BuildOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+		out.Envelope = &clientpb.OutboundMessage_Pong{
+			Pong: &clientpb.Pong{},
 		}
 	}))
 }
 
-func (c *Client) onSubRefresh(ctx context.Context, in *clientv1.ClientMessage, refresh *clientv1.SubRefresh) error {
+func (c *Client) onSubRefresh(ctx context.Context, in *clientpb.InboundMessage, refresh *clientpb.SubRefresh) error {
 	return errors.New("TODO")
 }

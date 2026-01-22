@@ -1,0 +1,101 @@
+syntax = "proto3";
+
+// buf:lint:ignore PACKAGE_DIRECTORY_MATCH
+package messageloop.proxy.v1;
+
+option go_package = "github.com/deeplooplabs/messageloop/genproto/go/proxy/v1;proxypb";
+
+import "shared/v1/errors.proto";
+import "includes/cloudevents/cloudevents.proto";
+
+service ProxyService {
+  // 远程调用
+  rpc RPC(RPCRequest) returns(RPCResponse);
+  // 认证
+  rpc Authenticate(AuthenticateRequest) returns(AuthenticateResponse);
+  // 订阅权限校验
+  rpc SubscribeAcl(SubscribeAclRequest) returns(SubscribeAclResponse);
+
+  rpc OnConnected(OnConnectedRequest) returns (OnConnectedResponse);
+
+  rpc OnSubscribed(OnSubscribedRequest) returns (OnSubscribedResponse);
+
+  rpc OnUnsubscribed(OnUnsubscribedRequest) returns(OnUnsubscribedResponse);
+
+  rpc OnDisconnected(OnDisconnectedRequest) returns(OnDisconnectedResponse);
+}
+
+
+message RPCRequest {
+  string id = 1;
+  string channel = 2;
+  string method = 3;
+  io.cloudevents.v1.CloudEvent request = 4;
+}
+
+message RPCResponse {
+  string id = 1;
+  shared.v1.Error error = 2;
+  io.cloudevents.v1.CloudEvent reply = 3;
+}
+
+message AuthenticateRequest {
+  string username = 1;
+  string password = 2;
+  string client_type = 3;
+  string client_id = 4;
+}
+
+message AuthenticateResponse {
+  shared.v1.Error error = 1;
+  UserInfo user_info = 2;
+}
+
+message UserInfo {
+  string id = 1;
+  string username = 2;
+  string token = 3;
+  string client_type = 4;
+  string client_id = 5;
+}
+
+message SubscribeAclRequest {
+  string channel = 1;
+  string token = 2;
+}
+
+message SubscribeAclResponse {
+
+}
+
+message OnConnectedRequest {
+  string session_id = 1;
+  string username = 2;
+}
+
+message OnConnectedResponse{
+}
+
+message OnSubscribedRequest {
+
+}
+message OnSubscribedResponse {
+
+}
+
+message OnUnsubscribedRequest {
+
+}
+
+message OnUnsubscribedResponse {
+
+}
+
+message OnDisconnectedRequest {
+  string session_id = 1;
+  string username = 2;
+
+}
+message OnDisconnectedResponse {
+
+}

@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/deeplooplabs/messageloop"
-	protocol "github.com/deeplooplabs/messageloop-protocol"
+	"github.com/deeplooplabs/messageloop/protocol"
 	"github.com/gorilla/websocket"
 )
 

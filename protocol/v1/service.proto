@@ -1,0 +1,129 @@
+syntax = "proto3";
+
+// buf:lint:ignore PACKAGE_DIRECTORY_MATCH
+package messageloop.v1;
+
+option go_package = "github.com/deeplooplabs/messageloop/genproto/go/client/v1;clientpb";
+
+import "shared/v1/errors.proto";
+import "includes/cloudevents/cloudevents.proto";
+
+service MessageLoopService {
+  // 核心双向数据流
+  // buf:lint:ignore RPC_REQUEST_STANDARD_NAME
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  rpc MessageLoop(stream InboundMessage) returns (stream OutboundMessage);
+}
+
+message InboundMessage {
+  string id = 1;
+  string channel = 2;
+  string method = 3;
+  map<string, string> metadata = 4;
+  uint64 time = 5;
+  oneof envelope {
+    Connect connect = 11;
+    Subscribe subscribe = 12;
+    Unsubscribe unsubscribe = 13;
+    io.cloudevents.v1.CloudEvent rpc_request = 14 [json_name = "rpc_request"];
+    Ping ping = 15;
+    io.cloudevents.v1.CloudEvent publish = 16;
+    SubRefresh sub_refresh = 17 [json_name = "sub_refresh"];
+  }
+}
+
+message OutboundMessage {
+  string id = 1;
+  map<string, string> metadata = 2;
+  uint64 time = 3;
+  oneof envelope {
+    messageloop.shared.v1.Error error = 11;
+    Connected connected = 12;
+    SubscribeAck subscribe_ack = 13 [json_name = "subscribe_ack"];
+    UnsubscribeAck unsubscribe_ack = 14[json_name = "unsubscribe_ack"];
+    io.cloudevents.v1.CloudEvent rpc_reply = 15 [json_name = "rpc_reply"];
+    Pong pong = 16;
+    PublishAck publish_ack = 17 [json_name = "publish_ack"];
+    Publication publication = 18;
+    SubRefreshAck sub_refresh_ack = 19 [json_name = "sub_refresh_ack"];
+  }
+}
+
+message Connect {
+  string client_id = 1 [json_name = "client_id"];
+  string client_type = 2 [json_name = "client_type"];
+  string token = 3;
+  string version = 4;
+  repeated Subscription subscriptions = 5;
+}
+
+message RPCRequest {
+  string channel = 1;
+  string method = 2;
+  io.cloudevents.v1.CloudEvent event = 3;
+}
+
+message RPCReply {
+  messageloop.shared.v1.Error error = 1;
+  io.cloudevents.v1.CloudEvent event = 3;
+}
+
+message Message {
+  string id = 1;
+  string channel = 2;
+  uint64 offset = 3;
+  io.cloudevents.v1.CloudEvent event = 4;
+}
+
+message Publication {
+  repeated Message envelopes = 3;
+}
+
+message Connected {
+  string session_id = 1 [json_name = "session_id"];
+  repeated Subscription subscriptions = 2;
+  repeated Publication publications = 3;
+}
+
+message Subscription {
+  string channel = 1;
+  bool ephemeral = 2;
+  string token = 3;
+}
+
+message Subscribe {
+  repeated Subscription subscriptions = 1;
+}
+
+message SubscribeAck {
+  repeated Subscription subscriptions = 1;
+}
+
+message Unsubscribe {
+  repeated Subscription subscriptions = 1;
+}
+
+message UnsubscribeAck {
+  repeated Subscription subscriptions = 1;
+}
+
+message RefreshSub {
+  repeated Subscription subscriptions = 1;
+}
+
+message Ping {
+}
+
+message Pong {
+}
+
+message PublishAck {
+  uint64 offset = 1;
+}
+
+message SubRefresh {
+  repeated string channels = 1;
+}
+
+message SubRefreshAck {
+}

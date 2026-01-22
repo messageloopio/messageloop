@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+// buf:lint:ignore PACKAGE_DIRECTORY_MATCH
+package messageloop.shared.v1;
+
+import "google/protobuf/struct.proto";
+
+option go_package = "github.com/deeplooplabs/messageloop/genproto/shared/v1;sharedpb";
+
+message Error {
+  string code = 1;
+  string type = 2;
+  string message = 3;
+  google.protobuf.Struct metadata = 4;
+}

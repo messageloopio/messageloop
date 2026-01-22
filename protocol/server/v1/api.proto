@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+// buf:lint:ignore PACKAGE_DIRECTORY_MATCH
+package messageloop.server.v1;
+
+option go_package = "github.com/deeplooplabs/messageloop/genproto/go/server/v1;serverpb";
+import "includes/cloudevents/cloudevents.proto";
+
+service APIService {
+  rpc Publish(PublishRequest) returns(PublishResponse);
+  rpc Disconnect(DisconnectRequest) returns(DisconnectResponse);
+  rpc Subscribe(SubscribeRequest) returns(SubscribeResponse);
+  rpc Unsubscribe(SubscribeRequest) returns(UnsubscribeResponse);
+}
+
+message Publication {
+  message Options {
+    bool add_history = 1;
+  }
+
+  message Destination {
+    repeated string sessions = 1;
+    repeated string channels = 2;
+  }
+
+  string id = 1;
+  Destination destination = 2;
+  Options options = 3;
+
+  io.cloudevents.v1.CloudEvent message = 4;
+}
+
+message PublishRequest {
+  string request_id = 1;
+  map<string, string> metadata = 2;
+  repeated Publication publications = 3;
+}
+
+message PublishResponse {
+
+}
+
+message DisconnectRequest {
+}
+
+message DisconnectResponse {
+
+}
+
+message SubscribeRequest {
+}
+
+message SubscribeResponse {
+}
+
+message UnsubscribeRequest {
+}
+
+message UnsubscribeResponse {
+}

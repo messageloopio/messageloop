@@ -4,10 +4,10 @@ import (
 	"net/http"
 	"strings"
 
+	clientpb "github.com/deeplooplabs/messageloop/genproto/v1"
+	sharedpb "github.com/deeplooplabs/messageloop/genproto/shared/v1"
 	"github.com/deeplooplabs/messageloop"
-	protocol "github.com/deeplooplabs/messageloop-protocol"
-	clientv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/client/v1"
-	sharedv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/shared/v1"
+	"github.com/deeplooplabs/messageloop/protocol"
 	"github.com/gorilla/websocket"
 	"github.com/lynx-go/x/log"
 )
@@ -58,15 +58,15 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			break
 		}
-		msg := &clientv1.ClientMessage{}
+		msg := &clientpb.InboundMessage{}
 		if err := marshaler.Unmarshal(data, msg); err != nil {
 			log.ErrorContext(ctx, "decode client message error", err)
-			_ = client.Send(ctx, messageloop.BuildServerMessage(nil, func(out *clientv1.ServerMessage) {
-				out.Envelope = &clientv1.ServerMessage_Error{
-					Error: &sharedv1.Error{
-						Code:    int32(messageloop.DisconnectBadRequest.Code),
-						Reason:  messageloop.DisconnectBadRequest.Reason,
-						Message: "BadRequest",
+			_ = client.Send(ctx, messageloop.BuildOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
+				out.Envelope = &clientpb.OutboundMessage_Error{
+					Error: &sharedpb.Error{
+						Code:    "BAD_REQUEST",
+						Type:    "client_error",
+						Message: "Failed to decode message",
 					},
 				}
 			}))

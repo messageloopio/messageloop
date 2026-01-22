@@ -5,7 +5,7 @@ import (
 	"hash/fnv"
 	"sync"
 
-	clientv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/client/v1"
+	clientpb "github.com/deeplooplabs/messageloop/genproto/v1"
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
 )
@@ -129,11 +129,11 @@ func (h *subShard) addSub(ch string, sub subscriber) (bool, error) {
 	return false, nil
 }
 
-//func pubToProto(pub *Publication) *clientv1.Publication {
+//func pubToProto(pub *Publication) *clientpb.Publication {
 //	if pub == nil {
 //		return nil
 //	}
-//	return &clientv1.Publication{
+//	return &clientpb.Publication{
 //		Offset: pub.Offset,
 //		Data:   pub.Data,
 //		Info:   infoToProto(pub.Info),
@@ -176,22 +176,15 @@ func (h *subShard) broadcastPublication(channel string, pub *Publication) error 
 		return nil
 	}
 
-	//if pub.Channel != channel {
-	//	fullPub.Channel = pub.Channel
-	//}
 	ctx := context.TODO()
-	msg := &clientv1.Message{
+	msg := &clientpb.Message{
 		Channel: channel,
 		Id:      uuid.NewString(),
+		Offset:  pub.Offset,
 	}
-	if pub.IsBlob {
-		msg.PayloadBlob = pub.Payload
-	} else {
-		msg.PayloadText = string(pub.Payload)
-	}
-	out := BuildServerMessage(nil, func(out *clientv1.ServerMessage) {
-		out.Envelope = &clientv1.ServerMessage_Publication{Publication: &clientv1.Publication{
-			Messages: []*clientv1.Message{msg},
+	out := BuildOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
+		out.Envelope = &clientpb.OutboundMessage_Publication{Publication: &clientpb.Publication{
+			Envelopes: []*clientpb.Message{msg},
 		}}
 	})
 

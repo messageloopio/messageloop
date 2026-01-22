@@ -4,8 +4,8 @@ import (
 	"context"
 	"net"
 
+	clientpb "github.com/deeplooplabs/messageloop/genproto/v1"
 	"github.com/deeplooplabs/messageloop"
-	clientv1 "github.com/deeplooplabs/messageloop-protocol/gen/proto/go/client/v1"
 	"github.com/lynx-go/lynx"
 	"github.com/lynx-go/x/log"
 	"google.golang.org/grpc"
@@ -21,7 +21,7 @@ func NewServer(opts Options, node *messageloop.Node) (*Server, error) {
 	grpcOpts := []grpc.ServerOption{}
 	grpcServer := grpc.NewServer(grpcOpts...)
 	handler := NewGRPCHandler(node)
-	clientv1.RegisterMessageLoopServiceServer(grpcServer, handler)
+	clientpb.RegisterMessageLoopServiceServer(grpcServer, handler)
 	return newServer(grpcServer, opts)
 }
 
