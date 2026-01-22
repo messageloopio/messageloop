@@ -3,13 +3,12 @@ package messageloopsdk
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 
-	pb "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
+	"github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	proxypb "github.com/fleetlit/messageloop/genproto/proxy/v1"
 	sharedpb "github.com/fleetlit/messageloop/genproto/shared/v1"
-	"github.com/lynx-go/lynx"
-	"github.com/lynx-go/x/log"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -164,7 +163,7 @@ type HandlerImpl struct {
 
 // RPC implements ProxyServiceServer.RPC.
 func (h *HandlerImpl) RPC(ctx context.Context, req *proxypb.RPCRequest) (*proxypb.RPCResponse, error) {
-	log.DebugContext(ctx, "received RPC request",
+	slog.DebugContext(ctx, "received RPC request",
 		"id", req.Id,
 		"channel", req.Channel,
 		"method", req.Method,
@@ -184,7 +183,7 @@ func (h *HandlerImpl) RPC(ctx context.Context, req *proxypb.RPCRequest) (*proxyp
 
 	resp, err := h.RPCHandlerImpl.HandleRPC(ctx, rpcReq)
 	if err != nil {
-		log.ErrorContext(ctx, "RPC handler failed", err)
+		slog.ErrorContext(ctx, "RPC handler failed", "error", err)
 		return &proxypb.RPCResponse{
 			Id: req.Id,
 			Error: &sharedpb.Error{
@@ -196,7 +195,7 @@ func (h *HandlerImpl) RPC(ctx context.Context, req *proxypb.RPCRequest) (*proxyp
 	}
 
 	if resp.Error != nil {
-		log.DebugContext(ctx, "RPC returned error",
+		slog.DebugContext(ctx, "RPC returned error",
 			"code", resp.Error.Code,
 			"message", resp.Error.Message,
 		)
@@ -217,7 +216,7 @@ func (h *HandlerImpl) RPC(ctx context.Context, req *proxypb.RPCRequest) (*proxyp
 
 // Authenticate implements ProxyServiceServer.Authenticate.
 func (h *HandlerImpl) Authenticate(ctx context.Context, req *proxypb.AuthenticateRequest) (*proxypb.AuthenticateResponse, error) {
-	log.DebugContext(ctx, "received authenticate request",
+	slog.DebugContext(ctx, "received authenticate request",
 		"username", req.Username,
 		"client_type", req.ClientType,
 		"client_id", req.ClientId,
@@ -232,7 +231,7 @@ func (h *HandlerImpl) Authenticate(ctx context.Context, req *proxypb.Authenticat
 
 	resp, err := h.AuthHandlerImpl.Authenticate(ctx, authReq)
 	if err != nil {
-		log.ErrorContext(ctx, "auth handler failed", err)
+		slog.ErrorContext(ctx, "auth handler failed", "error", err)
 		return &proxypb.AuthenticateResponse{
 			Error: &sharedpb.Error{
 				Code:    "AUTH_ERROR",
@@ -250,13 +249,13 @@ func (h *HandlerImpl) Authenticate(ctx context.Context, req *proxypb.Authenticat
 
 // SubscribeAcl implements ProxyServiceServer.SubscribeAcl.
 func (h *HandlerImpl) SubscribeAcl(ctx context.Context, req *proxypb.SubscribeAclRequest) (*proxypb.SubscribeAclResponse, error) {
-	log.DebugContext(ctx, "received subscribe ACL request",
+	slog.DebugContext(ctx, "received subscribe ACL request",
 		"channel", req.Channel,
 	)
 
 	err := h.ACLHandlerImpl.CheckSubscribeACL(ctx, req.Channel, req.Token)
 	if err != nil {
-		log.DebugContext(ctx, "subscription denied by ACL", "error", err)
+		slog.ErrorContext(ctx, "subscription denied by ACL", "error", err)
 		return &proxypb.SubscribeAclResponse{}, status.Error(codes.PermissionDenied, err.Error())
 	}
 
@@ -265,13 +264,13 @@ func (h *HandlerImpl) SubscribeAcl(ctx context.Context, req *proxypb.SubscribeAc
 
 // OnConnected implements ProxyServiceServer.OnConnected.
 func (h *HandlerImpl) OnConnected(ctx context.Context, req *proxypb.OnConnectedRequest) (*proxypb.OnConnectedResponse, error) {
-	log.DebugContext(ctx, "received OnConnected hook",
+	slog.DebugContext(ctx, "received OnConnected hook",
 		"session_id", req.SessionId,
 		"username", req.Username,
 	)
 
 	if err := h.LifecycleHandlerImpl.OnConnected(ctx, req.SessionId, req.Username); err != nil {
-		log.ErrorContext(ctx, "OnConnected handler failed", err)
+		slog.ErrorContext(ctx, "OnConnected handler failed", "error", err)
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
@@ -280,10 +279,10 @@ func (h *HandlerImpl) OnConnected(ctx context.Context, req *proxypb.OnConnectedR
 
 // OnSubscribed implements ProxyServiceServer.OnSubscribed.
 func (h *HandlerImpl) OnSubscribed(ctx context.Context, req *proxypb.OnSubscribedRequest) (*proxypb.OnSubscribedResponse, error) {
-	log.DebugContext(ctx, "received OnSubscribed hook")
+	slog.DebugContext(ctx, "received OnSubscribed hook")
 
 	if err := h.LifecycleHandlerImpl.OnSubscribed(ctx); err != nil {
-		log.ErrorContext(ctx, "OnSubscribed handler failed", err)
+		slog.ErrorContext(ctx, "OnSubscribed handler failed", "error", err)
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
@@ -292,10 +291,10 @@ func (h *HandlerImpl) OnSubscribed(ctx context.Context, req *proxypb.OnSubscribe
 
 // OnUnsubscribed implements ProxyServiceServer.OnUnsubscribed.
 func (h *HandlerImpl) OnUnsubscribed(ctx context.Context, req *proxypb.OnUnsubscribedRequest) (*proxypb.OnUnsubscribedResponse, error) {
-	log.DebugContext(ctx, "received OnUnsubscribed hook")
+	slog.DebugContext(ctx, "received OnUnsubscribed hook")
 
 	if err := h.LifecycleHandlerImpl.OnUnsubscribed(ctx); err != nil {
-		log.ErrorContext(ctx, "OnUnsubscribed handler failed", err)
+		slog.ErrorContext(ctx, "OnUnsubscribed handler failed", "error", err)
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
@@ -304,13 +303,13 @@ func (h *HandlerImpl) OnUnsubscribed(ctx context.Context, req *proxypb.OnUnsubsc
 
 // OnDisconnected implements ProxyServiceServer.OnDisconnected.
 func (h *HandlerImpl) OnDisconnected(ctx context.Context, req *proxypb.OnDisconnectedRequest) (*proxypb.OnDisconnectedResponse, error) {
-	log.DebugContext(ctx, "received OnDisconnected hook",
+	slog.DebugContext(ctx, "received OnDisconnected hook",
 		"session_id", req.SessionId,
 		"username", req.Username,
 	)
 
 	if err := h.LifecycleHandlerImpl.OnDisconnected(ctx, req.SessionId, req.Username); err != nil {
-		log.ErrorContext(ctx, "OnDisconnected handler failed", err)
+		slog.ErrorContext(ctx, "OnDisconnected handler failed", "error", err)
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
@@ -353,7 +352,6 @@ func NewProxyServer(opts ProxyServerOptions, handler proxypb.ProxyServiceServer)
 // It implements the lynx.Component interface for lifecycle management.
 type ProxyServer struct {
 	grpc *grpc.Server
-	lx   lynx.Lynx
 	conn net.Listener
 	opts *ProxyServerOptions
 }
@@ -363,22 +361,14 @@ func (s *ProxyServer) Name() string {
 	return "proxy-server"
 }
 
-// Init initializes the server with the lynx context.
-func (s *ProxyServer) Init(lx lynx.Lynx) error {
-	s.lx = lx
-	return nil
-}
-
 // Start starts the proxy server.
 func (s *ProxyServer) Start(ctx context.Context) error {
-	log.InfoContext(ctx, "starting proxy gRPC server", "addr", s.opts.Addr)
+	slog.InfoContext(ctx, "starting proxy gRPC server", "addr", s.opts.Addr)
 	return s.grpc.Serve(s.conn)
 }
 
 // Stop stops the proxy server gracefully.
 func (s *ProxyServer) Stop(ctx context.Context) {
-	log.InfoContext(ctx, "stopping proxy gRPC server", "addr", s.opts.Addr)
+	slog.InfoContext(ctx, "stopping proxy gRPC server", "addr", s.opts.Addr)
 	s.grpc.GracefulStop()
 }
-
-var _ lynx.Component = (*ProxyServer)(nil)

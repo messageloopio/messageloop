@@ -13,7 +13,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file shared/v1/errors.proto.
  */
 export const file_shared_v1_errors: GenFile = /*@__PURE__*/
-  fileDesc("ChZzaGFyZWQvdjEvZXJyb3JzLnByb3RvEhVtZXNzYWdlbG9vcC5zaGFyZWQudjEiXwoFRXJyb3ISDAoEY29kZRgBIAEoCRIMCgR0eXBlGAIgASgJEg8KB21lc3NhZ2UYAyABKAkSKQoIbWV0YWRhdGEYBCABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0QkFaP2dpdGh1Yi5jb20vZGVlcGxvb3BsYWJzL21lc3NhZ2Vsb29wL2dlbnByb3RvL3NoYXJlZC92MTtzaGFyZWRwYmIGcHJvdG8z", [file_google_protobuf_struct]);
+  fileDesc("ChZzaGFyZWQvdjEvZXJyb3JzLnByb3RvEhVtZXNzYWdlbG9vcC5zaGFyZWQudjEiXwoFRXJyb3ISDAoEY29kZRgBIAEoCRIMCgR0eXBlGAIgASgJEg8KB21lc3NhZ2UYAyABKAkSKQoIbWV0YWRhdGEYBCABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0Qj1aO2dpdGh1Yi5jb20vZmxlZXRsaXQvbWVzc2FnZWxvb3AvZ2VucHJvdG8vc2hhcmVkL3YxO3NoYXJlZHBiYgZwcm90bzM", [file_google_protobuf_struct]);
 
 /**
  * @generated from message messageloop.shared.v1.Error
