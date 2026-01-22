@@ -60,7 +60,7 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		msg := &clientpb.InboundMessage{}
 		if err := marshaler.Unmarshal(data, msg); err != nil {
 			log.ErrorContext(ctx, "decode client message error", err)
-			_ = client.Send(ctx, messageloop.BuildOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
+			_ = client.Send(ctx, messageloop.MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
 				out.Envelope = &clientpb.OutboundMessage_Error{
 					Error: &sharedpb.Error{
 						Code:    "BAD_REQUEST",

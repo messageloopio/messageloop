@@ -182,7 +182,7 @@ func (h *subShard) broadcastPublication(channel string, pub *Publication) error 
 		Id:      uuid.NewString(),
 		Offset:  pub.Offset,
 	}
-	out := BuildOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
+	out := MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_Publication{Publication: &clientpb.Publication{
 			Envelopes: []*clientpb.Message{msg},
 		}}

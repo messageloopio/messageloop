@@ -47,10 +47,10 @@ type HistoryOptions struct {
 
 type PublishOption func(*PublishOptions)
 
-// WithClientInfo adds ClientInfo to Publication.
-func WithClientInfo(info *ClientInfo) PublishOption {
+// WithClientDesc adds ClientDesc to Publication.
+func WithClientDesc(info *ClientDesc) PublishOption {
 	return func(opts *PublishOptions) {
-		opts.ClientInfo = info
+		opts.ClientDesc = info
 	}
 }
 
@@ -61,7 +61,7 @@ func WithAsBytes(asBytes bool) PublishOption {
 }
 
 type PublishOptions struct {
-	ClientInfo *ClientInfo
+	ClientDesc *ClientDesc
 	AsBytes    bool
 }
 
@@ -70,9 +70,9 @@ type BrokerEventHandler interface {
 	// HandlePublication to handle received Publications.
 	HandlePublication(ch string, pub *Publication) error
 	// HandleJoin to handle received Join messages.
-	HandleJoin(ch string, info *ClientInfo) error
+	HandleJoin(ch string, info *ClientDesc) error
 	// HandleLeave to handle received Leave messages.
-	HandleLeave(ch string, info *ClientInfo) error
+	HandleLeave(ch string, info *ClientDesc) error
 }
 
 type Broker interface {
@@ -107,9 +107,9 @@ type Broker interface {
 	// returned from the cache maintained by Broker.
 	Publish(ch string, data []byte, opts PublishOptions) (StreamPosition, bool, error)
 	// PublishJoin publishes Join Push message into channel.
-	PublishJoin(ch string, info *ClientInfo) error
+	PublishJoin(ch string, info *ClientDesc) error
 	// PublishLeave publishes Leave Push message into channel.
-	PublishLeave(ch string, info *ClientInfo) error
+	PublishLeave(ch string, info *ClientDesc) error
 
 	// History used to extract Publications from history stream.
 	// Publications returned according to HistoryFilter which allows to set several

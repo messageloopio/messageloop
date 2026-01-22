@@ -4,9 +4,9 @@ import (
 	"sync"
 	"time"
 
-	clientpb "github.com/deeplooplabs/messageloop/genproto/v1"
-	sharedpb "github.com/deeplooplabs/messageloop/genproto/shared/v1"
 	"github.com/deeplooplabs/messageloop"
+	sharedpb "github.com/deeplooplabs/messageloop/genproto/shared/v1"
+	clientpb "github.com/deeplooplabs/messageloop/genproto/v1"
 	"google.golang.org/grpc"
 )
 
@@ -50,7 +50,7 @@ func (t *Transport) Close(disconnect messageloop.Disconnect) error {
 }
 
 func (t *Transport) writeError(code int32, reason string) {
-	msg := messageloop.BuildOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
+	msg := messageloop.MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_Error{
 			Error: &sharedpb.Error{
 				Code:    "DISCONNECT_ERROR",

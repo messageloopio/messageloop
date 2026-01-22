@@ -30,11 +30,11 @@ func (n *Node) handlePublication(ch string, pub *Publication) error {
 	return n.hub.broadcastPublication(ch, pub)
 }
 
-func (n *Node) HandleJoin(ch string, info *ClientInfo) error {
+func (n *Node) HandleJoin(ch string, info *ClientDesc) error {
 	return nil
 }
 
-func (n *Node) HandleLeave(ch string, info *ClientInfo) error {
+func (n *Node) HandleLeave(ch string, info *ClientDesc) error {
 	return nil
 }
 

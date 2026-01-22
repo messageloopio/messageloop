@@ -38,7 +38,7 @@ const (
 
 type ClientCloseFunc func() error
 
-type ClientInfo struct {
+type ClientDesc struct {
 	ClientID  string `json:"client_id"`
 	SessionID string `json:"session_id"`
 	UserID    string `json:"user_id"`
@@ -118,7 +118,7 @@ func (c *ClientSession) HandleMessage(ctx context.Context, in *clientpb.InboundM
 			_ = c.close(dis)
 			return nil
 		}
-		_ = c.Send(ctx, BuildOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+		_ = c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 			out.Envelope = &clientpb.OutboundMessage_Error{
 				Error: &sharedpb.Error{
 					Code:    "INTERNAL_ERROR",
@@ -176,7 +176,7 @@ func (c *ClientSession) onConnect(ctx context.Context, in *clientpb.InboundMessa
 	c.node.addClient(c)
 	c.mu.Unlock()
 
-	return c.Send(ctx, BuildOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_Connected{
 			Connected: &clientpb.Connected{
 				SessionId: c.SessionID(),
@@ -190,7 +190,7 @@ func (c *ClientSession) onConnect(ctx context.Context, in *clientpb.InboundMessa
 	}))
 }
 
-func BuildOutboundMessage(in *clientpb.InboundMessage, bodyFunc func(out *clientpb.OutboundMessage)) *clientpb.OutboundMessage {
+func MakeOutboundMessage(in *clientpb.InboundMessage, bodyFunc func(out *clientpb.OutboundMessage)) *clientpb.OutboundMessage {
 	var out *clientpb.OutboundMessage
 	if in != nil {
 		out = &clientpb.OutboundMessage{
@@ -209,8 +209,8 @@ func BuildOutboundMessage(in *clientpb.InboundMessage, bodyFunc func(out *client
 	return out
 }
 
-func (c *ClientSession) ClientInfo() *ClientInfo {
-	return &ClientInfo{
+func (c *ClientSession) ClientInfo() *ClientDesc {
+	return &ClientDesc{
 		ClientID:  c.client,
 		SessionID: c.session,
 		UserID:    c.user,
@@ -253,14 +253,14 @@ func (c *ClientSession) onRPC(ctx context.Context, in *clientpb.InboundMessage, 
 		// No proxy configured or proxy failed - return error to client
 		if err.Error() == "no proxy found for channel/method" {
 			// No proxy configured - return original echo behavior
-			return c.Send(ctx, BuildOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+			return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 				out.Envelope = &clientpb.OutboundMessage_RpcReply{
 					RpcReply: event,
 				}
 			}))
 		}
 		// Proxy error - return error to client
-		return c.Send(ctx, BuildOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+		return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 			out.Envelope = &clientpb.OutboundMessage_Error{
 				Error: &sharedpb.Error{
 					Code:    "PROXY_ERROR",
@@ -272,7 +272,7 @@ func (c *ClientSession) onRPC(ctx context.Context, in *clientpb.InboundMessage, 
 	}
 
 	// Return the proxy response
-	return c.Send(ctx, BuildOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 		if proxyResp.Error != nil {
 			out.Envelope = &clientpb.OutboundMessage_Error{
 				Error: proxyResp.Error,
@@ -309,10 +309,10 @@ func (c *ClientSession) onPublish(ctx context.Context, in *clientpb.InboundMessa
 		}
 	}
 
-	if err := c.node.Publish(channel, data, WithClientInfo(c.ClientInfo()), WithAsBytes(true)); err != nil {
+	if err := c.node.Publish(channel, data, WithClientDesc(c.ClientInfo()), WithAsBytes(true)); err != nil {
 		return err
 	}
-	return c.Send(ctx, BuildOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_PublishAck{
 			PublishAck: &clientpb.PublishAck{
 				Offset: 0,
@@ -332,7 +332,7 @@ func (c *ClientSession) onSubscribe(ctx context.Context, in *clientpb.InboundMes
 		}
 		subs = append(subs, ch.Channel)
 	}
-	return c.Send(ctx, BuildOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_SubscribeAck{
 			SubscribeAck: &clientpb.SubscribeAck{
 				Subscriptions: lo.Map(subs, func(it string, i int) *clientpb.Subscription {
@@ -359,7 +359,7 @@ func (c *ClientSession) onUnsubscribe(ctx context.Context, in *clientpb.InboundM
 }
 
 func (c *ClientSession) onPing(ctx context.Context, in *clientpb.InboundMessage, ping *clientpb.Ping) error {
-	return c.Send(ctx, BuildOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_Pong{
 			Pong: &clientpb.Pong{},
 		}
