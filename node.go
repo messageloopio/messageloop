@@ -1,7 +1,12 @@
 package messageloop
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"sync"
+
+	"github.com/deeplooplabs/messageloop/proxy"
 )
 
 type Node struct {
@@ -9,6 +14,7 @@ type Node struct {
 	hub        *Hub
 	broker     Broker
 	subLocks   map[int]*sync.Mutex
+	proxy      *proxy.Router
 }
 
 func (n *Node) HandlePublication(ch string, pub *Publication) error {
@@ -118,4 +124,61 @@ func (n *Node) Publish(channel string, data []byte, opts ...PublishOption) error
 
 func (n *Node) Broker() Broker {
 	return n.broker
+}
+
+// SetupProxy configures the proxy router with the given proxy configurations.
+func (n *Node) SetupProxy(cfgs []*proxy.ProxyConfig) error {
+	n.proxy = proxy.NewRouter()
+	for _, cfg := range cfgs {
+		p, err := n.createProxy(cfg)
+		if err != nil {
+			return fmt.Errorf("failed to create proxy %s: %w", cfg.Name, err)
+		}
+		if err := n.proxy.AddFromConfig(p, cfg); err != nil {
+			return fmt.Errorf("failed to add routes for proxy %s: %w", cfg.Name, err)
+		}
+	}
+	return nil
+}
+
+// createProxy creates an RPCProxy instance based on the configuration.
+func (n *Node) createProxy(cfg *proxy.ProxyConfig) (proxy.RPCProxy, error) {
+	if cfg.GRPC != nil {
+		return proxy.NewGRPCProxy(cfg)
+	}
+	if cfg.HTTP != nil {
+		return proxy.NewHTTPProxy(cfg)
+	}
+	// Auto-detect: if endpoint starts with http:// or https://, use HTTP
+	// Otherwise, assume gRPC
+	if len(cfg.Endpoint) > 7 && (cfg.Endpoint[:7] == "http://" || cfg.Endpoint[:8] == "https://") {
+		return proxy.NewHTTPProxy(cfg)
+	}
+	return proxy.NewGRPCProxy(cfg)
+}
+
+// FindProxy finds a proxy for the given channel and method.
+// Returns nil if no matching proxy is found.
+func (n *Node) FindProxy(channel, method string) proxy.RPCProxy {
+	if n.proxy == nil {
+		return nil
+	}
+	return n.proxy.Match(channel, method)
+}
+
+// AddProxy adds a proxy to the router.
+func (n *Node) AddProxy(p proxy.RPCProxy, channelPattern, methodPattern string) error {
+	if n.proxy == nil {
+		n.proxy = proxy.NewRouter()
+	}
+	return n.proxy.Add(p, channelPattern, methodPattern)
+}
+
+// ProxyRPC proxies an RPC request to the configured backend.
+func (n *Node) ProxyRPC(ctx context.Context, channel, method string, req *proxy.RPCProxyRequest) (*proxy.RPCProxyResponse, error) {
+	p := n.FindProxy(channel, method)
+	if p == nil {
+		return nil, errors.New("no proxy found for channel/method")
+	}
+	return p.ProxyRPC(ctx, req)
 }

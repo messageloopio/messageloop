@@ -9,14 +9,14 @@ import (
 	cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	sharedpb "github.com/deeplooplabs/messageloop/genproto/shared/v1"
 	clientpb "github.com/deeplooplabs/messageloop/genproto/v1"
-	"github.com/deeplooplabs/messageloop/protocol"
+	"github.com/deeplooplabs/messageloop/proxy"
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
 	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
 )
 
-func NewClientSession(ctx context.Context, node *Node, t Transport, marshaler protocol.Marshaler) (*ClientSession, ClientCloseFunc, error) {
+func NewClientSession(ctx context.Context, node *Node, t Transport, marshaler Marshaler) (*ClientSession, ClientCloseFunc, error) {
 	client := &ClientSession{
 		ctx:       ctx,
 		node:      node,
@@ -55,12 +55,12 @@ type ClientSession struct {
 	info          []byte
 	status        status
 	node          *Node
-	marshaler     protocol.Marshaler
+	marshaler     Marshaler
 	authenticated bool
 }
 
 func jsonLog(msg proto.Message) string {
-	data, _ := protocol.ProtoJSONMarshaler.Marshal(msg)
+	data, _ := ProtoJSONMarshaler.Marshal(msg)
 	return string(data)
 }
 
@@ -224,10 +224,63 @@ func (c *ClientSession) Authenticated() bool {
 }
 
 func (c *ClientSession) onRPC(ctx context.Context, in *clientpb.InboundMessage, event *cloudevents.CloudEvent) error {
-	// Echo back the RPC request as the reply for now
+	// Extract channel and method from the InboundMessage
+	channel := in.Channel
+	method := in.Method
+
+	// Fallback to event fields if not set in InboundMessage
+	if channel == "" && event != nil {
+		channel = event.Source
+	}
+	if method == "" && event != nil {
+		method = event.Type
+	}
+
+	// Check if there's a proxy configured for this channel/method
+	proxyReq := &proxy.RPCProxyRequest{
+		ID:        in.Id,
+		ClientID:  c.client,
+		SessionID: c.session,
+		UserID:    c.user,
+		Channel:   channel,
+		Method:    method,
+		Event:     event,
+		Meta:      in.Metadata,
+	}
+
+	proxyResp, err := c.node.ProxyRPC(ctx, channel, method, proxyReq)
+	if err != nil {
+		// No proxy configured or proxy failed - return error to client
+		if err.Error() == "no proxy found for channel/method" {
+			// No proxy configured - return original echo behavior
+			return c.Send(ctx, BuildOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+				out.Envelope = &clientpb.OutboundMessage_RpcReply{
+					RpcReply: event,
+				}
+			}))
+		}
+		// Proxy error - return error to client
+		return c.Send(ctx, BuildOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+			out.Envelope = &clientpb.OutboundMessage_Error{
+				Error: &sharedpb.Error{
+					Code:    "PROXY_ERROR",
+					Type:    "proxy_error",
+					Message: err.Error(),
+				},
+			}
+		}))
+	}
+
+	// Return the proxy response
 	return c.Send(ctx, BuildOutboundMessage(in, func(out *clientpb.OutboundMessage) {
-		out.Envelope = &clientpb.OutboundMessage_RpcReply{
-			RpcReply: event,
+		if proxyResp.Error != nil {
+			out.Envelope = &clientpb.OutboundMessage_Error{
+				Error: proxyResp.Error,
+			}
+		} else {
+			out.Envelope = &clientpb.OutboundMessage_RpcReply{
+				RpcReply: proxyResp.Event,
+			}
 		}
 	}))
 }
