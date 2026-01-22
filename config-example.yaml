@@ -23,5 +23,5 @@ proxy:
     grpc:
       insecure: true
     routes:
-      - channel: chat.messages
+      - channel: "*"
         method: "*"

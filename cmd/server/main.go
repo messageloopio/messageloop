@@ -13,6 +13,7 @@ import (
 	"github.com/lynx-go/lynx"
 	"github.com/lynx-go/lynx/contrib/zap"
 	"github.com/spf13/pflag"
+	proxyproxy "github.com/fleetlit/messageloop/proxy"
 )
 
 var (
@@ -57,6 +58,29 @@ func main() {
 			return fmt.Errorf("unknown broker type: %s", brokerType)
 		}
 		node.SetBroker(broker)
+
+		// Configure proxies from config
+		if len(cfg.Proxy) > 0 {
+			proxyConfigs := make([]*proxyproxy.ProxyConfig, 0, len(cfg.Proxy))
+			for _, p := range cfg.Proxy {
+				pc, err := p.ToProxyConfig()
+				if err != nil {
+					return fmt.Errorf("invalid proxy config %s: %w", p.Name, err)
+				}
+				// Parse timeout duration
+				if p.Timeout != "" {
+					timeout, err := time.ParseDuration(p.Timeout)
+					if err != nil {
+						return fmt.Errorf("invalid proxy timeout %s: %w", p.Name, err)
+					}
+					pc.Timeout = timeout
+				}
+				proxyConfigs = append(proxyConfigs, pc)
+			}
+			if err := node.SetupProxy(proxyConfigs); err != nil {
+				return fmt.Errorf("failed to setup proxies: %w", err)
+			}
+		}
 
 		if err := node.Run(); err != nil {
 			return err
