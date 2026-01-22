@@ -137,12 +137,12 @@ func (c *ClientSession) handleMessage(ctx context.Context, in *clientpb.InboundM
 	switch msg := in.Envelope.(type) {
 	case *clientpb.InboundMessage_Connect:
 		return c.onConnect(ctx, in, msg.Connect)
-	case *clientpb.InboundMessage_PublishPayload:
-		return c.onPublish(ctx, in, msg.PublishPayload)
+	case *clientpb.InboundMessage_Publish:
+		return c.onPublish(ctx, in, msg.Publish)
 	case *clientpb.InboundMessage_Subscribe:
 		return c.onSubscribe(ctx, in, msg.Subscribe)
-	case *clientpb.InboundMessage_RpcRequestPayload:
-		return c.onRPC(ctx, in, msg.RpcRequestPayload)
+	case *clientpb.InboundMessage_RpcRequest:
+		return c.onRPC(ctx, in, msg.RpcRequest)
 	case *clientpb.InboundMessage_Unsubscribe:
 		return c.onUnsubscribe(ctx, in, msg.Unsubscribe)
 	case *clientpb.InboundMessage_Ping:
@@ -254,8 +254,8 @@ func (c *ClientSession) onRPC(ctx context.Context, in *clientpb.InboundMessage, 
 		if err.Error() == "no proxy found for channel/method" {
 			// No proxy configured - return original echo behavior
 			return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
-				out.Envelope = &clientpb.OutboundMessage_RpcReplyPayload{
-					RpcReplyPayload: event,
+				out.Envelope = &clientpb.OutboundMessage_RpcReply{
+					RpcReply: event,
 				}
 			}))
 		}
@@ -278,8 +278,8 @@ func (c *ClientSession) onRPC(ctx context.Context, in *clientpb.InboundMessage, 
 				Error: proxyResp.Error,
 			}
 		} else {
-			out.Envelope = &clientpb.OutboundMessage_RpcReplyPayload{
-				RpcReplyPayload: proxyResp.Event,
+			out.Envelope = &clientpb.OutboundMessage_RpcReply{
+				RpcReply: proxyResp.Event,
 			}
 		}
 	}))

@@ -37,9 +37,9 @@ type InboundMessage struct {
 	//	*InboundMessage_Connect
 	//	*InboundMessage_Subscribe
 	//	*InboundMessage_Unsubscribe
-	//	*InboundMessage_RpcRequestPayload
+	//	*InboundMessage_RpcRequest
 	//	*InboundMessage_Ping
-	//	*InboundMessage_PublishPayload
+	//	*InboundMessage_Publish
 	//	*InboundMessage_SubRefresh
 	Envelope      isInboundMessage_Envelope `protobuf_oneof:"envelope"`
 	unknownFields protoimpl.UnknownFields
@@ -145,10 +145,10 @@ func (x *InboundMessage) GetUnsubscribe() *Unsubscribe {
 	return nil
 }
 
-func (x *InboundMessage) GetRpcRequestPayload() *pb.CloudEvent {
+func (x *InboundMessage) GetRpcRequest() *pb.CloudEvent {
 	if x != nil {
-		if x, ok := x.Envelope.(*InboundMessage_RpcRequestPayload); ok {
-			return x.RpcRequestPayload
+		if x, ok := x.Envelope.(*InboundMessage_RpcRequest); ok {
+			return x.RpcRequest
 		}
 	}
 	return nil
@@ -163,10 +163,10 @@ func (x *InboundMessage) GetPing() *Ping {
 	return nil
 }
 
-func (x *InboundMessage) GetPublishPayload() *pb.CloudEvent {
+func (x *InboundMessage) GetPublish() *pb.CloudEvent {
 	if x != nil {
-		if x, ok := x.Envelope.(*InboundMessage_PublishPayload); ok {
-			return x.PublishPayload
+		if x, ok := x.Envelope.(*InboundMessage_Publish); ok {
+			return x.Publish
 		}
 	}
 	return nil
@@ -197,16 +197,16 @@ type InboundMessage_Unsubscribe struct {
 	Unsubscribe *Unsubscribe `protobuf:"bytes,13,opt,name=unsubscribe,proto3,oneof"`
 }
 
-type InboundMessage_RpcRequestPayload struct {
-	RpcRequestPayload *pb.CloudEvent `protobuf:"bytes,14,opt,name=rpc_request_payload,json=rpc_request,proto3,oneof"`
+type InboundMessage_RpcRequest struct {
+	RpcRequest *pb.CloudEvent `protobuf:"bytes,14,opt,name=rpc_request,proto3,oneof"`
 }
 
 type InboundMessage_Ping struct {
 	Ping *Ping `protobuf:"bytes,15,opt,name=ping,proto3,oneof"`
 }
 
-type InboundMessage_PublishPayload struct {
-	PublishPayload *pb.CloudEvent `protobuf:"bytes,16,opt,name=publish_payload,json=publishPayload,proto3,oneof"`
+type InboundMessage_Publish struct {
+	Publish *pb.CloudEvent `protobuf:"bytes,16,opt,name=publish,proto3,oneof"`
 }
 
 type InboundMessage_SubRefresh struct {
@@ -219,11 +219,11 @@ func (*InboundMessage_Subscribe) isInboundMessage_Envelope() {}
 
 func (*InboundMessage_Unsubscribe) isInboundMessage_Envelope() {}
 
-func (*InboundMessage_RpcRequestPayload) isInboundMessage_Envelope() {}
+func (*InboundMessage_RpcRequest) isInboundMessage_Envelope() {}
 
 func (*InboundMessage_Ping) isInboundMessage_Envelope() {}
 
-func (*InboundMessage_PublishPayload) isInboundMessage_Envelope() {}
+func (*InboundMessage_Publish) isInboundMessage_Envelope() {}
 
 func (*InboundMessage_SubRefresh) isInboundMessage_Envelope() {}
 
@@ -238,7 +238,7 @@ type OutboundMessage struct {
 	//	*OutboundMessage_Connected
 	//	*OutboundMessage_SubscribeAck
 	//	*OutboundMessage_UnsubscribeAck
-	//	*OutboundMessage_RpcReplyPayload
+	//	*OutboundMessage_RpcReply
 	//	*OutboundMessage_Pong
 	//	*OutboundMessage_PublishAck
 	//	*OutboundMessage_Publication
@@ -342,10 +342,10 @@ func (x *OutboundMessage) GetUnsubscribeAck() *UnsubscribeAck {
 	return nil
 }
 
-func (x *OutboundMessage) GetRpcReplyPayload() *pb.CloudEvent {
+func (x *OutboundMessage) GetRpcReply() *pb.CloudEvent {
 	if x != nil {
-		if x, ok := x.Envelope.(*OutboundMessage_RpcReplyPayload); ok {
-			return x.RpcReplyPayload
+		if x, ok := x.Envelope.(*OutboundMessage_RpcReply); ok {
+			return x.RpcReply
 		}
 	}
 	return nil
@@ -407,8 +407,8 @@ type OutboundMessage_UnsubscribeAck struct {
 	UnsubscribeAck *UnsubscribeAck `protobuf:"bytes,14,opt,name=unsubscribe_ack,proto3,oneof"`
 }
 
-type OutboundMessage_RpcReplyPayload struct {
-	RpcReplyPayload *pb.CloudEvent `protobuf:"bytes,15,opt,name=rpc_reply_payload,json=rpc_reply,proto3,oneof"`
+type OutboundMessage_RpcReply struct {
+	RpcReply *pb.CloudEvent `protobuf:"bytes,15,opt,name=rpc_reply,proto3,oneof"`
 }
 
 type OutboundMessage_Pong struct {
@@ -435,7 +435,7 @@ func (*OutboundMessage_SubscribeAck) isOutboundMessage_Envelope() {}
 
 func (*OutboundMessage_UnsubscribeAck) isOutboundMessage_Envelope() {}
 
-func (*OutboundMessage_RpcReplyPayload) isOutboundMessage_Envelope() {}
+func (*OutboundMessage_RpcReply) isOutboundMessage_Envelope() {}
 
 func (*OutboundMessage_Pong) isOutboundMessage_Envelope() {}
 
@@ -1285,7 +1285,7 @@ var File_v1_service_proto protoreflect.FileDescriptor
 
 const file_v1_service_proto_rawDesc = "" +
 	"\n" +
-	"\x10v1/service.proto\x12\x0emessageloop.v1\x1a\x16shared/v1/errors.proto\x1a&includes/cloudevents/cloudevents.proto\"\xab\x05\n" +
+	"\x10v1/service.proto\x12\x0emessageloop.v1\x1a\x16shared/v1/errors.proto\x1a&includes/cloudevents/cloudevents.proto\"\x94\x05\n" +
 	"\x0eInboundMessage\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
 	"\achannel\x18\x02 \x01(\tR\achannel\x12\x16\n" +
@@ -1294,16 +1294,16 @@ const file_v1_service_proto_rawDesc = "" +
 	"\x04time\x18\x05 \x01(\x04R\x04time\x123\n" +
 	"\aconnect\x18\v \x01(\v2\x17.messageloop.v1.ConnectH\x00R\aconnect\x129\n" +
 	"\tsubscribe\x18\f \x01(\v2\x19.messageloop.v1.SubscribeH\x00R\tsubscribe\x12?\n" +
-	"\vunsubscribe\x18\r \x01(\v2\x1b.messageloop.v1.UnsubscribeH\x00R\vunsubscribe\x12I\n" +
-	"\x13rpc_request_payload\x18\x0e \x01(\v2\x1d.io.cloudevents.v1.CloudEventH\x00R\vrpc_request\x12*\n" +
-	"\x04ping\x18\x0f \x01(\v2\x14.messageloop.v1.PingH\x00R\x04ping\x12H\n" +
-	"\x0fpublish_payload\x18\x10 \x01(\v2\x1d.io.cloudevents.v1.CloudEventH\x00R\x0epublishPayload\x12>\n" +
+	"\vunsubscribe\x18\r \x01(\v2\x1b.messageloop.v1.UnsubscribeH\x00R\vunsubscribe\x12A\n" +
+	"\vrpc_request\x18\x0e \x01(\v2\x1d.io.cloudevents.v1.CloudEventH\x00R\vrpc_request\x12*\n" +
+	"\x04ping\x18\x0f \x01(\v2\x14.messageloop.v1.PingH\x00R\x04ping\x129\n" +
+	"\apublish\x18\x10 \x01(\v2\x1d.io.cloudevents.v1.CloudEventH\x00R\apublish\x12>\n" +
 	"\vsub_refresh\x18\x11 \x01(\v2\x1a.messageloop.v1.SubRefreshH\x00R\vsub_refresh\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\n" +
 	"\n" +
-	"\benvelope\"\x8b\x06\n" +
+	"\benvelope\"\x83\x06\n" +
 	"\x0fOutboundMessage\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12I\n" +
 	"\bmetadata\x18\x02 \x03(\v2-.messageloop.v1.OutboundMessage.MetadataEntryR\bmetadata\x12\x12\n" +
@@ -1311,8 +1311,8 @@ const file_v1_service_proto_rawDesc = "" +
 	"\x05error\x18\v \x01(\v2\x1c.messageloop.shared.v1.ErrorH\x00R\x05error\x129\n" +
 	"\tconnected\x18\f \x01(\v2\x19.messageloop.v1.ConnectedH\x00R\tconnected\x12D\n" +
 	"\rsubscribe_ack\x18\r \x01(\v2\x1c.messageloop.v1.SubscribeAckH\x00R\rsubscribe_ack\x12J\n" +
-	"\x0funsubscribe_ack\x18\x0e \x01(\v2\x1e.messageloop.v1.UnsubscribeAckH\x00R\x0funsubscribe_ack\x12E\n" +
-	"\x11rpc_reply_payload\x18\x0f \x01(\v2\x1d.io.cloudevents.v1.CloudEventH\x00R\trpc_reply\x12*\n" +
+	"\x0funsubscribe_ack\x18\x0e \x01(\v2\x1e.messageloop.v1.UnsubscribeAckH\x00R\x0funsubscribe_ack\x12=\n" +
+	"\trpc_reply\x18\x0f \x01(\v2\x1d.io.cloudevents.v1.CloudEventH\x00R\trpc_reply\x12*\n" +
 	"\x04pong\x18\x10 \x01(\v2\x14.messageloop.v1.PongH\x00R\x04pong\x12>\n" +
 	"\vpublish_ack\x18\x11 \x01(\v2\x1a.messageloop.v1.PublishAckH\x00R\vpublish_ack\x12?\n" +
 	"\vpublication\x18\x12 \x01(\v2\x1b.messageloop.v1.PublicationH\x00R\vpublication\x12I\n" +
@@ -1419,16 +1419,16 @@ var file_v1_service_proto_depIdxs = []int32{
 	2,  // 1: messageloop.v1.InboundMessage.connect:type_name -> messageloop.v1.Connect
 	9,  // 2: messageloop.v1.InboundMessage.subscribe:type_name -> messageloop.v1.Subscribe
 	11, // 3: messageloop.v1.InboundMessage.unsubscribe:type_name -> messageloop.v1.Unsubscribe
-	21, // 4: messageloop.v1.InboundMessage.rpc_request_payload:type_name -> io.cloudevents.v1.CloudEvent
+	21, // 4: messageloop.v1.InboundMessage.rpc_request:type_name -> io.cloudevents.v1.CloudEvent
 	14, // 5: messageloop.v1.InboundMessage.ping:type_name -> messageloop.v1.Ping
-	21, // 6: messageloop.v1.InboundMessage.publish_payload:type_name -> io.cloudevents.v1.CloudEvent
+	21, // 6: messageloop.v1.InboundMessage.publish:type_name -> io.cloudevents.v1.CloudEvent
 	17, // 7: messageloop.v1.InboundMessage.sub_refresh:type_name -> messageloop.v1.SubRefresh
 	20, // 8: messageloop.v1.OutboundMessage.metadata:type_name -> messageloop.v1.OutboundMessage.MetadataEntry
 	22, // 9: messageloop.v1.OutboundMessage.error:type_name -> messageloop.shared.v1.Error
 	7,  // 10: messageloop.v1.OutboundMessage.connected:type_name -> messageloop.v1.Connected
 	10, // 11: messageloop.v1.OutboundMessage.subscribe_ack:type_name -> messageloop.v1.SubscribeAck
 	12, // 12: messageloop.v1.OutboundMessage.unsubscribe_ack:type_name -> messageloop.v1.UnsubscribeAck
-	21, // 13: messageloop.v1.OutboundMessage.rpc_reply_payload:type_name -> io.cloudevents.v1.CloudEvent
+	21, // 13: messageloop.v1.OutboundMessage.rpc_reply:type_name -> io.cloudevents.v1.CloudEvent
 	15, // 14: messageloop.v1.OutboundMessage.pong:type_name -> messageloop.v1.Pong
 	16, // 15: messageloop.v1.OutboundMessage.publish_ack:type_name -> messageloop.v1.PublishAck
 	6,  // 16: messageloop.v1.OutboundMessage.publication:type_name -> messageloop.v1.Publication
@@ -1464,9 +1464,9 @@ func file_v1_service_proto_init() {
 		(*InboundMessage_Connect)(nil),
 		(*InboundMessage_Subscribe)(nil),
 		(*InboundMessage_Unsubscribe)(nil),
-		(*InboundMessage_RpcRequestPayload)(nil),
+		(*InboundMessage_RpcRequest)(nil),
 		(*InboundMessage_Ping)(nil),
-		(*InboundMessage_PublishPayload)(nil),
+		(*InboundMessage_Publish)(nil),
 		(*InboundMessage_SubRefresh)(nil),
 	}
 	file_v1_service_proto_msgTypes[1].OneofWrappers = []any{
@@ -1474,7 +1474,7 @@ func file_v1_service_proto_init() {
 		(*OutboundMessage_Connected)(nil),
 		(*OutboundMessage_SubscribeAck)(nil),
 		(*OutboundMessage_UnsubscribeAck)(nil),
-		(*OutboundMessage_RpcReplyPayload)(nil),
+		(*OutboundMessage_RpcReply)(nil),
 		(*OutboundMessage_Pong)(nil),
 		(*OutboundMessage_PublishAck)(nil),
 		(*OutboundMessage_Publication)(nil),
