@@ -77,14 +77,18 @@ message OnConnectedResponse{
 }
 
 message OnSubscribedRequest {
-
+  string session_id = 1;
+  string channel = 2;
+  string username = 3;
 }
 message OnSubscribedResponse {
 
 }
 
 message OnUnsubscribedRequest {
-
+  string session_id = 1;
+  string channel = 2;
+  string username = 3;
 }
 
 message OnUnsubscribedResponse {

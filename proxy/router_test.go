@@ -19,6 +19,30 @@ func (m *mockRPCProxy) ProxyRPC(ctx context.Context, req *RPCProxyRequest) (*RPC
 	}, nil
 }
 
+func (m *mockRPCProxy) Authenticate(ctx context.Context, req *AuthenticateProxyRequest) (*AuthenticateProxyResponse, error) {
+	return &AuthenticateProxyResponse{}, nil
+}
+
+func (m *mockRPCProxy) SubscribeAcl(ctx context.Context, req *SubscribeAclProxyRequest) (*SubscribeAclProxyResponse, error) {
+	return &SubscribeAclProxyResponse{}, nil
+}
+
+func (m *mockRPCProxy) OnConnected(ctx context.Context, req *OnConnectedProxyRequest) (*OnConnectedProxyResponse, error) {
+	return &OnConnectedProxyResponse{}, nil
+}
+
+func (m *mockRPCProxy) OnSubscribed(ctx context.Context, req *OnSubscribedProxyRequest) (*OnSubscribedProxyResponse, error) {
+	return &OnSubscribedProxyResponse{}, nil
+}
+
+func (m *mockRPCProxy) OnUnsubscribed(ctx context.Context, req *OnUnsubscribedProxyRequest) (*OnUnsubscribedProxyResponse, error) {
+	return &OnUnsubscribedProxyResponse{}, nil
+}
+
+func (m *mockRPCProxy) OnDisconnected(ctx context.Context, req *OnDisconnectedProxyRequest) (*OnDisconnectedProxyResponse, error) {
+	return &OnDisconnectedProxyResponse{}, nil
+}
+
 func (m *mockRPCProxy) Name() string {
 	return m.name
 }

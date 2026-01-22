@@ -14,6 +14,24 @@ type RPCProxy interface {
 	// ProxyRPC forwards an RPC request to the backend service.
 	ProxyRPC(ctx context.Context, req *RPCProxyRequest) (*RPCProxyResponse, error)
 
+	// Authenticate forwards an authentication request to the backend service.
+	Authenticate(ctx context.Context, req *AuthenticateProxyRequest) (*AuthenticateProxyResponse, error)
+
+	// SubscribeAcl forwards a subscription ACL check request to the backend service.
+	SubscribeAcl(ctx context.Context, req *SubscribeAclProxyRequest) (*SubscribeAclProxyResponse, error)
+
+	// OnConnected notifies the backend when a client connects.
+	OnConnected(ctx context.Context, req *OnConnectedProxyRequest) (*OnConnectedProxyResponse, error)
+
+	// OnSubscribed notifies the backend when a client subscribes to a channel.
+	OnSubscribed(ctx context.Context, req *OnSubscribedProxyRequest) (*OnSubscribedProxyResponse, error)
+
+	// OnUnsubscribed notifies the backend when a client unsubscribes from a channel.
+	OnUnsubscribed(ctx context.Context, req *OnUnsubscribedProxyRequest) (*OnUnsubscribedProxyResponse, error)
+
+	// OnDisconnected notifies the backend when a client disconnects.
+	OnDisconnected(ctx context.Context, req *OnDisconnectedProxyRequest) (*OnDisconnectedProxyResponse, error)
+
 	// Name returns the name of this proxy instance.
 	Name() string
 
@@ -122,3 +140,196 @@ type RouteConfig struct {
 
 // DefaultRPCTimeout is the default timeout for RPC proxy requests.
 const DefaultRPCTimeout = 30 * time.Second
+
+// AuthenticateProxyRequest represents an authentication request to be proxied.
+type AuthenticateProxyRequest struct {
+	Username   string
+	Password   string
+	ClientType string
+	ClientID   string
+}
+
+// ToProtoRequest converts an AuthenticateProxyRequest to the protobuf AuthenticateRequest.
+func (r *AuthenticateProxyRequest) ToProtoRequest() *proxypb.AuthenticateRequest {
+	return &proxypb.AuthenticateRequest{
+		Username:   r.Username,
+		Password:   r.Password,
+		ClientType: r.ClientType,
+		ClientId:   r.ClientID,
+	}
+}
+
+// AuthenticateProxyResponse represents an authentication response from the proxy backend.
+type AuthenticateProxyResponse struct {
+	Error    *sharedpb.Error
+	UserInfo *UserInfo
+}
+
+// UserInfo represents user information returned from authentication.
+type UserInfo struct {
+	ID         string
+	Username   string
+	Token      string
+	ClientType string
+	ClientID   string
+}
+
+// FromProtoResponse creates an AuthenticateProxyResponse from the protobuf AuthenticateResponse.
+func FromProtoAuthenticateResponse(resp *proxypb.AuthenticateResponse) *AuthenticateProxyResponse {
+	if resp == nil {
+		return &AuthenticateProxyResponse{}
+	}
+	userInfo := &UserInfo{}
+	if resp.UserInfo != nil {
+		userInfo = &UserInfo{
+			ID:         resp.UserInfo.Id,
+			Username:   resp.UserInfo.Username,
+			Token:      resp.UserInfo.Token,
+			ClientType: resp.UserInfo.ClientType,
+			ClientID:   resp.UserInfo.ClientId,
+		}
+	}
+	return &AuthenticateProxyResponse{
+		Error:    resp.Error,
+		UserInfo: userInfo,
+	}
+}
+
+// SubscribeAclProxyRequest represents a subscription ACL check request to be proxied.
+type SubscribeAclProxyRequest struct {
+	Channel string
+	Token   string
+}
+
+// ToProtoRequest converts a SubscribeAclProxyRequest to the protobuf SubscribeAclRequest.
+func (r *SubscribeAclProxyRequest) ToProtoRequest() *proxypb.SubscribeAclRequest {
+	return &proxypb.SubscribeAclRequest{
+		Channel: r.Channel,
+		Token:   r.Token,
+	}
+}
+
+// SubscribeAclProxyResponse represents a subscription ACL response from the proxy backend.
+type SubscribeAclProxyResponse struct {
+	Error *sharedpb.Error
+}
+
+// FromProtoResponse creates a SubscribeAclProxyResponse from the protobuf SubscribeAclResponse.
+func FromProtoSubscribeAclResponse(resp *proxypb.SubscribeAclResponse) *SubscribeAclProxyResponse {
+	if resp == nil {
+		return &SubscribeAclProxyResponse{}
+	}
+	return &SubscribeAclProxyResponse{}
+}
+
+// OnConnectedProxyRequest represents a client connected notification to be proxied.
+type OnConnectedProxyRequest struct {
+	SessionID string
+	Username  string
+}
+
+// ToProtoRequest converts an OnConnectedProxyRequest to the protobuf OnConnectedRequest.
+func (r *OnConnectedProxyRequest) ToProtoRequest() *proxypb.OnConnectedRequest {
+	return &proxypb.OnConnectedRequest{
+		SessionId: r.SessionID,
+		Username:  r.Username,
+	}
+}
+
+// OnConnectedProxyResponse represents a response from the OnConnected notification.
+type OnConnectedProxyResponse struct {
+	Error *sharedpb.Error
+}
+
+// FromProtoResponse creates an OnConnectedProxyResponse from the protobuf OnConnectedResponse.
+func FromProtoOnConnectedResponse(resp *proxypb.OnConnectedResponse) *OnConnectedProxyResponse {
+	if resp == nil {
+		return &OnConnectedProxyResponse{}
+	}
+	return &OnConnectedProxyResponse{}
+}
+
+// OnSubscribedProxyRequest represents a client subscribed notification to be proxied.
+type OnSubscribedProxyRequest struct {
+	SessionID string
+	Channel   string
+	Username  string
+}
+
+// ToProtoRequest converts an OnSubscribedProxyRequest to the protobuf OnSubscribedRequest.
+func (r *OnSubscribedProxyRequest) ToProtoRequest() *proxypb.OnSubscribedRequest {
+	return &proxypb.OnSubscribedRequest{
+		SessionId: r.SessionID,
+		Channel:   r.Channel,
+		Username:  r.Username,
+	}
+}
+
+// OnSubscribedProxyResponse represents a response from the OnSubscribed notification.
+type OnSubscribedProxyResponse struct {
+	Error *sharedpb.Error
+}
+
+// FromProtoResponse creates an OnSubscribedProxyResponse from the protobuf OnSubscribedResponse.
+func FromProtoOnSubscribedResponse(resp *proxypb.OnSubscribedResponse) *OnSubscribedProxyResponse {
+	if resp == nil {
+		return &OnSubscribedProxyResponse{}
+	}
+	return &OnSubscribedProxyResponse{}
+}
+
+// OnUnsubscribedProxyRequest represents a client unsubscribed notification to be proxied.
+type OnUnsubscribedProxyRequest struct {
+	SessionID string
+	Channel   string
+	Username  string
+}
+
+// ToProtoRequest converts an OnUnsubscribedProxyRequest to the protobuf OnUnsubscribedRequest.
+func (r *OnUnsubscribedProxyRequest) ToProtoRequest() *proxypb.OnUnsubscribedRequest {
+	return &proxypb.OnUnsubscribedRequest{
+		SessionId: r.SessionID,
+		Channel:   r.Channel,
+		Username:  r.Username,
+	}
+}
+
+// OnUnsubscribedProxyResponse represents a response from the OnUnsubscribed notification.
+type OnUnsubscribedProxyResponse struct {
+	Error *sharedpb.Error
+}
+
+// FromProtoResponse creates an OnUnsubscribedProxyResponse from the protobuf OnUnsubscribedResponse.
+func FromProtoOnUnsubscribedResponse(resp *proxypb.OnUnsubscribedResponse) *OnUnsubscribedProxyResponse {
+	if resp == nil {
+		return &OnUnsubscribedProxyResponse{}
+	}
+	return &OnUnsubscribedProxyResponse{}
+}
+
+// OnDisconnectedProxyRequest represents a client disconnected notification to be proxied.
+type OnDisconnectedProxyRequest struct {
+	SessionID string
+	Username  string
+}
+
+// ToProtoRequest converts an OnDisconnectedProxyRequest to the protobuf OnDisconnectedRequest.
+func (r *OnDisconnectedProxyRequest) ToProtoRequest() *proxypb.OnDisconnectedRequest {
+	return &proxypb.OnDisconnectedRequest{
+		SessionId: r.SessionID,
+		Username:  r.Username,
+	}
+}
+
+// OnDisconnectedProxyResponse represents a response from the OnDisconnected notification.
+type OnDisconnectedProxyResponse struct {
+	Error *sharedpb.Error
+}
+
+// FromProtoResponse creates an OnDisconnectedProxyResponse from the protobuf OnDisconnectedResponse.
+func FromProtoOnDisconnectedResponse(resp *proxypb.OnDisconnectedResponse) *OnDisconnectedProxyResponse {
+	if resp == nil {
+		return &OnDisconnectedProxyResponse{}
+	}
+	return &OnDisconnectedProxyResponse{}
+}

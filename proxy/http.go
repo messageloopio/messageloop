@@ -67,12 +67,7 @@ func NewHTTPProxy(cfg *ProxyConfig) (*HTTPProxy, error) {
 
 // ProxyRPC implements RPCProxy.ProxyRPC.
 func (p *HTTPProxy) ProxyRPC(ctx context.Context, req *RPCProxyRequest) (*RPCProxyResponse, error) {
-	// Apply timeout if not already set in context
-	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, p.timeout)
-		defer cancel()
-	}
+	ctx = p.withTimeout(ctx)
 
 	// Build the HTTP request
 	protoReq := req.ToProtoRequest()
@@ -91,16 +86,236 @@ func (p *HTTPProxy) ProxyRPC(ctx context.Context, req *RPCProxyRequest) (*RPCPro
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
+	result, err := p.doRequest(ctx, httpReq, "RPC", req.Channel, req.Method,
+		func(respBody []byte) (any, error) {
+			var protoResp proxypb.RPCResponse
+			if err := json.Unmarshal(respBody, &protoResp); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+			}
+			return FromProtoReply(&protoResp), nil
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	return result.(*RPCProxyResponse), nil
+}
+
+// Authenticate implements RPCProxy.Authenticate.
+func (p *HTTPProxy) Authenticate(ctx context.Context, req *AuthenticateProxyRequest) (*AuthenticateProxyResponse, error) {
+	ctx = p.withTimeout(ctx)
+
+	protoReq := req.ToProtoRequest()
+	body, err := json.Marshal(map[string]any{
+		"username":    protoReq.Username,
+		"password":    protoReq.Password,
+		"client_type": protoReq.ClientType,
+		"client_id":   protoReq.ClientId,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	result, err := p.doRequest(ctx, httpReq, "Authenticate", req.Username, "",
+		func(respBody []byte) (any, error) {
+			var protoResp proxypb.AuthenticateResponse
+			if err := json.Unmarshal(respBody, &protoResp); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+			}
+			return FromProtoAuthenticateResponse(&protoResp), nil
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	return result.(*AuthenticateProxyResponse), nil
+}
+
+// SubscribeAcl implements RPCProxy.SubscribeAcl.
+func (p *HTTPProxy) SubscribeAcl(ctx context.Context, req *SubscribeAclProxyRequest) (*SubscribeAclProxyResponse, error) {
+	ctx = p.withTimeout(ctx)
+
+	protoReq := req.ToProtoRequest()
+	body, err := json.Marshal(map[string]any{
+		"channel": protoReq.Channel,
+		"token":   protoReq.Token,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	result, err := p.doRequest(ctx, httpReq, "SubscribeAcl", req.Channel, "",
+		func(respBody []byte) (any, error) {
+			var protoResp proxypb.SubscribeAclResponse
+			if err := json.Unmarshal(respBody, &protoResp); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+			}
+			return FromProtoSubscribeAclResponse(&protoResp), nil
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	return result.(*SubscribeAclProxyResponse), nil
+}
+
+// OnConnected implements RPCProxy.OnConnected.
+func (p *HTTPProxy) OnConnected(ctx context.Context, req *OnConnectedProxyRequest) (*OnConnectedProxyResponse, error) {
+	ctx = p.withTimeout(ctx)
+
+	protoReq := req.ToProtoRequest()
+	body, err := json.Marshal(map[string]any{
+		"session_id": protoReq.SessionId,
+		"username":   protoReq.Username,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	result, err := p.doRequest(ctx, httpReq, "OnConnected", req.SessionID, "",
+		func(respBody []byte) (any, error) {
+			var protoResp proxypb.OnConnectedResponse
+			if err := json.Unmarshal(respBody, &protoResp); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+			}
+			return FromProtoOnConnectedResponse(&protoResp), nil
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	return result.(*OnConnectedProxyResponse), nil
+}
+
+// OnSubscribed implements RPCProxy.OnSubscribed.
+func (p *HTTPProxy) OnSubscribed(ctx context.Context, req *OnSubscribedProxyRequest) (*OnSubscribedProxyResponse, error) {
+	ctx = p.withTimeout(ctx)
+
+	protoReq := req.ToProtoRequest()
+	body, err := json.Marshal(map[string]any{
+		"session_id": protoReq.SessionId,
+		"channel":    protoReq.Channel,
+		"username":   protoReq.Username,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	result, err := p.doRequest(ctx, httpReq, "OnSubscribed", req.SessionID, req.Channel,
+		func(respBody []byte) (any, error) {
+			var protoResp proxypb.OnSubscribedResponse
+			if err := json.Unmarshal(respBody, &protoResp); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+			}
+			return FromProtoOnSubscribedResponse(&protoResp), nil
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	return result.(*OnSubscribedProxyResponse), nil
+}
+
+// OnUnsubscribed implements RPCProxy.OnUnsubscribed.
+func (p *HTTPProxy) OnUnsubscribed(ctx context.Context, req *OnUnsubscribedProxyRequest) (*OnUnsubscribedProxyResponse, error) {
+	ctx = p.withTimeout(ctx)
+
+	protoReq := req.ToProtoRequest()
+	body, err := json.Marshal(map[string]any{
+		"session_id": protoReq.SessionId,
+		"channel":    protoReq.Channel,
+		"username":   protoReq.Username,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	result, err := p.doRequest(ctx, httpReq, "OnUnsubscribed", req.SessionID, req.Channel,
+		func(respBody []byte) (any, error) {
+			var protoResp proxypb.OnUnsubscribedResponse
+			if err := json.Unmarshal(respBody, &protoResp); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+			}
+			return FromProtoOnUnsubscribedResponse(&protoResp), nil
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	return result.(*OnUnsubscribedProxyResponse), nil
+}
+
+// OnDisconnected implements RPCProxy.OnDisconnected.
+func (p *HTTPProxy) OnDisconnected(ctx context.Context, req *OnDisconnectedProxyRequest) (*OnDisconnectedProxyResponse, error) {
+	ctx = p.withTimeout(ctx)
+
+	protoReq := req.ToProtoRequest()
+	body, err := json.Marshal(map[string]any{
+		"session_id": protoReq.SessionId,
+		"username":   protoReq.Username,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	result, err := p.doRequest(ctx, httpReq, "OnDisconnected", req.SessionID, "",
+		func(respBody []byte) (any, error) {
+			var protoResp proxypb.OnDisconnectedResponse
+			if err := json.Unmarshal(respBody, &protoResp); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+			}
+			return FromProtoOnDisconnectedResponse(&protoResp), nil
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	return result.(*OnDisconnectedProxyResponse), nil
+}
+
+// doRequest is a helper function for making HTTP requests.
+func (p *HTTPProxy) doRequest(ctx context.Context, httpReq *http.Request, method, channel, extra string, parseFunc func([]byte) (any, error)) (any, error) {
 	// Set headers
 	for k, v := range p.headers {
 		httpReq.Header.Set(k, v)
 	}
 
-	log.DebugContext(ctx, "proxying HTTP RPC request",
+	log.DebugContext(ctx, "proxying HTTP request",
 		"proxy", p.name,
-		"endpoint", p.endpoint,
-		"channel", req.Channel,
-		"method", req.Method,
+		"endpoint", httpReq.URL.String(),
+		"method", method,
+		"channel", channel,
+		"extra", extra,
 	)
 
 	// Send the request
@@ -121,13 +336,17 @@ func (p *HTTPProxy) ProxyRPC(ctx context.Context, req *RPCProxyRequest) (*RPCPro
 		return nil, fmt.Errorf("proxy returned status %d: %s", resp.StatusCode, string(respBody))
 	}
 
-	// Parse response
-	var protoResp proxypb.RPCResponse
-	if err := json.Unmarshal(respBody, &protoResp); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
-	}
+	return parseFunc(respBody)
+}
 
-	return FromProtoReply(&protoResp), nil
+// withTimeout applies the proxy timeout if not already set in context.
+func (p *HTTPProxy) withTimeout(ctx context.Context) context.Context {
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, p.timeout)
+		_ = cancel // Caller is responsible for using the context
+	}
+	return ctx
 }
 
 // Name implements RPCProxy.Name.

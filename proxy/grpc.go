@@ -62,12 +62,7 @@ func NewGRPCProxy(cfg *ProxyConfig) (*GRPCProxy, error) {
 
 // ProxyRPC implements RPCProxy.ProxyRPC.
 func (p *GRPCProxy) ProxyRPC(ctx context.Context, req *RPCProxyRequest) (*RPCProxyResponse, error) {
-	// Apply timeout if not already set in context
-	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, p.timeout)
-		defer cancel()
-	}
+	ctx = p.withTimeout(ctx)
 
 	protoReq := req.ToProtoRequest()
 
@@ -84,6 +79,138 @@ func (p *GRPCProxy) ProxyRPC(ctx context.Context, req *RPCProxyRequest) (*RPCPro
 	}
 
 	return FromProtoReply(resp), nil
+}
+
+// Authenticate implements RPCProxy.Authenticate.
+func (p *GRPCProxy) Authenticate(ctx context.Context, req *AuthenticateProxyRequest) (*AuthenticateProxyResponse, error) {
+	ctx = p.withTimeout(ctx)
+
+	protoReq := req.ToProtoRequest()
+
+	log.DebugContext(ctx, "proxying gRPC Authenticate request",
+		"proxy", p.name,
+		"endpoint", p.endpoint,
+		"username", req.Username,
+	)
+
+	resp, err := p.client.Authenticate(ctx, protoReq)
+	if err != nil {
+		return nil, fmt.Errorf("gRPC authenticate failed: %w", err)
+	}
+
+	return FromProtoAuthenticateResponse(resp), nil
+}
+
+// SubscribeAcl implements RPCProxy.SubscribeAcl.
+func (p *GRPCProxy) SubscribeAcl(ctx context.Context, req *SubscribeAclProxyRequest) (*SubscribeAclProxyResponse, error) {
+	ctx = p.withTimeout(ctx)
+
+	protoReq := req.ToProtoRequest()
+
+	log.DebugContext(ctx, "proxying gRPC SubscribeAcl request",
+		"proxy", p.name,
+		"endpoint", p.endpoint,
+		"channel", req.Channel,
+	)
+
+	resp, err := p.client.SubscribeAcl(ctx, protoReq)
+	if err != nil {
+		return nil, fmt.Errorf("gRPC subscribe acl failed: %w", err)
+	}
+
+	return FromProtoSubscribeAclResponse(resp), nil
+}
+
+// OnConnected implements RPCProxy.OnConnected.
+func (p *GRPCProxy) OnConnected(ctx context.Context, req *OnConnectedProxyRequest) (*OnConnectedProxyResponse, error) {
+	ctx = p.withTimeout(ctx)
+
+	protoReq := req.ToProtoRequest()
+
+	log.DebugContext(ctx, "proxying gRPC OnConnected request",
+		"proxy", p.name,
+		"endpoint", p.endpoint,
+		"session_id", req.SessionID,
+	)
+
+	resp, err := p.client.OnConnected(ctx, protoReq)
+	if err != nil {
+		return nil, fmt.Errorf("gRPC on connected failed: %w", err)
+	}
+
+	return FromProtoOnConnectedResponse(resp), nil
+}
+
+// OnSubscribed implements RPCProxy.OnSubscribed.
+func (p *GRPCProxy) OnSubscribed(ctx context.Context, req *OnSubscribedProxyRequest) (*OnSubscribedProxyResponse, error) {
+	ctx = p.withTimeout(ctx)
+
+	protoReq := req.ToProtoRequest()
+
+	log.DebugContext(ctx, "proxying gRPC OnSubscribed request",
+		"proxy", p.name,
+		"endpoint", p.endpoint,
+		"session_id", req.SessionID,
+		"channel", req.Channel,
+	)
+
+	resp, err := p.client.OnSubscribed(ctx, protoReq)
+	if err != nil {
+		return nil, fmt.Errorf("gRPC on subscribed failed: %w", err)
+	}
+
+	return FromProtoOnSubscribedResponse(resp), nil
+}
+
+// OnUnsubscribed implements RPCProxy.OnUnsubscribed.
+func (p *GRPCProxy) OnUnsubscribed(ctx context.Context, req *OnUnsubscribedProxyRequest) (*OnUnsubscribedProxyResponse, error) {
+	ctx = p.withTimeout(ctx)
+
+	protoReq := req.ToProtoRequest()
+
+	log.DebugContext(ctx, "proxying gRPC OnUnsubscribed request",
+		"proxy", p.name,
+		"endpoint", p.endpoint,
+		"session_id", req.SessionID,
+		"channel", req.Channel,
+	)
+
+	resp, err := p.client.OnUnsubscribed(ctx, protoReq)
+	if err != nil {
+		return nil, fmt.Errorf("gRPC on unsubscribed failed: %w", err)
+	}
+
+	return FromProtoOnUnsubscribedResponse(resp), nil
+}
+
+// OnDisconnected implements RPCProxy.OnDisconnected.
+func (p *GRPCProxy) OnDisconnected(ctx context.Context, req *OnDisconnectedProxyRequest) (*OnDisconnectedProxyResponse, error) {
+	ctx = p.withTimeout(ctx)
+
+	protoReq := req.ToProtoRequest()
+
+	log.DebugContext(ctx, "proxying gRPC OnDisconnected request",
+		"proxy", p.name,
+		"endpoint", p.endpoint,
+		"session_id", req.SessionID,
+	)
+
+	resp, err := p.client.OnDisconnected(ctx, protoReq)
+	if err != nil {
+		return nil, fmt.Errorf("gRPC on disconnected failed: %w", err)
+	}
+
+	return FromProtoOnDisconnectedResponse(resp), nil
+}
+
+// withTimeout applies the proxy timeout if not already set in context.
+func (p *GRPCProxy) withTimeout(ctx context.Context) context.Context {
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, p.timeout)
+		_ = cancel // Caller is responsible for using the context
+	}
+	return ctx
 }
 
 // Name implements RPCProxy.Name.

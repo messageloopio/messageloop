@@ -54,7 +54,7 @@ func TestHTTPProxy_ProxyRPC(t *testing.T) {
 		// Build response using JSON directly to avoid protobuf marshaling issues
 		respJSON := `{
 			"id": "` + reqBody["id"].(string) + `",
-			"reply": {
+			"payload": {
 				"id": "resp-123",
 				"source": "proxy-test",
 				"type": "test.response",

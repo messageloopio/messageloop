@@ -527,6 +527,9 @@ func (*OnConnectedResponse) Descriptor() ([]byte, []int) {
 
 type OnSubscribedRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	Channel       string                 `protobuf:"bytes,2,opt,name=channel,proto3" json:"channel,omitempty"`
+	Username      string                 `protobuf:"bytes,3,opt,name=username,proto3" json:"username,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -559,6 +562,27 @@ func (x *OnSubscribedRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use OnSubscribedRequest.ProtoReflect.Descriptor instead.
 func (*OnSubscribedRequest) Descriptor() ([]byte, []int) {
 	return file_proxy_v1_proxy_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *OnSubscribedRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *OnSubscribedRequest) GetChannel() string {
+	if x != nil {
+		return x.Channel
+	}
+	return ""
+}
+
+func (x *OnSubscribedRequest) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
 }
 
 type OnSubscribedResponse struct {
@@ -599,6 +623,9 @@ func (*OnSubscribedResponse) Descriptor() ([]byte, []int) {
 
 type OnUnsubscribedRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	Channel       string                 `protobuf:"bytes,2,opt,name=channel,proto3" json:"channel,omitempty"`
+	Username      string                 `protobuf:"bytes,3,opt,name=username,proto3" json:"username,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -631,6 +658,27 @@ func (x *OnUnsubscribedRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use OnUnsubscribedRequest.ProtoReflect.Descriptor instead.
 func (*OnUnsubscribedRequest) Descriptor() ([]byte, []int) {
 	return file_proxy_v1_proxy_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *OnUnsubscribedRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *OnUnsubscribedRequest) GetChannel() string {
+	if x != nil {
+		return x.Channel
+	}
+	return ""
+}
+
+func (x *OnUnsubscribedRequest) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
 }
 
 type OnUnsubscribedResponse struct {
@@ -796,10 +844,18 @@ const file_proxy_v1_proxy_proto_rawDesc = "" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1a\n" +
 	"\busername\x18\x02 \x01(\tR\busername\"\x15\n" +
-	"\x13OnConnectedResponse\"\x15\n" +
-	"\x13OnSubscribedRequest\"\x16\n" +
-	"\x14OnSubscribedResponse\"\x17\n" +
-	"\x15OnUnsubscribedRequest\"\x18\n" +
+	"\x13OnConnectedResponse\"j\n" +
+	"\x13OnSubscribedRequest\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x18\n" +
+	"\achannel\x18\x02 \x01(\tR\achannel\x12\x1a\n" +
+	"\busername\x18\x03 \x01(\tR\busername\"\x16\n" +
+	"\x14OnSubscribedResponse\"l\n" +
+	"\x15OnUnsubscribedRequest\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x18\n" +
+	"\achannel\x18\x02 \x01(\tR\achannel\x12\x1a\n" +
+	"\busername\x18\x03 \x01(\tR\busername\"\x18\n" +
 	"\x16OnUnsubscribedResponse\"R\n" +
 	"\x15OnDisconnectedRequest\x12\x1d\n" +
 	"\n" +

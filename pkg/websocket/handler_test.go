@@ -6,6 +6,7 @@ import (
 	"github.com/fleetlit/messageloop"
 	clientpb "github.com/fleetlit/messageloop/genproto/v1"
 	"github.com/google/uuid"
+	cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	"github.com/lynx-go/x/encoding/json"
 	"github.com/stretchr/testify/require"
 )
@@ -20,13 +21,20 @@ func TestHandler_marshaler(t *testing.T) {
 		Id:       uuid.NewString(),
 		Metadata: map[string]string{},
 		Envelope: &clientpb.OutboundMessage_Publication{
-			Publication: &clientpb.Publication{Messages: []*clientpb.Message{
+			Publication: &clientpb.Publication{Envelopes: []*clientpb.Message{
 				{
-					Id:           uuid.NewString(),
-					Channel:      "/topic/test",
-					Offset:       0,
-					PayloadBytes: bytes,
-					PayloadText:  string(bytes),
+					Id:      uuid.NewString(),
+					Channel: "/topic/test",
+					Offset:  0,
+					Payload: &cloudevents.CloudEvent{
+						Id:          uuid.NewString(),
+						Source:      "test-source",
+						Type:        "test.type",
+						SpecVersion: "1.0",
+						Data: &cloudevents.CloudEvent_TextData{
+							TextData: string(bytes),
+						},
+					},
 				},
 			}},
 		},
