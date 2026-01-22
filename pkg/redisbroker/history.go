@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/deeplooplabs/messageloop"
+	"github.com/fleetlit/messageloop"
 	"github.com/redis/go-redis/v9"
 )
 

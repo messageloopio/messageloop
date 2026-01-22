@@ -6,8 +6,8 @@ import (
 	"net"
 
 	pb "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
-	proxypb "github.com/deeplooplabs/messageloop/genproto/proxy/v1"
-	sharedpb "github.com/deeplooplabs/messageloop/genproto/shared/v1"
+	proxypb "github.com/fleetlit/messageloop/genproto/proxy/v1"
+	sharedpb "github.com/fleetlit/messageloop/genproto/shared/v1"
 	"github.com/lynx-go/lynx"
 	"github.com/lynx-go/x/log"
 	"google.golang.org/grpc"
@@ -67,9 +67,9 @@ type AuthenticateResponse struct {
 
 // UserInfo contains authenticated user information.
 type UserInfo struct {
-	ID        string
-	Username  string
-	Token     string
+	ID         string
+	Username   string
+	Token      string
 	ClientType string
 	ClientID   string
 }

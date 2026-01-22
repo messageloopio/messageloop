@@ -14,8 +14,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
-	proxypb "github.com/deeplooplabs/messageloop/genproto/proxy/v1"
 	cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
+	proxypb "github.com/fleetlit/messageloop/genproto/proxy/v1"
 )
 
 func TestNewHTTPProxy(t *testing.T) {
@@ -133,7 +133,7 @@ func TestHTTPProxy_Timeout(t *testing.T) {
 
 func TestNewGRPCProxy(t *testing.T) {
 	// Create a test gRPC server
- lis, err := net.Listen("tcp", "localhost:0")
+	lis, err := net.Listen("tcp", "localhost:0")
 	require.NoError(t, err)
 
 	server := grpc.NewServer()

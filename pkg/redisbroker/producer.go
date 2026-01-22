@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/deeplooplabs/messageloop"
+	"github.com/fleetlit/messageloop"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -26,10 +26,10 @@ func (b *redisBroker) publishToRedis(ch string, msg *redisMessage) (messageloop.
 	var id string
 	if b.options.StreamApproximate {
 		id, err = b.client.XAdd(ctx, &redis.XAddArgs{
-			Stream:  stream,
-			MaxLen:  b.options.StreamMaxLength,
-			Approx:  true,
-			Values:  map[string]interface{}{"data": payload},
+			Stream: stream,
+			MaxLen: b.options.StreamMaxLength,
+			Approx: true,
+			Values: map[string]interface{}{"data": payload},
 		}).Result()
 	} else {
 		id, err = b.client.XAdd(ctx, &redis.XAddArgs{

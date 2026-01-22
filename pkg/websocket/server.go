@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/deeplooplabs/messageloop"
+	"github.com/fleetlit/messageloop"
 	"github.com/lynx-go/lynx"
 	"github.com/lynx-go/x/log"
 )

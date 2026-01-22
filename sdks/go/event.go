@@ -2,7 +2,7 @@ package messageloopsdk
 
 import (
 	pb "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
-	clientpb "github.com/deeplooplabs/messageloop/genproto/v1"
+	clientpb "github.com/fleetlit/messageloop/genproto/v1"
 )
 
 // Message represents a received message from a subscribed channel.

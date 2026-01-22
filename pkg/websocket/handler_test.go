@@ -3,8 +3,8 @@ package websocket
 import (
 	"testing"
 
-	"github.com/deeplooplabs/messageloop"
-	clientpb "github.com/deeplooplabs/messageloop/genproto/v1"
+	"github.com/fleetlit/messageloop"
+	clientpb "github.com/fleetlit/messageloop/genproto/v1"
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/encoding/json"
 	"github.com/stretchr/testify/require"

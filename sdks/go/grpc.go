@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	clientpb "github.com/deeplooplabs/messageloop/genproto/v1"
+	clientpb "github.com/fleetlit/messageloop/genproto/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/encoding"

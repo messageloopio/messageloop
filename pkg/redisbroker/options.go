@@ -3,21 +3,21 @@ package redisbroker
 import (
 	"time"
 
-	"github.com/deeplooplabs/messageloop/config"
+	"github.com/fleetlit/messageloop/config"
 )
 
 const (
-	defaultStreamPrefix     = "ml:stream:"
-	defaultPubSubPrefix     = "ml:pubsub:"
-	defaultConsumerGroup    = "messageloop"
-	defaultStreamMaxLength  = 10000
-	defaultHistoryTTL       = 24 * time.Hour
-	defaultPoolSize         = 10
-	defaultMinIdleConns     = 5
-	defaultMaxRetries       = 3
-	defaultDialTimeout      = 5 * time.Second
-	defaultReadTimeout      = 3 * time.Second
-	defaultWriteTimeout     = 3 * time.Second
+	defaultStreamPrefix    = "ml:stream:"
+	defaultPubSubPrefix    = "ml:pubsub:"
+	defaultConsumerGroup   = "messageloop"
+	defaultStreamMaxLength = 10000
+	defaultHistoryTTL      = 24 * time.Hour
+	defaultPoolSize        = 10
+	defaultMinIdleConns    = 5
+	defaultMaxRetries      = 3
+	defaultDialTimeout     = 5 * time.Second
+	defaultReadTimeout     = 3 * time.Second
+	defaultWriteTimeout    = 3 * time.Second
 )
 
 // Options contains the configuration for the Redis broker.

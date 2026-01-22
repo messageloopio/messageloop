@@ -1,13 +1,13 @@
 package config
 
-import "github.com/deeplooplabs/messageloop/proxy"
+import "github.com/fleetlit/messageloop/proxy"
 
 type Config struct {
-	Server     Server           `yaml:"server" json:"server"`
-	Transport  Transport        `yaml:"transport" json:"transport"`
-	Broker     BrokerConfig     `yaml:"broker" json:"broker"`
-	Proxy      *ProxyServer     `yaml:"proxy" json:"proxy"`
-	Proxies    []ProxyConfig    `yaml:"proxies" json:"proxies"`
+	Server    Server        `yaml:"server" json:"server"`
+	Transport Transport     `yaml:"transport" json:"transport"`
+	Broker    BrokerConfig  `yaml:"broker" json:"broker"`
+	Proxy     *ProxyServer  `yaml:"proxy" json:"proxy"`
+	Proxies   []ProxyConfig `yaml:"proxies" json:"proxies"`
 }
 
 type Server struct {
@@ -43,12 +43,12 @@ type ProxyServer struct {
 
 // ProxyConfig wraps the proxy.ProxyConfig for YAML unmarshaling.
 type ProxyConfig struct {
-	Name     string                  `yaml:"name" json:"name"`
-	Endpoint string                  `yaml:"endpoint" json:"endpoint"`
-	Timeout  string                  `yaml:"timeout" json:"timeout"` // duration string
-	HTTP     *proxy.HTTPProxyConfig  `yaml:"http" json:"http"`
-	GRPC     *proxy.GRPCProxyConfig  `yaml:"grpc" json:"grpc"`
-	Routes   []proxy.RouteConfig     `yaml:"routes" json:"routes"`
+	Name     string                 `yaml:"name" json:"name"`
+	Endpoint string                 `yaml:"endpoint" json:"endpoint"`
+	Timeout  string                 `yaml:"timeout" json:"timeout"` // duration string
+	HTTP     *proxy.HTTPProxyConfig `yaml:"http" json:"http"`
+	GRPC     *proxy.GRPCProxyConfig `yaml:"grpc" json:"grpc"`
+	Routes   []proxy.RouteConfig    `yaml:"routes" json:"routes"`
 }
 
 // ToProxyConfig converts the config YAML struct to proxy.ProxyConfig.

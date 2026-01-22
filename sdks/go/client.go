@@ -8,8 +8,8 @@ import (
 	"time"
 
 	pb "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
-	sharedpb "github.com/deeplooplabs/messageloop/genproto/shared/v1"
-	clientpb "github.com/deeplooplabs/messageloop/genproto/v1"
+	sharedpb "github.com/fleetlit/messageloop/genproto/shared/v1"
+	clientpb "github.com/fleetlit/messageloop/genproto/v1"
 	"google.golang.org/protobuf/proto"
 )
 

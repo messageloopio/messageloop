@@ -3,7 +3,7 @@ package redisbroker
 import (
 	"encoding/json"
 
-	"github.com/deeplooplabs/messageloop"
+	"github.com/fleetlit/messageloop"
 )
 
 const (
@@ -14,9 +14,9 @@ const (
 
 // redisMessage is the envelope format for messages stored in Redis.
 type redisMessage struct {
-	Type    string             `json:"t"`
-	Channel string             `json:"ch"`
-	Payload []byte             `json:"p"`
+	Type    string                  `json:"t"`
+	Channel string                  `json:"ch"`
+	Payload []byte                  `json:"p"`
 	Info    *messageloop.ClientDesc `json:"i,omitempty"`
 }
 

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
-	"github.com/deeplooplabs/messageloop/sdks/go"
+	"github.com/fleetlit/messageloop/sdks/go"
 )
 
 // BasicWebSocketExample demonstrates a basic WebSocket connection.

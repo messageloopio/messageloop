@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	clientpb "github.com/deeplooplabs/messageloop/genproto/v1"
+	clientpb "github.com/fleetlit/messageloop/genproto/v1"
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/proto"
 )
@@ -107,7 +107,7 @@ func (t *wsTransport) Send(ctx context.Context, msg *clientpb.InboundMessage) er
 		return fmt.Errorf("marshal error: %w", err)
 	}
 
- messageType := websocket.TextMessage
+	messageType := websocket.TextMessage
 	if t.marshaler.UseBytes() {
 		messageType = websocket.BinaryMessage
 	}
@@ -131,7 +131,7 @@ func (t *wsTransport) Recv(ctx context.Context) (*clientpb.OutboundMessage, erro
 		default:
 		}
 
-	 messageType, data, err := t.conn.ReadMessage()
+		messageType, data, err := t.conn.ReadMessage()
 		if err != nil {
 			return nil, fmt.Errorf("read error: %w", err)
 		}

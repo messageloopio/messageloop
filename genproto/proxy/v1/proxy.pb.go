@@ -10,7 +10,7 @@ package proxypb
 
 import (
 	pb "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
-	v1 "github.com/deeplooplabs/messageloop/genproto/shared/v1"
+	v1 "github.com/fleetlit/messageloop/genproto/shared/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -813,7 +813,7 @@ const file_proxy_v1_proxy_proto_rawDesc = "" +
 	"\vOnConnected\x12(.messageloop.proxy.v1.OnConnectedRequest\x1a).messageloop.proxy.v1.OnConnectedResponse\x12e\n" +
 	"\fOnSubscribed\x12).messageloop.proxy.v1.OnSubscribedRequest\x1a*.messageloop.proxy.v1.OnSubscribedResponse\x12k\n" +
 	"\x0eOnUnsubscribed\x12+.messageloop.proxy.v1.OnUnsubscribedRequest\x1a,.messageloop.proxy.v1.OnUnsubscribedResponse\x12k\n" +
-	"\x0eOnDisconnected\x12+.messageloop.proxy.v1.OnDisconnectedRequest\x1a,.messageloop.proxy.v1.OnDisconnectedResponseBBZ@github.com/deeplooplabs/messageloop/genproto/go/proxy/v1;proxypbb\x06proto3"
+	"\x0eOnDisconnected\x12+.messageloop.proxy.v1.OnDisconnectedRequest\x1a,.messageloop.proxy.v1.OnDisconnectedResponseBBZ@github.com/fleetlit/messageloop/genproto/go/proxy/v1;proxypbb\x06proto3"
 
 var (
 	file_proxy_v1_proxy_proto_rawDescOnce sync.Once

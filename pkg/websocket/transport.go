@@ -3,7 +3,7 @@ package websocket
 import (
 	"time"
 
-	"github.com/deeplooplabs/messageloop"
+	"github.com/fleetlit/messageloop"
 	"github.com/gorilla/websocket"
 )
 

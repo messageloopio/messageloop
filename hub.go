@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
-	clientpb "github.com/deeplooplabs/messageloop/genproto/v1"
+	clientpb "github.com/fleetlit/messageloop/genproto/v1"
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
 )

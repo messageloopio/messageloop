@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/deeplooplabs/messageloop/proxy"
+	"github.com/fleetlit/messageloop/proxy"
 	"github.com/lynx-go/x/log"
 )
 

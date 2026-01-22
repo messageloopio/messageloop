@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	proxypb "github.com/deeplooplabs/messageloop/genproto/proxy/v1"
-	sharedpb "github.com/deeplooplabs/messageloop/genproto/shared/v1"
 	cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
+	proxypb "github.com/fleetlit/messageloop/genproto/proxy/v1"
+	sharedpb "github.com/fleetlit/messageloop/genproto/shared/v1"
 )
 
 // RPCProxy defines the interface for proxying RPC requests to backend services.

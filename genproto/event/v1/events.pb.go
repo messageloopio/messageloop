@@ -80,7 +80,7 @@ const file_event_v1_events_proto_rawDesc = "" +
 	"\x15event/v1/events.proto\x12\x14messageloop.event.v1\"K\n" +
 	"\fPublishEvent\x12\x18\n" +
 	"\achannel\x18\x01 \x01(\tR\achannel\x12!\n" +
-	"\fpayload_text\x18\x02 \x01(\fR\vpayloadTextBBZ@github.com/deeplooplabs/messageloop/genproto/go/event/v1;eventpbb\x06proto3"
+	"\fpayload_text\x18\x02 \x01(\fR\vpayloadTextBBZ@github.com/fleetlit/messageloop/genproto/go/event/v1;eventpbb\x06proto3"
 
 var (
 	file_event_v1_events_proto_rawDescOnce sync.Once

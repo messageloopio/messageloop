@@ -8,7 +8,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	proxypb "github.com/deeplooplabs/messageloop/genproto/proxy/v1"
+	proxypb "github.com/fleetlit/messageloop/genproto/proxy/v1"
 	"github.com/lynx-go/x/log"
 )
 
@@ -33,7 +33,7 @@ func NewGRPCProxy(cfg *ProxyConfig) (*GRPCProxy, error) {
 	}
 
 	dialOpts := []grpc.DialOption{
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(4*1024*1024)),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(4 * 1024 * 1024)),
 	}
 
 	if cfg.GRPC.Insecure {

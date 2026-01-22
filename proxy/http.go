@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"time"
 
-	proxypb "github.com/deeplooplabs/messageloop/genproto/proxy/v1"
+	proxypb "github.com/fleetlit/messageloop/genproto/proxy/v1"
 	"github.com/lynx-go/x/log"
 )
 
