@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/fleetlit/messageloop/sdks/go"
 )
 
@@ -29,9 +29,10 @@ func BasicWebSocketExample() error {
 		log.Printf("Connected! Session ID: %s", sessionID)
 	})
 
-	client.OnMessage(func(messages []*messageloopgo.Message) {
-		for _, msg := range messages {
-			log.Printf("Received from %s: %s", msg.Channel, msg.String())
+	client.OnMessage(func(events []*cloudevents.Event) {
+		for _, event := range events {
+			log.Printf("Received event - ID: %s, Type: %s, Source: %s",
+				event.ID(), event.Type(), event.Source())
 		}
 	})
 
@@ -87,9 +88,10 @@ func BasicGRPCExample() error {
 		log.Printf("Connected via gRPC! Session ID: %s", sessionID)
 	})
 
-	client.OnMessage(func(messages []*messageloopgo.Message) {
-		for _, msg := range messages {
-			log.Printf("Received from %s: %s", msg.Channel, msg.Data)
+	client.OnMessage(func(events []*cloudevents.Event) {
+		for _, event := range events {
+			log.Printf("Received event - ID: %s, Type: %s, Data: %s",
+				event.ID(), event.Type(), string(event.Data()))
 		}
 	})
 
@@ -150,13 +152,13 @@ func RPCExample() error {
 	)
 	messageloopgo.SetEventAttribute(req, "datacontenttype", "application/json")
 
-	var resp pb.CloudEvent
+	resp := cloudevents.NewEvent()
 	err = client.RPC(ctx, "user.service", "GetUser", req, &resp)
 	if err != nil {
 		return fmt.Errorf("rpc failed: %w", err)
 	}
 
-	log.Printf("RPC response: %s", resp.GetTextData())
+	log.Printf("RPC response: %s", resp.Data())
 
 	return nil
 }
@@ -210,9 +212,9 @@ func DynamicSubscriptionExample() error {
 	// Track received messages
 	messageCount := 0
 
-	client.OnMessage(func(messages []*messageloopgo.Message) {
-		messageCount += len(messages)
-		log.Printf("Received %d messages (total: %d)", len(messages), messageCount)
+	client.OnMessage(func(events []*cloudevents.Event) {
+		messageCount += len(events)
+		log.Printf("Received %d events (total: %d)", len(events), messageCount)
 	})
 
 	// Connect

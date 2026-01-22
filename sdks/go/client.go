@@ -7,10 +7,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	pb "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
+	"github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 	sharedpb "github.com/fleetlit/messageloop/genproto/shared/v1"
 	clientpb "github.com/fleetlit/messageloop/genproto/v1"
-	"google.golang.org/protobuf/proto"
 )
 
 // transport is the interface for sending/receiving messages.
@@ -31,11 +31,11 @@ type Client interface {
 	// Unsubscribe unsubscribes from channels
 	Unsubscribe(channels ...string) error
 	// Publish publishes a message to a channel
-	Publish(channel string, event *pb.CloudEvent) error
+	Publish(channel string, event *cloudevents.Event) error
 	// RPC sends an RPC request and waits for a response
-	RPC(ctx context.Context, channel, method string, req, resp *pb.CloudEvent) error
+	RPC(ctx context.Context, channel, method string, req, resp *cloudevents.Event) error
 	// OnMessage sets the message handler
-	OnMessage(fn func([]*Message))
+	OnMessage(fn func([]*cloudevents.Event))
 	// OnError sets the error handler
 	OnError(fn func(error))
 	// OnConnected sets the connected handler
@@ -58,7 +58,7 @@ type client struct {
 	closed           atomic.Bool
 	connectedCh      chan struct{} // Closed when connection is established
 	connectErrCh     chan error    // For connection errors
-	msgHandler       func([]*Message)
+	msgHandler       func([]*cloudevents.Event)
 	errorHandler     func(error)
 	connectedHandler func(string)
 	pendingRPC       map[string]chan *clientpb.OutboundMessage
@@ -251,9 +251,9 @@ func (c *client) handleConnected(connected *clientpb.Connected) {
 
 	// Handle initial publications
 	for _, pub := range connected.GetPublications() {
-		messages := wrapPublication(pub)
-		if c.msgHandler != nil && len(messages) > 0 {
-			c.msgHandler(messages)
+		events := wrapPublicationToEvents(pub)
+		if c.msgHandler != nil && len(events) > 0 {
+			c.msgHandler(events)
 		}
 	}
 
@@ -282,9 +282,9 @@ func (c *client) handleUnsubscribeAck(ack *clientpb.UnsubscribeAck) {
 
 // handlePublication handles the Publication message.
 func (c *client) handlePublication(pub *clientpb.Publication) {
-	messages := wrapPublication(pub)
-	if c.msgHandler != nil && len(messages) > 0 {
-		c.msgHandler(messages)
+	events := wrapPublicationToEvents(pub)
+	if c.msgHandler != nil && len(events) > 0 {
+		c.msgHandler(events)
 	}
 }
 
@@ -384,16 +384,22 @@ func (c *client) Unsubscribe(channels ...string) error {
 }
 
 // Publish publishes a message to a channel.
-func (c *client) Publish(channel string, event *pb.CloudEvent) error {
+func (c *client) Publish(channel string, event *cloudevents.Event) error {
 	if !c.connected.Load() {
 		return fmt.Errorf("not connected")
+	}
+
+	// Convert cloudevents.Event to pb.CloudEvent
+	pbEvent, err := CloudEventToPb(event)
+	if err != nil {
+		return fmt.Errorf("failed to convert event: %w", err)
 	}
 
 	msg := &clientpb.InboundMessage{
 		Id:      c.generateID(),
 		Channel: channel,
 		Envelope: &clientpb.InboundMessage_Publish{
-			Publish: event,
+			Publish: pbEvent,
 		},
 	}
 
@@ -405,9 +411,15 @@ func (c *client) Publish(channel string, event *pb.CloudEvent) error {
 }
 
 // RPC sends an RPC request and waits for a response.
-func (c *client) RPC(ctx context.Context, channel, method string, req, resp *pb.CloudEvent) error {
+func (c *client) RPC(ctx context.Context, channel, method string, req, resp *cloudevents.Event) error {
 	if !c.connected.Load() {
 		return fmt.Errorf("not connected")
+	}
+
+	// Convert request cloudevents.Event to pb.CloudEvent
+	pbReq, err := CloudEventToPb(req)
+	if err != nil {
+		return fmt.Errorf("failed to convert request event: %w", err)
 	}
 
 	id := c.generateID()
@@ -429,7 +441,7 @@ func (c *client) RPC(ctx context.Context, channel, method string, req, resp *pb.
 		Channel: channel,
 		Method:  method,
 		Envelope: &clientpb.InboundMessage_RpcRequest{
-			RpcRequest: req,
+			RpcRequest: pbReq,
 		},
 	}
 
@@ -449,14 +461,19 @@ func (c *client) RPC(ctx context.Context, channel, method string, req, resp *pb.
 			return fmt.Errorf("rpc error: %s (code: %s)", err.GetMessage(), err.GetCode())
 		}
 
-		reply := outMsg.GetRpcReply()
-		if reply == nil {
+		pbReply := outMsg.GetRpcReply()
+		if pbReply == nil {
 			return fmt.Errorf("rpc failed: no reply")
 		}
 
-		// Copy reply to resp
+		// Convert pb.CloudEvent reply to cloudevents.Event
 		if resp != nil {
-			proto.Merge(resp, reply)
+			ceReply, err := PbToCloudEvent(pbReply)
+			if err != nil {
+				return fmt.Errorf("failed to convert reply event: %w", err)
+			}
+			// Copy the reply event to resp
+			*resp = *ceReply
 		}
 
 		return nil
@@ -464,7 +481,7 @@ func (c *client) RPC(ctx context.Context, channel, method string, req, resp *pb.
 }
 
 // OnMessage sets the message handler.
-func (c *client) OnMessage(fn func([]*Message)) {
+func (c *client) OnMessage(fn func([]*cloudevents.Event)) {
 	c.msgHandler = fn
 }
 
