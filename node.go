@@ -73,7 +73,7 @@ func (n *Node) Hub() *Hub {
 	return n.hub
 }
 
-func (n *Node) addClient(c *Client) {
+func (n *Node) addClient(c *ClientSession) {
 	n.hub.add(c)
 }
 
@@ -96,7 +96,7 @@ func (n *Node) addSubscription(ch string, sub subscriber) error {
 	return nil
 }
 
-func (n *Node) removeSubscription(ch string, c *Client) error {
+func (n *Node) removeSubscription(ch string, c *ClientSession) error {
 	mu := n.subLock(ch)
 	mu.Lock()
 	defer mu.Unlock()

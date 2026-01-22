@@ -7,8 +7,8 @@ import (
 	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
-	clientpb "github.com/deeplooplabs/messageloop/genproto/v1"
 	sharedpb "github.com/deeplooplabs/messageloop/genproto/shared/v1"
+	clientpb "github.com/deeplooplabs/messageloop/genproto/v1"
 	"github.com/deeplooplabs/messageloop/protocol"
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
@@ -16,8 +16,8 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-func NewClient(ctx context.Context, node *Node, t Transport, marshaler protocol.Marshaler) (*Client, ClientCloseFunc, error) {
-	client := &Client{
+func NewClientSession(ctx context.Context, node *Node, t Transport, marshaler protocol.Marshaler) (*ClientSession, ClientCloseFunc, error) {
+	client := &ClientSession{
 		ctx:       ctx,
 		node:      node,
 		transport: t,
@@ -44,7 +44,7 @@ type ClientInfo struct {
 	UserID    string `json:"user_id"`
 }
 
-type Client struct {
+type ClientSession struct {
 	mu            sync.RWMutex
 	connectMu     sync.Mutex // allows syncing connect with disconnect.
 	ctx           context.Context
@@ -64,7 +64,7 @@ func jsonLog(msg proto.Message) string {
 	return string(data)
 }
 
-func (c *Client) marshal(msg any) ([]byte, error) {
+func (c *ClientSession) marshal(msg any) ([]byte, error) {
 	return c.marshaler.Marshal(msg)
 }
 
@@ -76,27 +76,27 @@ const (
 	statusClosed     status = 3
 )
 
-func (c *Client) close(disconnect Disconnect) error {
+func (c *ClientSession) close(disconnect Disconnect) error {
 	return c.transport.Close(disconnect)
 }
 
-func (c *Client) ClientID() string {
+func (c *ClientSession) ClientID() string {
 	return c.client
 }
 
-func (c *Client) SessionID() string {
+func (c *ClientSession) SessionID() string {
 	return c.session
 }
 
-func (c *Client) UserID() string {
+func (c *ClientSession) UserID() string {
 	return c.user
 }
 
-func (c *Client) Send(ctx context.Context, msg *clientpb.OutboundMessage) error {
+func (c *ClientSession) Send(ctx context.Context, msg *clientpb.OutboundMessage) error {
 	return c.write(ctx, msg)
 }
 
-func (c *Client) HandleMessage(ctx context.Context, in *clientpb.InboundMessage) error {
+func (c *ClientSession) HandleMessage(ctx context.Context, in *clientpb.InboundMessage) error {
 	c.mu.Lock()
 	if c.status == statusClosed {
 		c.mu.Unlock()
@@ -132,7 +132,7 @@ func (c *Client) HandleMessage(ctx context.Context, in *clientpb.InboundMessage)
 	return nil
 }
 
-func (c *Client) handleMessage(ctx context.Context, in *clientpb.InboundMessage) error {
+func (c *ClientSession) handleMessage(ctx context.Context, in *clientpb.InboundMessage) error {
 
 	switch msg := in.Envelope.(type) {
 	case *clientpb.InboundMessage_Connect:
@@ -153,11 +153,11 @@ func (c *Client) handleMessage(ctx context.Context, in *clientpb.InboundMessage)
 	return nil
 }
 
-func (c *Client) Channels() []string {
+func (c *ClientSession) Channels() []string {
 	return []string{}
 }
 
-func (c *Client) onConnect(ctx context.Context, in *clientpb.InboundMessage, connect *clientpb.Connect) error {
+func (c *ClientSession) onConnect(ctx context.Context, in *clientpb.InboundMessage, connect *clientpb.Connect) error {
 	c.mu.RLock()
 	authenticated := c.authenticated
 	closed := c.status == statusClosed
@@ -209,7 +209,7 @@ func BuildOutboundMessage(in *clientpb.InboundMessage, bodyFunc func(out *client
 	return out
 }
 
-func (c *Client) ClientInfo() *ClientInfo {
+func (c *ClientSession) ClientInfo() *ClientInfo {
 	return &ClientInfo{
 		ClientID:  c.client,
 		SessionID: c.session,
@@ -217,13 +217,13 @@ func (c *Client) ClientInfo() *ClientInfo {
 	}
 }
 
-func (c *Client) Authenticated() bool {
+func (c *ClientSession) Authenticated() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.authenticated
 }
 
-func (c *Client) onRPC(ctx context.Context, in *clientpb.InboundMessage, event *cloudevents.CloudEvent) error {
+func (c *ClientSession) onRPC(ctx context.Context, in *clientpb.InboundMessage, event *cloudevents.CloudEvent) error {
 	// Echo back the RPC request as the reply for now
 	return c.Send(ctx, BuildOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_RpcReply{
@@ -232,7 +232,7 @@ func (c *Client) onRPC(ctx context.Context, in *clientpb.InboundMessage, event *
 	}))
 }
 
-func (c *Client) onPublish(ctx context.Context, in *clientpb.InboundMessage, event *cloudevents.CloudEvent) error {
+func (c *ClientSession) onPublish(ctx context.Context, in *clientpb.InboundMessage, event *cloudevents.CloudEvent) error {
 	if !c.Authenticated() {
 		return DisconnectStale
 	}
@@ -268,7 +268,7 @@ func (c *Client) onPublish(ctx context.Context, in *clientpb.InboundMessage, eve
 	}))
 }
 
-func (c *Client) onSubscribe(ctx context.Context, in *clientpb.InboundMessage, sub *clientpb.Subscribe) error {
+func (c *ClientSession) onSubscribe(ctx context.Context, in *clientpb.InboundMessage, sub *clientpb.Subscribe) error {
 	subs := []string{}
 	for _, ch := range sub.Subscriptions {
 		if err := c.node.addSubscription(ch.Channel, subscriber{client: c, ephemeral: ch.Ephemeral}); err != nil {
@@ -292,7 +292,7 @@ func (c *Client) onSubscribe(ctx context.Context, in *clientpb.InboundMessage, s
 	}))
 }
 
-func (c *Client) write(ctx context.Context, msg proto.Message) error {
+func (c *ClientSession) write(ctx context.Context, msg proto.Message) error {
 	log.DebugContext(ctx, "sending message", "message", jsonLog(msg))
 	bytes, err := c.marshal(msg)
 	if err != nil {
@@ -301,11 +301,11 @@ func (c *Client) write(ctx context.Context, msg proto.Message) error {
 	return c.transport.Write(bytes)
 }
 
-func (c *Client) onUnsubscribe(ctx context.Context, in *clientpb.InboundMessage, unsubscribe *clientpb.Unsubscribe) error {
+func (c *ClientSession) onUnsubscribe(ctx context.Context, in *clientpb.InboundMessage, unsubscribe *clientpb.Unsubscribe) error {
 	return errors.New("TODO")
 }
 
-func (c *Client) onPing(ctx context.Context, in *clientpb.InboundMessage, ping *clientpb.Ping) error {
+func (c *ClientSession) onPing(ctx context.Context, in *clientpb.InboundMessage, ping *clientpb.Ping) error {
 	return c.Send(ctx, BuildOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_Pong{
 			Pong: &clientpb.Pong{},
@@ -313,6 +313,6 @@ func (c *Client) onPing(ctx context.Context, in *clientpb.InboundMessage, ping *
 	}))
 }
 
-func (c *Client) onSubRefresh(ctx context.Context, in *clientpb.InboundMessage, refresh *clientpb.SubRefresh) error {
+func (c *ClientSession) onSubRefresh(ctx context.Context, in *clientpb.InboundMessage, refresh *clientpb.SubRefresh) error {
 	return errors.New("TODO")
 }

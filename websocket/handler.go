@@ -4,9 +4,9 @@ import (
 	"net/http"
 	"strings"
 
-	clientpb "github.com/deeplooplabs/messageloop/genproto/v1"
-	sharedpb "github.com/deeplooplabs/messageloop/genproto/shared/v1"
 	"github.com/deeplooplabs/messageloop"
+	sharedpb "github.com/deeplooplabs/messageloop/genproto/shared/v1"
+	clientpb "github.com/deeplooplabs/messageloop/genproto/v1"
 	"github.com/deeplooplabs/messageloop/protocol"
 	"github.com/gorilla/websocket"
 	"github.com/lynx-go/x/log"
@@ -45,7 +45,7 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	marshaler := h.marshaler(subProtocols)
 	transport := newTransport(conn, marshaler)
 	ctx := r.Context()
-	client, closeFn, err := messageloop.NewClient(ctx, h.node, transport, marshaler)
+	client, closeFn, err := messageloop.NewClientSession(ctx, h.node, transport, marshaler)
 	if err != nil {
 		log.ErrorContext(r.Context(), "create client error", err)
 		rw.WriteHeader(http.StatusInternalServerError)

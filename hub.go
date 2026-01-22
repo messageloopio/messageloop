@@ -14,7 +14,7 @@ const numHubShards = 64
 
 type Hub struct {
 	mu         sync.RWMutex
-	sessions   map[string]*Client
+	sessions   map[string]*ClientSession
 	connShards [numHubShards]*connShard
 	subShards  [numHubShards]*subShard
 }
@@ -22,7 +22,7 @@ type Hub struct {
 // newHub initializes Hub.
 func newHub(maxTimeLagMilli int64) *Hub {
 	h := &Hub{
-		sessions: map[string]*Client{},
+		sessions: map[string]*ClientSession{},
 	}
 	for i := 0; i < numHubShards; i++ {
 		h.connShards[i] = newConnShard()
@@ -36,7 +36,7 @@ func (h *Hub) addSub(ch string, sub subscriber) (bool, error) {
 }
 
 // removeSub removes connection from clientHub subscriptions registry.
-func (h *Hub) removeSub(ch string, c *Client) (bool, bool) {
+func (h *Hub) removeSub(ch string, c *ClientSession) (bool, bool) {
 	return h.subShards[index(ch, numHubShards)].removeSub(ch, c)
 }
 
@@ -53,20 +53,20 @@ func index(s string, numBuckets int) int {
 type connShard struct {
 	mu sync.RWMutex
 	// match client ID with actual client connection.
-	clients map[string]*Client
+	clients map[string]*ClientSession
 	// registry to hold active client connections grouped by user.
 	users map[string]map[string]struct{}
 }
 
 func newConnShard() *connShard {
 	return &connShard{
-		clients: make(map[string]*Client),
+		clients: make(map[string]*ClientSession),
 		users:   make(map[string]map[string]struct{}),
 	}
 }
 
 // Add connection into clientHub connections registry.
-func (h *connShard) add(c *Client) {
+func (h *connShard) add(c *ClientSession) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -96,7 +96,7 @@ func newSubShard(maxTimeLagMilli int64) *subShard {
 }
 
 type subscriber struct {
-	client    *Client
+	client    *ClientSession
 	ephemeral bool
 }
 
@@ -144,7 +144,7 @@ func (h *subShard) addSub(ch string, sub subscriber) (bool, error) {
 // removeSub removes connection from clientHub subscriptions registry.
 // Returns true if channel does not have any subscribers left in first return value.
 // Returns true if found and really removed from registry in second return value.
-func (h *subShard) removeSub(ch string, c *Client) (bool, bool) {
+func (h *subShard) removeSub(ch string, c *ClientSession) (bool, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -199,7 +199,7 @@ func (h *subShard) broadcastPublication(channel string, pub *Publication) error 
 }
 
 // Add connection into clientHub connections registry.
-func (h *Hub) add(c *Client) {
+func (h *Hub) add(c *ClientSession) {
 	h.mu.Lock()
 	if c.SessionID() != "" {
 		h.sessions[c.SessionID()] = c
