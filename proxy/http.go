@@ -80,7 +80,7 @@ func (p *HTTPProxy) ProxyRPC(ctx context.Context, req *RPCProxyRequest) (*RPCPro
 		"id":      protoReq.Id,
 		"channel": protoReq.Channel,
 		"method":  protoReq.Method,
-		"request": protoReq.Request,
+		"payload": protoReq.Payload,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)

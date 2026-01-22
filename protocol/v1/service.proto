@@ -25,9 +25,9 @@ message InboundMessage {
     Connect connect = 11;
     Subscribe subscribe = 12;
     Unsubscribe unsubscribe = 13;
-    io.cloudevents.v1.CloudEvent rpc_request = 14 [json_name = "rpc_request"];
+    io.cloudevents.v1.CloudEvent rpc_request_payload = 14 [json_name = "rpc_request"];
     Ping ping = 15;
-    io.cloudevents.v1.CloudEvent publish = 16;
+    io.cloudevents.v1.CloudEvent publish_payload = 16;
     SubRefresh sub_refresh = 17 [json_name = "sub_refresh"];
   }
 }
@@ -41,7 +41,7 @@ message OutboundMessage {
     Connected connected = 12;
     SubscribeAck subscribe_ack = 13 [json_name = "subscribe_ack"];
     UnsubscribeAck unsubscribe_ack = 14[json_name = "unsubscribe_ack"];
-    io.cloudevents.v1.CloudEvent rpc_reply = 15 [json_name = "rpc_reply"];
+    io.cloudevents.v1.CloudEvent rpc_reply_payload = 15 [json_name = "rpc_reply"];
     Pong pong = 16;
     PublishAck publish_ack = 17 [json_name = "publish_ack"];
     Publication publication = 18;

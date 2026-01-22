@@ -30,13 +30,13 @@ message RPCRequest {
   string id = 1;
   string channel = 2;
   string method = 3;
-  io.cloudevents.v1.CloudEvent request = 4;
+  io.cloudevents.v1.CloudEvent payload = 4;
 }
 
 message RPCResponse {
   string id = 1;
   shared.v1.Error error = 2;
-  io.cloudevents.v1.CloudEvent reply = 3;
+  io.cloudevents.v1.CloudEvent payload = 3;
 }
 
 message AuthenticateRequest {

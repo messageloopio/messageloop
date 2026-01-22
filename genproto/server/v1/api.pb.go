@@ -29,7 +29,7 @@ type Publication struct {
 	Id            string                   `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Destination   *Publication_Destination `protobuf:"bytes,2,opt,name=destination,proto3" json:"destination,omitempty"`
 	Options       *Publication_Options     `protobuf:"bytes,3,opt,name=options,proto3" json:"options,omitempty"`
-	Message       *pb.CloudEvent           `protobuf:"bytes,4,opt,name=message,proto3" json:"message,omitempty"`
+	Payload       *pb.CloudEvent           `protobuf:"bytes,4,opt,name=payload,proto3" json:"payload,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -85,9 +85,9 @@ func (x *Publication) GetOptions() *Publication_Options {
 	return nil
 }
 
-func (x *Publication) GetMessage() *pb.CloudEvent {
+func (x *Publication) GetPayload() *pb.CloudEvent {
 	if x != nil {
-		return x.Message
+		return x.Payload
 	}
 	return nil
 }
@@ -509,7 +509,7 @@ const file_server_v1_api_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12P\n" +
 	"\vdestination\x18\x02 \x01(\v2..messageloop.server.v1.Publication.DestinationR\vdestination\x12D\n" +
 	"\aoptions\x18\x03 \x01(\v2*.messageloop.server.v1.Publication.OptionsR\aoptions\x127\n" +
-	"\amessage\x18\x04 \x01(\v2\x1d.io.cloudevents.v1.CloudEventR\amessage\x1a*\n" +
+	"\apayload\x18\x04 \x01(\v2\x1d.io.cloudevents.v1.CloudEventR\apayload\x1a*\n" +
 	"\aOptions\x12\x1f\n" +
 	"\vadd_history\x18\x01 \x01(\bR\n" +
 	"addHistory\x1aE\n" +
@@ -570,7 +570,7 @@ var file_server_v1_api_proto_goTypes = []any{
 var file_server_v1_api_proto_depIdxs = []int32{
 	10, // 0: messageloop.server.v1.Publication.destination:type_name -> messageloop.server.v1.Publication.Destination
 	9,  // 1: messageloop.server.v1.Publication.options:type_name -> messageloop.server.v1.Publication.Options
-	12, // 2: messageloop.server.v1.Publication.message:type_name -> io.cloudevents.v1.CloudEvent
+	12, // 2: messageloop.server.v1.Publication.payload:type_name -> io.cloudevents.v1.CloudEvent
 	11, // 3: messageloop.server.v1.PublishRequest.metadata:type_name -> messageloop.server.v1.PublishRequest.MetadataEntry
 	0,  // 4: messageloop.server.v1.PublishRequest.publications:type_name -> messageloop.server.v1.Publication
 	1,  // 5: messageloop.server.v1.APIService.Publish:input_type -> messageloop.server.v1.PublishRequest

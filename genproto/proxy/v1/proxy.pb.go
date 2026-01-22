@@ -30,7 +30,7 @@ type RPCRequest struct {
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Channel       string                 `protobuf:"bytes,2,opt,name=channel,proto3" json:"channel,omitempty"`
 	Method        string                 `protobuf:"bytes,3,opt,name=method,proto3" json:"method,omitempty"`
-	Request       *pb.CloudEvent         `protobuf:"bytes,4,opt,name=request,proto3" json:"request,omitempty"`
+	Payload       *pb.CloudEvent         `protobuf:"bytes,4,opt,name=payload,proto3" json:"payload,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -86,9 +86,9 @@ func (x *RPCRequest) GetMethod() string {
 	return ""
 }
 
-func (x *RPCRequest) GetRequest() *pb.CloudEvent {
+func (x *RPCRequest) GetPayload() *pb.CloudEvent {
 	if x != nil {
-		return x.Request
+		return x.Payload
 	}
 	return nil
 }
@@ -97,7 +97,7 @@ type RPCResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Error         *v1.Error              `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
-	Reply         *pb.CloudEvent         `protobuf:"bytes,3,opt,name=reply,proto3" json:"reply,omitempty"`
+	Payload       *pb.CloudEvent         `protobuf:"bytes,3,opt,name=payload,proto3" json:"payload,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -146,9 +146,9 @@ func (x *RPCResponse) GetError() *v1.Error {
 	return nil
 }
 
-func (x *RPCResponse) GetReply() *pb.CloudEvent {
+func (x *RPCResponse) GetPayload() *pb.CloudEvent {
 	if x != nil {
-		return x.Reply
+		return x.Payload
 	}
 	return nil
 }
@@ -767,11 +767,11 @@ const file_proxy_v1_proxy_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
 	"\achannel\x18\x02 \x01(\tR\achannel\x12\x16\n" +
 	"\x06method\x18\x03 \x01(\tR\x06method\x127\n" +
-	"\arequest\x18\x04 \x01(\v2\x1d.io.cloudevents.v1.CloudEventR\arequest\"\x86\x01\n" +
+	"\apayload\x18\x04 \x01(\v2\x1d.io.cloudevents.v1.CloudEventR\apayload\"\x8a\x01\n" +
 	"\vRPCResponse\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x122\n" +
-	"\x05error\x18\x02 \x01(\v2\x1c.messageloop.shared.v1.ErrorR\x05error\x123\n" +
-	"\x05reply\x18\x03 \x01(\v2\x1d.io.cloudevents.v1.CloudEventR\x05reply\"\x8b\x01\n" +
+	"\x05error\x18\x02 \x01(\v2\x1c.messageloop.shared.v1.ErrorR\x05error\x127\n" +
+	"\apayload\x18\x03 \x01(\v2\x1d.io.cloudevents.v1.CloudEventR\apayload\"\x8b\x01\n" +
 	"\x13AuthenticateRequest\x12\x1a\n" +
 	"\busername\x18\x01 \x01(\tR\busername\x12\x1a\n" +
 	"\bpassword\x18\x02 \x01(\tR\bpassword\x12\x1f\n" +
@@ -848,9 +848,9 @@ var file_proxy_v1_proxy_proto_goTypes = []any{
 	(*v1.Error)(nil),               // 16: messageloop.shared.v1.Error
 }
 var file_proxy_v1_proxy_proto_depIdxs = []int32{
-	15, // 0: messageloop.proxy.v1.RPCRequest.request:type_name -> io.cloudevents.v1.CloudEvent
+	15, // 0: messageloop.proxy.v1.RPCRequest.payload:type_name -> io.cloudevents.v1.CloudEvent
 	16, // 1: messageloop.proxy.v1.RPCResponse.error:type_name -> messageloop.shared.v1.Error
-	15, // 2: messageloop.proxy.v1.RPCResponse.reply:type_name -> io.cloudevents.v1.CloudEvent
+	15, // 2: messageloop.proxy.v1.RPCResponse.payload:type_name -> io.cloudevents.v1.CloudEvent
 	16, // 3: messageloop.proxy.v1.AuthenticateResponse.error:type_name -> messageloop.shared.v1.Error
 	4,  // 4: messageloop.proxy.v1.AuthenticateResponse.user_info:type_name -> messageloop.proxy.v1.UserInfo
 	0,  // 5: messageloop.proxy.v1.ProxyService.RPC:input_type -> messageloop.proxy.v1.RPCRequest

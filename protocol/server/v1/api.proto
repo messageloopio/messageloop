@@ -27,7 +27,7 @@ message Publication {
   Destination destination = 2;
   Options options = 3;
 
-  io.cloudevents.v1.CloudEvent message = 4;
+  io.cloudevents.v1.CloudEvent payload = 4;
 }
 
 message PublishRequest {

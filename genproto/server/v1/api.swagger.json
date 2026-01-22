@@ -54,7 +54,7 @@
         "options": {
           "$ref": "#/definitions/PublicationOptions"
         },
-        "message": {
+        "payload": {
           "$ref": "#/definitions/v1CloudEvent"
         }
       }

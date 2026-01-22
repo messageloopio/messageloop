@@ -170,7 +170,7 @@ func TestGRPCProxy_ProxyRPC(t *testing.T) {
 			close(serverReady)
 			return &proxypb.RPCResponse{
 				Id: req.Id,
-				Reply: &cloudevents.CloudEvent{
+				Payload: &cloudevents.CloudEvent{
 					Id:          "resp-grpc-123",
 					Source:      "grpc-proxy-test",
 					Type:        "test.response",
@@ -290,13 +290,13 @@ func TestRPCProxyRequest_ToProtoRequest(t *testing.T) {
 	assert.Equal(t, "test-id", protoReq.Id)
 	assert.Equal(t, "test.channel", protoReq.Channel)
 	assert.Equal(t, "testMethod", protoReq.Method)
-	assert.Equal(t, "event-1", protoReq.Request.Id)
+	assert.Equal(t, "event-1", protoReq.Payload.Id)
 }
 
 func TestFromProtoReply(t *testing.T) {
 	reply := &proxypb.RPCResponse{
 		Id: "reply-id",
-		Reply: &cloudevents.CloudEvent{
+		Payload: &cloudevents.CloudEvent{
 			Id:          "event-1",
 			Source:      "source",
 			Type:        "type",

@@ -45,7 +45,7 @@ func (r *RPCProxyRequest) ToProtoRequest() *proxypb.RPCRequest {
 		Id:      r.ID,
 		Channel: r.Channel,
 		Method:  r.Method,
-		Request: r.Event,
+		Payload: r.Event,
 	}
 }
 
@@ -55,7 +55,7 @@ func FromProtoReply(reply *proxypb.RPCResponse) *RPCProxyResponse {
 		return &RPCProxyResponse{}
 	}
 	return &RPCProxyResponse{
-		Event: reply.Reply,
+		Event: reply.Payload,
 		Error: reply.Error,
 	}
 }

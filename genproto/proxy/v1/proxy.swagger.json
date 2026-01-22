@@ -183,7 +183,7 @@
         "error": {
           "$ref": "#/definitions/v1Error"
         },
-        "reply": {
+        "payload": {
           "$ref": "#/definitions/v1CloudEvent"
         }
       }
