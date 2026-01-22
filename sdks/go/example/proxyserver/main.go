@@ -156,7 +156,7 @@ type MyProxyService struct {
 }
 
 // RPC implements ProxyServiceServer.RPC.
-func (s *MyProxyService) RPC(ctx context.Context, req *proxypb.RPCRequest) (*proxypb.RPCReply, error) {
+func (s *MyProxyService) RPC(ctx context.Context, req *proxypb.RPCRequest) (*proxypb.RPCResponse, error) {
 	rpcReq := &messageloopsdk.RPCRequest{
 		ID:      req.Id,
 		Channel: req.Channel,
@@ -165,13 +165,13 @@ func (s *MyProxyService) RPC(ctx context.Context, req *proxypb.RPCRequest) (*pro
 			ID:      req.Id,
 			Channel: req.Channel,
 			Method:  req.Method,
-			Event:   req.GetEvent(),
+			Event:   req.GetPayload(),
 		},
 	}
 
 	resp, err := s.rpcHandler.HandleRPC(ctx, rpcReq)
 	if err != nil {
-		return &proxypb.RPCReply{
+		return &proxypb.RPCResponse{
 			Id: req.Id,
 			Error: &sharedpb.Error{
 				Code:    "INTERNAL_ERROR",
@@ -188,15 +188,15 @@ func (s *MyProxyService) RPC(ctx context.Context, req *proxypb.RPCRequest) (*pro
 		}
 	}
 
-	return &proxypb.RPCReply{
-		Id:    req.Id,
-		Error: resp.Error,
-		Event: event,
+	return &proxypb.RPCResponse{
+		Id:      req.Id,
+		Error:   resp.Error,
+		Payload: event,
 	}, nil
 }
 
 // Authenticate implements ProxyServiceServer.Authenticate.
-func (s *MyProxyService) Authenticate(ctx context.Context, req *proxypb.AuthenticateRequest) (*proxypb.AuthenticateReply, error) {
+func (s *MyProxyService) Authenticate(ctx context.Context, req *proxypb.AuthenticateRequest) (*proxypb.AuthenticateResponse, error) {
 	authReq := &messageloopsdk.AuthenticateRequest{
 		Username:   req.Username,
 		Password:   req.Password,
@@ -206,7 +206,7 @@ func (s *MyProxyService) Authenticate(ctx context.Context, req *proxypb.Authenti
 
 	resp, err := s.authHandler.Authenticate(ctx, authReq)
 	if err != nil {
-		return &proxypb.AuthenticateReply{
+		return &proxypb.AuthenticateResponse{
 			Error: &sharedpb.Error{
 				Code:    "AUTH_ERROR",
 				Type:    "auth_error",
@@ -215,52 +215,52 @@ func (s *MyProxyService) Authenticate(ctx context.Context, req *proxypb.Authenti
 		}, nil
 	}
 
-	return &proxypb.AuthenticateReply{
+	return &proxypb.AuthenticateResponse{
 		Error:    resp.Error,
 		UserInfo: resp.UserInfo.ToProto(),
 	}, nil
 }
 
 // SubscribeAcl implements ProxyServiceServer.SubscribeAcl.
-func (s *MyProxyService) SubscribeAcl(ctx context.Context, req *proxypb.SubscribeAclRequest) (*proxypb.SubscribeAclReply, error) {
+func (s *MyProxyService) SubscribeAcl(ctx context.Context, req *proxypb.SubscribeAclRequest) (*proxypb.SubscribeAclResponse, error) {
 	err := s.aclHandler.CheckSubscribeACL(ctx, req.Channel, req.Token)
 	if err != nil {
-		return &proxypb.SubscribeAclReply{}, status.Error(codes.PermissionDenied, err.Error())
+		return &proxypb.SubscribeAclResponse{}, status.Error(codes.PermissionDenied, err.Error())
 	}
 
-	return &proxypb.SubscribeAclReply{}, nil
+	return &proxypb.SubscribeAclResponse{}, nil
 }
 
 // OnConnected implements ProxyServiceServer.OnConnected.
-func (s *MyProxyService) OnConnected(ctx context.Context, req *proxypb.OnConnectedRequest) (*proxypb.OnConnectedReply, error) {
+func (s *MyProxyService) OnConnected(ctx context.Context, req *proxypb.OnConnectedRequest) (*proxypb.OnConnectedResponse, error) {
 	if err := s.lifecycleHandler.OnConnected(ctx, req.SessionId, req.Username); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
-	return &proxypb.OnConnectedReply{}, nil
+	return &proxypb.OnConnectedResponse{}, nil
 }
 
 // OnSubscribed implements ProxyServiceServer.OnSubscribed.
-func (s *MyProxyService) OnSubscribed(ctx context.Context, req *proxypb.OnSubscribedRequest) (*proxypb.OnSubscribedReply, error) {
+func (s *MyProxyService) OnSubscribed(ctx context.Context, req *proxypb.OnSubscribedRequest) (*proxypb.OnSubscribedResponse, error) {
 	if err := s.lifecycleHandler.OnSubscribed(ctx); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
-	return &proxypb.OnSubscribedReply{}, nil
+	return &proxypb.OnSubscribedResponse{}, nil
 }
 
 // OnUnsubscribed implements ProxyServiceServer.OnUnsubscribed.
-func (s *MyProxyService) OnUnsubscribed(ctx context.Context, req *proxypb.OnUnsubscribedRequest) (*proxypb.OnUnsubscribedReply, error) {
+func (s *MyProxyService) OnUnsubscribed(ctx context.Context, req *proxypb.OnUnsubscribedRequest) (*proxypb.OnUnsubscribedResponse, error) {
 	if err := s.lifecycleHandler.OnUnsubscribed(ctx); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
-	return &proxypb.OnUnsubscribedReply{}, nil
+	return &proxypb.OnUnsubscribedResponse{}, nil
 }
 
 // OnDisconnected implements ProxyServiceServer.OnDisconnected.
-func (s *MyProxyService) OnDisconnected(ctx context.Context, req *proxypb.OnDisconnectedRequest) (*proxypb.OnDisconnectedReply, error) {
+func (s *MyProxyService) OnDisconnected(ctx context.Context, req *proxypb.OnDisconnectedRequest) (*proxypb.OnDisconnectedResponse, error) {
 	if err := s.lifecycleHandler.OnDisconnected(ctx, req.SessionId, req.Username); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
-	return &proxypb.OnDisconnectedReply{}, nil
+	return &proxypb.OnDisconnectedResponse{}, nil
 }
 
 func hasPrefix(s, prefix string) bool {

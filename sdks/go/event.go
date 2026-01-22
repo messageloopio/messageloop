@@ -41,7 +41,7 @@ func wrapMessage(m *clientpb.Message) *Message {
 	if m == nil {
 		return nil
 	}
-	event := m.GetEvent()
+	event := m.GetPayload()
 	data, contentType := extractData(event)
 	return &Message{
 		ID:          m.GetId(),

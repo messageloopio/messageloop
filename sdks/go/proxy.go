@@ -163,7 +163,7 @@ type HandlerImpl struct {
 }
 
 // RPC implements ProxyServiceServer.RPC.
-func (h *HandlerImpl) RPC(ctx context.Context, req *proxypb.RPCRequest) (*proxypb.RPCReply, error) {
+func (h *HandlerImpl) RPC(ctx context.Context, req *proxypb.RPCRequest) (*proxypb.RPCResponse, error) {
 	log.DebugContext(ctx, "received RPC request",
 		"id", req.Id,
 		"channel", req.Channel,
@@ -178,14 +178,14 @@ func (h *HandlerImpl) RPC(ctx context.Context, req *proxypb.RPCRequest) (*proxyp
 			ID:      req.Id,
 			Channel: req.Channel,
 			Method:  req.Method,
-			Event:   req.GetEvent(),
+			Event:   req.GetPayload(),
 		},
 	}
 
 	resp, err := h.RPCHandlerImpl.HandleRPC(ctx, rpcReq)
 	if err != nil {
 		log.ErrorContext(ctx, "RPC handler failed", err)
-		return &proxypb.RPCReply{
+		return &proxypb.RPCResponse{
 			Id: req.Id,
 			Error: &sharedpb.Error{
 				Code:    "INTERNAL_ERROR",
@@ -208,15 +208,15 @@ func (h *HandlerImpl) RPC(ctx context.Context, req *proxypb.RPCRequest) (*proxyp
 		event = ce
 	}
 
-	return &proxypb.RPCReply{
-		Id:    req.Id,
-		Error: resp.Error,
-		Event: event,
+	return &proxypb.RPCResponse{
+		Id:      req.Id,
+		Error:   resp.Error,
+		Payload: event,
 	}, nil
 }
 
 // Authenticate implements ProxyServiceServer.Authenticate.
-func (h *HandlerImpl) Authenticate(ctx context.Context, req *proxypb.AuthenticateRequest) (*proxypb.AuthenticateReply, error) {
+func (h *HandlerImpl) Authenticate(ctx context.Context, req *proxypb.AuthenticateRequest) (*proxypb.AuthenticateResponse, error) {
 	log.DebugContext(ctx, "received authenticate request",
 		"username", req.Username,
 		"client_type", req.ClientType,
@@ -233,7 +233,7 @@ func (h *HandlerImpl) Authenticate(ctx context.Context, req *proxypb.Authenticat
 	resp, err := h.AuthHandlerImpl.Authenticate(ctx, authReq)
 	if err != nil {
 		log.ErrorContext(ctx, "auth handler failed", err)
-		return &proxypb.AuthenticateReply{
+		return &proxypb.AuthenticateResponse{
 			Error: &sharedpb.Error{
 				Code:    "AUTH_ERROR",
 				Type:    "auth_error",
@@ -242,14 +242,14 @@ func (h *HandlerImpl) Authenticate(ctx context.Context, req *proxypb.Authenticat
 		}, nil
 	}
 
-	return &proxypb.AuthenticateReply{
+	return &proxypb.AuthenticateResponse{
 		Error:    resp.Error,
 		UserInfo: resp.UserInfo.ToProto(),
 	}, nil
 }
 
 // SubscribeAcl implements ProxyServiceServer.SubscribeAcl.
-func (h *HandlerImpl) SubscribeAcl(ctx context.Context, req *proxypb.SubscribeAclRequest) (*proxypb.SubscribeAclReply, error) {
+func (h *HandlerImpl) SubscribeAcl(ctx context.Context, req *proxypb.SubscribeAclRequest) (*proxypb.SubscribeAclResponse, error) {
 	log.DebugContext(ctx, "received subscribe ACL request",
 		"channel", req.Channel,
 	)
@@ -257,14 +257,14 @@ func (h *HandlerImpl) SubscribeAcl(ctx context.Context, req *proxypb.SubscribeAc
 	err := h.ACLHandlerImpl.CheckSubscribeACL(ctx, req.Channel, req.Token)
 	if err != nil {
 		log.DebugContext(ctx, "subscription denied by ACL", "error", err)
-		return &proxypb.SubscribeAclReply{}, status.Error(codes.PermissionDenied, err.Error())
+		return &proxypb.SubscribeAclResponse{}, status.Error(codes.PermissionDenied, err.Error())
 	}
 
-	return &proxypb.SubscribeAclReply{}, nil
+	return &proxypb.SubscribeAclResponse{}, nil
 }
 
 // OnConnected implements ProxyServiceServer.OnConnected.
-func (h *HandlerImpl) OnConnected(ctx context.Context, req *proxypb.OnConnectedRequest) (*proxypb.OnConnectedReply, error) {
+func (h *HandlerImpl) OnConnected(ctx context.Context, req *proxypb.OnConnectedRequest) (*proxypb.OnConnectedResponse, error) {
 	log.DebugContext(ctx, "received OnConnected hook",
 		"session_id", req.SessionId,
 		"username", req.Username,
@@ -275,11 +275,11 @@ func (h *HandlerImpl) OnConnected(ctx context.Context, req *proxypb.OnConnectedR
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	return &proxypb.OnConnectedReply{}, nil
+	return &proxypb.OnConnectedResponse{}, nil
 }
 
 // OnSubscribed implements ProxyServiceServer.OnSubscribed.
-func (h *HandlerImpl) OnSubscribed(ctx context.Context, req *proxypb.OnSubscribedRequest) (*proxypb.OnSubscribedReply, error) {
+func (h *HandlerImpl) OnSubscribed(ctx context.Context, req *proxypb.OnSubscribedRequest) (*proxypb.OnSubscribedResponse, error) {
 	log.DebugContext(ctx, "received OnSubscribed hook")
 
 	if err := h.LifecycleHandlerImpl.OnSubscribed(ctx); err != nil {
@@ -287,11 +287,11 @@ func (h *HandlerImpl) OnSubscribed(ctx context.Context, req *proxypb.OnSubscribe
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	return &proxypb.OnSubscribedReply{}, nil
+	return &proxypb.OnSubscribedResponse{}, nil
 }
 
 // OnUnsubscribed implements ProxyServiceServer.OnUnsubscribed.
-func (h *HandlerImpl) OnUnsubscribed(ctx context.Context, req *proxypb.OnUnsubscribedRequest) (*proxypb.OnUnsubscribedReply, error) {
+func (h *HandlerImpl) OnUnsubscribed(ctx context.Context, req *proxypb.OnUnsubscribedRequest) (*proxypb.OnUnsubscribedResponse, error) {
 	log.DebugContext(ctx, "received OnUnsubscribed hook")
 
 	if err := h.LifecycleHandlerImpl.OnUnsubscribed(ctx); err != nil {
@@ -299,11 +299,11 @@ func (h *HandlerImpl) OnUnsubscribed(ctx context.Context, req *proxypb.OnUnsubsc
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	return &proxypb.OnUnsubscribedReply{}, nil
+	return &proxypb.OnUnsubscribedResponse{}, nil
 }
 
 // OnDisconnected implements ProxyServiceServer.OnDisconnected.
-func (h *HandlerImpl) OnDisconnected(ctx context.Context, req *proxypb.OnDisconnectedRequest) (*proxypb.OnDisconnectedReply, error) {
+func (h *HandlerImpl) OnDisconnected(ctx context.Context, req *proxypb.OnDisconnectedRequest) (*proxypb.OnDisconnectedResponse, error) {
 	log.DebugContext(ctx, "received OnDisconnected hook",
 		"session_id", req.SessionId,
 		"username", req.Username,
@@ -314,7 +314,7 @@ func (h *HandlerImpl) OnDisconnected(ctx context.Context, req *proxypb.OnDisconn
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	return &proxypb.OnDisconnectedReply{}, nil
+	return &proxypb.OnDisconnectedResponse{}, nil
 }
 
 // ProxyServerOptions configures the proxy server.
