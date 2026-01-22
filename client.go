@@ -324,7 +324,7 @@ func (c *ClientSession) onPublish(ctx context.Context, in *clientpb.InboundMessa
 func (c *ClientSession) onSubscribe(ctx context.Context, in *clientpb.InboundMessage, sub *clientpb.Subscribe) error {
 	subs := []string{}
 	for _, ch := range sub.Subscriptions {
-		if err := c.node.addSubscription(ch.Channel, subscriber{client: c, ephemeral: ch.Ephemeral}); err != nil {
+		if err := c.node.addSubscription(ctx, ch.Channel, subscriber{client: c, ephemeral: ch.Ephemeral}); err != nil {
 			for _, s := range subs {
 				_ = c.node.removeSubscription(s, c)
 			}

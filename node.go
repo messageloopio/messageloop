@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/deeplooplabs/messageloop/proxy"
+	"github.com/lynx-go/x/log"
 )
 
 type Node struct {
@@ -83,14 +84,16 @@ func (n *Node) addClient(c *ClientSession) {
 	n.hub.add(c)
 }
 
-func (n *Node) addSubscription(ch string, sub subscriber) error {
+func (n *Node) addSubscription(ctx context.Context, ch string, sub subscriber) error {
 	mu := n.subLock(ch)
 	mu.Lock()
 	defer mu.Unlock()
+	log.InfoContext(ctx, "add subscriber", "channel", ch, "sub", sub)
 	first, err := n.hub.addSub(ch, sub)
 	if err != nil {
 		return err
 	}
+	log.InfoContext(ctx, "added subscriber", "channel", ch, "sub", sub)
 	if first {
 		if n.broker != nil {
 			if err := n.broker.Subscribe(ch); err != nil {

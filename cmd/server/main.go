@@ -7,9 +7,9 @@ import (
 
 	"github.com/deeplooplabs/messageloop"
 	"github.com/deeplooplabs/messageloop/config"
-	"github.com/deeplooplabs/messageloop/grpcstream"
+	"github.com/deeplooplabs/messageloop/pkg/grpcstream"
 	redisbroker "github.com/deeplooplabs/messageloop/pkg/redisbroker"
-	"github.com/deeplooplabs/messageloop/websocket"
+	"github.com/deeplooplabs/messageloop/pkg/websocket"
 	"github.com/lynx-go/lynx"
 	"github.com/lynx-go/lynx/contrib/zap"
 	"github.com/spf13/pflag"

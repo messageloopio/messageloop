@@ -9,7 +9,19 @@ transport:
   grpc:
     addr: ":9090"
 
-# Proxy server configuration (implements ProxyService for backend integrations)
-proxy:
-  addr: ":9001"
-  insecure: true
+broker:
+  type: redis
+  redis:
+    addr: 127.0.0.1:6379
+    password: ""
+    db: 10
+
+proxies:
+  - name: example
+    endpoint: 127.0.0.1:9091
+    timeout: 30s
+    grpc:
+      insecure: true
+    routes:
+      - channel: chat.messages
+        method: "*"

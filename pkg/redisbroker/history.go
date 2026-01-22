@@ -2,6 +2,7 @@ package redisbroker
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/deeplooplabs/messageloop"
@@ -17,7 +18,7 @@ func (b *redisBroker) getHistory(ch string, opts messageloop.HistoryOptions) ([]
 
 	// Get stream info for position
 	info, err := b.client.XInfoStream(ctx, stream).Result()
-	if err != nil && err != redis.Nil {
+	if err != nil && !errors.Is(err, redis.Nil) {
 		return nil, messageloop.StreamPosition{}, err
 	}
 
@@ -47,7 +48,7 @@ func (b *redisBroker) getHistory(ch string, opts messageloop.HistoryOptions) ([]
 	} else {
 		messages, err = b.client.XRange(ctx, stream, start, end).Result()
 	}
-	if err != nil && err != redis.Nil {
+	if err != nil && !errors.Is(err, redis.Nil) {
 		return nil, position, err
 	}
 
