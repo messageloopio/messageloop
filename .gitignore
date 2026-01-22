@@ -33,3 +33,5 @@ go.work.sum
 
 /nul
 .claude/settings.local.json
+
+config.yaml
