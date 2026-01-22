@@ -9,6 +9,7 @@ import (
 
 	clientpb "github.com/fleetlit/messageloop/genproto/v1"
 	"github.com/gorilla/websocket"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -32,11 +33,11 @@ type Marshaler interface {
 type JSONMarshaler struct{}
 
 func (JSONMarshaler) Marshal(msg proto.Message) ([]byte, error) {
-	return proto.Marshal(msg) // Use protobuf JSON encoding
+	return protojson.Marshal(msg)
 }
 
 func (JSONMarshaler) Unmarshal(data []byte, msg proto.Message) error {
-	return proto.Unmarshal(data, msg)
+	return protojson.Unmarshal(data, msg)
 }
 
 func (JSONMarshaler) Name() string {
