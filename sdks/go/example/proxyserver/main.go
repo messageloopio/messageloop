@@ -157,6 +157,8 @@ type MyProxyService struct {
 
 // RPC implements ProxyServiceServer.RPC.
 func (s *MyProxyService) RPC(ctx context.Context, req *proxypb.RPCRequest) (*proxypb.RPCResponse, error) {
+	log.Printf("[RPC Request] id=%s channel=%s method=%s", req.Id, req.Channel, req.Method)
+
 	rpcReq := &messageloopsdk.RPCRequest{
 		ID:      req.Id,
 		Channel: req.Channel,
@@ -171,6 +173,7 @@ func (s *MyProxyService) RPC(ctx context.Context, req *proxypb.RPCRequest) (*pro
 
 	resp, err := s.rpcHandler.HandleRPC(ctx, rpcReq)
 	if err != nil {
+		log.Printf("[RPC Error] id=%s error=%s", req.Id, err.Error())
 		return &proxypb.RPCResponse{
 			Id: req.Id,
 			Error: &sharedpb.Error{
@@ -188,6 +191,12 @@ func (s *MyProxyService) RPC(ctx context.Context, req *proxypb.RPCRequest) (*pro
 		}
 	}
 
+	if resp.Error != nil {
+		log.Printf("[RPC Response] id=%s error_code=%s error_type=%s error_msg=%s", req.Id, resp.Error.Code, resp.Error.Type, resp.Error.Message)
+	} else {
+		log.Printf("[RPC Response] id=%s success=true", req.Id)
+	}
+
 	return &proxypb.RPCResponse{
 		Id:      req.Id,
 		Error:   resp.Error,
@@ -197,6 +206,8 @@ func (s *MyProxyService) RPC(ctx context.Context, req *proxypb.RPCRequest) (*pro
 
 // Authenticate implements ProxyServiceServer.Authenticate.
 func (s *MyProxyService) Authenticate(ctx context.Context, req *proxypb.AuthenticateRequest) (*proxypb.AuthenticateResponse, error) {
+	log.Printf("[Authenticate Request] username=%s client_type=%s client_id=%s", req.Username, req.ClientType, req.ClientId)
+
 	authReq := &messageloopsdk.AuthenticateRequest{
 		Username:   req.Username,
 		Password:   req.Password,
@@ -206,6 +217,7 @@ func (s *MyProxyService) Authenticate(ctx context.Context, req *proxypb.Authenti
 
 	resp, err := s.authHandler.Authenticate(ctx, authReq)
 	if err != nil {
+		log.Printf("[Authenticate Error] username=%s error=%s", req.Username, err.Error())
 		return &proxypb.AuthenticateResponse{
 			Error: &sharedpb.Error{
 				Code:    "AUTH_ERROR",
@@ -213,6 +225,14 @@ func (s *MyProxyService) Authenticate(ctx context.Context, req *proxypb.Authenti
 				Message: err.Error(),
 			},
 		}, nil
+	}
+
+	if resp.Error != nil {
+		log.Printf("[Authenticate Response] username=%s error_code=%s error_type=%s", req.Username, resp.Error.Code, resp.Error.Type)
+	} else if resp.UserInfo != nil {
+		log.Printf("[Authenticate Response] username=%s user_id=%s success=true", req.Username, resp.UserInfo.ID)
+	} else {
+		log.Printf("[Authenticate Response] username=%s success=true", req.Username)
 	}
 
 	return &proxypb.AuthenticateResponse{
@@ -223,43 +243,67 @@ func (s *MyProxyService) Authenticate(ctx context.Context, req *proxypb.Authenti
 
 // SubscribeAcl implements ProxyServiceServer.SubscribeAcl.
 func (s *MyProxyService) SubscribeAcl(ctx context.Context, req *proxypb.SubscribeAclRequest) (*proxypb.SubscribeAclResponse, error) {
+	log.Printf("[SubscribeAcl Request] channel=%s token=%s", req.Channel, req.Token)
+
 	err := s.aclHandler.CheckSubscribeACL(ctx, req.Channel, req.Token)
 	if err != nil {
+		log.Printf("[SubscribeAcl Response] channel=%s denied: %s", req.Channel, err.Error())
 		return &proxypb.SubscribeAclResponse{}, status.Error(codes.PermissionDenied, err.Error())
 	}
 
+	log.Printf("[SubscribeAcl Response] channel=%s allowed=true", req.Channel)
 	return &proxypb.SubscribeAclResponse{}, nil
 }
 
 // OnConnected implements ProxyServiceServer.OnConnected.
 func (s *MyProxyService) OnConnected(ctx context.Context, req *proxypb.OnConnectedRequest) (*proxypb.OnConnectedResponse, error) {
+	log.Printf("[OnConnected Request] session_id=%s username=%s", req.SessionId, req.Username)
+
 	if err := s.lifecycleHandler.OnConnected(ctx, req.SessionId, req.Username); err != nil {
+		log.Printf("[OnConnected Error] session_id=%s error=%s", req.SessionId, err.Error())
 		return nil, status.Error(codes.Internal, err.Error())
 	}
+
+	log.Printf("[OnConnected Response] session_id=%s success=true", req.SessionId)
 	return &proxypb.OnConnectedResponse{}, nil
 }
 
 // OnSubscribed implements ProxyServiceServer.OnSubscribed.
 func (s *MyProxyService) OnSubscribed(ctx context.Context, req *proxypb.OnSubscribedRequest) (*proxypb.OnSubscribedResponse, error) {
+	log.Printf("[OnSubscribed Request]")
+
 	if err := s.lifecycleHandler.OnSubscribed(ctx); err != nil {
+		log.Printf("[OnSubscribed Error] error=%s", err.Error())
 		return nil, status.Error(codes.Internal, err.Error())
 	}
+
+	log.Printf("[OnSubscribed Response] success=true")
 	return &proxypb.OnSubscribedResponse{}, nil
 }
 
 // OnUnsubscribed implements ProxyServiceServer.OnUnsubscribed.
 func (s *MyProxyService) OnUnsubscribed(ctx context.Context, req *proxypb.OnUnsubscribedRequest) (*proxypb.OnUnsubscribedResponse, error) {
+	log.Printf("[OnUnsubscribed Request]")
+
 	if err := s.lifecycleHandler.OnUnsubscribed(ctx); err != nil {
+		log.Printf("[OnUnsubscribed Error] error=%s", err.Error())
 		return nil, status.Error(codes.Internal, err.Error())
 	}
+
+	log.Printf("[OnUnsubscribed Response] success=true")
 	return &proxypb.OnUnsubscribedResponse{}, nil
 }
 
 // OnDisconnected implements ProxyServiceServer.OnDisconnected.
 func (s *MyProxyService) OnDisconnected(ctx context.Context, req *proxypb.OnDisconnectedRequest) (*proxypb.OnDisconnectedResponse, error) {
+	log.Printf("[OnDisconnected Request] session_id=%s username=%s", req.SessionId, req.Username)
+
 	if err := s.lifecycleHandler.OnDisconnected(ctx, req.SessionId, req.Username); err != nil {
+		log.Printf("[OnDisconnected Error] session_id=%s error=%s", req.SessionId, err.Error())
 		return nil, status.Error(codes.Internal, err.Error())
 	}
+
+	log.Printf("[OnDisconnected Response] session_id=%s success=true", req.SessionId)
 	return &proxypb.OnDisconnectedResponse{}, nil
 }
 
