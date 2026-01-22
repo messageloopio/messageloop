@@ -60,7 +60,7 @@ func NewNode() *Node {
 }
 
 func (n *Node) Run() error {
-	if err := n.Broker().RegisterBrokerEventHandler(n); err != nil {
+	if err := n.Broker().RegisterEventHandler(n); err != nil {
 		return err
 	}
 	return nil

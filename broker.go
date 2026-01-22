@@ -76,9 +76,9 @@ type BrokerEventHandler interface {
 }
 
 type Broker interface {
-	// RegisterBrokerEventHandler called once on start when Broker already set to Node. At
+	// RegisterEventHandler called once on start when Broker already set to Node. At
 	// this moment node is ready to process broker events.
-	RegisterBrokerEventHandler(BrokerEventHandler) error
+	RegisterEventHandler(BrokerEventHandler) error
 
 	// Subscribe node on channel to listen all messages coming from channel.
 	Subscribe(ch string) error

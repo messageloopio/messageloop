@@ -17,10 +17,10 @@ type redisBroker struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	client   *redis.Client
-	nodeID   string
-	handler  messageloop.BrokerEventHandler
-	options  *Options
+	client  *redis.Client
+	nodeID  string
+	handler messageloop.BrokerEventHandler
+	options *Options
 
 	subMu      sync.RWMutex
 	subscribed map[string]struct{}
@@ -29,14 +29,14 @@ type redisBroker struct {
 // New creates a new Redis broker.
 func New(cfg config.RedisConfig, nodeID string) messageloop.Broker {
 	return &redisBroker{
-		nodeID:    nodeID,
-		options:   NewOptions(cfg),
+		nodeID:     nodeID,
+		options:    NewOptions(cfg),
 		subscribed: make(map[string]struct{}),
 	}
 }
 
-// RegisterBrokerEventHandler registers the handler for broker events.
-func (b *redisBroker) RegisterBrokerEventHandler(handler messageloop.BrokerEventHandler) error {
+// RegisterEventHandler registers the handler for broker events.
+func (b *redisBroker) RegisterEventHandler(handler messageloop.BrokerEventHandler) error {
 	b.handler = handler
 
 	// Initialize Redis client

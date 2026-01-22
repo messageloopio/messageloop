@@ -19,7 +19,7 @@ type memoryBroker struct {
 	node         *Node
 }
 
-func (b *memoryBroker) RegisterBrokerEventHandler(handler BrokerEventHandler) error {
+func (b *memoryBroker) RegisterEventHandler(handler BrokerEventHandler) error {
 	b.eventHandler = handler
 	return nil
 }
