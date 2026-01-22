@@ -1,0 +1,251 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"time"
+
+	pb "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
+	"github.com/deeplooplabs/messageloop/sdks/go"
+)
+
+// BasicWebSocketExample demonstrates a basic WebSocket connection.
+func BasicWebSocketExample() error {
+	// Create a WebSocket client with JSON encoding
+	client, err := messageloopsdk.Dial(
+		"ws://localhost:8080/ws",
+		messageloopsdk.WithEncoding(messageloopsdk.EncodingJSON),
+		messageloopsdk.WithClientID("example-client"),
+		messageloopsdk.WithAutoSubscribe("chat.messages"),
+	)
+	if err != nil {
+		return fmt.Errorf("dial failed: %w", err)
+	}
+	defer client.Close()
+
+	// Set up handlers
+	client.OnConnected(func(sessionID string) {
+		log.Printf("Connected! Session ID: %s", sessionID)
+	})
+
+	client.OnMessage(func(messages []*messageloopsdk.Message) {
+		for _, msg := range messages {
+			log.Printf("Received from %s: %s", msg.Channel, msg.Data)
+		}
+	})
+
+	client.OnError(func(err error) {
+		log.Printf("Error: %v", err)
+	})
+
+	// Connect to the server (waits for connection to be established)
+	ctx := context.Background()
+	if err := client.Connect(ctx); err != nil {
+		return fmt.Errorf("connect failed: %w", err)
+	}
+
+	// Subscribe to more channels
+	if err := client.Subscribe("chat.presence", "chat.typing"); err != nil {
+		return fmt.Errorf("subscribe failed: %w", err)
+	}
+
+	// Publish a message
+	event := messageloopsdk.NewCloudEvent(
+		"msg-123",
+		"/client/example",
+		"chat.message",
+		[]byte("Hello, MessageLoop!"),
+	)
+	if err := client.Publish("chat.messages", event); err != nil {
+		return fmt.Errorf("publish failed: %w", err)
+	}
+
+	// Keep running
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(30 * time.Second):
+		return nil
+	}
+}
+
+// BasicGRPCExample demonstrates a basic gRPC connection.
+func BasicGRPCExample() error {
+	// Create a gRPC client
+	client, err := messageloopsdk.DialGRPC(
+		"localhost:9090",
+		messageloopsdk.WithClientID("example-grpc-client"),
+	)
+	if err != nil {
+		return fmt.Errorf("dial grpc failed: %w", err)
+	}
+	defer client.Close()
+
+	// Set up handlers
+	client.OnConnected(func(sessionID string) {
+		log.Printf("Connected via gRPC! Session ID: %s", sessionID)
+	})
+
+	client.OnMessage(func(messages []*messageloopsdk.Message) {
+		for _, msg := range messages {
+			log.Printf("Received from %s: %s", msg.Channel, msg.Data)
+		}
+	})
+
+	// Connect to the server
+	ctx := context.Background()
+	if err := client.Connect(ctx); err != nil {
+		return fmt.Errorf("connect failed: %w", err)
+	}
+
+	// Publish a message
+	event := messageloopsdk.NewTextCloudEvent(
+		"msg-456",
+		"/client/example",
+		"chat.message",
+		"Hello via gRPC!",
+	)
+	if err := client.Publish("chat.messages", event); err != nil {
+		return fmt.Errorf("publish failed: %w", err)
+	}
+
+	// Keep running
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(30 * time.Second):
+		return nil
+	}
+}
+
+// RPCExample demonstrates making RPC calls.
+func RPCExample() error {
+	// Create a WebSocket client
+	client, err := messageloopsdk.Dial(
+		"ws://localhost:8080/ws",
+		messageloopsdk.WithClientID("rpc-example"),
+	)
+	if err != nil {
+		return fmt.Errorf("dial failed: %w", err)
+	}
+	defer client.Close()
+
+	// Connect to the server (waits for connection to be established)
+	ctx := context.Background()
+	if err := client.Connect(ctx); err != nil {
+		return fmt.Errorf("connect failed: %w", err)
+	}
+
+	// Make an RPC call
+	req := messageloopsdk.NewCloudEvent(
+		"rpc-req-123",
+		"/client/example",
+		"getUser",
+		[]byte(`{"user_id": "123"}`),
+	)
+	messageloopsdk.SetEventAttribute(req, "datacontenttype", "application/json")
+
+	var resp pb.CloudEvent
+	err = client.RPC(ctx, "user.service", "GetUser", req, &resp)
+	if err != nil {
+		return fmt.Errorf("rpc failed: %w", err)
+	}
+
+	log.Printf("RPC response: %s", resp.GetTextData())
+
+	return nil
+}
+
+// ProtobufEncodingExample demonstrates using protobuf encoding.
+func ProtobufEncodingExample() error {
+	// Create a WebSocket client with protobuf encoding
+	client, err := messageloopsdk.Dial(
+		"ws://localhost:8080/ws",
+		messageloopsdk.WithEncoding(messageloopsdk.EncodingProtobuf),
+		messageloopsdk.WithClientID("protobuf-example"),
+	)
+	if err != nil {
+		return fmt.Errorf("dial failed: %w", err)
+	}
+	defer client.Close()
+
+	// Connect to the server
+	ctx := context.Background()
+	if err := client.Connect(ctx); err != nil {
+		return fmt.Errorf("connect failed: %w", err)
+	}
+
+	// Publish messages with protobuf encoding
+	event := messageloopsdk.NewCloudEvent(
+		"msg-789",
+		"/client/example",
+		"chat.message",
+		[]byte("Protobuf encoded message"),
+	)
+	if err := client.Publish("chat.messages", event); err != nil {
+		return fmt.Errorf("publish failed: %w", err)
+	}
+
+	// Keep running for a bit
+	time.Sleep(5 * time.Second)
+	return nil
+}
+
+// DynamicSubscriptionExample demonstrates dynamic subscription management.
+func DynamicSubscriptionExample() error {
+	client, err := messageloopsdk.Dial(
+		"ws://localhost:8080/ws",
+		messageloopsdk.WithClientID("dynamic-sub-example"),
+	)
+	if err != nil {
+		return fmt.Errorf("dial failed: %w", err)
+	}
+	defer client.Close()
+
+	// Track received messages
+	messageCount := 0
+
+	client.OnMessage(func(messages []*messageloopsdk.Message) {
+		messageCount += len(messages)
+		log.Printf("Received %d messages (total: %d)", len(messages), messageCount)
+	})
+
+	// Connect
+	ctx := context.Background()
+	if err := client.Connect(ctx); err != nil {
+		return fmt.Errorf("connect failed: %w", err)
+	}
+
+	time.Sleep(1 * time.Second)
+
+	// Subscribe to channels dynamically
+	channels := []string{"channel.1", "channel.2", "channel.3"}
+	for _, ch := range channels {
+		if err := client.Subscribe(ch); err != nil {
+			log.Printf("Failed to subscribe to %s: %v", ch, err)
+		} else {
+			log.Printf("Subscribed to %s", ch)
+		}
+	}
+
+	// Unsubscribe after 10 seconds
+	time.Sleep(10 * time.Second)
+	for _, ch := range channels[:2] {
+		if err := client.Unsubscribe(ch); err != nil {
+			log.Printf("Failed to unsubscribe from %s: %v", ch, err)
+		} else {
+			log.Printf("Unsubscribed from %s", ch)
+		}
+	}
+
+	// Keep running
+	time.Sleep(10 * time.Second)
+	return nil
+}
+
+func main() {
+	if err := BasicGRPCExample(); err != nil {
+		log.Printf("Failed to connect to gRPC server: %v", err)
+	}
+}
