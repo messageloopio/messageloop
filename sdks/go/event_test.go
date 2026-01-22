@@ -85,10 +85,10 @@ func TestCloudEventToPbConversion(t *testing.T) {
 		t.Errorf("expected type 'test.type', got '%s'", pbEvent.GetType())
 	}
 
-	// Check data
-	textData := pbEvent.GetTextData()
-	if textData != `{"key":"value"}` {
-		t.Errorf("expected text data '{\"key\":\"value\"}', got '%s'", textData)
+	// Check data - the official SDK uses BinaryData for all data
+	binaryData := pbEvent.GetBinaryData()
+	if string(binaryData) != `{"key":"value"}` {
+		t.Errorf("expected binary data '{\"key\":\"value\"}', got '%s'", string(binaryData))
 	}
 
 	// Check content type
@@ -159,7 +159,13 @@ func TestWrapPublicationToEvents(t *testing.T) {
 		Source:      "test-source",
 		SpecVersion: "1.0",
 		Type:        "test.type",
-		Attributes:  make(map[string]*pb.CloudEventAttributeValue),
+		Attributes: map[string]*pb.CloudEventAttributeValue{
+			"datacontenttype": {
+				Attr: &pb.CloudEventAttributeValue_CeString{
+					CeString: "text/plain",
+				},
+			},
+		},
 		Data: &pb.CloudEvent_TextData{
 			TextData: "test data 1",
 		},
@@ -170,7 +176,13 @@ func TestWrapPublicationToEvents(t *testing.T) {
 		Source:      "test-source-2",
 		SpecVersion: "1.0",
 		Type:        "test.type.2",
-		Attributes:  make(map[string]*pb.CloudEventAttributeValue),
+		Attributes: map[string]*pb.CloudEventAttributeValue{
+			"datacontenttype": {
+				Attr: &pb.CloudEventAttributeValue_CeString{
+					CeString: "application/octet-stream",
+				},
+			},
+		},
 		Data: &pb.CloudEvent_BinaryData{
 			BinaryData: []byte("test data 2"),
 		},
