@@ -7,7 +7,6 @@ replace github.com/fleetlit/messageloop/genproto => ./genproto
 require (
 	github.com/RoaringBitmap/roaring v1.9.4
 	github.com/cloudevents/sdk-go/binding/format/protobuf/v2 v2.16.2
-	github.com/cloudevents/sdk-go/v2 v2.16.2
 	github.com/fleetlit/messageloop/genproto v0.1.0
 	github.com/gobwas/glob v0.2.3
 	github.com/google/uuid v1.6.0
@@ -31,9 +30,6 @@ require (
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
-	github.com/json-iterator/go v1.1.12 // indirect
-	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
-	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/mschoch/smat v0.2.0 // indirect
 	github.com/oklog/run v1.2.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
