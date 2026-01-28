@@ -3,6 +3,7 @@ package websocket
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/fleetlit/messageloop"
 	sharedpb "github.com/fleetlit/messageloop/genproto/shared/v1"
@@ -52,11 +53,27 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	}
 	ctx = log.Context(ctx, log.FromContext(ctx), "client_id", client.SessionID())
 	defer closeFn()
+
+	// Set initial read deadline (2 * ping_interval as a reasonable default)
+	readTimeout := 60 * time.Second
+	if h.opt.ReadTimeout > 0 {
+		readTimeout = h.opt.ReadTimeout
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(readTimeout))
+
 	for {
 		_, data, err := conn.ReadMessage()
 		if err != nil {
+			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+				log.InfoContext(ctx, "websocket closed normally")
+			} else {
+				log.ErrorContext(ctx, "websocket read error", err)
+			}
 			break
 		}
+		// Reset read deadline after successful read
+		_ = conn.SetReadDeadline(time.Now().Add(readTimeout))
+
 		msg := &clientpb.InboundMessage{}
 		if err := marshaler.Unmarshal(data, msg); err != nil {
 			log.ErrorContext(ctx, "decode client message error", err)

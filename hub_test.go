@@ -68,7 +68,7 @@ func newTestClient(t *testing.T, sessionID, userID string) *ClientSession {
 
 func newTestClientWithTransport(t *testing.T, sessionID, userID string, transport Transport) *ClientSession {
 	ctx := context.Background()
-	node := NewNode()
+	node := NewNode(nil)
 	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)

@@ -12,9 +12,9 @@ import (
 )
 
 func TestNewNode(t *testing.T) {
-	node := NewNode()
+	node := NewNode(nil)
 	if node == nil {
-		t.Fatal("NewNode() should not return nil")
+		t.Fatal("NewNode(nil) should not return nil")
 	}
 	if node.hub == nil {
 		t.Error("hub should be initialized")
@@ -31,7 +31,7 @@ func TestNewNode(t *testing.T) {
 }
 
 func TestNode_Hub(t *testing.T) {
-	node := NewNode()
+	node := NewNode(nil)
 	hub := node.Hub()
 	if hub == nil {
 		t.Error("Hub() should not return nil")
@@ -42,7 +42,7 @@ func TestNode_Hub(t *testing.T) {
 }
 
 func TestNode_Broker(t *testing.T) {
-	node := NewNode()
+	node := NewNode(nil)
 	broker := node.Broker()
 	if broker == nil {
 		t.Error("Broker() should not return nil")
@@ -53,7 +53,7 @@ func TestNode_Broker(t *testing.T) {
 }
 
 func TestNode_SetBroker(t *testing.T) {
-	node := NewNode()
+	node := NewNode(nil)
 	newBroker := NewMemoryBroker()
 
 	node.SetBroker(newBroker)
@@ -64,7 +64,7 @@ func TestNode_SetBroker(t *testing.T) {
 }
 
 func TestNode_Run(t *testing.T) {
-	node := NewNode()
+	node := NewNode(nil)
 	err := node.Run()
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -78,7 +78,7 @@ func TestNode_Run(t *testing.T) {
 }
 
 func TestNode_HandlePublication(t *testing.T) {
-	node := NewNode()
+	node := NewNode(nil)
 	transport := &capturingTransport{}
 	ctx := context.Background()
 
@@ -113,7 +113,7 @@ func TestNode_HandlePublication(t *testing.T) {
 }
 
 func TestNode_HandlePublication_NoSubscribers(t *testing.T) {
-	node := NewNode()
+	node := NewNode(nil)
 
 	pub := &Publication{
 		Channel:  "empty-channel",
@@ -129,7 +129,7 @@ func TestNode_HandlePublication_NoSubscribers(t *testing.T) {
 }
 
 func TestNode_HandleJoin(t *testing.T) {
-	node := NewNode()
+	node := NewNode(nil)
 	info := &ClientDesc{
 		ClientID:  "client-1",
 		SessionID: "session-1",
@@ -144,7 +144,7 @@ func TestNode_HandleJoin(t *testing.T) {
 }
 
 func TestNode_HandleLeave(t *testing.T) {
-	node := NewNode()
+	node := NewNode(nil)
 	info := &ClientDesc{
 		ClientID:  "client-1",
 		SessionID: "session-1",
@@ -159,7 +159,7 @@ func TestNode_HandleLeave(t *testing.T) {
 }
 
 func TestNode_Publish(t *testing.T) {
-	node := NewNode()
+	node := NewNode(nil)
 	_ = node.Run() // Register event handler
 
 	transport := &capturingTransport{}
@@ -192,7 +192,7 @@ func TestNode_Publish(t *testing.T) {
 }
 
 func TestNode_Publish_WithOptions(t *testing.T) {
-	node := NewNode()
+	node := NewNode(nil)
 	_ = node.Run()
 
 	err := node.Publish("test-channel", []byte("test payload"),
@@ -209,7 +209,7 @@ func TestNode_Publish_WithOptions(t *testing.T) {
 }
 
 func TestNode_AddClient(t *testing.T) {
-	node := NewNode()
+	node := NewNode(nil)
 	transport := &capturingTransport{}
 	ctx := context.Background()
 
@@ -232,7 +232,7 @@ func TestNode_AddClient(t *testing.T) {
 }
 
 func TestNode_AddSubscription(t *testing.T) {
-	node := NewNode()
+	node := NewNode(nil)
 	_ = node.Run() // Register event handler
 	transport := &capturingTransport{}
 	ctx := context.Background()
@@ -255,7 +255,7 @@ func TestNode_AddSubscription(t *testing.T) {
 }
 
 func TestNode_AddSubscription_FirstSubscriber(t *testing.T) {
-	node := NewNode()
+	node := NewNode(nil)
 	_ = node.Run()
 	transport := &capturingTransport{}
 	ctx := context.Background()
@@ -273,7 +273,7 @@ func TestNode_AddSubscription_FirstSubscriber(t *testing.T) {
 }
 
 func TestNode_RemoveSubscription(t *testing.T) {
-	node := NewNode()
+	node := NewNode(nil)
 	_ = node.Run()
 	transport := &capturingTransport{}
 	ctx := context.Background()
@@ -300,7 +300,7 @@ func TestNode_RemoveSubscription(t *testing.T) {
 }
 
 func TestNode_SubLock(t *testing.T) {
-	node := NewNode()
+	node := NewNode(nil)
 
 	lock1 := node.subLock("test-channel-1")
 	lock2 := node.subLock("test-channel-2")
@@ -321,7 +321,7 @@ func TestNode_SubLock(t *testing.T) {
 }
 
 func TestNode_SubLock_Distribution(t *testing.T) {
-	node := NewNode()
+	node := NewNode(nil)
 
 	// Test that different channels get distributed across locks
 	lockCounts := make(map[*sync.Mutex]int)
@@ -350,7 +350,7 @@ func TestNode_SubLock_Distribution(t *testing.T) {
 }
 
 func TestNode_SubLock_Concurrent(t *testing.T) {
-	node := NewNode()
+	node := NewNode(nil)
 	const numGoroutines = 100
 	var wg sync.WaitGroup
 
@@ -372,7 +372,7 @@ func TestNode_SubLock_Concurrent(t *testing.T) {
 }
 
 func TestNode_FindProxy_NoProxy(t *testing.T) {
-	node := NewNode()
+	node := NewNode(nil)
 
 	p := node.FindProxy("test-channel", "test.method")
 	if p != nil {
@@ -381,7 +381,7 @@ func TestNode_FindProxy_NoProxy(t *testing.T) {
 }
 
 func TestNode_AddProxy(t *testing.T) {
-	node := NewNode()
+	node := NewNode(nil)
 
 	// Mock proxy
 	mockProxy := &mockRPCProxy{}
@@ -398,7 +398,7 @@ func TestNode_AddProxy(t *testing.T) {
 }
 
 func TestNode_AddProxy_Wildcard(t *testing.T) {
-	node := NewNode()
+	node := NewNode(nil)
 
 	mockProxy := &mockRPCProxy{}
 
@@ -419,8 +419,8 @@ func TestNode_AddProxy_Wildcard(t *testing.T) {
 	}
 }
 
-func TestNode_ProxyRPC_NoProxy(t *testing.T) {
-	node := NewNode()
+func TestNode_RPC_NoProxy(t *testing.T) {
+	node := NewNode(nil)
 	ctx := context.Background()
 
 	req := &proxy.RPCProxyRequest{
@@ -434,15 +434,15 @@ func TestNode_ProxyRPC_NoProxy(t *testing.T) {
 
 	_, err := node.ProxyRPC(ctx, "test-channel", "test.method", req)
 	if err == nil {
-		t.Error("ProxyRPC() should return error when no proxy configured")
+		t.Error("RPC() should return error when no proxy configured")
 	}
 	if err.Error() != "no proxy found for channel/method" {
 		t.Errorf("Error message = %v, want 'no proxy found for channel/method'", err)
 	}
 }
 
-func TestNode_ProxyRPC_WithProxy(t *testing.T) {
-	node := NewNode()
+func TestNode_RPC_WithProxy(t *testing.T) {
+	node := NewNode(nil)
 	ctx := context.Background()
 
 	mockProxy := &mockRPCProxy{
@@ -469,18 +469,18 @@ func TestNode_ProxyRPC_WithProxy(t *testing.T) {
 
 	resp, err := node.ProxyRPC(ctx, "test-channel", "test.method", req)
 	if err != nil {
-		t.Fatalf("ProxyRPC() error = %v", err)
+		t.Fatalf("RPC() error = %v", err)
 	}
 	if resp == nil {
-		t.Error("ProxyRPC() should return response")
+		t.Error("RPC() should return response")
 	}
 	if resp.Event.Id != "response-1" {
 		t.Errorf("Response event ID = %s, want response-1", resp.Event.Id)
 	}
 }
 
-func TestNode_ProxyRPC_ProxyError(t *testing.T) {
-	node := NewNode()
+func TestNode_RPC_ProxyError(t *testing.T) {
+	node := NewNode(nil)
 	ctx := context.Background()
 
 	mockProxy := &mockRPCProxy{
@@ -503,7 +503,7 @@ func TestNode_ProxyRPC_ProxyError(t *testing.T) {
 
 	_, err = node.ProxyRPC(ctx, "test-channel", "test.method", req)
 	if err == nil {
-		t.Error("ProxyRPC() should return proxy error")
+		t.Error("RPC() should return proxy error")
 	}
 	if err.Error() != "proxy error" {
 		t.Errorf("Error = %v, want 'proxy error'", err)
@@ -524,7 +524,7 @@ func TestNode_BrokerEventHandler(t *testing.T) {
 }
 
 func TestNode_ConcurrentPublish(t *testing.T) {
-	node := NewNode()
+	node := NewNode(nil)
 	_ = node.Run()
 
 	transport := &capturingTransport{}
@@ -567,7 +567,7 @@ func TestNode_ConcurrentPublish(t *testing.T) {
 }
 
 func TestNode_ConcurrentSubscriptions(t *testing.T) {
-	node := NewNode()
+	node := NewNode(nil)
 	_ = node.Run()
 	ctx := context.Background()
 
@@ -596,7 +596,7 @@ func TestNode_ConcurrentSubscriptions(t *testing.T) {
 }
 
 func TestNode_MultipleChannels(t *testing.T) {
-	node := NewNode()
+	node := NewNode(nil)
 	_ = node.Run()
 	transport := &capturingTransport{}
 	ctx := context.Background()
@@ -623,7 +623,7 @@ func TestNode_MultipleChannels(t *testing.T) {
 }
 
 func TestNode_Publish_MultipleChannels(t *testing.T) {
-	node := NewNode()
+	node := NewNode(nil)
 	_ = node.Run()
 
 	transport1 := &capturingTransport{}
@@ -673,7 +673,7 @@ type mockRPCProxy struct {
 	err      error
 }
 
-func (m *mockRPCProxy) ProxyRPC(ctx context.Context, req *proxy.RPCProxyRequest) (*proxy.RPCProxyResponse, error) {
+func (m *mockRPCProxy) RPC(ctx context.Context, req *proxy.RPCProxyRequest) (*proxy.RPCProxyResponse, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -719,7 +719,7 @@ func (m *mockRPCProxy) Close() error {
 }
 
 func BenchmarkNode_Publish(b *testing.B) {
-	node := NewNode()
+	node := NewNode(nil)
 	_ = node.Run()
 
 	transport := &capturingTransport{}
@@ -742,7 +742,7 @@ func BenchmarkNode_Publish(b *testing.B) {
 }
 
 func BenchmarkNode_AddSubscription(b *testing.B) {
-	node := NewNode()
+	node := NewNode(nil)
 	_ = node.Run()
 	ctx := context.Background()
 
@@ -755,7 +755,7 @@ func BenchmarkNode_AddSubscription(b *testing.B) {
 }
 
 func BenchmarkNode_SubLock(b *testing.B) {
-	node := NewNode()
+	node := NewNode(nil)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

@@ -3,6 +3,7 @@ package websocket
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/fleetlit/messageloop"
 	"github.com/lynx-go/lynx"
@@ -17,8 +18,9 @@ type Server struct {
 }
 
 type Options struct {
-	Addr   string
-	WsPath string
+	Addr        string
+	WsPath      string
+	ReadTimeout time.Duration
 }
 
 func DefaultOptions() Options {

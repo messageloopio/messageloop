@@ -5,17 +5,20 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
+	"github.com/fleetlit/messageloop/config"
 	"github.com/fleetlit/messageloop/proxy"
 	"github.com/lynx-go/x/log"
 )
 
 type Node struct {
-	dispatcher *eventDispatcher
-	hub        *Hub
-	broker     Broker
-	subLocks   map[int]*sync.Mutex
-	proxy      *proxy.Router
+	dispatcher        *eventDispatcher
+	hub               *Hub
+	broker            Broker
+	subLocks          map[int]*sync.Mutex
+	proxy             *proxy.Router
+	heartbeatManager  *HeartbeatManager
 }
 
 func (n *Node) HandlePublication(ch string, pub *Publication) error {
@@ -43,7 +46,7 @@ const (
 	numSubLocks = 16384
 )
 
-func NewNode() *Node {
+func NewNode(cfg *config.Server) *Node {
 	subLocks := make(map[int]*sync.Mutex, numSubLocks)
 	for i := 0; i < numSubLocks; i++ {
 		subLocks[i] = &sync.Mutex{}
@@ -53,6 +56,19 @@ func NewNode() *Node {
 		subLocks: subLocks,
 		hub:      newHub(0),
 	}
+
+	// Initialize heartbeat manager if config is provided
+	if cfg != nil && cfg.Heartbeat.IdleTimeout != "" {
+		idleTimeout, err := time.ParseDuration(cfg.Heartbeat.IdleTimeout)
+		if err != nil {
+			idleTimeout = 300 * time.Second
+		}
+
+		node.heartbeatManager = NewHeartbeatManager(HeartbeatConfig{
+			IdleTimeout: idleTimeout,
+		})
+	}
+
 	broker := newMemoryBroker(node)
 	node.SetBroker(broker)
 

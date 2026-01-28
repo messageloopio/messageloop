@@ -92,4 +92,9 @@ var (
 		Code:   3509,
 		Reason: "too many errors",
 	}
+	// DisconnectIdleTimeout may be issued when client connection is idle for too long.
+	DisconnectIdleTimeout = Disconnect{
+		Code:   3511,
+		Reason: "idle timeout",
+	}
 )

@@ -332,7 +332,7 @@ func TestMemoryBroker_BrokerInterface(t *testing.T) {
 }
 
 func TestNewMemoryBroker_WithNode(t *testing.T) {
-	node := NewNode()
+	node := NewNode(nil)
 	broker := newMemoryBroker(node)
 
 	if broker.node != node {
@@ -574,7 +574,7 @@ func TestPublication_Default(t *testing.T) {
 }
 
 func TestMemoryBroker_IntegrationWithNode(t *testing.T) {
-	node := NewNode()
+	node := NewNode(nil)
 	broker := node.Broker()
 
 	if broker == nil {
@@ -589,7 +589,7 @@ func TestMemoryBroker_IntegrationWithNode(t *testing.T) {
 }
 
 func TestMemoryBroker_Run(t *testing.T) {
-	node := NewNode()
+	node := NewNode(nil)
 	err := node.Run()
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)

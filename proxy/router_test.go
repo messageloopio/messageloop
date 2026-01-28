@@ -13,7 +13,7 @@ type mockRPCProxy struct {
 	name string
 }
 
-func (m *mockRPCProxy) ProxyRPC(ctx context.Context, req *RPCProxyRequest) (*RPCProxyResponse, error) {
+func (m *mockRPCProxy) RPC(ctx context.Context, req *RPCProxyRequest) (*RPCProxyResponse, error) {
 	return &RPCProxyResponse{
 		Event: req.Event,
 	}, nil

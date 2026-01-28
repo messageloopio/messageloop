@@ -18,12 +18,19 @@ import (
 
 func NewClientSession(ctx context.Context, node *Node, t Transport, marshaler Marshaler) (*ClientSession, ClientCloseFunc, error) {
 	client := &ClientSession{
-		ctx:       ctx,
-		node:      node,
-		transport: t,
-		session:   uuid.NewString(),
-		marshaler: marshaler,
+		ctx:         ctx,
+		node:        node,
+		transport:   t,
+		session:     uuid.NewString(),
+		marshaler:   marshaler,
+		lastActivity: time.Now(),
 	}
+
+	// Start heartbeat if configured
+	if node.heartbeatManager != nil {
+		node.heartbeatManager.Start(ctx, client)
+	}
+
 	return client, func() error {
 		return client.close(Disconnect{})
 	}, nil
@@ -57,6 +64,10 @@ type ClientSession struct {
 	node          *Node
 	marshaler     Marshaler
 	authenticated bool
+
+	// Heartbeat fields
+	lastActivity    time.Time
+	heartbeatCancel context.CancelFunc
 }
 
 func jsonLog(msg proto.Message) string {
@@ -77,6 +88,13 @@ const (
 )
 
 func (c *ClientSession) close(disconnect Disconnect) error {
+	c.mu.Lock()
+	if c.heartbeatCancel != nil {
+		c.heartbeatCancel()
+		c.heartbeatCancel = nil
+	}
+	c.mu.Unlock()
+
 	// Notify proxy about disconnection
 	p := c.node.FindProxy("", "disconnect")
 	if p != nil {
@@ -114,6 +132,9 @@ func (c *ClientSession) HandleMessage(ctx context.Context, in *clientpb.InboundM
 		return errors.New("client is closed")
 	}
 	c.mu.Unlock()
+
+	// Reset activity on any message
+	c.ResetActivity()
 
 	log.DebugContext(ctx, "handling message", "message", jsonLog(in))
 
@@ -476,6 +497,7 @@ func (c *ClientSession) onUnsubscribe(ctx context.Context, in *clientpb.InboundM
 }
 
 func (c *ClientSession) onPing(ctx context.Context, in *clientpb.InboundMessage, ping *clientpb.Ping) error {
+	c.ResetActivity()
 	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_Pong{
 			Pong: &clientpb.Pong{},
@@ -492,3 +514,20 @@ func (c *ClientSession) onSubRefresh(ctx context.Context, in *clientpb.InboundMe
 		}
 	}))
 }
+
+// Heartbeat-related methods
+
+// setHeartbeatCancel sets the heartbeat cancel function.
+func (c *ClientSession) setHeartbeatCancel(cancel context.CancelFunc) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.heartbeatCancel = cancel
+}
+
+// ResetActivity resets the last activity timestamp to now.
+func (c *ClientSession) ResetActivity() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lastActivity = time.Now()
+}
+

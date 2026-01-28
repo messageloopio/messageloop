@@ -38,7 +38,7 @@ func main() {
 			return err
 		}
 
-		node := messageloop.NewNode()
+		node := messageloop.NewNode(&cfg.Server)
 
 		// Configure broker based on config
 		brokerType := cfg.Broker.Type

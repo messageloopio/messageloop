@@ -39,7 +39,7 @@ func TestNewHTTPProxy(t *testing.T) {
 	assert.NoError(t, p.Close())
 }
 
-func TestHTTPProxy_ProxyRPC(t *testing.T) {
+func TestHTTPProxy_RPC(t *testing.T) {
 	// Create a test HTTP server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify request
@@ -94,7 +94,7 @@ func TestHTTPProxy_ProxyRPC(t *testing.T) {
 		},
 	}
 
-	resp, err := p.ProxyRPC(ctx, req)
+	resp, err := p.RPC(ctx, req)
 	require.NoError(t, err)
 	assert.NotNil(t, resp.Event)
 	assert.Equal(t, "resp-123", resp.Event.Id)
@@ -127,7 +127,7 @@ func TestHTTPProxy_Timeout(t *testing.T) {
 		Event:   &cloudevents.CloudEvent{},
 	}
 
-	_, err = p.ProxyRPC(ctx, req)
+	_, err = p.RPC(ctx, req)
 	assert.Error(t, err)
 }
 
@@ -156,7 +156,7 @@ func TestNewGRPCProxy(t *testing.T) {
 	assert.NoError(t, p.Close())
 }
 
-func TestGRPCProxy_ProxyRPC(t *testing.T) {
+func TestGRPCProxy_RPC(t *testing.T) {
 	// Create a test gRPC server
 	lis, err := net.Listen("tcp", "localhost:0")
 	require.NoError(t, err)
@@ -216,7 +216,7 @@ func TestGRPCProxy_ProxyRPC(t *testing.T) {
 		},
 	}
 
-	resp, err := p.ProxyRPC(ctx, req)
+	resp, err := p.RPC(ctx, req)
 	require.NoError(t, err)
 
 	// Wait for server to process

@@ -1,6 +1,8 @@
 server:
   http:
     addr: ":8080"
+  heartbeat:
+    idle_timeout: "300s"
 
 transport:
   websocket:

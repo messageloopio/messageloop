@@ -126,7 +126,7 @@ func (f *failTransport) wasCloseCalled() bool {
 
 func TestNewClientSession(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode()
+	node := NewNode(nil)
 	transport := &capturingTransport{}
 	marshaler := JSONMarshaler{}
 
@@ -159,7 +159,7 @@ func TestNewClientSession(t *testing.T) {
 
 func TestClientSession_SessionID(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode()
+	node := NewNode(nil)
 	transport := &capturingTransport{}
 
 	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
@@ -189,7 +189,7 @@ func TestClientSession_SessionID(t *testing.T) {
 
 func TestClientSession_ClientID(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode()
+	node := NewNode(nil)
 	transport := &capturingTransport{}
 
 	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
@@ -205,7 +205,7 @@ func TestClientSession_ClientID(t *testing.T) {
 
 func TestClientSession_UserID(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode()
+	node := NewNode(nil)
 	transport := &capturingTransport{}
 
 	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
@@ -221,7 +221,7 @@ func TestClientSession_UserID(t *testing.T) {
 
 func TestClientSession_Authenticated(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode()
+	node := NewNode(nil)
 	transport := &capturingTransport{}
 
 	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
@@ -237,7 +237,7 @@ func TestClientSession_Authenticated(t *testing.T) {
 
 func TestClientSession_ClientInfo(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode()
+	node := NewNode(nil)
 	transport := &capturingTransport{}
 
 	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
@@ -256,7 +256,7 @@ func TestClientSession_ClientInfo(t *testing.T) {
 
 func TestClientSession_Channels(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode()
+	node := NewNode(nil)
 	transport := &capturingTransport{}
 
 	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
@@ -275,7 +275,7 @@ func TestClientSession_Channels(t *testing.T) {
 
 func TestClientSession_HandleMessage_Connect(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode()
+	node := NewNode(nil)
 	transport := &capturingTransport{}
 
 	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
@@ -308,7 +308,7 @@ func TestClientSession_HandleMessage_Connect(t *testing.T) {
 
 func TestClientSession_HandleMessage_Connect_Twice(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode()
+	node := NewNode(nil)
 	transport := &capturingTransport{}
 
 	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
@@ -352,7 +352,7 @@ func TestClientSession_HandleMessage_Connect_Twice(t *testing.T) {
 
 func TestClientSession_HandleMessage_Ping(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode()
+	node := NewNode(nil)
 	transport := &capturingTransport{}
 
 	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
@@ -380,7 +380,7 @@ func TestClientSession_HandleMessage_Ping(t *testing.T) {
 
 func TestClientSession_HandleMessage_Publish_BeforeAuth(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode()
+	node := NewNode(nil)
 	transport := &capturingTransport{}
 
 	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
@@ -419,7 +419,7 @@ func TestClientSession_HandleMessage_Publish_BeforeAuth(t *testing.T) {
 
 func TestClientSession_HandleMessage_Publish_AfterAuth(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode()
+	node := NewNode(nil)
 	_ = node.Run() // Register event handler
 	transport := &capturingTransport{}
 
@@ -472,7 +472,7 @@ func TestClientSession_HandleMessage_Publish_AfterAuth(t *testing.T) {
 
 func TestClientSession_HandleMessage_Subscribe(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode()
+	node := NewNode(nil)
 	transport := &capturingTransport{}
 
 	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
@@ -531,7 +531,7 @@ func TestClientSession_HandleMessage_Subscribe(t *testing.T) {
 
 func TestClientSession_HandleMessage_RpcRequest_NoProxy(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode()
+	node := NewNode(nil)
 	transport := &capturingTransport{}
 
 	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
@@ -582,7 +582,7 @@ func TestClientSession_HandleMessage_RpcRequest_NoProxy(t *testing.T) {
 
 func TestClientSession_HandleMessage_Closed(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode()
+	node := NewNode(nil)
 	transport := &capturingTransport{}
 
 	client, closeFunc, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
@@ -609,7 +609,7 @@ func TestClientSession_HandleMessage_Closed(t *testing.T) {
 
 func TestClientSession_CloseFunc(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode()
+	node := NewNode(nil)
 	transport := &capturingTransport{}
 
 	_, closeFunc, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
@@ -633,7 +633,7 @@ func TestClientSession_CloseFunc(t *testing.T) {
 
 func TestClientSession_CloseFunc_WithDisconnect(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode()
+	node := NewNode(nil)
 	transport := &capturingTransport{}
 
 	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
@@ -660,7 +660,7 @@ func TestClientSession_CloseFunc_WithDisconnect(t *testing.T) {
 
 func TestClientSession_Send(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode()
+	node := NewNode(nil)
 	transport := &capturingTransport{}
 
 	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
@@ -687,7 +687,7 @@ func TestClientSession_Send(t *testing.T) {
 
 func TestClientSession_Send_TransportError(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode()
+	node := NewNode(nil)
 	transport := &failTransport{writeErr: errors.New("write failed")}
 
 	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
@@ -710,7 +710,7 @@ func TestClientSession_Send_TransportError(t *testing.T) {
 
 func TestClientSession_HandleMessage_Unsupported(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode()
+	node := NewNode(nil)
 	transport := &capturingTransport{}
 
 	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
@@ -746,19 +746,19 @@ func TestClientSession_HandleMessage_Unsupported(t *testing.T) {
 	}
 
 	err = client.HandleMessage(ctx, unsubMsg)
-	if err == nil {
-		t.Error("HandleMessage() Unsubscribe should return error (TODO)")
+	if err != nil {
+		t.Errorf("HandleMessage() Unsubscribe should not return error, got %v", err)
 	}
 
-	// Should send error response
+	// Should send UnsubscribeAck response
 	if transport.getMessageCount() != 1 {
-		t.Errorf("Transport should have 1 error message, got %d", transport.getMessageCount())
+		t.Errorf("Transport should have 1 message, got %d", transport.getMessageCount())
 	}
 }
 
 func TestClientSession_HandleMessage_SubRefresh(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode()
+	node := NewNode(nil)
 	transport := &capturingTransport{}
 
 	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
@@ -781,7 +781,7 @@ func TestClientSession_HandleMessage_SubRefresh(t *testing.T) {
 	// Reset transport messages
 	transport.messages = nil
 
-	// Try SubRefresh (returns TODO error)
+	// Try SubRefresh (now implemented)
 	refreshMsg := &clientpb.InboundMessage{
 		Id: "msg-2",
 		Envelope: &clientpb.InboundMessage_SubRefresh{
@@ -790,19 +790,19 @@ func TestClientSession_HandleMessage_SubRefresh(t *testing.T) {
 	}
 
 	err = client.HandleMessage(ctx, refreshMsg)
-	if err == nil {
-		t.Error("HandleMessage() SubRefresh should return error (TODO)")
+	if err != nil {
+		t.Errorf("HandleMessage() SubRefresh should not return error, got %v", err)
 	}
 
-	// Should send error response
+	// Should send SubRefreshAck response
 	if transport.getMessageCount() != 1 {
-		t.Errorf("Transport should have 1 error message, got %d", transport.getMessageCount())
+		t.Errorf("Transport should have 1 message, got %d", transport.getMessageCount())
 	}
 }
 
 func TestClientSession_ConcurrentMessages(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode()
+	node := NewNode(nil)
 	transport := &capturingTransport{}
 
 	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
@@ -896,7 +896,7 @@ func TestMakeOutboundMessage_WithoutInbound(t *testing.T) {
 
 func TestClientSession_Publish_WithChannelFromEvent(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode()
+	node := NewNode(nil)
 	_ = node.Run() // Register event handler
 	transport := &capturingTransport{}
 
@@ -949,7 +949,7 @@ func TestClientSession_Publish_WithChannelFromEvent(t *testing.T) {
 
 func TestClientSession_Marshal(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode()
+	node := NewNode(nil)
 	transport := &capturingTransport{}
 
 	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
@@ -983,7 +983,7 @@ func TestClientSession_Marshal(t *testing.T) {
 
 func TestClientSession_Marshal_Protobuf(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode()
+	node := NewNode(nil)
 	transport := &capturingTransport{}
 
 	// Create client with protobuf marshaler
@@ -1018,7 +1018,7 @@ func TestClientSession_Marshal_Protobuf(t *testing.T) {
 
 func TestClientSession_HandleMessage_WithBinaryData(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode()
+	node := NewNode(nil)
 	_ = node.Run() // Register event handler
 	transport := &capturingTransport{}
 
@@ -1104,7 +1104,7 @@ func (s status) String() string {
 
 func BenchmarkClientSession_HandleMessage_Ping(b *testing.B) {
 	ctx := context.Background()
-	node := NewNode()
+	node := NewNode(nil)
 	transport := &capturingTransport{}
 
 	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
@@ -1136,7 +1136,7 @@ func BenchmarkClientSession_HandleMessage_Ping(b *testing.B) {
 
 func BenchmarkClientSession_Marshal_JSON(b *testing.B) {
 	ctx := context.Background()
-	node := NewNode()
+	node := NewNode(nil)
 	transport := &capturingTransport{}
 
 	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
@@ -1159,7 +1159,7 @@ func BenchmarkClientSession_Marshal_JSON(b *testing.B) {
 
 func BenchmarkClientSession_Marshal_Protobuf(b *testing.B) {
 	ctx := context.Background()
-	node := NewNode()
+	node := NewNode(nil)
 	transport := &capturingTransport{}
 
 	client, _, err := NewClientSession(ctx, node, transport, ProtobufMarshaler{})

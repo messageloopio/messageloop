@@ -66,6 +66,7 @@ type client struct {
 	nextMsgID        atomic.Uint64
 	subscriptions    map[string]bool
 	subMu            sync.RWMutex
+	pingCancel       context.CancelFunc
 }
 
 // Dial creates a new WebSocket client connecting to the specified URL.
@@ -222,7 +223,12 @@ func (c *client) handleMessage(msg *clientpb.OutboundMessage) {
 		// or we can just log it
 
 	case *clientpb.OutboundMessage_Pong:
-		// Pong is handled by the ping mechanism
+		// Handle pong response
+		c.handlePong()
+
+	case *clientpb.OutboundMessage_Ping:
+		// Respond to server ping with pong
+		c.handlePing(msg)
 	}
 }
 
@@ -256,6 +262,9 @@ func (c *client) handleConnected(connected *clientpb.Connected) {
 			c.msgHandler(events)
 		}
 	}
+
+	// Start ping loop
+	c.startPingLoop()
 
 	if c.connectedHandler != nil {
 		c.connectedHandler(c.sessionID)
@@ -511,6 +520,15 @@ func (c *client) IsConnected() bool {
 func (c *client) Close() error {
 	c.closed.Store(true)
 	c.connected.Store(false)
+
+	// Cancel ping loop
+	c.mu.Lock()
+	if c.pingCancel != nil {
+		c.pingCancel()
+		c.pingCancel = nil
+	}
+	c.mu.Unlock()
+
 	c.cancel()
 
 	// Close connection channels
@@ -688,3 +706,75 @@ func BuildRPCReplyMessage(id string, event *pb.CloudEvent) *clientpb.OutboundMes
 		},
 	}
 }
+
+// Ping loop and heartbeat methods
+
+// startPingLoop starts the ping loop if configured.
+func (c *client) startPingLoop() {
+	if c.opts.PingInterval <= 0 {
+		return
+	}
+
+	c.mu.Lock()
+	if c.pingCancel != nil {
+		c.mu.Unlock()
+		return
+	}
+
+	pingCtx, cancel := context.WithCancel(c.ctx)
+	c.pingCancel = cancel
+	c.mu.Unlock()
+
+	go c.pingLoop(pingCtx)
+}
+
+// pingLoop sends ping messages at regular intervals.
+func (c *client) pingLoop(ctx context.Context) {
+	ticker := time.NewTicker(c.opts.PingInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if !c.connected.Load() {
+				return
+			}
+
+			pingMsg := &clientpb.InboundMessage{
+				Id:       c.generateID(),
+				Metadata: make(map[string]string),
+				Envelope: &clientpb.InboundMessage_Ping{
+					Ping: &clientpb.Ping{},
+				},
+			}
+
+			if err := c.transport.Send(ctx, pingMsg); err != nil {
+				// Log error but don't break the loop
+				// The connection will be closed by receive loop if there's a real error
+				continue
+			}
+		}
+	}
+}
+
+// handlePong handles a pong response from the server.
+func (c *client) handlePong() {
+	// Pong received - the connection is alive
+	// Could add more sophisticated tracking here if needed
+}
+
+// handlePing handles a ping message from the server.
+func (c *client) handlePing(msg *clientpb.OutboundMessage) {
+	pongMsg := &clientpb.InboundMessage{
+		Id:       msg.GetId(),
+		Metadata: make(map[string]string),
+		Envelope: &clientpb.InboundMessage_Pong{
+			Pong: &clientpb.Pong{},
+		},
+	}
+
+	_ = c.transport.Send(c.ctx, pongMsg)
+}
+

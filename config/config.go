@@ -10,11 +10,16 @@ type Config struct {
 }
 
 type Server struct {
-	Http HttpServer `yaml:"http" json:"http"`
+	Http      HttpServer `yaml:"http" json:"http"`
+	Heartbeat Heartbeat  `yaml:"heartbeat" json:"heartbeat"`
 }
 
 type HttpServer struct {
 	Addr string `yaml:"addr" json:"addr"`
+}
+
+type Heartbeat struct {
+	IdleTimeout string `yaml:"idle_timeout" json:"idle_timeout"` // default: "300s"
 }
 
 type Transport struct {
@@ -23,8 +28,9 @@ type Transport struct {
 }
 
 type WebSocketTransport struct {
-	Addr string `yaml:"addr" json:"addr"`
-	Path string `yaml:"path" json:"path"`
+	Addr        string `yaml:"addr" json:"addr"`
+	Path        string `yaml:"path" json:"path"`
+	ReadTimeout string `yaml:"read_timeout" json:"read_timeout"` // duration string
 }
 
 type GRPCTransport struct {
