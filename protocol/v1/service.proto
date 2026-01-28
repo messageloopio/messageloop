@@ -8,7 +8,7 @@ option go_package = "github.com/fleetlit/messageloop/genproto/go/client/v1;clien
 import "shared/v1/errors.proto";
 import "includes/cloudevents/cloudevents.proto";
 
-service MessageLoopService {
+service MessagingService {
   // 核心双向数据流
   // buf:lint:ignore RPC_REQUEST_STANDARD_NAME
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME

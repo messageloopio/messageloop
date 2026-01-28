@@ -10,7 +10,7 @@ import (
 )
 
 type gRPCHandler struct {
-	clientpb.UnimplementedMessageLoopServiceServer
+	clientpb.UnimplementedMessagingServiceServer
 	node *messageloop.Node
 }
 
@@ -46,7 +46,7 @@ func (h *gRPCHandler) MessageLoop(stream grpc.BidiStreamingServer[clientpb.Inbou
 	}
 }
 
-func NewGRPCHandler(node *messageloop.Node) clientpb.MessageLoopServiceServer {
+func NewGRPCHandler(node *messageloop.Node) clientpb.MessagingServiceServer {
 	return &gRPCHandler{
 		node: node,
 	}

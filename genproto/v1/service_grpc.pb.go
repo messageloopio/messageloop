@@ -21,30 +21,30 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	MessageLoopService_MessageLoop_FullMethodName = "/messageloop.v1.MessageLoopService/MessageLoop"
+	MessagingService_MessageLoop_FullMethodName = "/messageloop.v1.MessagingService/MessageLoop"
 )
 
-// MessageLoopServiceClient is the client API for MessageLoopService service.
+// MessagingServiceClient is the client API for MessagingService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
-type MessageLoopServiceClient interface {
+type MessagingServiceClient interface {
 	// 核心双向数据流
 	// buf:lint:ignore RPC_REQUEST_STANDARD_NAME
 	// buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
 	MessageLoop(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[InboundMessage, OutboundMessage], error)
 }
 
-type messageLoopServiceClient struct {
+type messagingServiceClient struct {
 	cc grpc.ClientConnInterface
 }
 
-func NewMessageLoopServiceClient(cc grpc.ClientConnInterface) MessageLoopServiceClient {
-	return &messageLoopServiceClient{cc}
+func NewMessagingServiceClient(cc grpc.ClientConnInterface) MessagingServiceClient {
+	return &messagingServiceClient{cc}
 }
 
-func (c *messageLoopServiceClient) MessageLoop(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[InboundMessage, OutboundMessage], error) {
+func (c *messagingServiceClient) MessageLoop(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[InboundMessage, OutboundMessage], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &MessageLoopService_ServiceDesc.Streams[0], MessageLoopService_MessageLoop_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &MessagingService_ServiceDesc.Streams[0], MessagingService_MessageLoop_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -53,68 +53,68 @@ func (c *messageLoopServiceClient) MessageLoop(ctx context.Context, opts ...grpc
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type MessageLoopService_MessageLoopClient = grpc.BidiStreamingClient[InboundMessage, OutboundMessage]
+type MessagingService_MessageLoopClient = grpc.BidiStreamingClient[InboundMessage, OutboundMessage]
 
-// MessageLoopServiceServer is the server API for MessageLoopService service.
-// All implementations must embed UnimplementedMessageLoopServiceServer
+// MessagingServiceServer is the server API for MessagingService service.
+// All implementations must embed UnimplementedMessagingServiceServer
 // for forward compatibility.
-type MessageLoopServiceServer interface {
+type MessagingServiceServer interface {
 	// 核心双向数据流
 	// buf:lint:ignore RPC_REQUEST_STANDARD_NAME
 	// buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
 	MessageLoop(grpc.BidiStreamingServer[InboundMessage, OutboundMessage]) error
-	mustEmbedUnimplementedMessageLoopServiceServer()
+	mustEmbedUnimplementedMessagingServiceServer()
 }
 
-// UnimplementedMessageLoopServiceServer must be embedded to have
+// UnimplementedMessagingServiceServer must be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
 // pointer dereference when methods are called.
-type UnimplementedMessageLoopServiceServer struct{}
+type UnimplementedMessagingServiceServer struct{}
 
-func (UnimplementedMessageLoopServiceServer) MessageLoop(grpc.BidiStreamingServer[InboundMessage, OutboundMessage]) error {
+func (UnimplementedMessagingServiceServer) MessageLoop(grpc.BidiStreamingServer[InboundMessage, OutboundMessage]) error {
 	return status.Error(codes.Unimplemented, "method MessageLoop not implemented")
 }
-func (UnimplementedMessageLoopServiceServer) mustEmbedUnimplementedMessageLoopServiceServer() {}
-func (UnimplementedMessageLoopServiceServer) testEmbeddedByValue()                            {}
+func (UnimplementedMessagingServiceServer) mustEmbedUnimplementedMessagingServiceServer() {}
+func (UnimplementedMessagingServiceServer) testEmbeddedByValue()                          {}
 
-// UnsafeMessageLoopServiceServer may be embedded to opt out of forward compatibility for this service.
-// Use of this interface is not recommended, as added methods to MessageLoopServiceServer will
+// UnsafeMessagingServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to MessagingServiceServer will
 // result in compilation errors.
-type UnsafeMessageLoopServiceServer interface {
-	mustEmbedUnimplementedMessageLoopServiceServer()
+type UnsafeMessagingServiceServer interface {
+	mustEmbedUnimplementedMessagingServiceServer()
 }
 
-func RegisterMessageLoopServiceServer(s grpc.ServiceRegistrar, srv MessageLoopServiceServer) {
-	// If the following call panics, it indicates UnimplementedMessageLoopServiceServer was
+func RegisterMessagingServiceServer(s grpc.ServiceRegistrar, srv MessagingServiceServer) {
+	// If the following call panics, it indicates UnimplementedMessagingServiceServer was
 	// embedded by pointer and is nil.  This will cause panics if an
 	// unimplemented method is ever invoked, so we test this at initialization
 	// time to prevent it from happening at runtime later due to I/O.
 	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
 		t.testEmbeddedByValue()
 	}
-	s.RegisterService(&MessageLoopService_ServiceDesc, srv)
+	s.RegisterService(&MessagingService_ServiceDesc, srv)
 }
 
-func _MessageLoopService_MessageLoop_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(MessageLoopServiceServer).MessageLoop(&grpc.GenericServerStream[InboundMessage, OutboundMessage]{ServerStream: stream})
+func _MessagingService_MessageLoop_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(MessagingServiceServer).MessageLoop(&grpc.GenericServerStream[InboundMessage, OutboundMessage]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type MessageLoopService_MessageLoopServer = grpc.BidiStreamingServer[InboundMessage, OutboundMessage]
+type MessagingService_MessageLoopServer = grpc.BidiStreamingServer[InboundMessage, OutboundMessage]
 
-// MessageLoopService_ServiceDesc is the grpc.ServiceDesc for MessageLoopService service.
+// MessagingService_ServiceDesc is the grpc.ServiceDesc for MessagingService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
-var MessageLoopService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "messageloop.v1.MessageLoopService",
-	HandlerType: (*MessageLoopServiceServer)(nil),
+var MessagingService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "messageloop.v1.MessagingService",
+	HandlerType: (*MessagingServiceServer)(nil),
 	Methods:     []grpc.MethodDesc{},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "MessageLoop",
-			Handler:       _MessageLoopService_MessageLoop_Handler,
+			Handler:       _MessagingService_MessageLoop_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
 		},

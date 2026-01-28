@@ -223,12 +223,8 @@ func (c *client) handleMessage(msg *clientpb.OutboundMessage) {
 		// or we can just log it
 
 	case *clientpb.OutboundMessage_Pong:
-		// Handle pong response
+		// Handle pong response from server
 		c.handlePong()
-
-	case *clientpb.OutboundMessage_Ping:
-		// Respond to server ping with pong
-		c.handlePing(msg)
 	}
 }
 
@@ -765,16 +761,4 @@ func (c *client) handlePong() {
 	// Could add more sophisticated tracking here if needed
 }
 
-// handlePing handles a ping message from the server.
-func (c *client) handlePing(msg *clientpb.OutboundMessage) {
-	pongMsg := &clientpb.InboundMessage{
-		Id:       msg.GetId(),
-		Metadata: make(map[string]string),
-		Envelope: &clientpb.InboundMessage_Pong{
-			Pong: &clientpb.Pong{},
-		},
-	}
-
-	_ = c.transport.Send(c.ctx, pongMsg)
-}
 

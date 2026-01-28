@@ -50,8 +50,8 @@ func init() {
 
 // grpcTransport is a gRPC-based transport implementation.
 type grpcTransport struct {
-	client clientpb.MessageLoopServiceClient
-	stream clientpb.MessageLoopService_MessageLoopClient
+	client clientpb.MessagingServiceClient
+	stream clientpb.MessagingService_MessageLoopClient
 	conn   *grpc.ClientConn
 	sendMu sync.Mutex
 	recvMu sync.Mutex
@@ -71,7 +71,7 @@ func newGRPCTransport(ctx context.Context, addr string, opts ...grpc.DialOption)
 		return nil, fmt.Errorf("grpc dial failed: %w", err)
 	}
 
-	client := clientpb.NewMessageLoopServiceClient(conn)
+	client := clientpb.NewMessagingServiceClient(conn)
 	stream, err := client.MessageLoop(ctx)
 	if err != nil {
 		_ = conn.Close()

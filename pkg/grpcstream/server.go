@@ -21,7 +21,7 @@ func NewServer(opts Options, node *messageloop.Node) (*Server, error) {
 	grpcOpts := []grpc.ServerOption{}
 	grpcServer := grpc.NewServer(grpcOpts...)
 	handler := NewGRPCHandler(node)
-	clientpb.RegisterMessageLoopServiceServer(grpcServer, handler)
+	clientpb.RegisterMessagingServiceServer(grpcServer, handler)
 	return newServer(grpcServer, opts)
 }
 

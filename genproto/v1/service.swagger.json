@@ -6,7 +6,7 @@
   },
   "tags": [
     {
-      "name": "MessageLoopService"
+      "name": "MessagingService"
     }
   ],
   "consumes": [

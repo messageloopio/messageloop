@@ -1372,8 +1372,8 @@ const file_v1_service_proto_rawDesc = "" +
 	"\n" +
 	"SubRefresh\x12\x1a\n" +
 	"\bchannels\x18\x01 \x03(\tR\bchannels\"\x0f\n" +
-	"\rSubRefreshAck2h\n" +
-	"\x12MessageLoopService\x12R\n" +
+	"\rSubRefreshAck2f\n" +
+	"\x10MessagingService\x12R\n" +
 	"\vMessageLoop\x12\x1e.messageloop.v1.InboundMessage\x1a\x1f.messageloop.v1.OutboundMessage(\x010\x01B@Z>github.com/fleetlit/messageloop/genproto/go/client/v1;clientpbb\x06proto3"
 
 var (
@@ -1446,8 +1446,8 @@ var file_v1_service_proto_depIdxs = []int32{
 	8,  // 28: messageloop.v1.Unsubscribe.subscriptions:type_name -> messageloop.v1.Subscription
 	8,  // 29: messageloop.v1.UnsubscribeAck.subscriptions:type_name -> messageloop.v1.Subscription
 	8,  // 30: messageloop.v1.RefreshSub.subscriptions:type_name -> messageloop.v1.Subscription
-	0,  // 31: messageloop.v1.MessageLoopService.MessageLoop:input_type -> messageloop.v1.InboundMessage
-	1,  // 32: messageloop.v1.MessageLoopService.MessageLoop:output_type -> messageloop.v1.OutboundMessage
+	0,  // 31: messageloop.v1.MessagingService.MessageLoop:input_type -> messageloop.v1.InboundMessage
+	1,  // 32: messageloop.v1.MessagingService.MessageLoop:output_type -> messageloop.v1.OutboundMessage
 	32, // [32:33] is the sub-list for method output_type
 	31, // [31:32] is the sub-list for method input_type
 	31, // [31:31] is the sub-list for extension type_name
