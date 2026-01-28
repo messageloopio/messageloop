@@ -77,6 +77,17 @@ const (
 )
 
 func (c *ClientSession) close(disconnect Disconnect) error {
+	// Notify proxy about disconnection
+	p := c.node.FindProxy("", "disconnect")
+	if p != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		disconnectedReq := &proxy.OnDisconnectedProxyRequest{
+			SessionID: c.session,
+			Username:  c.user,
+		}
+		_, _ = p.OnDisconnected(ctx, disconnectedReq) // Ignore error for notification
+	}
 	return c.transport.Close(disconnect)
 }
 
@@ -171,10 +182,59 @@ func (c *ClientSession) onConnect(ctx context.Context, in *clientpb.InboundMessa
 		return DisconnectBadRequest
 	}
 
+	// Proxy authentication - check if there's a proxy configured for authentication
+	var p proxy.Proxy
+	if connect.Token != "" {
+		p = c.node.FindProxy("", "authenticate")
+		if p != nil {
+			authReq := &proxy.AuthenticateProxyRequest{
+				Username:   connect.ClientId, // Use client_id as username
+				Password:   connect.Token,     // Use token as password
+				ClientType: connect.ClientType,
+				ClientID:   connect.ClientId,
+			}
+			authResp, err := p.Authenticate(ctx, authReq)
+			if err != nil {
+				log.WarnContext(ctx, "proxy authentication failed", "error", err)
+				return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+					out.Envelope = &clientpb.OutboundMessage_Error{
+						Error: &sharedpb.Error{
+							Code:    "AUTH_ERROR",
+							Type:    "auth_error",
+							Message: err.Error(),
+						},
+					}
+				}))
+			}
+			if authResp.Error != nil {
+				log.WarnContext(ctx, "proxy authentication returned error", "error", authResp.Error)
+				return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+					out.Envelope = &clientpb.OutboundMessage_Error{
+						Error: authResp.Error,
+					}
+				}))
+			}
+			// Store user info from proxy response
+			if authResp.UserInfo != nil {
+				c.user = authResp.UserInfo.ID
+			}
+		}
+	}
+
 	c.mu.Lock()
 	c.authenticated = true
+	c.client = connect.ClientId
 	c.node.addClient(c)
 	c.mu.Unlock()
+
+	// Notify proxy about client connection
+	if p != nil {
+		connectedReq := &proxy.OnConnectedProxyRequest{
+			SessionID: c.session,
+			Username:  connect.ClientId,
+		}
+		_, _ = p.OnConnected(ctx, connectedReq) // Ignore error for notification
+	}
 
 	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_Connected{
@@ -322,24 +382,60 @@ func (c *ClientSession) onPublish(ctx context.Context, in *clientpb.InboundMessa
 }
 
 func (c *ClientSession) onSubscribe(ctx context.Context, in *clientpb.InboundMessage, sub *clientpb.Subscribe) error {
-	subs := []string{}
+	subs := []*clientpb.Subscription{}
 	for _, ch := range sub.Subscriptions {
+		// Proxy ACL check - check if there's a proxy configured for subscription ACL
+		p := c.node.FindProxy(ch.Channel, "subscribe")
+		if p != nil && ch.Token != "" {
+			aclReq := &proxy.SubscribeAclProxyRequest{
+				Channel: ch.Channel,
+				Token:   ch.Token,
+			}
+			aclResp, err := p.SubscribeAcl(ctx, aclReq)
+			if err != nil {
+				log.WarnContext(ctx, "proxy subscribe ACL check failed", "channel", ch.Channel, "error", err)
+				return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+					out.Envelope = &clientpb.OutboundMessage_Error{
+						Error: &sharedpb.Error{
+							Code:    "ACL_ERROR",
+							Type:    "acl_error",
+							Message: err.Error(),
+						},
+					}
+				}))
+			}
+			if aclResp.Error != nil {
+				log.WarnContext(ctx, "proxy subscribe ACL returned error", "channel", ch.Channel, "error", aclResp.Error)
+				return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+					out.Envelope = &clientpb.OutboundMessage_Error{
+						Error: aclResp.Error,
+					}
+				}))
+			}
+		}
+
 		if err := c.node.addSubscription(ctx, ch.Channel, subscriber{client: c, ephemeral: ch.Ephemeral}); err != nil {
 			for _, s := range subs {
-				_ = c.node.removeSubscription(s, c)
+				_ = c.node.removeSubscription(s.Channel, c)
 			}
 			return err
 		}
-		subs = append(subs, ch.Channel)
+		subs = append(subs, ch)
+
+		// Notify proxy about subscription
+		if p != nil {
+			subscribedReq := &proxy.OnSubscribedProxyRequest{
+				SessionID: c.session,
+				Channel:   ch.Channel,
+				Username:  c.user,
+			}
+			_, _ = p.OnSubscribed(ctx, subscribedReq) // Ignore error for notification
+		}
 	}
 	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_SubscribeAck{
 			SubscribeAck: &clientpb.SubscribeAck{
-				Subscriptions: lo.Map(subs, func(it string, i int) *clientpb.Subscription {
-					return &clientpb.Subscription{
-						Channel: it,
-					}
-				}),
+				Subscriptions: subs,
 			},
 		}
 	}))
@@ -355,7 +451,28 @@ func (c *ClientSession) write(ctx context.Context, msg proto.Message) error {
 }
 
 func (c *ClientSession) onUnsubscribe(ctx context.Context, in *clientpb.InboundMessage, unsubscribe *clientpb.Unsubscribe) error {
-	return errors.New("TODO")
+	for _, sub := range unsubscribe.Subscriptions {
+		// Remove subscription
+		_ = c.node.removeSubscription(sub.Channel, c)
+
+		// Notify proxy about unsubscription
+		p := c.node.FindProxy(sub.Channel, "unsubscribe")
+		if p != nil {
+			unsubscribedReq := &proxy.OnUnsubscribedProxyRequest{
+				SessionID: c.session,
+				Channel:   sub.Channel,
+				Username:  c.user,
+			}
+			_, _ = p.OnUnsubscribed(ctx, unsubscribedReq) // Ignore error for notification
+		}
+	}
+	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+		out.Envelope = &clientpb.OutboundMessage_UnsubscribeAck{
+			UnsubscribeAck: &clientpb.UnsubscribeAck{
+				Subscriptions: unsubscribe.Subscriptions,
+			},
+		}
+	}))
 }
 
 func (c *ClientSession) onPing(ctx context.Context, in *clientpb.InboundMessage, ping *clientpb.Ping) error {
@@ -367,5 +484,11 @@ func (c *ClientSession) onPing(ctx context.Context, in *clientpb.InboundMessage,
 }
 
 func (c *ClientSession) onSubRefresh(ctx context.Context, in *clientpb.InboundMessage, refresh *clientpb.SubRefresh) error {
-	return errors.New("TODO")
+	// SubRefresh is used to refresh subscriptions, currently just acknowledges the refresh
+	// The proxy is notified through OnSubscribed/OnUnsubscribed, so no additional action needed here
+	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+		out.Envelope = &clientpb.OutboundMessage_SubRefreshAck{
+			SubRefreshAck: &clientpb.SubRefreshAck{},
+		}
+	}))
 }

@@ -12,7 +12,7 @@ import (
 	"github.com/lynx-go/x/log"
 )
 
-// GRPCProxy implements RPCProxy using gRPC transport.
+// GRPCProxy implements Proxy using gRPC transport.
 type GRPCProxy struct {
 	name     string
 	endpoint string
@@ -60,8 +60,8 @@ func NewGRPCProxy(cfg *ProxyConfig) (*GRPCProxy, error) {
 	}, nil
 }
 
-// ProxyRPC implements RPCProxy.ProxyRPC.
-func (p *GRPCProxy) ProxyRPC(ctx context.Context, req *RPCProxyRequest) (*RPCProxyResponse, error) {
+// RPC implements Proxy.RPC.
+func (p *GRPCProxy) RPC(ctx context.Context, req *RPCProxyRequest) (*RPCProxyResponse, error) {
 	ctx = p.withTimeout(ctx)
 
 	protoReq := req.ToProtoRequest()
@@ -81,7 +81,7 @@ func (p *GRPCProxy) ProxyRPC(ctx context.Context, req *RPCProxyRequest) (*RPCPro
 	return FromProtoReply(resp), nil
 }
 
-// Authenticate implements RPCProxy.Authenticate.
+// Authenticate implements Proxy.Authenticate.
 func (p *GRPCProxy) Authenticate(ctx context.Context, req *AuthenticateProxyRequest) (*AuthenticateProxyResponse, error) {
 	ctx = p.withTimeout(ctx)
 
@@ -101,7 +101,7 @@ func (p *GRPCProxy) Authenticate(ctx context.Context, req *AuthenticateProxyRequ
 	return FromProtoAuthenticateResponse(resp), nil
 }
 
-// SubscribeAcl implements RPCProxy.SubscribeAcl.
+// SubscribeAcl implements Proxy.SubscribeAcl.
 func (p *GRPCProxy) SubscribeAcl(ctx context.Context, req *SubscribeAclProxyRequest) (*SubscribeAclProxyResponse, error) {
 	ctx = p.withTimeout(ctx)
 
@@ -121,7 +121,7 @@ func (p *GRPCProxy) SubscribeAcl(ctx context.Context, req *SubscribeAclProxyRequ
 	return FromProtoSubscribeAclResponse(resp), nil
 }
 
-// OnConnected implements RPCProxy.OnConnected.
+// OnConnected implements Proxy.OnConnected.
 func (p *GRPCProxy) OnConnected(ctx context.Context, req *OnConnectedProxyRequest) (*OnConnectedProxyResponse, error) {
 	ctx = p.withTimeout(ctx)
 
@@ -141,7 +141,7 @@ func (p *GRPCProxy) OnConnected(ctx context.Context, req *OnConnectedProxyReques
 	return FromProtoOnConnectedResponse(resp), nil
 }
 
-// OnSubscribed implements RPCProxy.OnSubscribed.
+// OnSubscribed implements Proxy.OnSubscribed.
 func (p *GRPCProxy) OnSubscribed(ctx context.Context, req *OnSubscribedProxyRequest) (*OnSubscribedProxyResponse, error) {
 	ctx = p.withTimeout(ctx)
 
@@ -162,7 +162,7 @@ func (p *GRPCProxy) OnSubscribed(ctx context.Context, req *OnSubscribedProxyRequ
 	return FromProtoOnSubscribedResponse(resp), nil
 }
 
-// OnUnsubscribed implements RPCProxy.OnUnsubscribed.
+// OnUnsubscribed implements Proxy.OnUnsubscribed.
 func (p *GRPCProxy) OnUnsubscribed(ctx context.Context, req *OnUnsubscribedProxyRequest) (*OnUnsubscribedProxyResponse, error) {
 	ctx = p.withTimeout(ctx)
 
@@ -183,7 +183,7 @@ func (p *GRPCProxy) OnUnsubscribed(ctx context.Context, req *OnUnsubscribedProxy
 	return FromProtoOnUnsubscribedResponse(resp), nil
 }
 
-// OnDisconnected implements RPCProxy.OnDisconnected.
+// OnDisconnected implements Proxy.OnDisconnected.
 func (p *GRPCProxy) OnDisconnected(ctx context.Context, req *OnDisconnectedProxyRequest) (*OnDisconnectedProxyResponse, error) {
 	ctx = p.withTimeout(ctx)
 
@@ -213,12 +213,12 @@ func (p *GRPCProxy) withTimeout(ctx context.Context) context.Context {
 	return ctx
 }
 
-// Name implements RPCProxy.Name.
+// Name implements Proxy.Name.
 func (p *GRPCProxy) Name() string {
 	return p.name
 }
 
-// Close implements RPCProxy.Close.
+// Close implements Proxy.Close.
 func (p *GRPCProxy) Close() error {
 	if p.conn != nil {
 		return p.conn.Close()

@@ -14,7 +14,7 @@ type Router struct {
 
 // route represents a single routing rule.
 type route struct {
-	proxy          RPCProxy
+	proxy          Proxy
 	channelMatcher glob.Glob
 	methodMatcher  glob.Glob
 }
@@ -28,7 +28,7 @@ func NewRouter() *Router {
 
 // Add adds a new route to the router. Routes are evaluated in the order they were added.
 // The first matching route is returned.
-func (r *Router) Add(proxy RPCProxy, channelPattern, methodPattern string) error {
+func (r *Router) Add(proxy Proxy, channelPattern, methodPattern string) error {
 	channelGlob, err := glob.Compile(channelPattern)
 	if err != nil {
 		return err
@@ -53,7 +53,7 @@ func (r *Router) Add(proxy RPCProxy, channelPattern, methodPattern string) error
 
 // Match finds the proxy that matches the given channel and method.
 // Returns nil if no match is found.
-func (r *Router) Match(channel, method string) RPCProxy {
+func (r *Router) Match(channel, method string) Proxy {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -67,7 +67,7 @@ func (r *Router) Match(channel, method string) RPCProxy {
 }
 
 // AddFromConfig adds routes from a ProxyConfig.
-func (r *Router) AddFromConfig(proxy RPCProxy, cfg *ProxyConfig) error {
+func (r *Router) AddFromConfig(proxy Proxy, cfg *ProxyConfig) error {
 	for _, routeCfg := range cfg.Routes {
 		if err := r.Add(proxy, routeCfg.Channel, routeCfg.Method); err != nil {
 			return err

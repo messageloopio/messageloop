@@ -14,7 +14,7 @@ import (
 	"github.com/lynx-go/x/log"
 )
 
-// HTTPProxy implements RPCProxy using HTTP transport.
+// HTTPProxy implements Proxy using HTTP transport.
 type HTTPProxy struct {
 	name     string
 	endpoint string
@@ -65,8 +65,8 @@ func NewHTTPProxy(cfg *ProxyConfig) (*HTTPProxy, error) {
 	}, nil
 }
 
-// ProxyRPC implements RPCProxy.ProxyRPC.
-func (p *HTTPProxy) ProxyRPC(ctx context.Context, req *RPCProxyRequest) (*RPCProxyResponse, error) {
+// RPC implements Proxy.RPC.
+func (p *HTTPProxy) RPC(ctx context.Context, req *RPCProxyRequest) (*RPCProxyResponse, error) {
 	ctx = p.withTimeout(ctx)
 
 	// Build the HTTP request
@@ -101,7 +101,7 @@ func (p *HTTPProxy) ProxyRPC(ctx context.Context, req *RPCProxyRequest) (*RPCPro
 	return result.(*RPCProxyResponse), nil
 }
 
-// Authenticate implements RPCProxy.Authenticate.
+// Authenticate implements Proxy.Authenticate.
 func (p *HTTPProxy) Authenticate(ctx context.Context, req *AuthenticateProxyRequest) (*AuthenticateProxyResponse, error) {
 	ctx = p.withTimeout(ctx)
 
@@ -136,7 +136,7 @@ func (p *HTTPProxy) Authenticate(ctx context.Context, req *AuthenticateProxyRequ
 	return result.(*AuthenticateProxyResponse), nil
 }
 
-// SubscribeAcl implements RPCProxy.SubscribeAcl.
+// SubscribeAcl implements Proxy.SubscribeAcl.
 func (p *HTTPProxy) SubscribeAcl(ctx context.Context, req *SubscribeAclProxyRequest) (*SubscribeAclProxyResponse, error) {
 	ctx = p.withTimeout(ctx)
 
@@ -169,7 +169,7 @@ func (p *HTTPProxy) SubscribeAcl(ctx context.Context, req *SubscribeAclProxyRequ
 	return result.(*SubscribeAclProxyResponse), nil
 }
 
-// OnConnected implements RPCProxy.OnConnected.
+// OnConnected implements Proxy.OnConnected.
 func (p *HTTPProxy) OnConnected(ctx context.Context, req *OnConnectedProxyRequest) (*OnConnectedProxyResponse, error) {
 	ctx = p.withTimeout(ctx)
 
@@ -202,7 +202,7 @@ func (p *HTTPProxy) OnConnected(ctx context.Context, req *OnConnectedProxyReques
 	return result.(*OnConnectedProxyResponse), nil
 }
 
-// OnSubscribed implements RPCProxy.OnSubscribed.
+// OnSubscribed implements Proxy.OnSubscribed.
 func (p *HTTPProxy) OnSubscribed(ctx context.Context, req *OnSubscribedProxyRequest) (*OnSubscribedProxyResponse, error) {
 	ctx = p.withTimeout(ctx)
 
@@ -236,7 +236,7 @@ func (p *HTTPProxy) OnSubscribed(ctx context.Context, req *OnSubscribedProxyRequ
 	return result.(*OnSubscribedProxyResponse), nil
 }
 
-// OnUnsubscribed implements RPCProxy.OnUnsubscribed.
+// OnUnsubscribed implements Proxy.OnUnsubscribed.
 func (p *HTTPProxy) OnUnsubscribed(ctx context.Context, req *OnUnsubscribedProxyRequest) (*OnUnsubscribedProxyResponse, error) {
 	ctx = p.withTimeout(ctx)
 
@@ -270,7 +270,7 @@ func (p *HTTPProxy) OnUnsubscribed(ctx context.Context, req *OnUnsubscribedProxy
 	return result.(*OnUnsubscribedProxyResponse), nil
 }
 
-// OnDisconnected implements RPCProxy.OnDisconnected.
+// OnDisconnected implements Proxy.OnDisconnected.
 func (p *HTTPProxy) OnDisconnected(ctx context.Context, req *OnDisconnectedProxyRequest) (*OnDisconnectedProxyResponse, error) {
 	ctx = p.withTimeout(ctx)
 
@@ -349,12 +349,12 @@ func (p *HTTPProxy) withTimeout(ctx context.Context) context.Context {
 	return ctx
 }
 
-// Name implements RPCProxy.Name.
+// Name implements Proxy.Name.
 func (p *HTTPProxy) Name() string {
 	return p.name
 }
 
-// Close implements RPCProxy.Close.
+// Close implements Proxy.Close.
 func (p *HTTPProxy) Close() error {
 	p.client.CloseIdleConnections()
 	return nil

@@ -144,8 +144,8 @@ func (n *Node) SetupProxy(cfgs []*proxy.ProxyConfig) error {
 	return nil
 }
 
-// createProxy creates an RPCProxy instance based on the configuration.
-func (n *Node) createProxy(cfg *proxy.ProxyConfig) (proxy.RPCProxy, error) {
+// createProxy creates a Proxy instance based on the configuration.
+func (n *Node) createProxy(cfg *proxy.ProxyConfig) (proxy.Proxy, error) {
 	if cfg.GRPC != nil {
 		return proxy.NewGRPCProxy(cfg)
 	}
@@ -162,7 +162,7 @@ func (n *Node) createProxy(cfg *proxy.ProxyConfig) (proxy.RPCProxy, error) {
 
 // FindProxy finds a proxy for the given channel and method.
 // Returns nil if no matching proxy is found.
-func (n *Node) FindProxy(channel, method string) proxy.RPCProxy {
+func (n *Node) FindProxy(channel, method string) proxy.Proxy {
 	if n.proxy == nil {
 		return nil
 	}
@@ -170,7 +170,7 @@ func (n *Node) FindProxy(channel, method string) proxy.RPCProxy {
 }
 
 // AddProxy adds a proxy to the router.
-func (n *Node) AddProxy(p proxy.RPCProxy, channelPattern, methodPattern string) error {
+func (n *Node) AddProxy(p proxy.Proxy, channelPattern, methodPattern string) error {
 	if n.proxy == nil {
 		n.proxy = proxy.NewRouter()
 	}
@@ -183,5 +183,5 @@ func (n *Node) ProxyRPC(ctx context.Context, channel, method string, req *proxy.
 	if p == nil {
 		return nil, errors.New("no proxy found for channel/method")
 	}
-	return p.ProxyRPC(ctx, req)
+	return p.RPC(ctx, req)
 }

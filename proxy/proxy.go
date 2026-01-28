@@ -9,10 +9,10 @@ import (
 	sharedpb "github.com/fleetlit/messageloop/genproto/shared/v1"
 )
 
-// RPCProxy defines the interface for proxying RPC requests to backend services.
-type RPCProxy interface {
-	// ProxyRPC forwards an RPC request to the backend service.
-	ProxyRPC(ctx context.Context, req *RPCProxyRequest) (*RPCProxyResponse, error)
+// Proxy defines the interface for proxying RPC requests to backend services.
+type Proxy interface {
+	// RPC forwards an RPC request to the backend service.
+	RPC(ctx context.Context, req *RPCProxyRequest) (*RPCProxyResponse, error)
 
 	// Authenticate forwards an authentication request to the backend service.
 	Authenticate(ctx context.Context, req *AuthenticateProxyRequest) (*AuthenticateProxyResponse, error)
@@ -174,7 +174,7 @@ type UserInfo struct {
 	ClientID   string
 }
 
-// FromProtoResponse creates an AuthenticateProxyResponse from the protobuf AuthenticateResponse.
+// FromProtoAuthenticateResponse creates an AuthenticateProxyResponse from the protobuf AuthenticateResponse.
 func FromProtoAuthenticateResponse(resp *proxypb.AuthenticateResponse) *AuthenticateProxyResponse {
 	if resp == nil {
 		return &AuthenticateProxyResponse{}
