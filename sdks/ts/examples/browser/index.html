@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MessageLoop SDK - Browser Example</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 800px;
+      margin: 50px auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    .container {
+      background: white;
+      padding: 30px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    h1 { color: #333; }
+    .status {
+      padding: 10px 15px;
+      border-radius: 4px;
+      margin: 10px 0;
+    }
+    .status.connected { background: #d4edda; color: #155724; }
+    .status.disconnected { background: #f8d7da; color: #721c24; }
+    .messages {
+      border: 1px solid #ddd;
+      padding: 10px;
+      height: 300px;
+      overflow-y: auto;
+      margin: 10px 0;
+      background: #fafafa;
+    }
+    .message {
+      padding: 8px 12px;
+      margin: 5px 0;
+      background: white;
+      border-radius: 4px;
+      border-left: 3px solid #007bff;
+    }
+    .message .channel { font-weight: bold; color: #007bff; }
+    .message .type { color: #666; font-size: 0.9em; }
+    .message .time { color: #999; font-size: 0.8em; }
+    .input-group { margin: 10px 0; }
+    input, button {
+      padding: 10px 15px;
+      font-size: 14px;
+      border-radius: 4px;
+    }
+    input { width: 200px; border: 1px solid #ddd; }
+    button {
+      background: #007bff;
+      color: white;
+      border: none;
+      cursor: pointer;
+      margin-left: 10px;
+    }
+    button:hover { background: #0056b3; }
+    button:disabled { background: #ccc; }
+    .error { color: #dc3545; padding: 10px; background: #f8d7da; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>MessageLoop SDK - Browser Example</h1>
+
+    <div id="status" class="status disconnected">Not connected</div>
+
+    <div class="input-group">
+      <input type="text" id="channelInput" placeholder="Channel name" value="chat.general">
+      <input type="text" id="messageInput" placeholder="Message text" value="Hello from browser!">
+      <button id="sendBtn" disabled>Send Message</button>
+    </div>
+
+    <div class="input-group">
+      <input type="text" id="subInput" placeholder="Subscribe to channel" value="chat.dev">
+      <button id="subBtn" disabled>Subscribe</button>
+      <button id="connectBtn">Connect</button>
+      <button id="disconnectBtn" disabled>Disconnect</button>
+    </div>
+
+    <h3>Messages</h3>
+    <div id="messages" class="messages">
+      <div style="color: #999;">No messages yet...</div>
+    </div>
+
+    <div id="error" class="error" style="display: none;"></div>
+  </div>
+
+  <script type="module">
+    // Import from the built SDK
+    import {
+      MessageLoopClient,
+      createCloudEvent,
+      withClientId,
+      withAutoSubscribe,
+    } from '../dist/esm/index.js';
+
+    let client = null;
+
+    const statusEl = document.getElementById('status');
+    const messagesEl = document.getElementById('messages');
+    const errorEl = document.getElementById('error');
+    const connectBtn = document.getElementById('connectBtn');
+    const disconnectBtn = document.getElementById('disconnectBtn');
+    const sendBtn = document.getElementById('sendBtn');
+    const subBtn = document.getElementById('subBtn');
+
+    function updateStatus(message, connected) {
+      statusEl.textContent = message;
+      statusEl.className = 'status ' + (connected ? 'connected' : 'disconnected');
+      connectBtn.disabled = connected;
+      disconnectBtn.disabled = !connected;
+      sendBtn.disabled = !connected;
+      subBtn.disabled = !connected;
+    }
+
+    function addMessage(channel, event) {
+      // Remove "no messages" text if present
+      if (messagesEl.children[0]?.textContent === 'No messages yet...') {
+        messagesEl.innerHTML = '';
+      }
+
+      const div = document.createElement('div');
+      div.className = 'message';
+      const time = new Date().toLocaleTimeString();
+
+      div.innerHTML = `
+        <span class="channel">${channel}</span>
+        <span class="type">${event.type}</span>
+        <span class="time">${time}</span>
+        <pre>${JSON.stringify(event.data, null, 2)}</pre>
+      `;
+      messagesEl.appendChild(div);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    function showError(message) {
+      errorEl.textContent = message;
+      errorEl.style.display = 'block';
+      setTimeout(() => {
+        errorEl.style.display = 'none';
+      }, 5000);
+    }
+
+    connectBtn.addEventListener('click', async () => {
+      try {
+        updateStatus('Connecting...', false);
+
+        client = await MessageLoopClient.dial(
+          'ws://localhost:9080/ws',
+          [
+            withClientId('browser-' + Math.random().toString(36).substr(2, 9)),
+            withAutoSubscribe('chat.general'),
+          ]
+        );
+
+        updateStatus(`Connected! Session: ${client.getSessionId()}`, true);
+
+        client.onConnected((sessionId) => {
+          updateStatus(`Connected! Session: ${sessionId}`, true);
+        });
+
+        client.onMessage((events) => {
+          for (const msg of events) {
+            addMessage(msg.channel, msg.event);
+          }
+        });
+
+        client.onError((err) => {
+          showError('Error: ' + err.message);
+        });
+
+        client.onClosed(() => {
+          updateStatus('Disconnected', false);
+        });
+
+      } catch (err) {
+        showError('Connection failed: ' + err.message);
+        updateStatus('Connection failed', false);
+      }
+    });
+
+    disconnectBtn.addEventListener('click', async () => {
+      if (client) {
+        await client.close();
+        client = null;
+        updateStatus('Disconnected', false);
+      }
+    });
+
+    sendBtn.addEventListener('click', async () => {
+      if (!client) return;
+
+      const channel = document.getElementById('channelInput').value;
+      const text = document.getElementById('messageInput').value;
+
+      const event = createCloudEvent({
+        source: '/browser',
+        type: 'chat.message',
+        data: {
+          text,
+          timestamp: new Date().toISOString(),
+        },
+      });
+
+      try {
+        await client.publish(channel, event);
+        // Add our own message to the list
+        addMessage(channel, event);
+        document.getElementById('messageInput').value = '';
+      } catch (err) {
+        showError('Publish failed: ' + err.message);
+      }
+    });
+
+    subBtn.addEventListener('click', async () => {
+      if (!client) return;
+
+      const channel = document.getElementById('subInput').value;
+      try {
+        await client.subscribe(channel);
+        addMessage('system', {
+          type: 'subscription',
+          data: { action: 'subscribed', channel },
+        });
+      } catch (err) {
+        showError('Subscribe failed: ' + err.message);
+      }
+    });
+  </script>
+</body>
+</html>
