@@ -8,6 +8,13 @@ MessageLoop is a realtime messaging platform server written in Go. It provides p
 
 ## Build and Test Commands
 
+**Note:** This project uses [Task](https://taskfile.dev) for build automation. Install with `go install github.com/go-task/task/v3/cmd/task@latest`.
+
+### Initialize development environment
+```bash
+task init  # Installs protoc-gen-go and buf
+```
+
 ### Build
 ```bash
 go build ./...
@@ -15,7 +22,7 @@ go build ./...
 
 ### Generate protocol buffers
 ```bash
-task generate-protocol  # Requires buf: go install github.com/bufbuild/buf/cmd/buf@v1.63.0
+task generate-protocol
 ```
 
 ### Run tests
