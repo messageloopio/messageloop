@@ -49,12 +49,12 @@ func (hm *HeartbeatManager) heartbeatLoop(ctx context.Context, client *ClientSes
 		case <-idleTimer.C:
 			client.mu.Lock()
 			idle := time.Since(client.lastActivity) > hm.config.IdleTimeout
-			client.mu.Unlock()
-
 			if idle {
+				client.mu.Unlock()
 				_ = client.close(DisconnectIdleTimeout)
 				return
 			}
+			client.mu.Unlock()
 			idleTimer.Reset(hm.config.IdleTimeout)
 		}
 	}

@@ -95,6 +95,11 @@ func (c *ClientSession) close(disconnect Disconnect) error {
 	}
 	c.mu.Unlock()
 
+	// Clean up session from hub
+	if c.session != "" {
+		c.node.hub.RemoveSession(c.session)
+	}
+
 	// Notify proxy about disconnection
 	p := c.node.FindProxy("", "disconnect")
 	if p != nil {
@@ -131,10 +136,9 @@ func (c *ClientSession) HandleMessage(ctx context.Context, in *clientpb.InboundM
 		c.mu.Unlock()
 		return errors.New("client is closed")
 	}
+	// Reset activity while holding lock to prevent TOCTOU
+	c.lastActivity = time.Now()
 	c.mu.Unlock()
-
-	// Reset activity on any message
-	c.ResetActivity()
 
 	log.DebugContext(ctx, "handling message", "message", jsonLog(in))
 
@@ -217,7 +221,7 @@ func (c *ClientSession) onConnect(ctx context.Context, in *clientpb.InboundMessa
 			authResp, err := p.Authenticate(ctx, authReq)
 			if err != nil {
 				log.WarnContext(ctx, "proxy authentication failed", "error", err)
-				return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+				_ = c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 					out.Envelope = &clientpb.OutboundMessage_Error{
 						Error: &sharedpb.Error{
 							Code:    "AUTH_ERROR",
@@ -226,14 +230,16 @@ func (c *ClientSession) onConnect(ctx context.Context, in *clientpb.InboundMessa
 						},
 					}
 				}))
+				return DisconnectInvalidToken
 			}
 			if authResp.Error != nil {
 				log.WarnContext(ctx, "proxy authentication returned error", "error", authResp.Error)
-				return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+				_ = c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 					out.Envelope = &clientpb.OutboundMessage_Error{
 						Error: authResp.Error,
 					}
 				}))
+				return DisconnectInvalidToken
 			}
 			// Store user info from proxy response
 			if authResp.UserInfo != nil {
@@ -415,7 +421,7 @@ func (c *ClientSession) onSubscribe(ctx context.Context, in *clientpb.InboundMes
 			aclResp, err := p.SubscribeAcl(ctx, aclReq)
 			if err != nil {
 				log.WarnContext(ctx, "proxy subscribe ACL check failed", "channel", ch.Channel, "error", err)
-				return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+				_ = c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 					out.Envelope = &clientpb.OutboundMessage_Error{
 						Error: &sharedpb.Error{
 							Code:    "ACL_ERROR",
@@ -424,14 +430,16 @@ func (c *ClientSession) onSubscribe(ctx context.Context, in *clientpb.InboundMes
 						},
 					}
 				}))
+				return DisconnectInvalidToken
 			}
 			if aclResp.Error != nil {
 				log.WarnContext(ctx, "proxy subscribe ACL returned error", "channel", ch.Channel, "error", aclResp.Error)
-				return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+				_ = c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 					out.Envelope = &clientpb.OutboundMessage_Error{
 						Error: aclResp.Error,
 					}
 				}))
+				return DisconnectInvalidToken
 			}
 		}
 

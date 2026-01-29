@@ -238,3 +238,10 @@ func (h *Hub) NumSubscribers(ch string) int {
 func (h *Hub) broadcastPublication(ch string, pub *Publication) error {
 	return h.subShards[index(ch, numHubShards)].broadcastPublication(ch, pub)
 }
+
+// RemoveSession removes a session from the sessions map.
+func (h *Hub) RemoveSession(sessionID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	delete(h.sessions, sessionID)
+}

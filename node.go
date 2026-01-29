@@ -125,7 +125,10 @@ func (n *Node) removeSubscription(ch string, c *ClientSession) error {
 	mu := n.subLock(ch)
 	mu.Lock()
 	defer mu.Unlock()
-	_, _ = n.hub.removeSub(ch, c)
+	last, removed := n.hub.removeSub(ch, c)
+	if removed && last && n.broker != nil {
+		_ = n.broker.Unsubscribe(ch)
+	}
 	return nil
 }
 
@@ -170,7 +173,8 @@ func (n *Node) createProxy(cfg *proxy.ProxyConfig) (proxy.Proxy, error) {
 	}
 	// Auto-detect: if endpoint starts with http:// or https://, use HTTP
 	// Otherwise, assume gRPC
-	if len(cfg.Endpoint) > 7 && (cfg.Endpoint[:7] == "http://" || cfg.Endpoint[:8] == "https://") {
+	if (len(cfg.Endpoint) >= 7 && cfg.Endpoint[:7] == "http://") ||
+		(len(cfg.Endpoint) >= 8 && cfg.Endpoint[:8] == "https://") {
 		return proxy.NewHTTPProxy(cfg)
 	}
 	return proxy.NewGRPCProxy(cfg)
