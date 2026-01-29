@@ -127,6 +127,24 @@ The protocol uses CloudEvents for message passing:
 5. **CloudEvents** - Publish and RPC operations wrap data in CloudEvents with BinaryData/TextData fields
 6. **StreamPosition recovery** - History streams use offset + epoch semantics for reliable recovery
 
+## TypeScript SDK
+
+### Build
+```bash
+cd sdks/ts
+npm install
+npm run build
+```
+
+### Test
+```bash
+npm test
+```
+
+### Examples
+- `sdks/ts/examples/browser/index.html` - Browser WebSocket example
+- `sdks/ts/examples/node/client.ts` - Node.js example
+
 ## Dependencies
 
 - `github.com/cloudevents/sdk-go/binding/format/protobuf/v2` - CloudEvent protobuf format
@@ -147,6 +165,51 @@ The protocol uses CloudEvents for message passing:
 - `pkg/redisbroker/` - Redis-based distributed broker implementation
 - `proxy/` - RPC proxy backend integration
 - `sdks/go/` - Go client SDK for MessageLoop
+- `sdks/go/example/` - Go SDK examples:
+  - `basicwebsocket/` - Basic WebSocket connection example
+  - `basicgrpc/` - Basic gRPC connection example
+  - `dynamicsub/` - Dynamic subscription example
+  - `protobuf/` - Protobuf encoding example
+  - `wsrpc/` - WebSocket RPC example
+  - `proxyserver/` - Proxy server example
+- `sdks/ts/` - TypeScript/JavaScript client SDK for MessageLoop
+  - `src/client/` - Client implementation
+  - `src/event/` - CloudEvent utilities and converters
+  - `src/transport/` - Transport layer (WebSocket, codecs)
+  - `examples/browser/` - Browser example
+  - `examples/node/` - Node.js example
 - `protocol/` - Protobuf definitions (source)
 - `genproto/` - Generated protobuf Go code (local replace)
 - `config/` - Configuration structures
+
+## TypeScript SDK
+
+The TypeScript SDK (`sdks/ts/`) provides a client library for MessageLoop in both Node.js and browser environments:
+
+**Key features:**
+- WebSocket transport with JSON and Protobuf encoding
+- Pub/sub messaging with wildcard channel support
+- RPC-style request/response
+- CloudEvents integration
+- Heartbeat/ping-pong keepalive
+
+**Usage:**
+```typescript
+import { dial, createCloudEvent } from "@messageloop/sdk";
+
+const client = await dial("ws://localhost:9080/ws", [
+  withClientId("my-client"),
+  withAutoSubscribe("chat.messages"),
+]);
+
+client.onMessage((events) => {
+  events.forEach((msg) => console.log("Message:", msg.event.type));
+});
+
+const event = createCloudEvent({
+  source: "/client",
+  type: "chat.message",
+  data: { text: "Hello!" },
+});
+await client.publish("chat.messages", event);
+```
