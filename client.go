@@ -3,6 +3,7 @@ package messageloop
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -323,6 +324,11 @@ func (c *ClientSession) onRPC(ctx context.Context, in *clientpb.InboundMessage, 
 		method = event.Type
 	}
 
+	// Apply RPC timeout from configuration or use default
+	rpcTimeout := c.node.getRPCTimeout()
+	rpcCtx, cancel := context.WithTimeout(ctx, rpcTimeout)
+	defer cancel()
+
 	// Check if there's a proxy configured for this channel/method
 	proxyReq := &proxy.RPCProxyRequest{
 		ID:        in.Id,
@@ -335,8 +341,30 @@ func (c *ClientSession) onRPC(ctx context.Context, in *clientpb.InboundMessage, 
 		Meta:      in.Metadata,
 	}
 
-	proxyResp, err := c.node.ProxyRPC(ctx, channel, method, proxyReq)
+	startTime := time.Now()
+	proxyResp, err := c.node.ProxyRPC(rpcCtx, channel, method, proxyReq)
+	duration := time.Since(startTime)
+
 	if err != nil {
+		// Check for timeout error
+		if errors.Is(err, context.DeadlineExceeded) {
+			log.WarnContext(ctx, "RPC request timeout",
+				"channel", channel,
+				"method", method,
+				"timeout", rpcTimeout,
+				"duration", duration,
+			)
+			return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+				out.Envelope = &clientpb.OutboundMessage_Error{
+					Error: &sharedpb.Error{
+						Code:    "RPC_TIMEOUT",
+						Type:    "timeout",
+						Message: fmt.Sprintf("RPC request timeout after %v", duration),
+					},
+				}
+			}))
+		}
+
 		// No proxy configured or proxy failed - return error to client
 		if err.Error() == "no proxy found for channel/method" {
 			// No proxy configured - return original echo behavior
@@ -346,7 +374,14 @@ func (c *ClientSession) onRPC(ctx context.Context, in *clientpb.InboundMessage, 
 				}
 			}))
 		}
+
 		// Proxy error - return error to client
+		log.WarnContext(ctx, "RPC proxy error",
+			"channel", channel,
+			"method", method,
+			"error", err,
+			"duration", duration,
+		)
 		return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 			out.Envelope = &clientpb.OutboundMessage_Error{
 				Error: &sharedpb.Error{
@@ -357,6 +392,13 @@ func (c *ClientSession) onRPC(ctx context.Context, in *clientpb.InboundMessage, 
 			}
 		}))
 	}
+
+	// Log successful RPC
+	log.DebugContext(ctx, "RPC request completed",
+		"channel", channel,
+		"method", method,
+		"duration", duration,
+	)
 
 	// Return the proxy response
 	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {

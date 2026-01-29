@@ -10,8 +10,9 @@ type Config struct {
 }
 
 type Server struct {
-	Http      HttpServer `yaml:"http" json:"http"`
-	Heartbeat Heartbeat  `yaml:"heartbeat" json:"heartbeat"`
+	Http       HttpServer `yaml:"http" json:"http"`
+	Heartbeat  Heartbeat  `yaml:"heartbeat" json:"heartbeat"`
+	RPCTimeout string     `yaml:"rpc_timeout" json:"rpc_timeout"` // default: "30s"
 }
 
 type HttpServer struct {

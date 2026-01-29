@@ -43,6 +43,8 @@ Config structure defined in `config/config.go` with example in `config-example.y
 - **Transport** - WebSocket address (`:9080`) and gRPC address (`:9090`)
 - **Broker** - Type selection (`memory` or `redis`) with Redis connection settings
 - **Proxies** - Backend proxy configurations for RPC routing (HTTP or gRPC)
+- **Heartbeat** - Idle timeout for client connections (default: `300s`)
+- **RPC Timeout** - Global timeout for RPC requests (default: `30s`)
 
 ## Architecture
 
@@ -58,7 +60,7 @@ Config structure defined in `config/config.go` with example in `config-example.y
 - `Connect` - Initial authentication and session establishment
 - `Publish` - Publish CloudEvents to channels
 - `Subscribe` / `Unsubscribe` - Manage channel subscriptions
-- `RpcRequest` - RPC-style request/response using CloudEvents (proxied to backend)
+- `RpcRequest` - RPC-style request/response using CloudEvents (proxied to backend with timeout protection)
 - `Ping` / `Pong` - Connection keepalive
 
 **Hub** (`hub.go`) - Sharded connection registry with 64 shards:
@@ -77,6 +79,8 @@ Config structure defined in `config/config.go` with example in `config-example.y
 - Supports HTTP and gRPC backends
 - Routes RPC requests based on channel patterns
 - Configured via YAML with timeout and endpoint settings
+- Three-tier timeout control: client-level, global, and proxy-specific
+- Automatic timeout detection with friendly error messages
 
 ### Transports
 

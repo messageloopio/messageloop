@@ -19,6 +19,7 @@ type Node struct {
 	subLocks          map[int]*sync.Mutex
 	proxy             *proxy.Router
 	heartbeatManager  *HeartbeatManager
+	rpcTimeout        time.Duration
 }
 
 func (n *Node) HandlePublication(ch string, pub *Publication) error {
@@ -53,8 +54,18 @@ func NewNode(cfg *config.Server) *Node {
 	}
 
 	node := &Node{
-		subLocks: subLocks,
-		hub:      newHub(0),
+		subLocks:   subLocks,
+		hub:        newHub(0),
+		rpcTimeout: proxy.DefaultRPCTimeout, // Default 30s
+	}
+
+	// Initialize RPC timeout if config is provided
+	if cfg != nil && cfg.RPCTimeout != "" {
+		rpcTimeout, err := time.ParseDuration(cfg.RPCTimeout)
+		if err != nil {
+			rpcTimeout = proxy.DefaultRPCTimeout
+		}
+		node.rpcTimeout = rpcTimeout
 	}
 
 	// Initialize heartbeat manager if config is provided
@@ -204,4 +215,12 @@ func (n *Node) ProxyRPC(ctx context.Context, channel, method string, req *proxy.
 		return nil, errors.New("no proxy found for channel/method")
 	}
 	return p.RPC(ctx, req)
+}
+
+// getRPCTimeout returns the configured RPC timeout.
+func (n *Node) getRPCTimeout() time.Duration {
+	if n.rpcTimeout > 0 {
+		return n.rpcTimeout
+	}
+	return proxy.DefaultRPCTimeout
 }
