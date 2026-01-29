@@ -61,6 +61,19 @@ func BasicGRPCExample() error {
 		return fmt.Errorf("publish failed: %w", err)
 	}
 
+	// Make an RPC call
+	req, _ := messageloopgo.NewJSONMessage(
+		"getUser",
+		map[string]any{
+			"message": "hello world",
+		},
+	)
+	resp := cloudevents.NewEvent()
+	err = client.RPC(ctx, "user.service", "getUser", req, &resp)
+	if err != nil {
+		return fmt.Errorf("rpc failed: %w", err)
+	}
+
 	// Keep running
 	select {
 	case <-ctx.Done():
