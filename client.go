@@ -19,11 +19,11 @@ import (
 
 func NewClientSession(ctx context.Context, node *Node, t Transport, marshaler Marshaler) (*ClientSession, ClientCloseFunc, error) {
 	client := &ClientSession{
-		ctx:         ctx,
-		node:        node,
-		transport:   t,
-		session:     uuid.NewString(),
-		marshaler:   marshaler,
+		ctx:          ctx,
+		node:         node,
+		transport:    t,
+		session:      uuid.NewString(),
+		marshaler:    marshaler,
 		lastActivity: time.Now(),
 	}
 
@@ -194,6 +194,10 @@ func (c *ClientSession) Channels() []string {
 	return []string{}
 }
 
+const (
+	SystemMethodAuthenticate = "$authenticate"
+)
+
 func (c *ClientSession) onConnect(ctx context.Context, in *clientpb.InboundMessage, connect *clientpb.Connect) error {
 	c.mu.RLock()
 	authenticated := c.authenticated
@@ -211,11 +215,11 @@ func (c *ClientSession) onConnect(ctx context.Context, in *clientpb.InboundMessa
 	// Proxy authentication - check if there's a proxy configured for authentication
 	var p proxy.Proxy
 	if connect.Token != "" {
-		p = c.node.FindProxy("", "authenticate")
+		p = c.node.FindProxy("", SystemMethodAuthenticate)
 		if p != nil {
 			authReq := &proxy.AuthenticateProxyRequest{
 				Username:   connect.ClientId, // Use client_id as username
-				Password:   connect.Token,     // Use token as password
+				Password:   connect.Token,    // Use token as password
 				ClientType: connect.ClientType,
 				ClientID:   connect.ClientId,
 			}
@@ -580,4 +584,3 @@ func (c *ClientSession) ResetActivity() {
 	defer c.mu.Unlock()
 	c.lastActivity = time.Now()
 }
-
