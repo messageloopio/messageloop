@@ -8,7 +8,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	proxypb "github.com/fleetlit/messageloop/genproto/proxy/v1"
+	proxypb "github.com/deeplooplabs/messageloop/genproto/proxy/v1"
 	"github.com/lynx-go/x/log"
 )
 

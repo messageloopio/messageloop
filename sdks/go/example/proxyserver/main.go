@@ -10,9 +10,9 @@ import (
 	"syscall"
 
 	pb "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
-	proxypb "github.com/fleetlit/messageloop/genproto/proxy/v1"
-	sharedpb "github.com/fleetlit/messageloop/genproto/shared/v1"
-	"github.com/fleetlit/messageloop/sdks/go"
+	proxypb "github.com/deeplooplabs/messageloop/genproto/proxy/v1"
+	sharedpb "github.com/deeplooplabs/messageloop/genproto/shared/v1"
+	"github.com/deeplooplabs/messageloop/sdks/go"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

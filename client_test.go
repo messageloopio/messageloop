@@ -9,19 +9,19 @@ import (
 	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
-	clientpb "github.com/fleetlit/messageloop/genproto/v1"
+	clientpb "github.com/deeplooplabs/messageloop/genproto/v1"
 )
 
 // capturingTransport captures all written messages for inspection
 type capturingTransport struct {
-	mu            sync.Mutex
-	messages      [][]byte
-	closeCount    atomic.Int32
-	closed        atomic.Bool
-	closeReason   Disconnect
-	writeDelay    time.Duration
-	writeError    error
-	closeOnWrite  bool
+	mu           sync.Mutex
+	messages     [][]byte
+	closeCount   atomic.Int32
+	closed       atomic.Bool
+	closeReason  Disconnect
+	writeDelay   time.Duration
+	writeError   error
+	closeOnWrite bool
 }
 
 func (c *capturingTransport) Write(data []byte) error {
@@ -97,10 +97,10 @@ func (c *capturingTransport) getCloseReason() Disconnect {
 
 // failTransport simulates transport failures
 type failTransport struct {
-	writeErr  error
-	closeErr  error
+	writeErr    error
+	closeErr    error
 	closeCalled bool
-	mu        sync.Mutex
+	mu          sync.Mutex
 }
 
 func (f *failTransport) Write(data []byte) error {
@@ -734,7 +734,7 @@ func TestClientSession_HandleMessage_Unsupported(t *testing.T) {
 	transport.messages = nil
 
 	// Try unsubscribe (returns TODO error)
- unsubMsg := &clientpb.InboundMessage{
+	unsubMsg := &clientpb.InboundMessage{
 		Id: "msg-2",
 		Envelope: &clientpb.InboundMessage_Unsubscribe{
 			Unsubscribe: &clientpb.Unsubscribe{

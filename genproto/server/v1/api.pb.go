@@ -537,7 +537,7 @@ const file_server_v1_api_proto_rawDesc = "" +
 	"\n" +
 	"Disconnect\x12(.messageloop.server.v1.DisconnectRequest\x1a).messageloop.server.v1.DisconnectResponse\x12^\n" +
 	"\tSubscribe\x12'.messageloop.server.v1.SubscribeRequest\x1a(.messageloop.server.v1.SubscribeResponse\x12b\n" +
-	"\vUnsubscribe\x12'.messageloop.server.v1.SubscribeRequest\x1a*.messageloop.server.v1.UnsubscribeResponseB@Z>github.com/fleetlit/messageloop/genproto/go/server/v1;serverpbb\x06proto3"
+	"\vUnsubscribe\x12'.messageloop.server.v1.SubscribeRequest\x1a*.messageloop.server.v1.UnsubscribeResponseB@Z>github.com/deeplooplabs/messageloop/genproto/go/server/v1;serverpbb\x06proto3"
 
 var (
 	file_server_v1_api_proto_rawDescOnce sync.Once

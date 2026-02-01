@@ -1,11 +1,11 @@
-module github.com/fleetlit/messageloop/sdks/go
+module github.com/deeplooplabs/messageloop/sdks/go
 
 go 1.25
 
 require (
 	github.com/cloudevents/sdk-go/binding/format/protobuf/v2 v2.16.2
 	github.com/cloudevents/sdk-go/v2 v2.16.2
-	github.com/fleetlit/messageloop/genproto v1.0.0
+	github.com/deeplooplabs/messageloop/genproto v1.0.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	google.golang.org/grpc v1.78.0
@@ -24,4 +24,4 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20251029180050-ab9386a59fda // indirect
 )
 
-replace github.com/fleetlit/messageloop/genproto => ../../genproto
+replace github.com/deeplooplabs/messageloop/genproto => ../../genproto

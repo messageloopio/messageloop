@@ -3,14 +3,14 @@ syntax = "proto3";
 // buf:lint:ignore PACKAGE_DIRECTORY_MATCH
 package messageloop.server.v1;
 
-option go_package = "github.com/fleetlit/messageloop/genproto/go/server/v1;serverpb";
+option go_package = "github.com/deeplooplabs/messageloop/genproto/go/server/v1;serverpb";
 import "includes/cloudevents/cloudevents.proto";
 
 service APIService {
   rpc Publish(PublishRequest) returns(PublishResponse);
   rpc Disconnect(DisconnectRequest) returns(DisconnectResponse);
   rpc Subscribe(SubscribeRequest) returns(SubscribeResponse);
-  rpc Unsubscribe(SubscribeRequest) returns(UnsubscribeResponse);
+  rpc Unsubscribe(UnsubscribeRequest) returns(UnsubscribeResponse);
 }
 
 message Publication {

@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/fleetlit/messageloop"
+	"github.com/deeplooplabs/messageloop"
 	"github.com/lynx-go/lynx"
 	"github.com/lynx-go/x/log"
 )

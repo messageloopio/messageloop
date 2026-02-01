@@ -7,19 +7,19 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fleetlit/messageloop/config"
-	"github.com/fleetlit/messageloop/proxy"
+	"github.com/deeplooplabs/messageloop/config"
+	"github.com/deeplooplabs/messageloop/proxy"
 	"github.com/lynx-go/x/log"
 )
 
 type Node struct {
-	dispatcher        *eventDispatcher
-	hub               *Hub
-	broker            Broker
-	subLocks          map[int]*sync.Mutex
-	proxy             *proxy.Router
-	heartbeatManager  *HeartbeatManager
-	rpcTimeout        time.Duration
+	dispatcher       *eventDispatcher
+	hub              *Hub
+	broker           Broker
+	subLocks         map[int]*sync.Mutex
+	proxy            *proxy.Router
+	heartbeatManager *HeartbeatManager
+	rpcTimeout       time.Duration
 }
 
 func (n *Node) HandlePublication(ch string, pub *Publication) error {

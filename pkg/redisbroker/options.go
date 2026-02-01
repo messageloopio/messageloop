@@ -3,7 +3,7 @@ package redisbroker
 import (
 	"time"
 
-	"github.com/fleetlit/messageloop/config"
+	"github.com/deeplooplabs/messageloop/config"
 )
 
 const (
