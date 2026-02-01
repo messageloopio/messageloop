@@ -30,6 +30,7 @@ task generate-protocol
 go test ./...
 go test ./pkg/topics/...  # Run tests for specific package
 go test -v ./pkg/topics/... # Run with verbose output
+go test -v ./pkg/topics/... -run TestCSTrieMatcher # Run a single test
 ```
 
 ### Run the server
@@ -40,11 +41,10 @@ go run cmd/server/main.go --config-dir ./configs
 ## Configuration
 
 Config structure defined in `config/config.go` with example in `config-example.yaml`:
-- **Transport** - WebSocket address (`:9080`) and gRPC address (`:9090`)
-- **Broker** - Type selection (`memory` or `redis`) with Redis connection settings
-- **Proxies** - Backend proxy configurations for RPC routing (HTTP or gRPC)
-- **Heartbeat** - Idle timeout for client connections (default: `300s`)
-- **RPC Timeout** - Global timeout for RPC requests (default: `30s`)
+- **server** - HTTP admin address (`:8080`), heartbeat idle timeout (default: `300s`), RPC timeout (default: `30s`)
+- **transport** - WebSocket (`:9080` with `/ws` path) and gRPC (`:9090`) listeners
+- **broker** - Type selection (`memory` or `redis`) with Redis connection settings
+- **proxy** - Backend proxy configurations with routes, timeout, and HTTP/gRPC backends
 
 ## Architecture
 
@@ -184,43 +184,6 @@ npm test
   - `wsrpc/` - WebSocket RPC example
   - `proxyserver/` - Proxy server example
 - `sdks/ts/` - TypeScript/JavaScript client SDK for MessageLoop
-  - `src/client/` - Client implementation
-  - `src/event/` - CloudEvent utilities and converters
-  - `src/transport/` - Transport layer (WebSocket, codecs)
-  - `examples/browser/` - Browser example
-  - `examples/node/` - Node.js example
 - `protocol/` - Protobuf definitions (source)
 - `genproto/` - Generated protobuf Go code (local replace)
 - `config/` - Configuration structures
-
-## TypeScript SDK
-
-The TypeScript SDK (`sdks/ts/`) provides a client library for MessageLoop in both Node.js and browser environments:
-
-**Key features:**
-- WebSocket transport with JSON and Protobuf encoding
-- Pub/sub messaging with wildcard channel support
-- RPC-style request/response
-- CloudEvents integration
-- Heartbeat/ping-pong keepalive
-
-**Usage:**
-```typescript
-import { dial, createCloudEvent } from "@messageloop/sdk";
-
-const client = await dial("ws://localhost:9080/ws", [
-  withClientId("my-client"),
-  withAutoSubscribe("chat.messages"),
-]);
-
-client.onMessage((events) => {
-  events.forEach((msg) => console.log("Message:", msg.event.type));
-});
-
-const event = createCloudEvent({
-  source: "/client",
-  type: "chat.message",
-  data: { text: "Hello!" },
-});
-await client.publish("chat.messages", event);
-```
