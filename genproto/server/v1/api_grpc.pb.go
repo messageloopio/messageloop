@@ -34,7 +34,7 @@ type APIServiceClient interface {
 	Publish(ctx context.Context, in *PublishRequest, opts ...grpc.CallOption) (*PublishResponse, error)
 	Disconnect(ctx context.Context, in *DisconnectRequest, opts ...grpc.CallOption) (*DisconnectResponse, error)
 	Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (*SubscribeResponse, error)
-	Unsubscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (*UnsubscribeResponse, error)
+	Unsubscribe(ctx context.Context, in *UnsubscribeRequest, opts ...grpc.CallOption) (*UnsubscribeResponse, error)
 }
 
 type aPIServiceClient struct {
@@ -75,7 +75,7 @@ func (c *aPIServiceClient) Subscribe(ctx context.Context, in *SubscribeRequest, 
 	return out, nil
 }
 
-func (c *aPIServiceClient) Unsubscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (*UnsubscribeResponse, error) {
+func (c *aPIServiceClient) Unsubscribe(ctx context.Context, in *UnsubscribeRequest, opts ...grpc.CallOption) (*UnsubscribeResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(UnsubscribeResponse)
 	err := c.cc.Invoke(ctx, APIService_Unsubscribe_FullMethodName, in, out, cOpts...)
@@ -92,7 +92,7 @@ type APIServiceServer interface {
 	Publish(context.Context, *PublishRequest) (*PublishResponse, error)
 	Disconnect(context.Context, *DisconnectRequest) (*DisconnectResponse, error)
 	Subscribe(context.Context, *SubscribeRequest) (*SubscribeResponse, error)
-	Unsubscribe(context.Context, *SubscribeRequest) (*UnsubscribeResponse, error)
+	Unsubscribe(context.Context, *UnsubscribeRequest) (*UnsubscribeResponse, error)
 	mustEmbedUnimplementedAPIServiceServer()
 }
 
@@ -112,7 +112,7 @@ func (UnimplementedAPIServiceServer) Disconnect(context.Context, *DisconnectRequ
 func (UnimplementedAPIServiceServer) Subscribe(context.Context, *SubscribeRequest) (*SubscribeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Subscribe not implemented")
 }
-func (UnimplementedAPIServiceServer) Unsubscribe(context.Context, *SubscribeRequest) (*UnsubscribeResponse, error) {
+func (UnimplementedAPIServiceServer) Unsubscribe(context.Context, *UnsubscribeRequest) (*UnsubscribeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Unsubscribe not implemented")
 }
 func (UnimplementedAPIServiceServer) mustEmbedUnimplementedAPIServiceServer() {}
@@ -191,7 +191,7 @@ func _APIService_Subscribe_Handler(srv interface{}, ctx context.Context, dec fun
 }
 
 func _APIService_Unsubscribe_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(SubscribeRequest)
+	in := new(UnsubscribeRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -203,7 +203,7 @@ func _APIService_Unsubscribe_Handler(srv interface{}, ctx context.Context, dec f
 		FullMethod: APIService_Unsubscribe_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(APIServiceServer).Unsubscribe(ctx, req.(*SubscribeRequest))
+		return srv.(APIServiceServer).Unsubscribe(ctx, req.(*UnsubscribeRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }

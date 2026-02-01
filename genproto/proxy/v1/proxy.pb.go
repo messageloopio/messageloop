@@ -869,7 +869,7 @@ const file_proxy_v1_proxy_proto_rawDesc = "" +
 	"\vOnConnected\x12(.messageloop.proxy.v1.OnConnectedRequest\x1a).messageloop.proxy.v1.OnConnectedResponse\x12e\n" +
 	"\fOnSubscribed\x12).messageloop.proxy.v1.OnSubscribedRequest\x1a*.messageloop.proxy.v1.OnSubscribedResponse\x12k\n" +
 	"\x0eOnUnsubscribed\x12+.messageloop.proxy.v1.OnUnsubscribedRequest\x1a,.messageloop.proxy.v1.OnUnsubscribedResponse\x12k\n" +
-	"\x0eOnDisconnected\x12+.messageloop.proxy.v1.OnDisconnectedRequest\x1a,.messageloop.proxy.v1.OnDisconnectedResponseB>Z<github.com/deeplooplabs/messageloop/genproto/go/proxy/v1;proxypbb\x06proto3"
+	"\x0eOnDisconnected\x12+.messageloop.proxy.v1.OnDisconnectedRequest\x1a,.messageloop.proxy.v1.OnDisconnectedResponseBBZ@github.com/deeplooplabs/messageloop/genproto/go/proxy/v1;proxypbb\x06proto3"
 
 var (
 	file_proxy_v1_proxy_proto_rawDescOnce sync.Once
