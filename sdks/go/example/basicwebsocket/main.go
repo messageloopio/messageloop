@@ -20,7 +20,7 @@ func main() {
 func basicWebSocketExample() error {
 	// Create a WebSocket client with JSON encoding
 	client, err := messageloopgo.Dial(
-		"ws://localhost:8080/ws",
+		"ws://localhost:9080/ws",
 		messageloopgo.WithEncoding(messageloopgo.EncodingJSON),
 		messageloopgo.WithClientID("example-client"),
 		messageloopgo.WithAutoSubscribe("chat.messages"),

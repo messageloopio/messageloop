@@ -142,7 +142,10 @@ func (t *wsTransport) Recv(ctx context.Context) (*clientpb.OutboundMessage, erro
 			return nil, fmt.Errorf("connection closed")
 		}
 		if messageType == websocket.PingMessage {
+			// Use sendMu to prevent concurrent write with Send()
+			t.sendMu.Lock()
 			_ = t.conn.WriteMessage(websocket.PongMessage, nil)
+			t.sendMu.Unlock()
 			continue
 		}
 		if messageType == websocket.PongMessage {
