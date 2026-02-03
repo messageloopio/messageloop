@@ -5,12 +5,32 @@ package messageloop.server.v1;
 
 option go_package = "github.com/deeplooplabs/messageloop/genproto/go/server/v1;serverpb";
 import "includes/cloudevents/cloudevents.proto";
+import "shared/v1/errors.proto";
 
 service APIService {
   rpc Publish(PublishRequest) returns(PublishResponse);
   rpc Disconnect(DisconnectRequest) returns(DisconnectResponse);
   rpc Subscribe(SubscribeRequest) returns(SubscribeResponse);
   rpc Unsubscribe(UnsubscribeRequest) returns(UnsubscribeResponse);
+  rpc Survey(SurveyRequest) returns(SurveyResponse);
+}
+
+message SurveyRequest {
+  string request_id = 1;
+  string channel = 2;
+  io.cloudevents.v1.CloudEvent payload = 3;
+  int32 timeout_ms = 4;
+}
+
+message SurveyResponse {
+  string request_id = 1;
+  repeated SurveyResult results = 2;
+}
+
+message SurveyResult {
+  string session_id = 1;
+  io.cloudevents.v1.CloudEvent payload = 2;
+  messageloop.shared.v1.Error error = 3;
 }
 
 message Publication {

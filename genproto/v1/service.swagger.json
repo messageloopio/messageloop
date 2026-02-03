@@ -41,6 +41,31 @@
         }
       }
     },
+    "messageloopv1SurveyRequest": {
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/definitions/v1CloudEvent"
+        }
+      }
+    },
+    "messageloopv1SurveyResponse": {
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/definitions/v1CloudEvent"
+        },
+        "error": {
+          "$ref": "#/definitions/v1Error"
+        }
+      }
+    },
     "messageloopv1Unsubscribe": {
       "type": "object",
       "properties": {
@@ -293,6 +318,12 @@
         },
         "sub_refresh_ack": {
           "$ref": "#/definitions/v1SubRefreshAck"
+        },
+        "survey_request": {
+          "$ref": "#/definitions/messageloopv1SurveyRequest"
+        },
+        "survey_response": {
+          "$ref": "#/definitions/messageloopv1SurveyResponse"
         }
       }
     },

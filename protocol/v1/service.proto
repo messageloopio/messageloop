@@ -29,6 +29,8 @@ message InboundMessage {
     Ping ping = 15;
     io.cloudevents.v1.CloudEvent publish = 16;
     SubRefresh sub_refresh = 17 [json_name = "sub_refresh"];
+    SurveyRequest survey_request = 20 [json_name = "survey_request"];
+    SurveyResponse survey_response = 21 [json_name = "survey_response"];
   }
 }
 
@@ -46,6 +48,8 @@ message OutboundMessage {
     PublishAck publish_ack = 17 [json_name = "publish_ack"];
     Publication publication = 18;
     SubRefreshAck sub_refresh_ack = 19 [json_name = "sub_refresh_ack"];
+    SurveyRequest survey_request = 20 [json_name = "survey_request"];
+    SurveyResponse survey_response = 21 [json_name = "survey_response"];
   }
 }
 
@@ -126,4 +130,15 @@ message SubRefresh {
 }
 
 message SubRefreshAck {
+}
+
+message SurveyRequest {
+  string request_id = 1;
+  io.cloudevents.v1.CloudEvent payload = 2;
+}
+
+message SurveyResponse {
+  string request_id = 1;
+  io.cloudevents.v1.CloudEvent payload = 2;
+  messageloop.shared.v1.Error error = 3;
 }

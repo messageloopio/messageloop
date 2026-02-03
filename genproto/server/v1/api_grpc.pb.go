@@ -25,6 +25,7 @@ const (
 	APIService_Disconnect_FullMethodName  = "/messageloop.server.v1.APIService/Disconnect"
 	APIService_Subscribe_FullMethodName   = "/messageloop.server.v1.APIService/Subscribe"
 	APIService_Unsubscribe_FullMethodName = "/messageloop.server.v1.APIService/Unsubscribe"
+	APIService_Survey_FullMethodName      = "/messageloop.server.v1.APIService/Survey"
 )
 
 // APIServiceClient is the client API for APIService service.
@@ -35,6 +36,7 @@ type APIServiceClient interface {
 	Disconnect(ctx context.Context, in *DisconnectRequest, opts ...grpc.CallOption) (*DisconnectResponse, error)
 	Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (*SubscribeResponse, error)
 	Unsubscribe(ctx context.Context, in *UnsubscribeRequest, opts ...grpc.CallOption) (*UnsubscribeResponse, error)
+	Survey(ctx context.Context, in *SurveyRequest, opts ...grpc.CallOption) (*SurveyResponse, error)
 }
 
 type aPIServiceClient struct {
@@ -85,6 +87,16 @@ func (c *aPIServiceClient) Unsubscribe(ctx context.Context, in *UnsubscribeReque
 	return out, nil
 }
 
+func (c *aPIServiceClient) Survey(ctx context.Context, in *SurveyRequest, opts ...grpc.CallOption) (*SurveyResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SurveyResponse)
+	err := c.cc.Invoke(ctx, APIService_Survey_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // APIServiceServer is the server API for APIService service.
 // All implementations must embed UnimplementedAPIServiceServer
 // for forward compatibility.
@@ -93,6 +105,7 @@ type APIServiceServer interface {
 	Disconnect(context.Context, *DisconnectRequest) (*DisconnectResponse, error)
 	Subscribe(context.Context, *SubscribeRequest) (*SubscribeResponse, error)
 	Unsubscribe(context.Context, *UnsubscribeRequest) (*UnsubscribeResponse, error)
+	Survey(context.Context, *SurveyRequest) (*SurveyResponse, error)
 	mustEmbedUnimplementedAPIServiceServer()
 }
 
@@ -114,6 +127,9 @@ func (UnimplementedAPIServiceServer) Subscribe(context.Context, *SubscribeReques
 }
 func (UnimplementedAPIServiceServer) Unsubscribe(context.Context, *UnsubscribeRequest) (*UnsubscribeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Unsubscribe not implemented")
+}
+func (UnimplementedAPIServiceServer) Survey(context.Context, *SurveyRequest) (*SurveyResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Survey not implemented")
 }
 func (UnimplementedAPIServiceServer) mustEmbedUnimplementedAPIServiceServer() {}
 func (UnimplementedAPIServiceServer) testEmbeddedByValue()                    {}
@@ -208,6 +224,24 @@ func _APIService_Unsubscribe_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _APIService_Survey_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SurveyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(APIServiceServer).Survey(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: APIService_Survey_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(APIServiceServer).Survey(ctx, req.(*SurveyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // APIService_ServiceDesc is the grpc.ServiceDesc for APIService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -230,6 +264,10 @@ var APIService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Unsubscribe",
 			Handler:    _APIService_Unsubscribe_Handler,
+		},
+		{
+			MethodName: "Survey",
+			Handler:    _APIService_Survey_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

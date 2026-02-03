@@ -10,6 +10,7 @@ package serverpb
 
 import (
 	pb "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
+	v1 "github.com/deeplooplabs/messageloop/genproto/shared/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -24,6 +25,186 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type SurveyRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Channel       string                 `protobuf:"bytes,2,opt,name=channel,proto3" json:"channel,omitempty"`
+	Payload       *pb.CloudEvent         `protobuf:"bytes,3,opt,name=payload,proto3" json:"payload,omitempty"`
+	TimeoutMs     int32                  `protobuf:"varint,4,opt,name=timeout_ms,json=timeoutMs,proto3" json:"timeout_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SurveyRequest) Reset() {
+	*x = SurveyRequest{}
+	mi := &file_server_v1_api_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SurveyRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SurveyRequest) ProtoMessage() {}
+
+func (x *SurveyRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_server_v1_api_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SurveyRequest.ProtoReflect.Descriptor instead.
+func (*SurveyRequest) Descriptor() ([]byte, []int) {
+	return file_server_v1_api_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *SurveyRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *SurveyRequest) GetChannel() string {
+	if x != nil {
+		return x.Channel
+	}
+	return ""
+}
+
+func (x *SurveyRequest) GetPayload() *pb.CloudEvent {
+	if x != nil {
+		return x.Payload
+	}
+	return nil
+}
+
+func (x *SurveyRequest) GetTimeoutMs() int32 {
+	if x != nil {
+		return x.TimeoutMs
+	}
+	return 0
+}
+
+type SurveyResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Results       []*SurveyResult        `protobuf:"bytes,2,rep,name=results,proto3" json:"results,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SurveyResponse) Reset() {
+	*x = SurveyResponse{}
+	mi := &file_server_v1_api_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SurveyResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SurveyResponse) ProtoMessage() {}
+
+func (x *SurveyResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_server_v1_api_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SurveyResponse.ProtoReflect.Descriptor instead.
+func (*SurveyResponse) Descriptor() ([]byte, []int) {
+	return file_server_v1_api_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *SurveyResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *SurveyResponse) GetResults() []*SurveyResult {
+	if x != nil {
+		return x.Results
+	}
+	return nil
+}
+
+type SurveyResult struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	Payload       *pb.CloudEvent         `protobuf:"bytes,2,opt,name=payload,proto3" json:"payload,omitempty"`
+	Error         *v1.Error              `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SurveyResult) Reset() {
+	*x = SurveyResult{}
+	mi := &file_server_v1_api_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SurveyResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SurveyResult) ProtoMessage() {}
+
+func (x *SurveyResult) ProtoReflect() protoreflect.Message {
+	mi := &file_server_v1_api_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SurveyResult.ProtoReflect.Descriptor instead.
+func (*SurveyResult) Descriptor() ([]byte, []int) {
+	return file_server_v1_api_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *SurveyResult) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *SurveyResult) GetPayload() *pb.CloudEvent {
+	if x != nil {
+		return x.Payload
+	}
+	return nil
+}
+
+func (x *SurveyResult) GetError() *v1.Error {
+	if x != nil {
+		return x.Error
+	}
+	return nil
+}
+
 type Publication struct {
 	state         protoimpl.MessageState   `protogen:"open.v1"`
 	Id            string                   `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -36,7 +217,7 @@ type Publication struct {
 
 func (x *Publication) Reset() {
 	*x = Publication{}
-	mi := &file_server_v1_api_proto_msgTypes[0]
+	mi := &file_server_v1_api_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -48,7 +229,7 @@ func (x *Publication) String() string {
 func (*Publication) ProtoMessage() {}
 
 func (x *Publication) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_api_proto_msgTypes[0]
+	mi := &file_server_v1_api_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -61,7 +242,7 @@ func (x *Publication) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Publication.ProtoReflect.Descriptor instead.
 func (*Publication) Descriptor() ([]byte, []int) {
-	return file_server_v1_api_proto_rawDescGZIP(), []int{0}
+	return file_server_v1_api_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *Publication) GetId() string {
@@ -103,7 +284,7 @@ type PublishRequest struct {
 
 func (x *PublishRequest) Reset() {
 	*x = PublishRequest{}
-	mi := &file_server_v1_api_proto_msgTypes[1]
+	mi := &file_server_v1_api_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -115,7 +296,7 @@ func (x *PublishRequest) String() string {
 func (*PublishRequest) ProtoMessage() {}
 
 func (x *PublishRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_api_proto_msgTypes[1]
+	mi := &file_server_v1_api_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -128,7 +309,7 @@ func (x *PublishRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PublishRequest.ProtoReflect.Descriptor instead.
 func (*PublishRequest) Descriptor() ([]byte, []int) {
-	return file_server_v1_api_proto_rawDescGZIP(), []int{1}
+	return file_server_v1_api_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *PublishRequest) GetRequestId() string {
@@ -160,7 +341,7 @@ type PublishResponse struct {
 
 func (x *PublishResponse) Reset() {
 	*x = PublishResponse{}
-	mi := &file_server_v1_api_proto_msgTypes[2]
+	mi := &file_server_v1_api_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -172,7 +353,7 @@ func (x *PublishResponse) String() string {
 func (*PublishResponse) ProtoMessage() {}
 
 func (x *PublishResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_api_proto_msgTypes[2]
+	mi := &file_server_v1_api_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -185,7 +366,7 @@ func (x *PublishResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PublishResponse.ProtoReflect.Descriptor instead.
 func (*PublishResponse) Descriptor() ([]byte, []int) {
-	return file_server_v1_api_proto_rawDescGZIP(), []int{2}
+	return file_server_v1_api_proto_rawDescGZIP(), []int{5}
 }
 
 type DisconnectRequest struct {
@@ -196,7 +377,7 @@ type DisconnectRequest struct {
 
 func (x *DisconnectRequest) Reset() {
 	*x = DisconnectRequest{}
-	mi := &file_server_v1_api_proto_msgTypes[3]
+	mi := &file_server_v1_api_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -208,7 +389,7 @@ func (x *DisconnectRequest) String() string {
 func (*DisconnectRequest) ProtoMessage() {}
 
 func (x *DisconnectRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_api_proto_msgTypes[3]
+	mi := &file_server_v1_api_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -221,7 +402,7 @@ func (x *DisconnectRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DisconnectRequest.ProtoReflect.Descriptor instead.
 func (*DisconnectRequest) Descriptor() ([]byte, []int) {
-	return file_server_v1_api_proto_rawDescGZIP(), []int{3}
+	return file_server_v1_api_proto_rawDescGZIP(), []int{6}
 }
 
 type DisconnectResponse struct {
@@ -232,7 +413,7 @@ type DisconnectResponse struct {
 
 func (x *DisconnectResponse) Reset() {
 	*x = DisconnectResponse{}
-	mi := &file_server_v1_api_proto_msgTypes[4]
+	mi := &file_server_v1_api_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -244,7 +425,7 @@ func (x *DisconnectResponse) String() string {
 func (*DisconnectResponse) ProtoMessage() {}
 
 func (x *DisconnectResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_api_proto_msgTypes[4]
+	mi := &file_server_v1_api_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -257,7 +438,7 @@ func (x *DisconnectResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DisconnectResponse.ProtoReflect.Descriptor instead.
 func (*DisconnectResponse) Descriptor() ([]byte, []int) {
-	return file_server_v1_api_proto_rawDescGZIP(), []int{4}
+	return file_server_v1_api_proto_rawDescGZIP(), []int{7}
 }
 
 type SubscribeRequest struct {
@@ -268,7 +449,7 @@ type SubscribeRequest struct {
 
 func (x *SubscribeRequest) Reset() {
 	*x = SubscribeRequest{}
-	mi := &file_server_v1_api_proto_msgTypes[5]
+	mi := &file_server_v1_api_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -280,7 +461,7 @@ func (x *SubscribeRequest) String() string {
 func (*SubscribeRequest) ProtoMessage() {}
 
 func (x *SubscribeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_api_proto_msgTypes[5]
+	mi := &file_server_v1_api_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -293,7 +474,7 @@ func (x *SubscribeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubscribeRequest.ProtoReflect.Descriptor instead.
 func (*SubscribeRequest) Descriptor() ([]byte, []int) {
-	return file_server_v1_api_proto_rawDescGZIP(), []int{5}
+	return file_server_v1_api_proto_rawDescGZIP(), []int{8}
 }
 
 type SubscribeResponse struct {
@@ -304,7 +485,7 @@ type SubscribeResponse struct {
 
 func (x *SubscribeResponse) Reset() {
 	*x = SubscribeResponse{}
-	mi := &file_server_v1_api_proto_msgTypes[6]
+	mi := &file_server_v1_api_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -316,7 +497,7 @@ func (x *SubscribeResponse) String() string {
 func (*SubscribeResponse) ProtoMessage() {}
 
 func (x *SubscribeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_api_proto_msgTypes[6]
+	mi := &file_server_v1_api_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -329,7 +510,7 @@ func (x *SubscribeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubscribeResponse.ProtoReflect.Descriptor instead.
 func (*SubscribeResponse) Descriptor() ([]byte, []int) {
-	return file_server_v1_api_proto_rawDescGZIP(), []int{6}
+	return file_server_v1_api_proto_rawDescGZIP(), []int{9}
 }
 
 type UnsubscribeRequest struct {
@@ -340,7 +521,7 @@ type UnsubscribeRequest struct {
 
 func (x *UnsubscribeRequest) Reset() {
 	*x = UnsubscribeRequest{}
-	mi := &file_server_v1_api_proto_msgTypes[7]
+	mi := &file_server_v1_api_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -352,7 +533,7 @@ func (x *UnsubscribeRequest) String() string {
 func (*UnsubscribeRequest) ProtoMessage() {}
 
 func (x *UnsubscribeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_api_proto_msgTypes[7]
+	mi := &file_server_v1_api_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -365,7 +546,7 @@ func (x *UnsubscribeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnsubscribeRequest.ProtoReflect.Descriptor instead.
 func (*UnsubscribeRequest) Descriptor() ([]byte, []int) {
-	return file_server_v1_api_proto_rawDescGZIP(), []int{7}
+	return file_server_v1_api_proto_rawDescGZIP(), []int{10}
 }
 
 type UnsubscribeResponse struct {
@@ -376,7 +557,7 @@ type UnsubscribeResponse struct {
 
 func (x *UnsubscribeResponse) Reset() {
 	*x = UnsubscribeResponse{}
-	mi := &file_server_v1_api_proto_msgTypes[8]
+	mi := &file_server_v1_api_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -388,7 +569,7 @@ func (x *UnsubscribeResponse) String() string {
 func (*UnsubscribeResponse) ProtoMessage() {}
 
 func (x *UnsubscribeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_api_proto_msgTypes[8]
+	mi := &file_server_v1_api_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -401,7 +582,7 @@ func (x *UnsubscribeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnsubscribeResponse.ProtoReflect.Descriptor instead.
 func (*UnsubscribeResponse) Descriptor() ([]byte, []int) {
-	return file_server_v1_api_proto_rawDescGZIP(), []int{8}
+	return file_server_v1_api_proto_rawDescGZIP(), []int{11}
 }
 
 type Publication_Options struct {
@@ -413,7 +594,7 @@ type Publication_Options struct {
 
 func (x *Publication_Options) Reset() {
 	*x = Publication_Options{}
-	mi := &file_server_v1_api_proto_msgTypes[9]
+	mi := &file_server_v1_api_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -425,7 +606,7 @@ func (x *Publication_Options) String() string {
 func (*Publication_Options) ProtoMessage() {}
 
 func (x *Publication_Options) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_api_proto_msgTypes[9]
+	mi := &file_server_v1_api_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -438,7 +619,7 @@ func (x *Publication_Options) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Publication_Options.ProtoReflect.Descriptor instead.
 func (*Publication_Options) Descriptor() ([]byte, []int) {
-	return file_server_v1_api_proto_rawDescGZIP(), []int{0, 0}
+	return file_server_v1_api_proto_rawDescGZIP(), []int{3, 0}
 }
 
 func (x *Publication_Options) GetAddHistory() bool {
@@ -458,7 +639,7 @@ type Publication_Destination struct {
 
 func (x *Publication_Destination) Reset() {
 	*x = Publication_Destination{}
-	mi := &file_server_v1_api_proto_msgTypes[10]
+	mi := &file_server_v1_api_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -470,7 +651,7 @@ func (x *Publication_Destination) String() string {
 func (*Publication_Destination) ProtoMessage() {}
 
 func (x *Publication_Destination) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_api_proto_msgTypes[10]
+	mi := &file_server_v1_api_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -483,7 +664,7 @@ func (x *Publication_Destination) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Publication_Destination.ProtoReflect.Descriptor instead.
 func (*Publication_Destination) Descriptor() ([]byte, []int) {
-	return file_server_v1_api_proto_rawDescGZIP(), []int{0, 1}
+	return file_server_v1_api_proto_rawDescGZIP(), []int{3, 1}
 }
 
 func (x *Publication_Destination) GetSessions() []string {
@@ -504,7 +685,23 @@ var File_server_v1_api_proto protoreflect.FileDescriptor
 
 const file_server_v1_api_proto_rawDesc = "" +
 	"\n" +
-	"\x13server/v1/api.proto\x12\x15messageloop.server.v1\x1a&includes/cloudevents/cloudevents.proto\"\xe1\x02\n" +
+	"\x13server/v1/api.proto\x12\x15messageloop.server.v1\x1a&includes/cloudevents/cloudevents.proto\x1a\x16shared/v1/errors.proto\"\xa0\x01\n" +
+	"\rSurveyRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x18\n" +
+	"\achannel\x18\x02 \x01(\tR\achannel\x127\n" +
+	"\apayload\x18\x03 \x01(\v2\x1d.io.cloudevents.v1.CloudEventR\apayload\x12\x1d\n" +
+	"\n" +
+	"timeout_ms\x18\x04 \x01(\x05R\ttimeoutMs\"n\n" +
+	"\x0eSurveyResponse\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12=\n" +
+	"\aresults\x18\x02 \x03(\v2#.messageloop.server.v1.SurveyResultR\aresults\"\x9a\x01\n" +
+	"\fSurveyResult\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x127\n" +
+	"\apayload\x18\x02 \x01(\v2\x1d.io.cloudevents.v1.CloudEventR\apayload\x122\n" +
+	"\x05error\x18\x03 \x01(\v2\x1c.messageloop.shared.v1.ErrorR\x05error\"\xe1\x02\n" +
 	"\vPublication\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12P\n" +
 	"\vdestination\x18\x02 \x01(\v2..messageloop.server.v1.Publication.DestinationR\vdestination\x12D\n" +
@@ -530,14 +727,15 @@ const file_server_v1_api_proto_rawDesc = "" +
 	"\x10SubscribeRequest\"\x13\n" +
 	"\x11SubscribeResponse\"\x14\n" +
 	"\x12UnsubscribeRequest\"\x15\n" +
-	"\x13UnsubscribeResponse2\x8f\x03\n" +
+	"\x13UnsubscribeResponse2\xe6\x03\n" +
 	"\n" +
 	"APIService\x12X\n" +
 	"\aPublish\x12%.messageloop.server.v1.PublishRequest\x1a&.messageloop.server.v1.PublishResponse\x12a\n" +
 	"\n" +
 	"Disconnect\x12(.messageloop.server.v1.DisconnectRequest\x1a).messageloop.server.v1.DisconnectResponse\x12^\n" +
 	"\tSubscribe\x12'.messageloop.server.v1.SubscribeRequest\x1a(.messageloop.server.v1.SubscribeResponse\x12d\n" +
-	"\vUnsubscribe\x12).messageloop.server.v1.UnsubscribeRequest\x1a*.messageloop.server.v1.UnsubscribeResponseBDZBgithub.com/deeplooplabs/messageloop/genproto/go/server/v1;serverpbb\x06proto3"
+	"\vUnsubscribe\x12).messageloop.server.v1.UnsubscribeRequest\x1a*.messageloop.server.v1.UnsubscribeResponse\x12U\n" +
+	"\x06Survey\x12$.messageloop.server.v1.SurveyRequest\x1a%.messageloop.server.v1.SurveyResponseBDZBgithub.com/deeplooplabs/messageloop/genproto/go/server/v1;serverpbb\x06proto3"
 
 var (
 	file_server_v1_api_proto_rawDescOnce sync.Once
@@ -551,41 +749,51 @@ func file_server_v1_api_proto_rawDescGZIP() []byte {
 	return file_server_v1_api_proto_rawDescData
 }
 
-var file_server_v1_api_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_server_v1_api_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_server_v1_api_proto_goTypes = []any{
-	(*Publication)(nil),             // 0: messageloop.server.v1.Publication
-	(*PublishRequest)(nil),          // 1: messageloop.server.v1.PublishRequest
-	(*PublishResponse)(nil),         // 2: messageloop.server.v1.PublishResponse
-	(*DisconnectRequest)(nil),       // 3: messageloop.server.v1.DisconnectRequest
-	(*DisconnectResponse)(nil),      // 4: messageloop.server.v1.DisconnectResponse
-	(*SubscribeRequest)(nil),        // 5: messageloop.server.v1.SubscribeRequest
-	(*SubscribeResponse)(nil),       // 6: messageloop.server.v1.SubscribeResponse
-	(*UnsubscribeRequest)(nil),      // 7: messageloop.server.v1.UnsubscribeRequest
-	(*UnsubscribeResponse)(nil),     // 8: messageloop.server.v1.UnsubscribeResponse
-	(*Publication_Options)(nil),     // 9: messageloop.server.v1.Publication.Options
-	(*Publication_Destination)(nil), // 10: messageloop.server.v1.Publication.Destination
-	nil,                             // 11: messageloop.server.v1.PublishRequest.MetadataEntry
-	(*pb.CloudEvent)(nil),           // 12: io.cloudevents.v1.CloudEvent
+	(*SurveyRequest)(nil),           // 0: messageloop.server.v1.SurveyRequest
+	(*SurveyResponse)(nil),          // 1: messageloop.server.v1.SurveyResponse
+	(*SurveyResult)(nil),            // 2: messageloop.server.v1.SurveyResult
+	(*Publication)(nil),             // 3: messageloop.server.v1.Publication
+	(*PublishRequest)(nil),          // 4: messageloop.server.v1.PublishRequest
+	(*PublishResponse)(nil),         // 5: messageloop.server.v1.PublishResponse
+	(*DisconnectRequest)(nil),       // 6: messageloop.server.v1.DisconnectRequest
+	(*DisconnectResponse)(nil),      // 7: messageloop.server.v1.DisconnectResponse
+	(*SubscribeRequest)(nil),        // 8: messageloop.server.v1.SubscribeRequest
+	(*SubscribeResponse)(nil),       // 9: messageloop.server.v1.SubscribeResponse
+	(*UnsubscribeRequest)(nil),      // 10: messageloop.server.v1.UnsubscribeRequest
+	(*UnsubscribeResponse)(nil),     // 11: messageloop.server.v1.UnsubscribeResponse
+	(*Publication_Options)(nil),     // 12: messageloop.server.v1.Publication.Options
+	(*Publication_Destination)(nil), // 13: messageloop.server.v1.Publication.Destination
+	nil,                             // 14: messageloop.server.v1.PublishRequest.MetadataEntry
+	(*pb.CloudEvent)(nil),           // 15: io.cloudevents.v1.CloudEvent
+	(*v1.Error)(nil),                // 16: messageloop.shared.v1.Error
 }
 var file_server_v1_api_proto_depIdxs = []int32{
-	10, // 0: messageloop.server.v1.Publication.destination:type_name -> messageloop.server.v1.Publication.Destination
-	9,  // 1: messageloop.server.v1.Publication.options:type_name -> messageloop.server.v1.Publication.Options
-	12, // 2: messageloop.server.v1.Publication.payload:type_name -> io.cloudevents.v1.CloudEvent
-	11, // 3: messageloop.server.v1.PublishRequest.metadata:type_name -> messageloop.server.v1.PublishRequest.MetadataEntry
-	0,  // 4: messageloop.server.v1.PublishRequest.publications:type_name -> messageloop.server.v1.Publication
-	1,  // 5: messageloop.server.v1.APIService.Publish:input_type -> messageloop.server.v1.PublishRequest
-	3,  // 6: messageloop.server.v1.APIService.Disconnect:input_type -> messageloop.server.v1.DisconnectRequest
-	5,  // 7: messageloop.server.v1.APIService.Subscribe:input_type -> messageloop.server.v1.SubscribeRequest
-	7,  // 8: messageloop.server.v1.APIService.Unsubscribe:input_type -> messageloop.server.v1.UnsubscribeRequest
-	2,  // 9: messageloop.server.v1.APIService.Publish:output_type -> messageloop.server.v1.PublishResponse
-	4,  // 10: messageloop.server.v1.APIService.Disconnect:output_type -> messageloop.server.v1.DisconnectResponse
-	6,  // 11: messageloop.server.v1.APIService.Subscribe:output_type -> messageloop.server.v1.SubscribeResponse
-	8,  // 12: messageloop.server.v1.APIService.Unsubscribe:output_type -> messageloop.server.v1.UnsubscribeResponse
-	9,  // [9:13] is the sub-list for method output_type
-	5,  // [5:9] is the sub-list for method input_type
-	5,  // [5:5] is the sub-list for extension type_name
-	5,  // [5:5] is the sub-list for extension extendee
-	0,  // [0:5] is the sub-list for field type_name
+	15, // 0: messageloop.server.v1.SurveyRequest.payload:type_name -> io.cloudevents.v1.CloudEvent
+	2,  // 1: messageloop.server.v1.SurveyResponse.results:type_name -> messageloop.server.v1.SurveyResult
+	15, // 2: messageloop.server.v1.SurveyResult.payload:type_name -> io.cloudevents.v1.CloudEvent
+	16, // 3: messageloop.server.v1.SurveyResult.error:type_name -> messageloop.shared.v1.Error
+	13, // 4: messageloop.server.v1.Publication.destination:type_name -> messageloop.server.v1.Publication.Destination
+	12, // 5: messageloop.server.v1.Publication.options:type_name -> messageloop.server.v1.Publication.Options
+	15, // 6: messageloop.server.v1.Publication.payload:type_name -> io.cloudevents.v1.CloudEvent
+	14, // 7: messageloop.server.v1.PublishRequest.metadata:type_name -> messageloop.server.v1.PublishRequest.MetadataEntry
+	3,  // 8: messageloop.server.v1.PublishRequest.publications:type_name -> messageloop.server.v1.Publication
+	4,  // 9: messageloop.server.v1.APIService.Publish:input_type -> messageloop.server.v1.PublishRequest
+	6,  // 10: messageloop.server.v1.APIService.Disconnect:input_type -> messageloop.server.v1.DisconnectRequest
+	8,  // 11: messageloop.server.v1.APIService.Subscribe:input_type -> messageloop.server.v1.SubscribeRequest
+	10, // 12: messageloop.server.v1.APIService.Unsubscribe:input_type -> messageloop.server.v1.UnsubscribeRequest
+	0,  // 13: messageloop.server.v1.APIService.Survey:input_type -> messageloop.server.v1.SurveyRequest
+	5,  // 14: messageloop.server.v1.APIService.Publish:output_type -> messageloop.server.v1.PublishResponse
+	7,  // 15: messageloop.server.v1.APIService.Disconnect:output_type -> messageloop.server.v1.DisconnectResponse
+	9,  // 16: messageloop.server.v1.APIService.Subscribe:output_type -> messageloop.server.v1.SubscribeResponse
+	11, // 17: messageloop.server.v1.APIService.Unsubscribe:output_type -> messageloop.server.v1.UnsubscribeResponse
+	1,  // 18: messageloop.server.v1.APIService.Survey:output_type -> messageloop.server.v1.SurveyResponse
+	14, // [14:19] is the sub-list for method output_type
+	9,  // [9:14] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_server_v1_api_proto_init() }
@@ -599,7 +807,7 @@ func file_server_v1_api_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_server_v1_api_proto_rawDesc), len(file_server_v1_api_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   12,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

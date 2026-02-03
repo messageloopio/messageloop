@@ -275,3 +275,21 @@ func (h *Hub) RemoveSession(sessionID string) {
 	userID := session.UserID()
 	h.connShards[index(userID, numHubShards)].remove(sessionID)
 }
+
+// GetSubscribers returns a copy of all subscribers for a given channel.
+func (h *Hub) GetSubscribers(ch string) []*ClientSession {
+	shard := h.subShards[index(ch, numHubShards)]
+	shard.mu.RLock()
+	defer shard.mu.RUnlock()
+
+	subscribers, ok := shard.subs[ch]
+	if !ok {
+		return nil
+	}
+
+	result := make([]*ClientSession, 0, len(subscribers))
+	for _, sub := range subscribers {
+		result = append(result, sub.client)
+	}
+	return result
+}

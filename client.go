@@ -69,6 +69,9 @@ type ClientSession struct {
 	// Heartbeat fields
 	lastActivity    time.Time
 	heartbeatCancel context.CancelFunc
+
+	// Survey field - stores the last received survey request ID
+	lastSurveyRequestID string
 }
 
 func jsonLog(msg proto.Message) string {
@@ -186,6 +189,10 @@ func (c *ClientSession) handleMessage(ctx context.Context, in *clientpb.InboundM
 		return c.onPing(ctx, in, msg.Ping)
 	case *clientpb.InboundMessage_SubRefresh:
 		return c.onSubRefresh(ctx, in, msg.SubRefresh)
+	case *clientpb.InboundMessage_SurveyRequest:
+		return c.onSurvey(ctx, in, msg.SurveyRequest)
+	case *clientpb.InboundMessage_SurveyResponse:
+		return c.onSurveyResponse(ctx, in, msg.SurveyResponse)
 	}
 	return nil
 }
@@ -569,6 +576,91 @@ func (c *ClientSession) onSubRefresh(ctx context.Context, in *clientpb.InboundMe
 			SubRefreshAck: &clientpb.SubRefreshAck{},
 		}
 	}))
+}
+
+// onSurvey handles incoming survey requests from the server.
+// The client should process the survey request and send a response back.
+func (c *ClientSession) onSurvey(ctx context.Context, in *clientpb.InboundMessage, req *clientpb.SurveyRequest) error {
+	c.ResetActivity()
+
+	// Store the request ID for response routing
+	c.mu.Lock()
+	c.lastSurveyRequestID = req.RequestId
+	c.mu.Unlock()
+
+	// Extract payload from the survey request
+	var payload []byte
+	if req.Payload != nil {
+		if binaryData := req.Payload.GetBinaryData(); len(binaryData) > 0 {
+			payload = binaryData
+		} else if textData := req.Payload.GetTextData(); textData != "" {
+			payload = []byte(textData)
+		}
+	}
+
+	// Send survey response - by default, echo back the same payload
+	// In a real implementation, the client application would handle this differently
+	responseEvent := &cloudevents.CloudEvent{
+		Id:          uuid.NewString(),
+		Source:      in.Channel,
+		SpecVersion: "1.0",
+		Type:        "com.messageloop.survey.response",
+		Data: &cloudevents.CloudEvent_BinaryData{
+			BinaryData: payload,
+		},
+	}
+
+	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+		out.Envelope = &clientpb.OutboundMessage_SurveyResponse{
+			SurveyResponse: &clientpb.SurveyResponse{
+				RequestId: req.RequestId,
+				Payload:   responseEvent,
+			},
+		}
+	}))
+}
+
+// LastSurveyRequestID returns the last received survey request ID.
+// This is useful for testing purposes.
+func (c *ClientSession) LastSurveyRequestID() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.lastSurveyRequestID
+}
+
+// onSurveyResponse handles incoming survey responses from clients.
+// This is called when a client sends a SurveyResponse back to the server.
+func (c *ClientSession) onSurveyResponse(ctx context.Context, in *clientpb.InboundMessage, resp *clientpb.SurveyResponse) error {
+	c.ResetActivity()
+
+	// Extract payload from the survey response
+	var payload []byte
+	var respErr error
+	if resp.Error != nil {
+		respErr = fmt.Errorf("%s: %s", resp.Error.Code, resp.Error.Message)
+	}
+	if resp.Payload != nil {
+		if binaryData := resp.Payload.GetBinaryData(); len(binaryData) > 0 {
+			payload = binaryData
+		} else if textData := resp.Payload.GetTextData(); textData != "" {
+			payload = []byte(textData)
+		}
+	}
+
+	// Use request_id from response, or fall back to stored request_id
+	requestID := resp.RequestId
+	if requestID == "" {
+		c.mu.RLock()
+		requestID = c.lastSurveyRequestID
+		c.mu.RUnlock()
+	}
+
+	// Add the response to the survey (if the survey is still active)
+	if requestID != "" {
+		c.node.AddSurveyResponse(ctx, c.session, requestID, payload, respErr)
+	}
+
+	return nil
 }
 
 // Heartbeat-related methods

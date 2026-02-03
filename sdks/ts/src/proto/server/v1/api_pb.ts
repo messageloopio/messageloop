@@ -8,13 +8,96 @@ import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegen
 import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
 import type { CloudEvent } from "../../includes/cloudevents/cloudevents_pb";
 import { file_includes_cloudevents_cloudevents } from "../../includes/cloudevents/cloudevents_pb";
+import type { Error } from "../../shared/v1/errors_pb";
+import { file_shared_v1_errors } from "../../shared/v1/errors_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file server/v1/api.proto.
  */
 export const file_server_v1_api: GenFile = /*@__PURE__*/
-  fileDesc("ChNzZXJ2ZXIvdjEvYXBpLnByb3RvEhVtZXNzYWdlbG9vcC5zZXJ2ZXIudjEingIKC1B1YmxpY2F0aW9uEgoKAmlkGAEgASgJEkMKC2Rlc3RpbmF0aW9uGAIgASgLMi4ubWVzc2FnZWxvb3Auc2VydmVyLnYxLlB1YmxpY2F0aW9uLkRlc3RpbmF0aW9uEjsKB29wdGlvbnMYAyABKAsyKi5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuUHVibGljYXRpb24uT3B0aW9ucxIuCgdwYXlsb2FkGAQgASgLMh0uaW8uY2xvdWRldmVudHMudjEuQ2xvdWRFdmVudBoeCgdPcHRpb25zEhMKC2FkZF9oaXN0b3J5GAEgASgIGjEKC0Rlc3RpbmF0aW9uEhAKCHNlc3Npb25zGAEgAygJEhAKCGNoYW5uZWxzGAIgAygJItYBCg5QdWJsaXNoUmVxdWVzdBISCgpyZXF1ZXN0X2lkGAEgASgJEkUKCG1ldGFkYXRhGAIgAygLMjMubWVzc2FnZWxvb3Auc2VydmVyLnYxLlB1Ymxpc2hSZXF1ZXN0Lk1ldGFkYXRhRW50cnkSOAoMcHVibGljYXRpb25zGAMgAygLMiIubWVzc2FnZWxvb3Auc2VydmVyLnYxLlB1YmxpY2F0aW9uGi8KDU1ldGFkYXRhRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASIRCg9QdWJsaXNoUmVzcG9uc2UiEwoRRGlzY29ubmVjdFJlcXVlc3QiFAoSRGlzY29ubmVjdFJlc3BvbnNlIhIKEFN1YnNjcmliZVJlcXVlc3QiEwoRU3Vic2NyaWJlUmVzcG9uc2UiFAoSVW5zdWJzY3JpYmVSZXF1ZXN0IhUKE1Vuc3Vic2NyaWJlUmVzcG9uc2UyjwMKCkFQSVNlcnZpY2USWAoHUHVibGlzaBIlLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5QdWJsaXNoUmVxdWVzdBomLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5QdWJsaXNoUmVzcG9uc2USYQoKRGlzY29ubmVjdBIoLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5EaXNjb25uZWN0UmVxdWVzdBopLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5EaXNjb25uZWN0UmVzcG9uc2USXgoJU3Vic2NyaWJlEicubWVzc2FnZWxvb3Auc2VydmVyLnYxLlN1YnNjcmliZVJlcXVlc3QaKC5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuU3Vic2NyaWJlUmVzcG9uc2USZAoLVW5zdWJzY3JpYmUSKS5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuVW5zdWJzY3JpYmVSZXF1ZXN0GioubWVzc2FnZWxvb3Auc2VydmVyLnYxLlVuc3Vic2NyaWJlUmVzcG9uc2VCRFpCZ2l0aHViLmNvbS9kZWVwbG9vcGxhYnMvbWVzc2FnZWxvb3AvZ2VucHJvdG8vZ28vc2VydmVyL3YxO3NlcnZlcnBiYgZwcm90bzM", [file_includes_cloudevents_cloudevents]);
+  fileDesc("ChNzZXJ2ZXIvdjEvYXBpLnByb3RvEhVtZXNzYWdlbG9vcC5zZXJ2ZXIudjEieAoNU3VydmV5UmVxdWVzdBISCgpyZXF1ZXN0X2lkGAEgASgJEg8KB2NoYW5uZWwYAiABKAkSLgoHcGF5bG9hZBgDIAEoCzIdLmlvLmNsb3VkZXZlbnRzLnYxLkNsb3VkRXZlbnQSEgoKdGltZW91dF9tcxgEIAEoBSJaCg5TdXJ2ZXlSZXNwb25zZRISCgpyZXF1ZXN0X2lkGAEgASgJEjQKB3Jlc3VsdHMYAiADKAsyIy5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuU3VydmV5UmVzdWx0In8KDFN1cnZleVJlc3VsdBISCgpzZXNzaW9uX2lkGAEgASgJEi4KB3BheWxvYWQYAiABKAsyHS5pby5jbG91ZGV2ZW50cy52MS5DbG91ZEV2ZW50EisKBWVycm9yGAMgASgLMhwubWVzc2FnZWxvb3Auc2hhcmVkLnYxLkVycm9yIp4CCgtQdWJsaWNhdGlvbhIKCgJpZBgBIAEoCRJDCgtkZXN0aW5hdGlvbhgCIAEoCzIuLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5QdWJsaWNhdGlvbi5EZXN0aW5hdGlvbhI7CgdvcHRpb25zGAMgASgLMioubWVzc2FnZWxvb3Auc2VydmVyLnYxLlB1YmxpY2F0aW9uLk9wdGlvbnMSLgoHcGF5bG9hZBgEIAEoCzIdLmlvLmNsb3VkZXZlbnRzLnYxLkNsb3VkRXZlbnQaHgoHT3B0aW9ucxITCgthZGRfaGlzdG9yeRgBIAEoCBoxCgtEZXN0aW5hdGlvbhIQCghzZXNzaW9ucxgBIAMoCRIQCghjaGFubmVscxgCIAMoCSLWAQoOUHVibGlzaFJlcXVlc3QSEgoKcmVxdWVzdF9pZBgBIAEoCRJFCghtZXRhZGF0YRgCIAMoCzIzLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5QdWJsaXNoUmVxdWVzdC5NZXRhZGF0YUVudHJ5EjgKDHB1YmxpY2F0aW9ucxgDIAMoCzIiLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5QdWJsaWNhdGlvbhovCg1NZXRhZGF0YUVudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiEQoPUHVibGlzaFJlc3BvbnNlIhMKEURpc2Nvbm5lY3RSZXF1ZXN0IhQKEkRpc2Nvbm5lY3RSZXNwb25zZSISChBTdWJzY3JpYmVSZXF1ZXN0IhMKEVN1YnNjcmliZVJlc3BvbnNlIhQKElVuc3Vic2NyaWJlUmVxdWVzdCIVChNVbnN1YnNjcmliZVJlc3BvbnNlMuYDCgpBUElTZXJ2aWNlElgKB1B1Ymxpc2gSJS5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuUHVibGlzaFJlcXVlc3QaJi5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuUHVibGlzaFJlc3BvbnNlEmEKCkRpc2Nvbm5lY3QSKC5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuRGlzY29ubmVjdFJlcXVlc3QaKS5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuRGlzY29ubmVjdFJlc3BvbnNlEl4KCVN1YnNjcmliZRInLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5TdWJzY3JpYmVSZXF1ZXN0GigubWVzc2FnZWxvb3Auc2VydmVyLnYxLlN1YnNjcmliZVJlc3BvbnNlEmQKC1Vuc3Vic2NyaWJlEikubWVzc2FnZWxvb3Auc2VydmVyLnYxLlVuc3Vic2NyaWJlUmVxdWVzdBoqLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5VbnN1YnNjcmliZVJlc3BvbnNlElUKBlN1cnZleRIkLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5TdXJ2ZXlSZXF1ZXN0GiUubWVzc2FnZWxvb3Auc2VydmVyLnYxLlN1cnZleVJlc3BvbnNlQkRaQmdpdGh1Yi5jb20vZGVlcGxvb3BsYWJzL21lc3NhZ2Vsb29wL2dlbnByb3RvL2dvL3NlcnZlci92MTtzZXJ2ZXJwYmIGcHJvdG8z", [file_includes_cloudevents_cloudevents, file_shared_v1_errors]);
+
+/**
+ * @generated from message messageloop.server.v1.SurveyRequest
+ */
+export type SurveyRequest = Message<"messageloop.server.v1.SurveyRequest"> & {
+  /**
+   * @generated from field: string request_id = 1;
+   */
+  requestId: string;
+
+  /**
+   * @generated from field: string channel = 2;
+   */
+  channel: string;
+
+  /**
+   * @generated from field: io.cloudevents.v1.CloudEvent payload = 3;
+   */
+  payload?: CloudEvent;
+
+  /**
+   * @generated from field: int32 timeout_ms = 4;
+   */
+  timeoutMs: number;
+};
+
+/**
+ * Describes the message messageloop.server.v1.SurveyRequest.
+ * Use `create(SurveyRequestSchema)` to create a new message.
+ */
+export const SurveyRequestSchema: GenMessage<SurveyRequest> = /*@__PURE__*/
+  messageDesc(file_server_v1_api, 0);
+
+/**
+ * @generated from message messageloop.server.v1.SurveyResponse
+ */
+export type SurveyResponse = Message<"messageloop.server.v1.SurveyResponse"> & {
+  /**
+   * @generated from field: string request_id = 1;
+   */
+  requestId: string;
+
+  /**
+   * @generated from field: repeated messageloop.server.v1.SurveyResult results = 2;
+   */
+  results: SurveyResult[];
+};
+
+/**
+ * Describes the message messageloop.server.v1.SurveyResponse.
+ * Use `create(SurveyResponseSchema)` to create a new message.
+ */
+export const SurveyResponseSchema: GenMessage<SurveyResponse> = /*@__PURE__*/
+  messageDesc(file_server_v1_api, 1);
+
+/**
+ * @generated from message messageloop.server.v1.SurveyResult
+ */
+export type SurveyResult = Message<"messageloop.server.v1.SurveyResult"> & {
+  /**
+   * @generated from field: string session_id = 1;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: io.cloudevents.v1.CloudEvent payload = 2;
+   */
+  payload?: CloudEvent;
+
+  /**
+   * @generated from field: messageloop.shared.v1.Error error = 3;
+   */
+  error?: Error;
+};
+
+/**
+ * Describes the message messageloop.server.v1.SurveyResult.
+ * Use `create(SurveyResultSchema)` to create a new message.
+ */
+export const SurveyResultSchema: GenMessage<SurveyResult> = /*@__PURE__*/
+  messageDesc(file_server_v1_api, 2);
 
 /**
  * @generated from message messageloop.server.v1.Publication
@@ -46,7 +129,7 @@ export type Publication = Message<"messageloop.server.v1.Publication"> & {
  * Use `create(PublicationSchema)` to create a new message.
  */
 export const PublicationSchema: GenMessage<Publication> = /*@__PURE__*/
-  messageDesc(file_server_v1_api, 0);
+  messageDesc(file_server_v1_api, 3);
 
 /**
  * @generated from message messageloop.server.v1.Publication.Options
@@ -63,7 +146,7 @@ export type Publication_Options = Message<"messageloop.server.v1.Publication.Opt
  * Use `create(Publication_OptionsSchema)` to create a new message.
  */
 export const Publication_OptionsSchema: GenMessage<Publication_Options> = /*@__PURE__*/
-  messageDesc(file_server_v1_api, 0, 0);
+  messageDesc(file_server_v1_api, 3, 0);
 
 /**
  * @generated from message messageloop.server.v1.Publication.Destination
@@ -85,7 +168,7 @@ export type Publication_Destination = Message<"messageloop.server.v1.Publication
  * Use `create(Publication_DestinationSchema)` to create a new message.
  */
 export const Publication_DestinationSchema: GenMessage<Publication_Destination> = /*@__PURE__*/
-  messageDesc(file_server_v1_api, 0, 1);
+  messageDesc(file_server_v1_api, 3, 1);
 
 /**
  * @generated from message messageloop.server.v1.PublishRequest
@@ -112,7 +195,7 @@ export type PublishRequest = Message<"messageloop.server.v1.PublishRequest"> & {
  * Use `create(PublishRequestSchema)` to create a new message.
  */
 export const PublishRequestSchema: GenMessage<PublishRequest> = /*@__PURE__*/
-  messageDesc(file_server_v1_api, 1);
+  messageDesc(file_server_v1_api, 4);
 
 /**
  * @generated from message messageloop.server.v1.PublishResponse
@@ -125,7 +208,7 @@ export type PublishResponse = Message<"messageloop.server.v1.PublishResponse"> &
  * Use `create(PublishResponseSchema)` to create a new message.
  */
 export const PublishResponseSchema: GenMessage<PublishResponse> = /*@__PURE__*/
-  messageDesc(file_server_v1_api, 2);
+  messageDesc(file_server_v1_api, 5);
 
 /**
  * @generated from message messageloop.server.v1.DisconnectRequest
@@ -138,7 +221,7 @@ export type DisconnectRequest = Message<"messageloop.server.v1.DisconnectRequest
  * Use `create(DisconnectRequestSchema)` to create a new message.
  */
 export const DisconnectRequestSchema: GenMessage<DisconnectRequest> = /*@__PURE__*/
-  messageDesc(file_server_v1_api, 3);
+  messageDesc(file_server_v1_api, 6);
 
 /**
  * @generated from message messageloop.server.v1.DisconnectResponse
@@ -151,7 +234,7 @@ export type DisconnectResponse = Message<"messageloop.server.v1.DisconnectRespon
  * Use `create(DisconnectResponseSchema)` to create a new message.
  */
 export const DisconnectResponseSchema: GenMessage<DisconnectResponse> = /*@__PURE__*/
-  messageDesc(file_server_v1_api, 4);
+  messageDesc(file_server_v1_api, 7);
 
 /**
  * @generated from message messageloop.server.v1.SubscribeRequest
@@ -164,7 +247,7 @@ export type SubscribeRequest = Message<"messageloop.server.v1.SubscribeRequest">
  * Use `create(SubscribeRequestSchema)` to create a new message.
  */
 export const SubscribeRequestSchema: GenMessage<SubscribeRequest> = /*@__PURE__*/
-  messageDesc(file_server_v1_api, 5);
+  messageDesc(file_server_v1_api, 8);
 
 /**
  * @generated from message messageloop.server.v1.SubscribeResponse
@@ -177,7 +260,7 @@ export type SubscribeResponse = Message<"messageloop.server.v1.SubscribeResponse
  * Use `create(SubscribeResponseSchema)` to create a new message.
  */
 export const SubscribeResponseSchema: GenMessage<SubscribeResponse> = /*@__PURE__*/
-  messageDesc(file_server_v1_api, 6);
+  messageDesc(file_server_v1_api, 9);
 
 /**
  * @generated from message messageloop.server.v1.UnsubscribeRequest
@@ -190,7 +273,7 @@ export type UnsubscribeRequest = Message<"messageloop.server.v1.UnsubscribeReque
  * Use `create(UnsubscribeRequestSchema)` to create a new message.
  */
 export const UnsubscribeRequestSchema: GenMessage<UnsubscribeRequest> = /*@__PURE__*/
-  messageDesc(file_server_v1_api, 7);
+  messageDesc(file_server_v1_api, 10);
 
 /**
  * @generated from message messageloop.server.v1.UnsubscribeResponse
@@ -203,7 +286,7 @@ export type UnsubscribeResponse = Message<"messageloop.server.v1.UnsubscribeResp
  * Use `create(UnsubscribeResponseSchema)` to create a new message.
  */
 export const UnsubscribeResponseSchema: GenMessage<UnsubscribeResponse> = /*@__PURE__*/
-  messageDesc(file_server_v1_api, 8);
+  messageDesc(file_server_v1_api, 11);
 
 /**
  * @generated from service messageloop.server.v1.APIService
@@ -240,6 +323,14 @@ export const APIService: GenService<{
     methodKind: "unary";
     input: typeof UnsubscribeRequestSchema;
     output: typeof UnsubscribeResponseSchema;
+  },
+  /**
+   * @generated from rpc messageloop.server.v1.APIService.Survey
+   */
+  survey: {
+    methodKind: "unary";
+    input: typeof SurveyRequestSchema;
+    output: typeof SurveyResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_server_v1_api, 0);

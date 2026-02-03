@@ -41,6 +41,8 @@ type InboundMessage struct {
 	//	*InboundMessage_Ping
 	//	*InboundMessage_Publish
 	//	*InboundMessage_SubRefresh
+	//	*InboundMessage_SurveyRequest
+	//	*InboundMessage_SurveyResponse
 	Envelope      isInboundMessage_Envelope `protobuf_oneof:"envelope"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -181,6 +183,24 @@ func (x *InboundMessage) GetSubRefresh() *SubRefresh {
 	return nil
 }
 
+func (x *InboundMessage) GetSurveyRequest() *SurveyRequest {
+	if x != nil {
+		if x, ok := x.Envelope.(*InboundMessage_SurveyRequest); ok {
+			return x.SurveyRequest
+		}
+	}
+	return nil
+}
+
+func (x *InboundMessage) GetSurveyResponse() *SurveyResponse {
+	if x != nil {
+		if x, ok := x.Envelope.(*InboundMessage_SurveyResponse); ok {
+			return x.SurveyResponse
+		}
+	}
+	return nil
+}
+
 type isInboundMessage_Envelope interface {
 	isInboundMessage_Envelope()
 }
@@ -213,6 +233,14 @@ type InboundMessage_SubRefresh struct {
 	SubRefresh *SubRefresh `protobuf:"bytes,17,opt,name=sub_refresh,proto3,oneof"`
 }
 
+type InboundMessage_SurveyRequest struct {
+	SurveyRequest *SurveyRequest `protobuf:"bytes,20,opt,name=survey_request,proto3,oneof"`
+}
+
+type InboundMessage_SurveyResponse struct {
+	SurveyResponse *SurveyResponse `protobuf:"bytes,21,opt,name=survey_response,proto3,oneof"`
+}
+
 func (*InboundMessage_Connect) isInboundMessage_Envelope() {}
 
 func (*InboundMessage_Subscribe) isInboundMessage_Envelope() {}
@@ -226,6 +254,10 @@ func (*InboundMessage_Ping) isInboundMessage_Envelope() {}
 func (*InboundMessage_Publish) isInboundMessage_Envelope() {}
 
 func (*InboundMessage_SubRefresh) isInboundMessage_Envelope() {}
+
+func (*InboundMessage_SurveyRequest) isInboundMessage_Envelope() {}
+
+func (*InboundMessage_SurveyResponse) isInboundMessage_Envelope() {}
 
 type OutboundMessage struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
@@ -243,6 +275,8 @@ type OutboundMessage struct {
 	//	*OutboundMessage_PublishAck
 	//	*OutboundMessage_Publication
 	//	*OutboundMessage_SubRefreshAck
+	//	*OutboundMessage_SurveyRequest
+	//	*OutboundMessage_SurveyResponse
 	Envelope      isOutboundMessage_Envelope `protobuf_oneof:"envelope"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -387,6 +421,24 @@ func (x *OutboundMessage) GetSubRefreshAck() *SubRefreshAck {
 	return nil
 }
 
+func (x *OutboundMessage) GetSurveyRequest() *SurveyRequest {
+	if x != nil {
+		if x, ok := x.Envelope.(*OutboundMessage_SurveyRequest); ok {
+			return x.SurveyRequest
+		}
+	}
+	return nil
+}
+
+func (x *OutboundMessage) GetSurveyResponse() *SurveyResponse {
+	if x != nil {
+		if x, ok := x.Envelope.(*OutboundMessage_SurveyResponse); ok {
+			return x.SurveyResponse
+		}
+	}
+	return nil
+}
+
 type isOutboundMessage_Envelope interface {
 	isOutboundMessage_Envelope()
 }
@@ -427,6 +479,14 @@ type OutboundMessage_SubRefreshAck struct {
 	SubRefreshAck *SubRefreshAck `protobuf:"bytes,19,opt,name=sub_refresh_ack,proto3,oneof"`
 }
 
+type OutboundMessage_SurveyRequest struct {
+	SurveyRequest *SurveyRequest `protobuf:"bytes,20,opt,name=survey_request,proto3,oneof"`
+}
+
+type OutboundMessage_SurveyResponse struct {
+	SurveyResponse *SurveyResponse `protobuf:"bytes,21,opt,name=survey_response,proto3,oneof"`
+}
+
 func (*OutboundMessage_Error) isOutboundMessage_Envelope() {}
 
 func (*OutboundMessage_Connected) isOutboundMessage_Envelope() {}
@@ -444,6 +504,10 @@ func (*OutboundMessage_PublishAck) isOutboundMessage_Envelope() {}
 func (*OutboundMessage_Publication) isOutboundMessage_Envelope() {}
 
 func (*OutboundMessage_SubRefreshAck) isOutboundMessage_Envelope() {}
+
+func (*OutboundMessage_SurveyRequest) isOutboundMessage_Envelope() {}
+
+func (*OutboundMessage_SurveyResponse) isOutboundMessage_Envelope() {}
 
 type Connect struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1281,11 +1345,123 @@ func (*SubRefreshAck) Descriptor() ([]byte, []int) {
 	return file_v1_service_proto_rawDescGZIP(), []int{18}
 }
 
+type SurveyRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Payload       *pb.CloudEvent         `protobuf:"bytes,2,opt,name=payload,proto3" json:"payload,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SurveyRequest) Reset() {
+	*x = SurveyRequest{}
+	mi := &file_v1_service_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SurveyRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SurveyRequest) ProtoMessage() {}
+
+func (x *SurveyRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_v1_service_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SurveyRequest.ProtoReflect.Descriptor instead.
+func (*SurveyRequest) Descriptor() ([]byte, []int) {
+	return file_v1_service_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *SurveyRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *SurveyRequest) GetPayload() *pb.CloudEvent {
+	if x != nil {
+		return x.Payload
+	}
+	return nil
+}
+
+type SurveyResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Payload       *pb.CloudEvent         `protobuf:"bytes,2,opt,name=payload,proto3" json:"payload,omitempty"`
+	Error         *v1.Error              `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SurveyResponse) Reset() {
+	*x = SurveyResponse{}
+	mi := &file_v1_service_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SurveyResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SurveyResponse) ProtoMessage() {}
+
+func (x *SurveyResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_v1_service_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SurveyResponse.ProtoReflect.Descriptor instead.
+func (*SurveyResponse) Descriptor() ([]byte, []int) {
+	return file_v1_service_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *SurveyResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *SurveyResponse) GetPayload() *pb.CloudEvent {
+	if x != nil {
+		return x.Payload
+	}
+	return nil
+}
+
+func (x *SurveyResponse) GetError() *v1.Error {
+	if x != nil {
+		return x.Error
+	}
+	return nil
+}
+
 var File_v1_service_proto protoreflect.FileDescriptor
 
 const file_v1_service_proto_rawDesc = "" +
 	"\n" +
-	"\x10v1/service.proto\x12\x0emessageloop.v1\x1a\x16shared/v1/errors.proto\x1a&includes/cloudevents/cloudevents.proto\"\x94\x05\n" +
+	"\x10v1/service.proto\x12\x0emessageloop.v1\x1a\x16shared/v1/errors.proto\x1a&includes/cloudevents/cloudevents.proto\"\xa9\x06\n" +
 	"\x0eInboundMessage\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
 	"\achannel\x18\x02 \x01(\tR\achannel\x12\x16\n" +
@@ -1298,12 +1474,14 @@ const file_v1_service_proto_rawDesc = "" +
 	"\vrpc_request\x18\x0e \x01(\v2\x1d.io.cloudevents.v1.CloudEventH\x00R\vrpc_request\x12*\n" +
 	"\x04ping\x18\x0f \x01(\v2\x14.messageloop.v1.PingH\x00R\x04ping\x129\n" +
 	"\apublish\x18\x10 \x01(\v2\x1d.io.cloudevents.v1.CloudEventH\x00R\apublish\x12>\n" +
-	"\vsub_refresh\x18\x11 \x01(\v2\x1a.messageloop.v1.SubRefreshH\x00R\vsub_refresh\x1a;\n" +
+	"\vsub_refresh\x18\x11 \x01(\v2\x1a.messageloop.v1.SubRefreshH\x00R\vsub_refresh\x12G\n" +
+	"\x0esurvey_request\x18\x14 \x01(\v2\x1d.messageloop.v1.SurveyRequestH\x00R\x0esurvey_request\x12J\n" +
+	"\x0fsurvey_response\x18\x15 \x01(\v2\x1e.messageloop.v1.SurveyResponseH\x00R\x0fsurvey_response\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\n" +
 	"\n" +
-	"\benvelope\"\x83\x06\n" +
+	"\benvelope\"\x98\a\n" +
 	"\x0fOutboundMessage\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12I\n" +
 	"\bmetadata\x18\x02 \x03(\v2-.messageloop.v1.OutboundMessage.MetadataEntryR\bmetadata\x12\x12\n" +
@@ -1316,7 +1494,9 @@ const file_v1_service_proto_rawDesc = "" +
 	"\x04pong\x18\x10 \x01(\v2\x14.messageloop.v1.PongH\x00R\x04pong\x12>\n" +
 	"\vpublish_ack\x18\x11 \x01(\v2\x1a.messageloop.v1.PublishAckH\x00R\vpublish_ack\x12?\n" +
 	"\vpublication\x18\x12 \x01(\v2\x1b.messageloop.v1.PublicationH\x00R\vpublication\x12I\n" +
-	"\x0fsub_refresh_ack\x18\x13 \x01(\v2\x1d.messageloop.v1.SubRefreshAckH\x00R\x0fsub_refresh_ack\x1a;\n" +
+	"\x0fsub_refresh_ack\x18\x13 \x01(\v2\x1d.messageloop.v1.SubRefreshAckH\x00R\x0fsub_refresh_ack\x12G\n" +
+	"\x0esurvey_request\x18\x14 \x01(\v2\x1d.messageloop.v1.SurveyRequestH\x00R\x0esurvey_request\x12J\n" +
+	"\x0fsurvey_response\x18\x15 \x01(\v2\x1e.messageloop.v1.SurveyResponseH\x00R\x0fsurvey_response\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\n" +
@@ -1372,7 +1552,16 @@ const file_v1_service_proto_rawDesc = "" +
 	"\n" +
 	"SubRefresh\x12\x1a\n" +
 	"\bchannels\x18\x01 \x03(\tR\bchannels\"\x0f\n" +
-	"\rSubRefreshAck2f\n" +
+	"\rSubRefreshAck\"g\n" +
+	"\rSurveyRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x127\n" +
+	"\apayload\x18\x02 \x01(\v2\x1d.io.cloudevents.v1.CloudEventR\apayload\"\x9c\x01\n" +
+	"\x0eSurveyResponse\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x127\n" +
+	"\apayload\x18\x02 \x01(\v2\x1d.io.cloudevents.v1.CloudEventR\apayload\x122\n" +
+	"\x05error\x18\x03 \x01(\v2\x1c.messageloop.shared.v1.ErrorR\x05error2f\n" +
 	"\x10MessagingService\x12R\n" +
 	"\vMessageLoop\x12\x1e.messageloop.v1.InboundMessage\x1a\x1f.messageloop.v1.OutboundMessage(\x010\x01BDZBgithub.com/deeplooplabs/messageloop/genproto/go/client/v1;clientpbb\x06proto3"
 
@@ -1388,7 +1577,7 @@ func file_v1_service_proto_rawDescGZIP() []byte {
 	return file_v1_service_proto_rawDescData
 }
 
-var file_v1_service_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
+var file_v1_service_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_v1_service_proto_goTypes = []any{
 	(*InboundMessage)(nil),  // 0: messageloop.v1.InboundMessage
 	(*OutboundMessage)(nil), // 1: messageloop.v1.OutboundMessage
@@ -1409,50 +1598,59 @@ var file_v1_service_proto_goTypes = []any{
 	(*PublishAck)(nil),      // 16: messageloop.v1.PublishAck
 	(*SubRefresh)(nil),      // 17: messageloop.v1.SubRefresh
 	(*SubRefreshAck)(nil),   // 18: messageloop.v1.SubRefreshAck
-	nil,                     // 19: messageloop.v1.InboundMessage.MetadataEntry
-	nil,                     // 20: messageloop.v1.OutboundMessage.MetadataEntry
-	(*pb.CloudEvent)(nil),   // 21: io.cloudevents.v1.CloudEvent
-	(*v1.Error)(nil),        // 22: messageloop.shared.v1.Error
+	(*SurveyRequest)(nil),   // 19: messageloop.v1.SurveyRequest
+	(*SurveyResponse)(nil),  // 20: messageloop.v1.SurveyResponse
+	nil,                     // 21: messageloop.v1.InboundMessage.MetadataEntry
+	nil,                     // 22: messageloop.v1.OutboundMessage.MetadataEntry
+	(*pb.CloudEvent)(nil),   // 23: io.cloudevents.v1.CloudEvent
+	(*v1.Error)(nil),        // 24: messageloop.shared.v1.Error
 }
 var file_v1_service_proto_depIdxs = []int32{
-	19, // 0: messageloop.v1.InboundMessage.metadata:type_name -> messageloop.v1.InboundMessage.MetadataEntry
+	21, // 0: messageloop.v1.InboundMessage.metadata:type_name -> messageloop.v1.InboundMessage.MetadataEntry
 	2,  // 1: messageloop.v1.InboundMessage.connect:type_name -> messageloop.v1.Connect
 	9,  // 2: messageloop.v1.InboundMessage.subscribe:type_name -> messageloop.v1.Subscribe
 	11, // 3: messageloop.v1.InboundMessage.unsubscribe:type_name -> messageloop.v1.Unsubscribe
-	21, // 4: messageloop.v1.InboundMessage.rpc_request:type_name -> io.cloudevents.v1.CloudEvent
+	23, // 4: messageloop.v1.InboundMessage.rpc_request:type_name -> io.cloudevents.v1.CloudEvent
 	14, // 5: messageloop.v1.InboundMessage.ping:type_name -> messageloop.v1.Ping
-	21, // 6: messageloop.v1.InboundMessage.publish:type_name -> io.cloudevents.v1.CloudEvent
+	23, // 6: messageloop.v1.InboundMessage.publish:type_name -> io.cloudevents.v1.CloudEvent
 	17, // 7: messageloop.v1.InboundMessage.sub_refresh:type_name -> messageloop.v1.SubRefresh
-	20, // 8: messageloop.v1.OutboundMessage.metadata:type_name -> messageloop.v1.OutboundMessage.MetadataEntry
-	22, // 9: messageloop.v1.OutboundMessage.error:type_name -> messageloop.shared.v1.Error
-	7,  // 10: messageloop.v1.OutboundMessage.connected:type_name -> messageloop.v1.Connected
-	10, // 11: messageloop.v1.OutboundMessage.subscribe_ack:type_name -> messageloop.v1.SubscribeAck
-	12, // 12: messageloop.v1.OutboundMessage.unsubscribe_ack:type_name -> messageloop.v1.UnsubscribeAck
-	21, // 13: messageloop.v1.OutboundMessage.rpc_reply:type_name -> io.cloudevents.v1.CloudEvent
-	15, // 14: messageloop.v1.OutboundMessage.pong:type_name -> messageloop.v1.Pong
-	16, // 15: messageloop.v1.OutboundMessage.publish_ack:type_name -> messageloop.v1.PublishAck
-	6,  // 16: messageloop.v1.OutboundMessage.publication:type_name -> messageloop.v1.Publication
-	18, // 17: messageloop.v1.OutboundMessage.sub_refresh_ack:type_name -> messageloop.v1.SubRefreshAck
-	8,  // 18: messageloop.v1.Connect.subscriptions:type_name -> messageloop.v1.Subscription
-	21, // 19: messageloop.v1.RPCRequest.payload:type_name -> io.cloudevents.v1.CloudEvent
-	22, // 20: messageloop.v1.RPCReply.error:type_name -> messageloop.shared.v1.Error
-	21, // 21: messageloop.v1.RPCReply.payload:type_name -> io.cloudevents.v1.CloudEvent
-	21, // 22: messageloop.v1.Message.payload:type_name -> io.cloudevents.v1.CloudEvent
-	5,  // 23: messageloop.v1.Publication.envelopes:type_name -> messageloop.v1.Message
-	8,  // 24: messageloop.v1.Connected.subscriptions:type_name -> messageloop.v1.Subscription
-	6,  // 25: messageloop.v1.Connected.publications:type_name -> messageloop.v1.Publication
-	8,  // 26: messageloop.v1.Subscribe.subscriptions:type_name -> messageloop.v1.Subscription
-	8,  // 27: messageloop.v1.SubscribeAck.subscriptions:type_name -> messageloop.v1.Subscription
-	8,  // 28: messageloop.v1.Unsubscribe.subscriptions:type_name -> messageloop.v1.Subscription
-	8,  // 29: messageloop.v1.UnsubscribeAck.subscriptions:type_name -> messageloop.v1.Subscription
-	8,  // 30: messageloop.v1.RefreshSub.subscriptions:type_name -> messageloop.v1.Subscription
-	0,  // 31: messageloop.v1.MessagingService.MessageLoop:input_type -> messageloop.v1.InboundMessage
-	1,  // 32: messageloop.v1.MessagingService.MessageLoop:output_type -> messageloop.v1.OutboundMessage
-	32, // [32:33] is the sub-list for method output_type
-	31, // [31:32] is the sub-list for method input_type
-	31, // [31:31] is the sub-list for extension type_name
-	31, // [31:31] is the sub-list for extension extendee
-	0,  // [0:31] is the sub-list for field type_name
+	19, // 8: messageloop.v1.InboundMessage.survey_request:type_name -> messageloop.v1.SurveyRequest
+	20, // 9: messageloop.v1.InboundMessage.survey_response:type_name -> messageloop.v1.SurveyResponse
+	22, // 10: messageloop.v1.OutboundMessage.metadata:type_name -> messageloop.v1.OutboundMessage.MetadataEntry
+	24, // 11: messageloop.v1.OutboundMessage.error:type_name -> messageloop.shared.v1.Error
+	7,  // 12: messageloop.v1.OutboundMessage.connected:type_name -> messageloop.v1.Connected
+	10, // 13: messageloop.v1.OutboundMessage.subscribe_ack:type_name -> messageloop.v1.SubscribeAck
+	12, // 14: messageloop.v1.OutboundMessage.unsubscribe_ack:type_name -> messageloop.v1.UnsubscribeAck
+	23, // 15: messageloop.v1.OutboundMessage.rpc_reply:type_name -> io.cloudevents.v1.CloudEvent
+	15, // 16: messageloop.v1.OutboundMessage.pong:type_name -> messageloop.v1.Pong
+	16, // 17: messageloop.v1.OutboundMessage.publish_ack:type_name -> messageloop.v1.PublishAck
+	6,  // 18: messageloop.v1.OutboundMessage.publication:type_name -> messageloop.v1.Publication
+	18, // 19: messageloop.v1.OutboundMessage.sub_refresh_ack:type_name -> messageloop.v1.SubRefreshAck
+	19, // 20: messageloop.v1.OutboundMessage.survey_request:type_name -> messageloop.v1.SurveyRequest
+	20, // 21: messageloop.v1.OutboundMessage.survey_response:type_name -> messageloop.v1.SurveyResponse
+	8,  // 22: messageloop.v1.Connect.subscriptions:type_name -> messageloop.v1.Subscription
+	23, // 23: messageloop.v1.RPCRequest.payload:type_name -> io.cloudevents.v1.CloudEvent
+	24, // 24: messageloop.v1.RPCReply.error:type_name -> messageloop.shared.v1.Error
+	23, // 25: messageloop.v1.RPCReply.payload:type_name -> io.cloudevents.v1.CloudEvent
+	23, // 26: messageloop.v1.Message.payload:type_name -> io.cloudevents.v1.CloudEvent
+	5,  // 27: messageloop.v1.Publication.envelopes:type_name -> messageloop.v1.Message
+	8,  // 28: messageloop.v1.Connected.subscriptions:type_name -> messageloop.v1.Subscription
+	6,  // 29: messageloop.v1.Connected.publications:type_name -> messageloop.v1.Publication
+	8,  // 30: messageloop.v1.Subscribe.subscriptions:type_name -> messageloop.v1.Subscription
+	8,  // 31: messageloop.v1.SubscribeAck.subscriptions:type_name -> messageloop.v1.Subscription
+	8,  // 32: messageloop.v1.Unsubscribe.subscriptions:type_name -> messageloop.v1.Subscription
+	8,  // 33: messageloop.v1.UnsubscribeAck.subscriptions:type_name -> messageloop.v1.Subscription
+	8,  // 34: messageloop.v1.RefreshSub.subscriptions:type_name -> messageloop.v1.Subscription
+	23, // 35: messageloop.v1.SurveyRequest.payload:type_name -> io.cloudevents.v1.CloudEvent
+	23, // 36: messageloop.v1.SurveyResponse.payload:type_name -> io.cloudevents.v1.CloudEvent
+	24, // 37: messageloop.v1.SurveyResponse.error:type_name -> messageloop.shared.v1.Error
+	0,  // 38: messageloop.v1.MessagingService.MessageLoop:input_type -> messageloop.v1.InboundMessage
+	1,  // 39: messageloop.v1.MessagingService.MessageLoop:output_type -> messageloop.v1.OutboundMessage
+	39, // [39:40] is the sub-list for method output_type
+	38, // [38:39] is the sub-list for method input_type
+	38, // [38:38] is the sub-list for extension type_name
+	38, // [38:38] is the sub-list for extension extendee
+	0,  // [0:38] is the sub-list for field type_name
 }
 
 func init() { file_v1_service_proto_init() }
@@ -1468,6 +1666,8 @@ func file_v1_service_proto_init() {
 		(*InboundMessage_Ping)(nil),
 		(*InboundMessage_Publish)(nil),
 		(*InboundMessage_SubRefresh)(nil),
+		(*InboundMessage_SurveyRequest)(nil),
+		(*InboundMessage_SurveyResponse)(nil),
 	}
 	file_v1_service_proto_msgTypes[1].OneofWrappers = []any{
 		(*OutboundMessage_Error)(nil),
@@ -1479,6 +1679,8 @@ func file_v1_service_proto_init() {
 		(*OutboundMessage_PublishAck)(nil),
 		(*OutboundMessage_Publication)(nil),
 		(*OutboundMessage_SubRefreshAck)(nil),
+		(*OutboundMessage_SurveyRequest)(nil),
+		(*OutboundMessage_SurveyResponse)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1486,7 +1688,7 @@ func file_v1_service_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_v1_service_proto_rawDesc), len(file_v1_service_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   21,
+			NumMessages:   23,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

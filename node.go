@@ -8,6 +8,9 @@ import (
 
 	"github.com/deeplooplabs/messageloop/config"
 	"github.com/deeplooplabs/messageloop/proxy"
+	clientpb "github.com/deeplooplabs/messageloop/genproto/v1"
+	cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
+	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
 )
 
@@ -19,6 +22,8 @@ type Node struct {
 	proxy            *proxy.Router
 	heartbeatManager *HeartbeatManager
 	rpcTimeout       time.Duration
+	surveys          map[string]*Survey
+	surveyMu         sync.RWMutex
 }
 
 func (n *Node) HandlePublication(ch string, pub *Publication) error {
@@ -56,6 +61,7 @@ func NewNode(cfg *config.Server) *Node {
 		subLocks:   subLocks,
 		hub:        newHub(0),
 		rpcTimeout: proxy.DefaultRPCTimeout, // Default 30s
+		surveys:    make(map[string]*Survey),
 	}
 
 	// Initialize RPC timeout if config is provided
@@ -231,4 +237,102 @@ func (n *Node) GetHeartbeatIdleTimeout() time.Duration {
 		return n.heartbeatManager.Config().IdleTimeout
 	}
 	return 0
+}
+
+// Survey sends a request to all subscribers of a channel and collects responses.
+// Returns collected results or error if the channel has no subscribers.
+func (n *Node) Survey(ctx context.Context, channel string, payload []byte, timeout time.Duration) ([]*SurveyResult, error) {
+	// Get subscribers for the channel
+	subscribers := n.hub.GetSubscribers(channel)
+	if len(subscribers) == 0 {
+		return []*SurveyResult{}, nil
+	}
+
+	// Create survey instance
+	surveyID := uuid.NewString()
+	survey := NewSurvey(surveyID, channel, payload, timeout)
+
+	// Register survey for response collection
+	n.registerSurvey(survey)
+	defer n.unregisterSurvey(surveyID)
+
+	// Send survey request to all subscribers concurrently
+	var wg sync.WaitGroup
+	for _, sub := range subscribers {
+		wg.Add(1)
+		go func(session *ClientSession) {
+			defer wg.Done()
+			n.sendSurveyRequest(ctx, session, survey)
+		}(sub)
+	}
+
+	// Wait for all sends to complete
+	wg.Wait()
+
+	// Wait for responses or timeout
+	results := survey.Wait(ctx)
+	survey.Close()
+
+	return results, nil
+}
+
+// sendSurveyRequest sends a survey request to a single client session.
+func (n *Node) sendSurveyRequest(ctx context.Context, session *ClientSession, survey *Survey) {
+	// Create the CloudEvent for the survey request
+	event := &cloudevents.CloudEvent{
+		Id:          survey.ID(),
+		Source:      survey.Channel(),
+		SpecVersion: "1.0",
+		Type:        "com.messageloop.survey",
+		Data: &cloudevents.CloudEvent_BinaryData{
+			BinaryData: survey.Payload(),
+		},
+	}
+
+	// Create outbound message with survey request
+	msg := MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
+		out.Envelope = &clientpb.OutboundMessage_SurveyRequest{
+			SurveyRequest: &clientpb.SurveyRequest{
+				RequestId: survey.ID(),
+				Payload:   event,
+			},
+		}
+	})
+
+	// Send to client (fire and forget, responses come through handleMessage)
+	if err := session.Send(ctx, msg); err != nil {
+		log.WarnContext(ctx, "failed to send survey request", "session", session.SessionID(), "error", err)
+		survey.AddResponse(session.SessionID(), nil, err)
+	}
+}
+
+// registerSurvey registers a survey in the registry.
+func (n *Node) registerSurvey(survey *Survey) {
+	n.surveyMu.Lock()
+	defer n.surveyMu.Unlock()
+	n.surveys[survey.ID()] = survey
+}
+
+// unregisterSurvey removes a survey from the registry.
+func (n *Node) unregisterSurvey(surveyID string) {
+	n.surveyMu.Lock()
+	defer n.surveyMu.Unlock()
+	delete(n.surveys, surveyID)
+}
+
+// getSurvey retrieves a survey by ID.
+func (n *Node) getSurvey(surveyID string) *Survey {
+	n.surveyMu.RLock()
+	defer n.surveyMu.RUnlock()
+	return n.surveys[surveyID]
+}
+
+// AddSurveyResponse adds a client response to the appropriate survey.
+func (n *Node) AddSurveyResponse(ctx context.Context, sessionID string, requestID string, payload []byte, err error) {
+	survey := n.getSurvey(requestID)
+	if survey == nil {
+		log.WarnContext(ctx, "survey not found for response", "request_id", requestID, "session", sessionID)
+		return
+	}
+	survey.AddResponse(sessionID, payload, err)
 }
