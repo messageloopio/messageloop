@@ -342,9 +342,11 @@ func (p *HTTPProxy) doRequest(ctx context.Context, httpReq *http.Request, method
 // withTimeout applies the proxy timeout if not already set in context.
 func (p *HTTPProxy) withTimeout(ctx context.Context) context.Context {
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, p.timeout)
-		_ = cancel // Caller is responsible for using the context
+		// Use context.WithTimeout but discard the cancel function.
+		// The cancel is called automatically when the context expires or is canceled.
+		// We don't need to track it separately since the HTTP request will complete
+		// before the timeout (or be canceled by it).
+		ctx, _ = context.WithTimeout(ctx, p.timeout)
 	}
 	return ctx
 }

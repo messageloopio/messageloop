@@ -82,6 +82,26 @@ func (h *connShard) add(c *ClientSession) {
 	h.users[user][uid] = struct{}{}
 }
 
+// remove removes a connection from the registry by session ID.
+func (h *connShard) remove(sessionID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	client, ok := h.clients[sessionID]
+	if !ok {
+		return
+	}
+	delete(h.clients, sessionID)
+
+	user := client.UserID()
+	if users, ok := h.users[user]; ok {
+		delete(users, sessionID)
+		if len(users) == 0 {
+			delete(h.users, user)
+		}
+	}
+}
+
 type subShard struct {
 	mu sync.RWMutex
 	// registry to hold active subscriptions of clients to channels with some additional info.
@@ -239,9 +259,19 @@ func (h *Hub) broadcastPublication(ch string, pub *Publication) error {
 	return h.subShards[index(ch, numHubShards)].broadcastPublication(ch, pub)
 }
 
-// RemoveSession removes a session from the sessions map.
+// RemoveSession removes a session from the sessions map and connShards.
 func (h *Hub) RemoveSession(sessionID string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
+	// Get the client session to find the user ID before deleting
+	session, ok := h.sessions[sessionID]
+	if !ok {
+		return
+	}
 	delete(h.sessions, sessionID)
+
+	// Also remove from connShards
+	userID := session.UserID()
+	h.connShards[index(userID, numHubShards)].remove(sessionID)
 }

@@ -184,7 +184,7 @@ func TestRPCTimeout_DefaultTimeout(t *testing.T) {
 	node := NewNode(cfg)
 
 	// Check default timeout is set
-	timeout := node.getRPCTimeout()
+	timeout := node.GetRPCTimeout()
 	assert.Equal(t, proxy.DefaultRPCTimeout, timeout, "Should use default RPC timeout")
 }
 
@@ -196,7 +196,7 @@ func TestRPCTimeout_CustomTimeout(t *testing.T) {
 	node := NewNode(cfg)
 
 	// Check custom timeout is set
-	timeout := node.getRPCTimeout()
+	timeout := node.GetRPCTimeout()
 	assert.Equal(t, 5*time.Second, timeout, "Should use custom RPC timeout")
 }
 
@@ -208,6 +208,6 @@ func TestRPCTimeout_InvalidTimeout(t *testing.T) {
 	node := NewNode(cfg)
 
 	// Check default timeout is used
-	timeout := node.getRPCTimeout()
+	timeout := node.GetRPCTimeout()
 	assert.Equal(t, proxy.DefaultRPCTimeout, timeout, "Should fallback to default on invalid timeout")
 }

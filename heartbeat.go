@@ -36,8 +36,8 @@ func (hm *HeartbeatManager) Start(ctx context.Context, client *ClientSession) {
 
 // heartbeatLoop manages the heartbeat timers for a client.
 func (hm *HeartbeatManager) heartbeatLoop(ctx context.Context, client *ClientSession) {
-	idleTimer := time.NewTimer(hm.config.IdleTimeout)
-	defer idleTimer.Stop()
+	idleTicker := time.NewTicker(hm.config.IdleTimeout)
+	defer idleTicker.Stop()
 
 	client.ResetActivity()
 
@@ -46,7 +46,7 @@ func (hm *HeartbeatManager) heartbeatLoop(ctx context.Context, client *ClientSes
 		case <-ctx.Done():
 			return
 
-		case <-idleTimer.C:
+		case <-idleTicker.C:
 			client.mu.Lock()
 			idle := time.Since(client.lastActivity) > hm.config.IdleTimeout
 			if idle {
@@ -55,7 +55,6 @@ func (hm *HeartbeatManager) heartbeatLoop(ctx context.Context, client *ClientSes
 				return
 			}
 			client.mu.Unlock()
-			idleTimer.Reset(hm.config.IdleTimeout)
 		}
 	}
 }

@@ -11,10 +11,11 @@ import (
 )
 
 type Transport struct {
-	stream  grpc.BidiStreamingServer[clientpb.InboundMessage, clientpb.OutboundMessage]
-	mu      sync.RWMutex
-	closed  bool
-	closeCh chan struct{}
+	stream   grpc.BidiStreamingServer[clientpb.InboundMessage, clientpb.OutboundMessage]
+	mu       sync.RWMutex
+	closed   bool
+	closeCh  chan struct{}
+	closeOnce sync.Once
 }
 
 func (t *Transport) Write(message []byte) error {
@@ -22,13 +23,22 @@ func (t *Transport) Write(message []byte) error {
 }
 
 func (t *Transport) WriteMany(messages ...[]byte) error {
+	// Check if closed using a read lock
 	t.mu.RLock()
 	if t.closed {
 		t.mu.RUnlock()
 		return nil
 	}
 	t.mu.RUnlock()
+
 	for i := 0; i < len(messages); i++ {
+		// Double-check after acquiring the write lock for each send
+		t.mu.RLock()
+		closed := t.closed
+		t.mu.RUnlock()
+		if closed {
+			return nil
+		}
 		if err := t.stream.SendMsg(rawFrame(messages[i])); err != nil {
 			return err
 		}
@@ -37,16 +47,20 @@ func (t *Transport) WriteMany(messages ...[]byte) error {
 }
 
 func (t *Transport) Close(disconnect messageloop.Disconnect) error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.closed {
-		return nil
-	}
-	t.writeError(int32(disconnect.Code), disconnect.Reason)
-	time.Sleep(100 * time.Millisecond)
-	close(t.closeCh)
-	t.closed = true
-	return nil
+	var err error
+	t.closeOnce.Do(func() {
+		t.mu.Lock()
+		defer t.mu.Unlock()
+		if t.closed {
+			err = nil
+			return
+		}
+		t.writeError(int32(disconnect.Code), disconnect.Reason)
+		time.Sleep(100 * time.Millisecond)
+		close(t.closeCh)
+		t.closed = true
+	})
+	return err
 }
 
 func (t *Transport) writeError(code int32, reason string) {

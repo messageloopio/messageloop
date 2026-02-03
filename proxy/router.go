@@ -1,10 +1,14 @@
 package proxy
 
 import (
+	"errors"
 	"sync"
 
 	"github.com/gobwas/glob"
 )
+
+// ErrNoProxyFound is returned when no matching proxy is found for a channel/method.
+var ErrNoProxyFound = errors.New("no proxy found for channel/method")
 
 // Router matches RPC requests to their configured proxies based on channel and method patterns.
 type Router struct {

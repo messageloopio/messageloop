@@ -54,8 +54,12 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	ctx = log.Context(ctx, log.FromContext(ctx), "client_id", client.SessionID())
 	defer closeFn()
 
-	// Set initial read deadline (2 * ping_interval as a reasonable default)
+	// Set read deadline based on heartbeat configuration
 	readTimeout := 60 * time.Second
+	if idleTimeout := h.node.GetHeartbeatIdleTimeout(); idleTimeout > 0 {
+		// Use 2 * IdleTimeout as the read deadline to allow for missed heartbeats
+		readTimeout = 2 * idleTimeout
+	}
 	if h.opt.ReadTimeout > 0 {
 		readTimeout = h.opt.ReadTimeout
 	}

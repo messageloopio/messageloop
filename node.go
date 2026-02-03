@@ -2,7 +2,6 @@ package messageloop
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -212,15 +211,24 @@ func (n *Node) AddProxy(p proxy.Proxy, channelPattern, methodPattern string) err
 func (n *Node) ProxyRPC(ctx context.Context, channel, method string, req *proxy.RPCProxyRequest) (*proxy.RPCProxyResponse, error) {
 	p := n.FindProxy(channel, method)
 	if p == nil {
-		return nil, errors.New("no proxy found for channel/method")
+		return nil, proxy.ErrNoProxyFound
 	}
 	return p.RPC(ctx, req)
 }
 
-// getRPCTimeout returns the configured RPC timeout.
-func (n *Node) getRPCTimeout() time.Duration {
+// GetRPCTimeout returns the configured RPC timeout.
+func (n *Node) GetRPCTimeout() time.Duration {
 	if n.rpcTimeout > 0 {
 		return n.rpcTimeout
 	}
 	return proxy.DefaultRPCTimeout
+}
+
+// GetHeartbeatIdleTimeout returns the configured heartbeat idle timeout.
+// Returns 0 if heartbeat manager is not configured.
+func (n *Node) GetHeartbeatIdleTimeout() time.Duration {
+	if n.heartbeatManager != nil {
+		return n.heartbeatManager.Config().IdleTimeout
+	}
+	return 0
 }

@@ -329,7 +329,7 @@ func (c *ClientSession) onRPC(ctx context.Context, in *clientpb.InboundMessage, 
 	}
 
 	// Apply RPC timeout from configuration or use default
-	rpcTimeout := c.node.getRPCTimeout()
+	rpcTimeout := c.node.GetRPCTimeout()
 	rpcCtx, cancel := context.WithTimeout(ctx, rpcTimeout)
 	defer cancel()
 
@@ -370,7 +370,7 @@ func (c *ClientSession) onRPC(ctx context.Context, in *clientpb.InboundMessage, 
 		}
 
 		// No proxy configured or proxy failed - return error to client
-		if err.Error() == "no proxy found for channel/method" {
+		if errors.Is(err, proxy.ErrNoProxyFound) {
 			// No proxy configured - return original echo behavior
 			return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 				out.Envelope = &clientpb.OutboundMessage_RpcReply{
@@ -491,7 +491,9 @@ func (c *ClientSession) onSubscribe(ctx context.Context, in *clientpb.InboundMes
 
 		if err := c.node.addSubscription(ctx, ch.Channel, subscriber{client: c, ephemeral: ch.Ephemeral}); err != nil {
 			for _, s := range subs {
-				_ = c.node.removeSubscription(s.Channel, c)
+				if rmErr := c.node.removeSubscription(s.Channel, c); rmErr != nil {
+					log.WarnContext(ctx, "failed to rollback subscription", "channel", s.Channel, "error", rmErr)
+				}
 			}
 			return err
 		}
