@@ -1,11 +1,11 @@
 version: '3'
 
 env:
-  POSTGRES_USER: fleetlit
-  POSTGRES_PASSWORD: fleetlit
+  POSTGRES_USER: deeplooplabs
+  POSTGRES_PASSWORD: deeplooplabs
   POSTGRES_HOST: localhost
   POSTGRES_PORT: 5432
-  POSTGRES_DB: fleetlit
+  POSTGRES_DB: deeplooplabs
 
 tasks:
 

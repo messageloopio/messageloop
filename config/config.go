@@ -1,6 +1,6 @@
 package config
 
-import "github.com/fleetlit/messageloop/proxy"
+import "github.com/deeplooplabs/messageloop/proxy"
 
 type Config struct {
 	Server    Server        `yaml:"server" json:"server"`

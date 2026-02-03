@@ -530,14 +530,14 @@ const file_server_v1_api_proto_rawDesc = "" +
 	"\x10SubscribeRequest\"\x13\n" +
 	"\x11SubscribeResponse\"\x14\n" +
 	"\x12UnsubscribeRequest\"\x15\n" +
-	"\x13UnsubscribeResponse2\x8d\x03\n" +
+	"\x13UnsubscribeResponse2\x8f\x03\n" +
 	"\n" +
 	"APIService\x12X\n" +
 	"\aPublish\x12%.messageloop.server.v1.PublishRequest\x1a&.messageloop.server.v1.PublishResponse\x12a\n" +
 	"\n" +
 	"Disconnect\x12(.messageloop.server.v1.DisconnectRequest\x1a).messageloop.server.v1.DisconnectResponse\x12^\n" +
-	"\tSubscribe\x12'.messageloop.server.v1.SubscribeRequest\x1a(.messageloop.server.v1.SubscribeResponse\x12b\n" +
-	"\vUnsubscribe\x12'.messageloop.server.v1.SubscribeRequest\x1a*.messageloop.server.v1.UnsubscribeResponseB@Z>github.com/fleetlit/messageloop/genproto/go/server/v1;serverpbb\x06proto3"
+	"\tSubscribe\x12'.messageloop.server.v1.SubscribeRequest\x1a(.messageloop.server.v1.SubscribeResponse\x12d\n" +
+	"\vUnsubscribe\x12).messageloop.server.v1.UnsubscribeRequest\x1a*.messageloop.server.v1.UnsubscribeResponseBDZBgithub.com/deeplooplabs/messageloop/genproto/go/server/v1;serverpbb\x06proto3"
 
 var (
 	file_server_v1_api_proto_rawDescOnce sync.Once
@@ -576,7 +576,7 @@ var file_server_v1_api_proto_depIdxs = []int32{
 	1,  // 5: messageloop.server.v1.APIService.Publish:input_type -> messageloop.server.v1.PublishRequest
 	3,  // 6: messageloop.server.v1.APIService.Disconnect:input_type -> messageloop.server.v1.DisconnectRequest
 	5,  // 7: messageloop.server.v1.APIService.Subscribe:input_type -> messageloop.server.v1.SubscribeRequest
-	5,  // 8: messageloop.server.v1.APIService.Unsubscribe:input_type -> messageloop.server.v1.SubscribeRequest
+	7,  // 8: messageloop.server.v1.APIService.Unsubscribe:input_type -> messageloop.server.v1.UnsubscribeRequest
 	2,  // 9: messageloop.server.v1.APIService.Publish:output_type -> messageloop.server.v1.PublishResponse
 	4,  // 10: messageloop.server.v1.APIService.Disconnect:output_type -> messageloop.server.v1.DisconnectResponse
 	6,  // 11: messageloop.server.v1.APIService.Subscribe:output_type -> messageloop.server.v1.SubscribeResponse

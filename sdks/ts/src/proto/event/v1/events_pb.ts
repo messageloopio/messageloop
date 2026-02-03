@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file event/v1/events.proto.
  */
 export const file_event_v1_events: GenFile = /*@__PURE__*/
-  fileDesc("ChVldmVudC92MS9ldmVudHMucHJvdG8SFG1lc3NhZ2Vsb29wLmV2ZW50LnYxIjUKDFB1Ymxpc2hFdmVudBIPCgdjaGFubmVsGAEgASgJEhQKDHBheWxvYWRfdGV4dBgCIAEoDEI+WjxnaXRodWIuY29tL2ZsZWV0bGl0L21lc3NhZ2Vsb29wL2dlbnByb3RvL2dvL2V2ZW50L3YxO2V2ZW50cGJiBnByb3RvMw");
+  fileDesc("ChVldmVudC92MS9ldmVudHMucHJvdG8SFG1lc3NhZ2Vsb29wLmV2ZW50LnYxIjUKDFB1Ymxpc2hFdmVudBIPCgdjaGFubmVsGAEgASgJEhQKDHBheWxvYWRfdGV4dBgCIAEoDEJCWkBnaXRodWIuY29tL2RlZXBsb29wbGFicy9tZXNzYWdlbG9vcC9nZW5wcm90by9nby9ldmVudC92MTtldmVudHBiYgZwcm90bzM");
 
 /**
  * @generated from message messageloop.event.v1.PublishEvent

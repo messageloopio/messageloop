@@ -6,9 +6,9 @@ import (
 	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
-	"github.com/fleetlit/messageloop/config"
-	clientpb "github.com/fleetlit/messageloop/genproto/v1"
-	"github.com/fleetlit/messageloop/proxy"
+	"github.com/deeplooplabs/messageloop/config"
+	clientpb "github.com/deeplooplabs/messageloop/genproto/v1"
+	"github.com/deeplooplabs/messageloop/proxy"
 	"github.com/stretchr/testify/assert"
 )
 

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
-	"github.com/fleetlit/messageloop/proxy"
+	"github.com/deeplooplabs/messageloop/proxy"
 )
 
 func TestNewNode(t *testing.T) {
@@ -95,10 +95,10 @@ func TestNode_HandlePublication(t *testing.T) {
 	node.addSubscription(ctx, "test-channel", subscriber{client: client, ephemeral: false})
 
 	pub := &Publication{
-		Channel:  "test-channel",
-		Offset:   1,
-		Payload:  []byte("test payload"),
-		Time:     time.Now().UnixMilli(),
+		Channel: "test-channel",
+		Offset:  1,
+		Payload: []byte("test payload"),
+		Time:    time.Now().UnixMilli(),
 	}
 
 	err = node.HandlePublication("test-channel", pub)
@@ -116,10 +116,10 @@ func TestNode_HandlePublication_NoSubscribers(t *testing.T) {
 	node := NewNode(nil)
 
 	pub := &Publication{
-		Channel:  "empty-channel",
-		Offset:   1,
-		Payload:  []byte("test payload"),
-		Time:     time.Now().UnixMilli(),
+		Channel: "empty-channel",
+		Offset:  1,
+		Payload: []byte("test payload"),
+		Time:    time.Now().UnixMilli(),
 	}
 
 	err := node.HandlePublication("empty-channel", pub)

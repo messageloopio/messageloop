@@ -6,7 +6,7 @@ import (
 	"log"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
-	messageloopgo "github.com/fleetlit/messageloop/sdks/go"
+	messageloopgo "github.com/deeplooplabs/messageloop/sdks/go"
 )
 
 func main() {

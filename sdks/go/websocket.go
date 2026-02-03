@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	clientpb "github.com/fleetlit/messageloop/genproto/v1"
+	clientpb "github.com/deeplooplabs/messageloop/genproto/v1"
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"

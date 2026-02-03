@@ -3,10 +3,10 @@ package websocket
 import (
 	"testing"
 
-	"github.com/fleetlit/messageloop"
-	clientpb "github.com/fleetlit/messageloop/genproto/v1"
-	"github.com/google/uuid"
 	cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
+	"github.com/deeplooplabs/messageloop"
+	clientpb "github.com/deeplooplabs/messageloop/genproto/v1"
+	"github.com/google/uuid"
 	"github.com/lynx-go/x/encoding/json"
 	"github.com/stretchr/testify/require"
 )

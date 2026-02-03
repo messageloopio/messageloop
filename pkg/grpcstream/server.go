@@ -4,8 +4,8 @@ import (
 	"context"
 	"net"
 
-	"github.com/fleetlit/messageloop"
-	clientpb "github.com/fleetlit/messageloop/genproto/v1"
+	"github.com/deeplooplabs/messageloop"
+	clientpb "github.com/deeplooplabs/messageloop/genproto/v1"
 	"github.com/lynx-go/lynx"
 	"github.com/lynx-go/x/log"
 	"google.golang.org/grpc"

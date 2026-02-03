@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fleetlit/messageloop"
-	sharedpb "github.com/fleetlit/messageloop/genproto/shared/v1"
-	clientpb "github.com/fleetlit/messageloop/genproto/v1"
+	"github.com/deeplooplabs/messageloop"
+	sharedpb "github.com/deeplooplabs/messageloop/genproto/shared/v1"
+	clientpb "github.com/deeplooplabs/messageloop/genproto/v1"
 	"github.com/gorilla/websocket"
 	"github.com/lynx-go/x/log"
 )

@@ -3,7 +3,7 @@ package redisbroker
 import (
 	"encoding/json"
 
-	"github.com/fleetlit/messageloop"
+	"github.com/deeplooplabs/messageloop"
 )
 
 const (

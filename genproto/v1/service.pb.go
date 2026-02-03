@@ -10,7 +10,7 @@ package clientpb
 
 import (
 	pb "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
-	v1 "github.com/fleetlit/messageloop/genproto/shared/v1"
+	v1 "github.com/deeplooplabs/messageloop/genproto/shared/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -1374,7 +1374,7 @@ const file_v1_service_proto_rawDesc = "" +
 	"\bchannels\x18\x01 \x03(\tR\bchannels\"\x0f\n" +
 	"\rSubRefreshAck2f\n" +
 	"\x10MessagingService\x12R\n" +
-	"\vMessageLoop\x12\x1e.messageloop.v1.InboundMessage\x1a\x1f.messageloop.v1.OutboundMessage(\x010\x01B@Z>github.com/fleetlit/messageloop/genproto/go/client/v1;clientpbb\x06proto3"
+	"\vMessageLoop\x12\x1e.messageloop.v1.InboundMessage\x1a\x1f.messageloop.v1.OutboundMessage(\x010\x01BDZBgithub.com/deeplooplabs/messageloop/genproto/go/client/v1;clientpbb\x06proto3"
 
 var (
 	file_v1_service_proto_rawDescOnce sync.Once
