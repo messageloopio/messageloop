@@ -32,7 +32,7 @@ func newHub(maxTimeLagMilli int64) *Hub {
 	return h
 }
 
-func (h *Hub) addSub(ch string, sub subscriber) (bool, error) {
+func (h *Hub) addSub(ch string, sub Subscriber) (bool, error) {
 	return h.subShards[index(ch, numHubShards)].addSub(ch, sub)
 }
 
@@ -116,7 +116,8 @@ func newSubShard(maxTimeLagMilli int64) *subShard {
 	}
 }
 
-type subscriber struct {
+// Subscriber represents a client that can subscribe to channels.
+type Subscriber struct {
 	client    *ClientSession
 	ephemeral bool
 }
@@ -133,7 +134,7 @@ func (h *subShard) NumSubscribers(ch string) int {
 }
 
 // addSub adds connection into clientHub subscriptions registry.
-func (h *subShard) addSub(ch string, sub subscriber) (bool, error) {
+func (h *subShard) addSub(ch string, sub Subscriber) (bool, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -141,7 +142,7 @@ func (h *subShard) addSub(ch string, sub subscriber) (bool, error) {
 
 	_, ok := h.subs[ch]
 	if !ok {
-		h.subs[ch] = make(map[string]subscriber)
+		h.subs[ch] = make(map[string]Subscriber)
 	}
 	h.subs[ch][uid] = sub
 	if !ok {
@@ -292,4 +293,12 @@ func (h *Hub) GetSubscribers(ch string) []*ClientSession {
 		result = append(result, sub.client)
 	}
 	return result
+}
+
+// LookupSession returns a client session by session ID.
+// Returns nil if session not found.
+func (h *Hub) LookupSession(sessionID string) *ClientSession {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.sessions[sessionID]
 }

@@ -4,6 +4,8 @@
 // 	protoc        (unknown)
 // source: event/v1/events.proto
 
+// buf:lint:ignore PACKAGE_DIRECTORY_MATCH
+
 package eventpb
 
 import (

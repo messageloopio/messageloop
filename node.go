@@ -112,11 +112,18 @@ func (n *Node) Hub() *Hub {
 	return n.hub
 }
 
+// AddClient adds a client session to the node's hub.
+func (n *Node) AddClient(c *ClientSession) {
+	n.addClient(c)
+}
+
 func (n *Node) addClient(c *ClientSession) {
 	n.hub.add(c)
 }
 
-func (n *Node) addSubscription(ctx context.Context, ch string, sub subscriber) error {
+// AddSubscription adds a subscription for a client to a channel.
+// This is an exported method for use by the server-side API.
+func (n *Node) AddSubscription(ctx context.Context, ch string, sub Subscriber) error {
 	mu := n.subLock(ch)
 	mu.Lock()
 	defer mu.Unlock()
@@ -137,7 +144,9 @@ func (n *Node) addSubscription(ctx context.Context, ch string, sub subscriber) e
 	return nil
 }
 
-func (n *Node) removeSubscription(ch string, c *ClientSession) error {
+// RemoveSubscription removes a subscription for a client from a channel.
+// This is an exported method for use by the server-side API.
+func (n *Node) RemoveSubscription(ch string, c *ClientSession) error {
 	mu := n.subLock(ch)
 	mu.Lock()
 	defer mu.Unlock()

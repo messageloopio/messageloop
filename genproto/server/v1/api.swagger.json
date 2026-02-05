@@ -192,7 +192,15 @@
       "description": "CloudEventAttribute enables extensions to use any of the seven allowed\r\ndata types as the value of an envelope key."
     },
     "v1DisconnectResponse": {
-      "type": "object"
+      "type": "object",
+      "properties": {
+        "results": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "boolean"
+          }
+        }
+      }
     },
     "v1Error": {
       "type": "object",
@@ -215,7 +223,15 @@
       "type": "object"
     },
     "v1SubscribeResponse": {
-      "type": "object"
+      "type": "object",
+      "properties": {
+        "results": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "boolean"
+          }
+        }
+      }
     },
     "v1SurveyResult": {
       "type": "object",
@@ -232,7 +248,15 @@
       }
     },
     "v1UnsubscribeResponse": {
-      "type": "object"
+      "type": "object",
+      "properties": {
+        "results": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "boolean"
+          }
+        }
+      }
     }
   }
 }

@@ -118,6 +118,12 @@ func (c *ClientSession) close(disconnect Disconnect) error {
 	return c.transport.Close(disconnect)
 }
 
+// Close closes the client session with a disconnect reason.
+// This is an exported method for use by the server-side API.
+func (c *ClientSession) Close(disconnect Disconnect) error {
+	return c.close(disconnect)
+}
+
 func (c *ClientSession) ClientID() string {
 	return c.client
 }
@@ -496,7 +502,7 @@ func (c *ClientSession) onSubscribe(ctx context.Context, in *clientpb.InboundMes
 			}
 		}
 
-		if err := c.node.addSubscription(ctx, ch.Channel, subscriber{client: c, ephemeral: ch.Ephemeral}); err != nil {
+		if err := c.node.AddSubscription(ctx, ch.Channel, Subscriber{client: c, ephemeral: ch.Ephemeral}); err != nil {
 			for _, s := range subs {
 				if rmErr := c.node.removeSubscription(s.Channel, c); rmErr != nil {
 					log.WarnContext(ctx, "failed to rollback subscription", "channel", s.Channel, "error", rmErr)
