@@ -36,3 +36,5 @@ go.work.sum
 
 config.yaml
 /sdks/go/bin/
+
+config-node*.yaml
