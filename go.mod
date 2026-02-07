@@ -1,19 +1,19 @@
 module github.com/messageloopio/messageloop
 
-go 1.25
+go 1.25.5
 
-replace github.com/messageloopio/messageloop/genproto => ./genproto
+replace github.com/messageloopio/messageloop/shared => ./shared
 
 require (
 	github.com/RoaringBitmap/roaring v1.9.4
 	github.com/cloudevents/sdk-go/binding/format/protobuf/v2 v2.16.2
-	github.com/messageloopio/messageloop/genproto v0.1.0
 	github.com/gobwas/glob v0.2.3
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/lynx-go/lynx v0.7.0
 	github.com/lynx-go/lynx/contrib/zap v0.7.0
 	github.com/lynx-go/x v0.1.0
+	github.com/messageloopio/messageloop/shared v0.1.0
 	github.com/redis/go-redis/v9 v9.17.3
 	github.com/samber/lo v1.52.0
 	github.com/spf13/pflag v1.0.10

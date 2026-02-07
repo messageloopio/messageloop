@@ -5,7 +5,7 @@ import (
 
 	"github.com/lynx-go/x/log"
 	"github.com/messageloopio/messageloop"
-	clientpb "github.com/messageloopio/messageloop/genproto/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/v1"
 	"google.golang.org/grpc"
 )
 

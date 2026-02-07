@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	clientpb "github.com/messageloopio/messageloop/genproto/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/v1"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )

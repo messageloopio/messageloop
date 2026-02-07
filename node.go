@@ -10,8 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
 	"github.com/messageloopio/messageloop/config"
-	clientpb "github.com/messageloopio/messageloop/genproto/v1"
 	"github.com/messageloopio/messageloop/proxy"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/v1"
 )
 
 type Node struct {

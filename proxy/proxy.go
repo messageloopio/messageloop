@@ -5,8 +5,8 @@ import (
 	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
-	proxypb "github.com/messageloopio/messageloop/genproto/proxy/v1"
-	sharedpb "github.com/messageloopio/messageloop/genproto/shared/v1"
+	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v1"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 )
 
 // Proxy defines the interface for proxying RPC requests to backend services.

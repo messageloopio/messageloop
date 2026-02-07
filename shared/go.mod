@@ -1,6 +1,6 @@
-module github.com/messageloopio/messageloop/genproto
+module github.com/messageloopio/messageloop/shared
 
-go 1.25
+go 1.25.5
 
 require (
 	github.com/cloudevents/sdk-go/binding/format/protobuf/v2 v2.16.2

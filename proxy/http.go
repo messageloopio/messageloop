@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/lynx-go/x/log"
-	proxypb "github.com/messageloopio/messageloop/genproto/proxy/v1"
+	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v1"
 )
 
 // HTTPProxy implements Proxy using HTTP transport.

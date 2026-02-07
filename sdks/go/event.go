@@ -5,7 +5,7 @@ import (
 	"github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/google/uuid"
-	clientpb "github.com/messageloopio/messageloop/genproto/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/v1"
 )
 
 // Message represents a received message from a subscribed channel.

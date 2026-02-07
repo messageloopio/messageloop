@@ -10,9 +10,9 @@ import (
 	cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
-	sharedpb "github.com/messageloopio/messageloop/genproto/shared/v1"
-	clientpb "github.com/messageloopio/messageloop/genproto/v1"
 	"github.com/messageloopio/messageloop/proxy"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/v1"
 	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
 )

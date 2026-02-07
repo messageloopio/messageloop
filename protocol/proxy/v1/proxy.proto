@@ -3,7 +3,7 @@ syntax = "proto3";
 // buf:lint:ignore PACKAGE_DIRECTORY_MATCH
 package messageloop.proxy.v1;
 
-option go_package = "github.com/messageloopio/messageloop/genproto/go/proxy/v1;proxypb";
+option go_package = "github.com/messageloopio/messageloop/shared/genproto/go/proxy/v1;proxypb";
 
 import "shared/v1/errors.proto";
 import "includes/cloudevents/cloudevents.proto";

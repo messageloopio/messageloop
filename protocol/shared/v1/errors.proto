@@ -5,7 +5,7 @@ package messageloop.shared.v1;
 
 import "google/protobuf/struct.proto";
 
-option go_package = "github.com/messageloopio/messageloop/genproto/shared/v1;sharedpb";
+option go_package = "github.com/messageloopio/messageloop/shared/genproto/shared/v1;sharedpb";
 
 message Error {
   string code = 1;

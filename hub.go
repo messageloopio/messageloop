@@ -8,7 +8,7 @@ import (
 	cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
-	clientpb "github.com/messageloopio/messageloop/genproto/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/v1"
 )
 
 const numHubShards = 64

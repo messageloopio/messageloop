@@ -7,7 +7,7 @@ import (
 	cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	"github.com/google/uuid"
 	"github.com/messageloopio/messageloop"
-	serverpb "github.com/messageloopio/messageloop/genproto/server/v1"
+	serverpb "github.com/messageloopio/messageloop/shared/genproto/server/v1"
 	"github.com/stretchr/testify/require"
 )
 

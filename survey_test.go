@@ -7,7 +7,7 @@ import (
 	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
-	clientpb "github.com/messageloopio/messageloop/genproto/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/v1"
 )
 
 func TestSurvey_NewSurvey(t *testing.T) {
