@@ -3,7 +3,9 @@ syntax = "proto3";
 // buf:lint:ignore PACKAGE_DIRECTORY_MATCH
 package messageloop.server.v1;
 
+// buf:lint:ignore FILE_SAME_GO_PACKAGE
 option go_package = "github.com/deeplooplabs/messageloop/genproto/go/server/v1;serverpb";
+
 import "includes/cloudevents/cloudevents.proto";
 import "shared/v1/errors.proto";
 
@@ -61,20 +63,29 @@ message PublishResponse {
 }
 
 message DisconnectRequest {
+  repeated string sessions = 1;
+  uint32 code = 2;
+  string reason = 3;
 }
 
 message DisconnectResponse {
-
+  map<string, bool> results = 1;
 }
 
 message SubscribeRequest {
+  string session_id = 1;
+  repeated string channels = 2;
 }
 
 message SubscribeResponse {
+  map<string, bool> results = 1;
 }
 
 message UnsubscribeRequest {
+  string session_id = 1;
+  repeated string channels = 2;
 }
 
 message UnsubscribeResponse {
+  map<string, bool> results = 1;
 }

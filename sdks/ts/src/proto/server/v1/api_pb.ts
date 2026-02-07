@@ -16,7 +16,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file server/v1/api.proto.
  */
 export const file_server_v1_api: GenFile = /*@__PURE__*/
-  fileDesc("ChNzZXJ2ZXIvdjEvYXBpLnByb3RvEhVtZXNzYWdlbG9vcC5zZXJ2ZXIudjEieAoNU3VydmV5UmVxdWVzdBISCgpyZXF1ZXN0X2lkGAEgASgJEg8KB2NoYW5uZWwYAiABKAkSLgoHcGF5bG9hZBgDIAEoCzIdLmlvLmNsb3VkZXZlbnRzLnYxLkNsb3VkRXZlbnQSEgoKdGltZW91dF9tcxgEIAEoBSJaCg5TdXJ2ZXlSZXNwb25zZRISCgpyZXF1ZXN0X2lkGAEgASgJEjQKB3Jlc3VsdHMYAiADKAsyIy5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuU3VydmV5UmVzdWx0In8KDFN1cnZleVJlc3VsdBISCgpzZXNzaW9uX2lkGAEgASgJEi4KB3BheWxvYWQYAiABKAsyHS5pby5jbG91ZGV2ZW50cy52MS5DbG91ZEV2ZW50EisKBWVycm9yGAMgASgLMhwubWVzc2FnZWxvb3Auc2hhcmVkLnYxLkVycm9yIp4CCgtQdWJsaWNhdGlvbhIKCgJpZBgBIAEoCRJDCgtkZXN0aW5hdGlvbhgCIAEoCzIuLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5QdWJsaWNhdGlvbi5EZXN0aW5hdGlvbhI7CgdvcHRpb25zGAMgASgLMioubWVzc2FnZWxvb3Auc2VydmVyLnYxLlB1YmxpY2F0aW9uLk9wdGlvbnMSLgoHcGF5bG9hZBgEIAEoCzIdLmlvLmNsb3VkZXZlbnRzLnYxLkNsb3VkRXZlbnQaHgoHT3B0aW9ucxITCgthZGRfaGlzdG9yeRgBIAEoCBoxCgtEZXN0aW5hdGlvbhIQCghzZXNzaW9ucxgBIAMoCRIQCghjaGFubmVscxgCIAMoCSLWAQoOUHVibGlzaFJlcXVlc3QSEgoKcmVxdWVzdF9pZBgBIAEoCRJFCghtZXRhZGF0YRgCIAMoCzIzLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5QdWJsaXNoUmVxdWVzdC5NZXRhZGF0YUVudHJ5EjgKDHB1YmxpY2F0aW9ucxgDIAMoCzIiLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5QdWJsaWNhdGlvbhovCg1NZXRhZGF0YUVudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiEQoPUHVibGlzaFJlc3BvbnNlIhMKEURpc2Nvbm5lY3RSZXF1ZXN0IhQKEkRpc2Nvbm5lY3RSZXNwb25zZSISChBTdWJzY3JpYmVSZXF1ZXN0IhMKEVN1YnNjcmliZVJlc3BvbnNlIhQKElVuc3Vic2NyaWJlUmVxdWVzdCIVChNVbnN1YnNjcmliZVJlc3BvbnNlMuYDCgpBUElTZXJ2aWNlElgKB1B1Ymxpc2gSJS5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuUHVibGlzaFJlcXVlc3QaJi5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuUHVibGlzaFJlc3BvbnNlEmEKCkRpc2Nvbm5lY3QSKC5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuRGlzY29ubmVjdFJlcXVlc3QaKS5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuRGlzY29ubmVjdFJlc3BvbnNlEl4KCVN1YnNjcmliZRInLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5TdWJzY3JpYmVSZXF1ZXN0GigubWVzc2FnZWxvb3Auc2VydmVyLnYxLlN1YnNjcmliZVJlc3BvbnNlEmQKC1Vuc3Vic2NyaWJlEikubWVzc2FnZWxvb3Auc2VydmVyLnYxLlVuc3Vic2NyaWJlUmVxdWVzdBoqLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5VbnN1YnNjcmliZVJlc3BvbnNlElUKBlN1cnZleRIkLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5TdXJ2ZXlSZXF1ZXN0GiUubWVzc2FnZWxvb3Auc2VydmVyLnYxLlN1cnZleVJlc3BvbnNlQkRaQmdpdGh1Yi5jb20vZGVlcGxvb3BsYWJzL21lc3NhZ2Vsb29wL2dlbnByb3RvL2dvL3NlcnZlci92MTtzZXJ2ZXJwYmIGcHJvdG8z", [file_includes_cloudevents_cloudevents, file_shared_v1_errors]);
+  fileDesc("ChNzZXJ2ZXIvdjEvYXBpLnByb3RvEhVtZXNzYWdlbG9vcC5zZXJ2ZXIudjEieAoNU3VydmV5UmVxdWVzdBISCgpyZXF1ZXN0X2lkGAEgASgJEg8KB2NoYW5uZWwYAiABKAkSLgoHcGF5bG9hZBgDIAEoCzIdLmlvLmNsb3VkZXZlbnRzLnYxLkNsb3VkRXZlbnQSEgoKdGltZW91dF9tcxgEIAEoBSJaCg5TdXJ2ZXlSZXNwb25zZRISCgpyZXF1ZXN0X2lkGAEgASgJEjQKB3Jlc3VsdHMYAiADKAsyIy5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuU3VydmV5UmVzdWx0In8KDFN1cnZleVJlc3VsdBISCgpzZXNzaW9uX2lkGAEgASgJEi4KB3BheWxvYWQYAiABKAsyHS5pby5jbG91ZGV2ZW50cy52MS5DbG91ZEV2ZW50EisKBWVycm9yGAMgASgLMhwubWVzc2FnZWxvb3Auc2hhcmVkLnYxLkVycm9yIp4CCgtQdWJsaWNhdGlvbhIKCgJpZBgBIAEoCRJDCgtkZXN0aW5hdGlvbhgCIAEoCzIuLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5QdWJsaWNhdGlvbi5EZXN0aW5hdGlvbhI7CgdvcHRpb25zGAMgASgLMioubWVzc2FnZWxvb3Auc2VydmVyLnYxLlB1YmxpY2F0aW9uLk9wdGlvbnMSLgoHcGF5bG9hZBgEIAEoCzIdLmlvLmNsb3VkZXZlbnRzLnYxLkNsb3VkRXZlbnQaHgoHT3B0aW9ucxITCgthZGRfaGlzdG9yeRgBIAEoCBoxCgtEZXN0aW5hdGlvbhIQCghzZXNzaW9ucxgBIAMoCRIQCghjaGFubmVscxgCIAMoCSLWAQoOUHVibGlzaFJlcXVlc3QSEgoKcmVxdWVzdF9pZBgBIAEoCRJFCghtZXRhZGF0YRgCIAMoCzIzLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5QdWJsaXNoUmVxdWVzdC5NZXRhZGF0YUVudHJ5EjgKDHB1YmxpY2F0aW9ucxgDIAMoCzIiLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5QdWJsaWNhdGlvbhovCg1NZXRhZGF0YUVudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiEQoPUHVibGlzaFJlc3BvbnNlIkMKEURpc2Nvbm5lY3RSZXF1ZXN0EhAKCHNlc3Npb25zGAEgAygJEgwKBGNvZGUYAiABKA0SDgoGcmVhc29uGAMgASgJIo0BChJEaXNjb25uZWN0UmVzcG9uc2USRwoHcmVzdWx0cxgBIAMoCzI2Lm1lc3NhZ2Vsb29wLnNlcnZlci52MS5EaXNjb25uZWN0UmVzcG9uc2UuUmVzdWx0c0VudHJ5Gi4KDFJlc3VsdHNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAg6AjgBIjgKEFN1YnNjcmliZVJlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRIQCghjaGFubmVscxgCIAMoCSKLAQoRU3Vic2NyaWJlUmVzcG9uc2USRgoHcmVzdWx0cxgBIAMoCzI1Lm1lc3NhZ2Vsb29wLnNlcnZlci52MS5TdWJzY3JpYmVSZXNwb25zZS5SZXN1bHRzRW50cnkaLgoMUmVzdWx0c0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCDoCOAEiOgoSVW5zdWJzY3JpYmVSZXF1ZXN0EhIKCnNlc3Npb25faWQYASABKAkSEAoIY2hhbm5lbHMYAiADKAkijwEKE1Vuc3Vic2NyaWJlUmVzcG9uc2USSAoHcmVzdWx0cxgBIAMoCzI3Lm1lc3NhZ2Vsb29wLnNlcnZlci52MS5VbnN1YnNjcmliZVJlc3BvbnNlLlJlc3VsdHNFbnRyeRouCgxSZXN1bHRzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgIOgI4ATLmAwoKQVBJU2VydmljZRJYCgdQdWJsaXNoEiUubWVzc2FnZWxvb3Auc2VydmVyLnYxLlB1Ymxpc2hSZXF1ZXN0GiYubWVzc2FnZWxvb3Auc2VydmVyLnYxLlB1Ymxpc2hSZXNwb25zZRJhCgpEaXNjb25uZWN0EigubWVzc2FnZWxvb3Auc2VydmVyLnYxLkRpc2Nvbm5lY3RSZXF1ZXN0GikubWVzc2FnZWxvb3Auc2VydmVyLnYxLkRpc2Nvbm5lY3RSZXNwb25zZRJeCglTdWJzY3JpYmUSJy5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuU3Vic2NyaWJlUmVxdWVzdBooLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5TdWJzY3JpYmVSZXNwb25zZRJkCgtVbnN1YnNjcmliZRIpLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5VbnN1YnNjcmliZVJlcXVlc3QaKi5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuVW5zdWJzY3JpYmVSZXNwb25zZRJVCgZTdXJ2ZXkSJC5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuU3VydmV5UmVxdWVzdBolLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5TdXJ2ZXlSZXNwb25zZUJEWkJnaXRodWIuY29tL2RlZXBsb29wbGFicy9tZXNzYWdlbG9vcC9nZW5wcm90by9nby9zZXJ2ZXIvdjE7c2VydmVycGJiBnByb3RvMw", [file_includes_cloudevents_cloudevents, file_shared_v1_errors]);
 
 /**
  * @generated from message messageloop.server.v1.SurveyRequest
@@ -214,6 +214,20 @@ export const PublishResponseSchema: GenMessage<PublishResponse> = /*@__PURE__*/
  * @generated from message messageloop.server.v1.DisconnectRequest
  */
 export type DisconnectRequest = Message<"messageloop.server.v1.DisconnectRequest"> & {
+  /**
+   * @generated from field: repeated string sessions = 1;
+   */
+  sessions: string[];
+
+  /**
+   * @generated from field: uint32 code = 2;
+   */
+  code: number;
+
+  /**
+   * @generated from field: string reason = 3;
+   */
+  reason: string;
 };
 
 /**
@@ -227,6 +241,10 @@ export const DisconnectRequestSchema: GenMessage<DisconnectRequest> = /*@__PURE_
  * @generated from message messageloop.server.v1.DisconnectResponse
  */
 export type DisconnectResponse = Message<"messageloop.server.v1.DisconnectResponse"> & {
+  /**
+   * @generated from field: map<string, bool> results = 1;
+   */
+  results: { [key: string]: boolean };
 };
 
 /**
@@ -240,6 +258,15 @@ export const DisconnectResponseSchema: GenMessage<DisconnectResponse> = /*@__PUR
  * @generated from message messageloop.server.v1.SubscribeRequest
  */
 export type SubscribeRequest = Message<"messageloop.server.v1.SubscribeRequest"> & {
+  /**
+   * @generated from field: string session_id = 1;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: repeated string channels = 2;
+   */
+  channels: string[];
 };
 
 /**
@@ -253,6 +280,10 @@ export const SubscribeRequestSchema: GenMessage<SubscribeRequest> = /*@__PURE__*
  * @generated from message messageloop.server.v1.SubscribeResponse
  */
 export type SubscribeResponse = Message<"messageloop.server.v1.SubscribeResponse"> & {
+  /**
+   * @generated from field: map<string, bool> results = 1;
+   */
+  results: { [key: string]: boolean };
 };
 
 /**
@@ -266,6 +297,15 @@ export const SubscribeResponseSchema: GenMessage<SubscribeResponse> = /*@__PURE_
  * @generated from message messageloop.server.v1.UnsubscribeRequest
  */
 export type UnsubscribeRequest = Message<"messageloop.server.v1.UnsubscribeRequest"> & {
+  /**
+   * @generated from field: string session_id = 1;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: repeated string channels = 2;
+   */
+  channels: string[];
 };
 
 /**
@@ -279,6 +319,10 @@ export const UnsubscribeRequestSchema: GenMessage<UnsubscribeRequest> = /*@__PUR
  * @generated from message messageloop.server.v1.UnsubscribeResponse
  */
 export type UnsubscribeResponse = Message<"messageloop.server.v1.UnsubscribeResponse"> & {
+  /**
+   * @generated from field: map<string, bool> results = 1;
+   */
+  results: { [key: string]: boolean };
 };
 
 /**

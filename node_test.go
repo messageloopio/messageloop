@@ -91,8 +91,8 @@ func TestNode_HandlePublication(t *testing.T) {
 	client.authenticated = true
 	client.mu.Unlock()
 
-	node.addClient(client)
-	node.addSubscription(ctx, "test-channel", subscriber{client: client, ephemeral: false})
+	node.AddClient(client)
+	node.AddSubscription(ctx, "test-channel", Subscriber{client: client, ephemeral: false})
 
 	pub := &Publication{
 		Channel: "test-channel",
@@ -174,8 +174,8 @@ func TestNode_Publish(t *testing.T) {
 	client.authenticated = true
 	client.mu.Unlock()
 
-	node.addClient(client)
-	node.addSubscription(ctx, "test-channel", subscriber{client: client, ephemeral: false})
+	node.AddClient(client)
+	node.AddSubscription(ctx, "test-channel", Subscriber{client: client, ephemeral: false})
 
 	// Clear transport messages from subscription
 	transport.messages = nil
@@ -218,7 +218,7 @@ func TestNode_AddClient(t *testing.T) {
 		t.Fatalf("NewClientSession() error = %v", err)
 	}
 
-	node.addClient(client)
+	node.AddClient(client)
 
 	// Check that client was added to hub
 	hub := node.Hub()
@@ -242,9 +242,9 @@ func TestNode_AddSubscription(t *testing.T) {
 		t.Fatalf("NewClientSession() error = %v", err)
 	}
 
-	err = node.addSubscription(ctx, "test-channel", subscriber{client: client, ephemeral: false})
+	err = node.AddSubscription(ctx, "test-channel", Subscriber{client: client, ephemeral: false})
 	if err != nil {
-		t.Fatalf("addSubscription() error = %v", err)
+		t.Fatalf("AddSubscription() error = %v", err)
 	}
 
 	// Check that subscription was added
@@ -266,9 +266,9 @@ func TestNode_AddSubscription_FirstSubscriber(t *testing.T) {
 	}
 
 	// First subscriber should trigger broker.Subscribe
-	err = node.addSubscription(ctx, "test-channel", subscriber{client: client, ephemeral: false})
+	err = node.AddSubscription(ctx, "test-channel", Subscriber{client: client, ephemeral: false})
 	if err != nil {
-		t.Fatalf("addSubscription() error = %v", err)
+		t.Fatalf("AddSubscription() error = %v", err)
 	}
 }
 
@@ -284,7 +284,7 @@ func TestNode_RemoveSubscription(t *testing.T) {
 	}
 
 	// Add subscription
-	_ = node.addSubscription(ctx, "test-channel", subscriber{client: client, ephemeral: false})
+	_ = node.AddSubscription(ctx, "test-channel", Subscriber{client: client, ephemeral: false})
 
 	// Remove subscription
 	err = node.removeSubscription("test-channel", client)
@@ -539,8 +539,8 @@ func TestNode_ConcurrentPublish(t *testing.T) {
 	client.authenticated = true
 	client.mu.Unlock()
 
-	node.addClient(client)
-	node.addSubscription(ctx, "test-channel", subscriber{client: client, ephemeral: false})
+	node.AddClient(client)
+	node.AddSubscription(ctx, "test-channel", Subscriber{client: client, ephemeral: false})
 
 	// Clear transport messages from subscription
 	transport.messages = nil
@@ -583,7 +583,7 @@ func TestNode_ConcurrentSubscriptions(t *testing.T) {
 			if err != nil {
 				return
 			}
-			_ = node.addSubscription(ctx, "test-channel", subscriber{client: client, ephemeral: false})
+			_ = node.AddSubscription(ctx, "test-channel", Subscriber{client: client, ephemeral: false})
 		}(i)
 	}
 
@@ -608,9 +608,9 @@ func TestNode_MultipleChannels(t *testing.T) {
 
 	channels := []string{"channel-1", "channel-2", "channel-3"}
 	for _, ch := range channels {
-		err = node.addSubscription(ctx, ch, subscriber{client: client, ephemeral: false})
+		err = node.AddSubscription(ctx, ch, Subscriber{client: client, ephemeral: false})
 		if err != nil {
-			t.Fatalf("addSubscription() error for %s: %v", ch, err)
+			t.Fatalf("AddSubscription() error for %s: %v", ch, err)
 		}
 	}
 
@@ -648,8 +648,8 @@ func TestNode_Publish_MultipleChannels(t *testing.T) {
 
 	node.addClient(client1)
 	node.addClient(client2)
-	node.addSubscription(ctx, "channel-1", subscriber{client: client1, ephemeral: false})
-	node.addSubscription(ctx, "channel-2", subscriber{client: client2, ephemeral: false})
+	node.AddSubscription(ctx, "channel-1", Subscriber{client: client1, ephemeral: false})
+	node.AddSubscription(ctx, "channel-2", Subscriber{client: client2, ephemeral: false})
 
 	// Clear transport messages from subscriptions
 	transport1.messages = nil
@@ -730,8 +730,8 @@ func BenchmarkNode_Publish(b *testing.B) {
 	client.authenticated = true
 	client.mu.Unlock()
 
-	node.addClient(client)
-	node.addSubscription(ctx, "test-channel", subscriber{client: client, ephemeral: false})
+	node.AddClient(client)
+	node.AddSubscription(ctx, "test-channel", Subscriber{client: client, ephemeral: false})
 
 	payload := []byte("test payload")
 
@@ -750,7 +750,7 @@ func BenchmarkNode_AddSubscription(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		transport := &capturingTransport{}
 		client, _, _ := NewClientSession(ctx, node, transport, JSONMarshaler{})
-		node.addSubscription(ctx, "test-channel", subscriber{client: client, ephemeral: false})
+		node.AddSubscription(ctx, "test-channel", Subscriber{client: client, ephemeral: false})
 	}
 }
 

@@ -371,6 +371,9 @@ func (*PublishResponse) Descriptor() ([]byte, []int) {
 
 type DisconnectRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	Sessions      []string               `protobuf:"bytes,1,rep,name=sessions,proto3" json:"sessions,omitempty"`
+	Code          uint32                 `protobuf:"varint,2,opt,name=code,proto3" json:"code,omitempty"`
+	Reason        string                 `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -405,8 +408,30 @@ func (*DisconnectRequest) Descriptor() ([]byte, []int) {
 	return file_server_v1_api_proto_rawDescGZIP(), []int{6}
 }
 
+func (x *DisconnectRequest) GetSessions() []string {
+	if x != nil {
+		return x.Sessions
+	}
+	return nil
+}
+
+func (x *DisconnectRequest) GetCode() uint32 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *DisconnectRequest) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
 type DisconnectResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	Results       map[string]bool        `protobuf:"bytes,1,rep,name=results,proto3" json:"results,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -441,8 +466,17 @@ func (*DisconnectResponse) Descriptor() ([]byte, []int) {
 	return file_server_v1_api_proto_rawDescGZIP(), []int{7}
 }
 
+func (x *DisconnectResponse) GetResults() map[string]bool {
+	if x != nil {
+		return x.Results
+	}
+	return nil
+}
+
 type SubscribeRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	Channels      []string               `protobuf:"bytes,2,rep,name=channels,proto3" json:"channels,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -477,8 +511,23 @@ func (*SubscribeRequest) Descriptor() ([]byte, []int) {
 	return file_server_v1_api_proto_rawDescGZIP(), []int{8}
 }
 
+func (x *SubscribeRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *SubscribeRequest) GetChannels() []string {
+	if x != nil {
+		return x.Channels
+	}
+	return nil
+}
+
 type SubscribeResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	Results       map[string]bool        `protobuf:"bytes,1,rep,name=results,proto3" json:"results,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -513,8 +562,17 @@ func (*SubscribeResponse) Descriptor() ([]byte, []int) {
 	return file_server_v1_api_proto_rawDescGZIP(), []int{9}
 }
 
+func (x *SubscribeResponse) GetResults() map[string]bool {
+	if x != nil {
+		return x.Results
+	}
+	return nil
+}
+
 type UnsubscribeRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	Channels      []string               `protobuf:"bytes,2,rep,name=channels,proto3" json:"channels,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -549,8 +607,23 @@ func (*UnsubscribeRequest) Descriptor() ([]byte, []int) {
 	return file_server_v1_api_proto_rawDescGZIP(), []int{10}
 }
 
+func (x *UnsubscribeRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *UnsubscribeRequest) GetChannels() []string {
+	if x != nil {
+		return x.Channels
+	}
+	return nil
+}
+
 type UnsubscribeResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	Results       map[string]bool        `protobuf:"bytes,1,rep,name=results,proto3" json:"results,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -583,6 +656,13 @@ func (x *UnsubscribeResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use UnsubscribeResponse.ProtoReflect.Descriptor instead.
 func (*UnsubscribeResponse) Descriptor() ([]byte, []int) {
 	return file_server_v1_api_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *UnsubscribeResponse) GetResults() map[string]bool {
+	if x != nil {
+		return x.Results
+	}
+	return nil
 }
 
 type Publication_Options struct {
@@ -721,13 +801,34 @@ const file_server_v1_api_proto_rawDesc = "" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x11\n" +
-	"\x0fPublishResponse\"\x13\n" +
-	"\x11DisconnectRequest\"\x14\n" +
-	"\x12DisconnectResponse\"\x12\n" +
-	"\x10SubscribeRequest\"\x13\n" +
-	"\x11SubscribeResponse\"\x14\n" +
-	"\x12UnsubscribeRequest\"\x15\n" +
-	"\x13UnsubscribeResponse2\xe6\x03\n" +
+	"\x0fPublishResponse\"[\n" +
+	"\x11DisconnectRequest\x12\x1a\n" +
+	"\bsessions\x18\x01 \x03(\tR\bsessions\x12\x12\n" +
+	"\x04code\x18\x02 \x01(\rR\x04code\x12\x16\n" +
+	"\x06reason\x18\x03 \x01(\tR\x06reason\"\xa2\x01\n" +
+	"\x12DisconnectResponse\x12P\n" +
+	"\aresults\x18\x01 \x03(\v26.messageloop.server.v1.DisconnectResponse.ResultsEntryR\aresults\x1a:\n" +
+	"\fResultsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\bR\x05value:\x028\x01\"M\n" +
+	"\x10SubscribeRequest\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1a\n" +
+	"\bchannels\x18\x02 \x03(\tR\bchannels\"\xa0\x01\n" +
+	"\x11SubscribeResponse\x12O\n" +
+	"\aresults\x18\x01 \x03(\v25.messageloop.server.v1.SubscribeResponse.ResultsEntryR\aresults\x1a:\n" +
+	"\fResultsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\bR\x05value:\x028\x01\"O\n" +
+	"\x12UnsubscribeRequest\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1a\n" +
+	"\bchannels\x18\x02 \x03(\tR\bchannels\"\xa4\x01\n" +
+	"\x13UnsubscribeResponse\x12Q\n" +
+	"\aresults\x18\x01 \x03(\v27.messageloop.server.v1.UnsubscribeResponse.ResultsEntryR\aresults\x1a:\n" +
+	"\fResultsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\bR\x05value:\x028\x012\xe6\x03\n" +
 	"\n" +
 	"APIService\x12X\n" +
 	"\aPublish\x12%.messageloop.server.v1.PublishRequest\x1a&.messageloop.server.v1.PublishResponse\x12a\n" +
@@ -749,7 +850,7 @@ func file_server_v1_api_proto_rawDescGZIP() []byte {
 	return file_server_v1_api_proto_rawDescData
 }
 
-var file_server_v1_api_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_server_v1_api_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_server_v1_api_proto_goTypes = []any{
 	(*SurveyRequest)(nil),           // 0: messageloop.server.v1.SurveyRequest
 	(*SurveyResponse)(nil),          // 1: messageloop.server.v1.SurveyResponse
@@ -766,34 +867,40 @@ var file_server_v1_api_proto_goTypes = []any{
 	(*Publication_Options)(nil),     // 12: messageloop.server.v1.Publication.Options
 	(*Publication_Destination)(nil), // 13: messageloop.server.v1.Publication.Destination
 	nil,                             // 14: messageloop.server.v1.PublishRequest.MetadataEntry
-	(*pb.CloudEvent)(nil),           // 15: io.cloudevents.v1.CloudEvent
-	(*v1.Error)(nil),                // 16: messageloop.shared.v1.Error
+	nil,                             // 15: messageloop.server.v1.DisconnectResponse.ResultsEntry
+	nil,                             // 16: messageloop.server.v1.SubscribeResponse.ResultsEntry
+	nil,                             // 17: messageloop.server.v1.UnsubscribeResponse.ResultsEntry
+	(*pb.CloudEvent)(nil),           // 18: io.cloudevents.v1.CloudEvent
+	(*v1.Error)(nil),                // 19: messageloop.shared.v1.Error
 }
 var file_server_v1_api_proto_depIdxs = []int32{
-	15, // 0: messageloop.server.v1.SurveyRequest.payload:type_name -> io.cloudevents.v1.CloudEvent
+	18, // 0: messageloop.server.v1.SurveyRequest.payload:type_name -> io.cloudevents.v1.CloudEvent
 	2,  // 1: messageloop.server.v1.SurveyResponse.results:type_name -> messageloop.server.v1.SurveyResult
-	15, // 2: messageloop.server.v1.SurveyResult.payload:type_name -> io.cloudevents.v1.CloudEvent
-	16, // 3: messageloop.server.v1.SurveyResult.error:type_name -> messageloop.shared.v1.Error
+	18, // 2: messageloop.server.v1.SurveyResult.payload:type_name -> io.cloudevents.v1.CloudEvent
+	19, // 3: messageloop.server.v1.SurveyResult.error:type_name -> messageloop.shared.v1.Error
 	13, // 4: messageloop.server.v1.Publication.destination:type_name -> messageloop.server.v1.Publication.Destination
 	12, // 5: messageloop.server.v1.Publication.options:type_name -> messageloop.server.v1.Publication.Options
-	15, // 6: messageloop.server.v1.Publication.payload:type_name -> io.cloudevents.v1.CloudEvent
+	18, // 6: messageloop.server.v1.Publication.payload:type_name -> io.cloudevents.v1.CloudEvent
 	14, // 7: messageloop.server.v1.PublishRequest.metadata:type_name -> messageloop.server.v1.PublishRequest.MetadataEntry
 	3,  // 8: messageloop.server.v1.PublishRequest.publications:type_name -> messageloop.server.v1.Publication
-	4,  // 9: messageloop.server.v1.APIService.Publish:input_type -> messageloop.server.v1.PublishRequest
-	6,  // 10: messageloop.server.v1.APIService.Disconnect:input_type -> messageloop.server.v1.DisconnectRequest
-	8,  // 11: messageloop.server.v1.APIService.Subscribe:input_type -> messageloop.server.v1.SubscribeRequest
-	10, // 12: messageloop.server.v1.APIService.Unsubscribe:input_type -> messageloop.server.v1.UnsubscribeRequest
-	0,  // 13: messageloop.server.v1.APIService.Survey:input_type -> messageloop.server.v1.SurveyRequest
-	5,  // 14: messageloop.server.v1.APIService.Publish:output_type -> messageloop.server.v1.PublishResponse
-	7,  // 15: messageloop.server.v1.APIService.Disconnect:output_type -> messageloop.server.v1.DisconnectResponse
-	9,  // 16: messageloop.server.v1.APIService.Subscribe:output_type -> messageloop.server.v1.SubscribeResponse
-	11, // 17: messageloop.server.v1.APIService.Unsubscribe:output_type -> messageloop.server.v1.UnsubscribeResponse
-	1,  // 18: messageloop.server.v1.APIService.Survey:output_type -> messageloop.server.v1.SurveyResponse
-	14, // [14:19] is the sub-list for method output_type
-	9,  // [9:14] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	15, // 9: messageloop.server.v1.DisconnectResponse.results:type_name -> messageloop.server.v1.DisconnectResponse.ResultsEntry
+	16, // 10: messageloop.server.v1.SubscribeResponse.results:type_name -> messageloop.server.v1.SubscribeResponse.ResultsEntry
+	17, // 11: messageloop.server.v1.UnsubscribeResponse.results:type_name -> messageloop.server.v1.UnsubscribeResponse.ResultsEntry
+	4,  // 12: messageloop.server.v1.APIService.Publish:input_type -> messageloop.server.v1.PublishRequest
+	6,  // 13: messageloop.server.v1.APIService.Disconnect:input_type -> messageloop.server.v1.DisconnectRequest
+	8,  // 14: messageloop.server.v1.APIService.Subscribe:input_type -> messageloop.server.v1.SubscribeRequest
+	10, // 15: messageloop.server.v1.APIService.Unsubscribe:input_type -> messageloop.server.v1.UnsubscribeRequest
+	0,  // 16: messageloop.server.v1.APIService.Survey:input_type -> messageloop.server.v1.SurveyRequest
+	5,  // 17: messageloop.server.v1.APIService.Publish:output_type -> messageloop.server.v1.PublishResponse
+	7,  // 18: messageloop.server.v1.APIService.Disconnect:output_type -> messageloop.server.v1.DisconnectResponse
+	9,  // 19: messageloop.server.v1.APIService.Subscribe:output_type -> messageloop.server.v1.SubscribeResponse
+	11, // 20: messageloop.server.v1.APIService.Unsubscribe:output_type -> messageloop.server.v1.UnsubscribeResponse
+	1,  // 21: messageloop.server.v1.APIService.Survey:output_type -> messageloop.server.v1.SurveyResponse
+	17, // [17:22] is the sub-list for method output_type
+	12, // [12:17] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_server_v1_api_proto_init() }
@@ -807,7 +914,7 @@ func file_server_v1_api_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_server_v1_api_proto_rawDesc), len(file_server_v1_api_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   15,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
