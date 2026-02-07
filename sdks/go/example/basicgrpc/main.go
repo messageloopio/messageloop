@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
@@ -18,9 +19,13 @@ func main() {
 
 // BasicGRPCExample demonstrates a basic gRPC connection.
 func BasicGRPCExample() error {
+	serverAddr := os.Getenv("SERVER_ADDR")
+	if serverAddr == "" {
+		serverAddr = "localhost:9090"
+	}
 	// Create a gRPC client
 	client, err := messageloopgo.DialGRPC(
-		"localhost:9090",
+		serverAddr,
 		messageloopgo.WithClientID("example-grpc-client"),
 	)
 	if err != nil {
