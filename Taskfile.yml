@@ -1,12 +1,5 @@
 version: '3'
 
-env:
-  POSTGRES_USER: messageloopio
-  POSTGRES_PASSWORD: messageloopio
-  POSTGRES_HOST: localhost
-  POSTGRES_PORT: 5432
-  POSTGRES_DB: messageloopio
-
 tasks:
 
   init:
