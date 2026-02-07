@@ -1,7 +1,7 @@
 {
   "swagger": "2.0",
   "info": {
-    "title": "event/v1/events.proto",
+    "title": "buf:lint:ignore PACKAGE_DIRECTORY_MATCH",
     "version": "version not set"
   },
   "consumes": [
