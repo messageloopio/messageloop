@@ -3,7 +3,7 @@ syntax = "proto3";
 // buf:lint:ignore PACKAGE_DIRECTORY_MATCH
 package messageloop.event.v1;
 
-option go_package = "github.com/deeplooplabs/messageloop/genproto/go/event/v1;eventpb";
+option go_package = "github.com/messageloopio/messageloop/genproto/go/event/v1;eventpb";
 
 message PublishEvent {
   string channel = 1;

@@ -136,7 +136,7 @@ func (n *Node) AddSubscription(ctx context.Context, ch string, sub Subscriber) e
 	if first {
 		if n.broker != nil {
 			if err := n.broker.Subscribe(ch); err != nil {
-				n.hub.removeSub(ch, sub.client)
+				n.hub.removeSub(ch, sub.Client)
 				return err
 			}
 		}

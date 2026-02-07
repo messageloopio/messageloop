@@ -105,21 +105,29 @@ func (h *connShard) remove(sessionID string) {
 type subShard struct {
 	mu sync.RWMutex
 	// registry to hold active subscriptions of clients to channels with some additional info.
-	subs            map[string]map[string]subscriber
+	subs            map[string]map[string]Subscriber
 	maxTimeLagMilli int64
 }
 
 func newSubShard(maxTimeLagMilli int64) *subShard {
 	return &subShard{
-		subs:            make(map[string]map[string]subscriber),
+		subs:            make(map[string]map[string]Subscriber),
 		maxTimeLagMilli: maxTimeLagMilli,
 	}
 }
 
 // Subscriber represents a client that can subscribe to channels.
 type Subscriber struct {
-	client    *ClientSession
-	ephemeral bool
+	Client    *ClientSession
+	Ephemeral bool
+}
+
+// NewSubscriber creates a new Subscriber.
+func NewSubscriber(client *ClientSession, ephemeral bool) Subscriber {
+	return Subscriber{
+		Client:    client,
+		Ephemeral: ephemeral,
+	}
 }
 
 // NumSubscribers returns number of current subscribers for a given channel.
@@ -138,7 +146,7 @@ func (h *subShard) addSub(ch string, sub Subscriber) (bool, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	uid := sub.client.SessionID()
+	uid := sub.Client.SessionID()
 
 	_, ok := h.subs[ch]
 	if !ok {
@@ -232,7 +240,7 @@ func (h *subShard) broadcastPublication(channel string, pub *Publication) error 
 	})
 
 	for _, sub := range subscribers {
-		if err := sub.client.Send(ctx, out); err != nil {
+		if err := sub.Client.Send(ctx, out); err != nil {
 			log.ErrorContext(ctx, "send publication error", err)
 			continue
 		}
@@ -290,7 +298,7 @@ func (h *Hub) GetSubscribers(ch string) []*ClientSession {
 
 	result := make([]*ClientSession, 0, len(subscribers))
 	for _, sub := range subscribers {
-		result = append(result, sub.client)
+		result = append(result, sub.Client)
 	}
 	return result
 }

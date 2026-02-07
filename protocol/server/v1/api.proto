@@ -4,7 +4,7 @@ syntax = "proto3";
 package messageloop.server.v1;
 
 // buf:lint:ignore FILE_SAME_GO_PACKAGE
-option go_package = "github.com/deeplooplabs/messageloop/genproto/go/server/v1;serverpb";
+option go_package = "github.com/messageloopio/messageloop/genproto/go/server/v1;serverpb";
 
 import "includes/cloudevents/cloudevents.proto";
 import "shared/v1/errors.proto";

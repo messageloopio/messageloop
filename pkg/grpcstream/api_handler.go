@@ -3,7 +3,6 @@ package grpcstream
 import (
 	"context"
 
-	cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	"github.com/lynx-go/x/log"
 	"github.com/messageloopio/messageloop"
 	serverpb "github.com/messageloopio/messageloop/genproto/server/v1"
@@ -74,7 +73,7 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverpb.PublishRe
 				})
 
 				if err := client.Send(ctx, out); err != nil {
-					log.ErrorContext(ctx, "failed to send to session", "session_id", sessionID, "error", err)
+					log.ErrorContext(ctx, "failed to send to session", err)
 				}
 			}
 		}
@@ -88,7 +87,7 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverpb.PublishRe
 					log.DebugContext(ctx, "add_history option set but not yet implemented", "channel", channel)
 				}
 				if err := h.node.Publish(channel, data, publishOpts...); err != nil {
-					log.ErrorContext(ctx, "failed to publish to channel", "channel", channel, "error", err)
+					log.ErrorContext(ctx, "failed to publish to channel", err)
 				}
 			}
 		}
@@ -118,7 +117,7 @@ func (h *apiServiceHandler) Disconnect(ctx context.Context, req *serverpb.Discon
 
 		if err := client.Close(disconnect); err != nil {
 			results[sessionID] = false
-			log.ErrorContext(ctx, "failed to disconnect session", "session_id", sessionID, "error", err)
+			log.ErrorContext(ctx, "failed to disconnect session", err)
 		} else {
 			results[sessionID] = true
 		}
@@ -143,14 +142,11 @@ func (h *apiServiceHandler) Subscribe(ctx context.Context, req *serverpb.Subscri
 
 	for _, ch := range req.Channels {
 		// Create subscriber (non-ephemeral for server-side subscriptions)
-		sub := messageloop.Subscriber{
-			client:    client,
-			ephemeral: false,
-		}
+		sub := messageloop.NewSubscriber(client, false)
 
 		if err := h.node.AddSubscription(ctx, ch, sub); err != nil {
 			results[ch] = false
-			log.ErrorContext(ctx, "failed to subscribe to channel", "channel", ch, "error", err)
+			log.ErrorContext(ctx, "failed to subscribe to channel", err)
 		} else {
 			results[ch] = true
 		}
@@ -176,7 +172,7 @@ func (h *apiServiceHandler) Unsubscribe(ctx context.Context, req *serverpb.Unsub
 	for _, ch := range req.Channels {
 		if err := h.node.RemoveSubscription(ch, client); err != nil {
 			results[ch] = false
-			log.ErrorContext(ctx, "failed to unsubscribe from channel", "channel", ch, "error", err)
+			log.ErrorContext(ctx, "failed to unsubscribe from channel", err)
 		} else {
 			results[ch] = true
 		}

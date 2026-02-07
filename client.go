@@ -502,9 +502,9 @@ func (c *ClientSession) onSubscribe(ctx context.Context, in *clientpb.InboundMes
 			}
 		}
 
-		if err := c.node.AddSubscription(ctx, ch.Channel, Subscriber{client: c, ephemeral: ch.Ephemeral}); err != nil {
+		if err := c.node.AddSubscription(ctx, ch.Channel, Subscriber{Client: c, Ephemeral: ch.Ephemeral}); err != nil {
 			for _, s := range subs {
-				if rmErr := c.node.removeSubscription(s.Channel, c); rmErr != nil {
+				if rmErr := c.node.RemoveSubscription(s.Channel, c); rmErr != nil {
 					log.WarnContext(ctx, "failed to rollback subscription", "channel", s.Channel, "error", rmErr)
 				}
 			}
@@ -543,7 +543,7 @@ func (c *ClientSession) write(ctx context.Context, msg proto.Message) error {
 func (c *ClientSession) onUnsubscribe(ctx context.Context, in *clientpb.InboundMessage, unsubscribe *clientpb.Unsubscribe) error {
 	for _, sub := range unsubscribe.Subscriptions {
 		// Remove subscription
-		_ = c.node.removeSubscription(sub.Channel, c)
+		_ = c.node.RemoveSubscription(sub.Channel, c)
 
 		// Notify proxy about unsubscription
 		p := c.node.FindProxy(sub.Channel, "unsubscribe")
