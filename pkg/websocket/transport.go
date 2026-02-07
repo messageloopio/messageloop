@@ -3,8 +3,8 @@ package websocket
 import (
 	"time"
 
-	"github.com/deeplooplabs/messageloop"
 	"github.com/gorilla/websocket"
+	"github.com/messageloopio/messageloop"
 )
 
 type Transport struct {

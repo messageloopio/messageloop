@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
-	sharedpb "github.com/deeplooplabs/messageloop/genproto/shared/v1"
-	clientpb "github.com/deeplooplabs/messageloop/genproto/v1"
+	sharedpb "github.com/messageloopio/messageloop/genproto/shared/v1"
+	clientpb "github.com/messageloopio/messageloop/genproto/v1"
 )
 
 func TestJSONMarshaler_Name(t *testing.T) {

@@ -195,10 +195,10 @@ case <-idleTimer.C:
 ### ✅ Unit Tests
 ```bash
 $ go test ./...
-ok      github.com/deeplooplabs/messageloop         0.300s
-ok      github.com/deeplooplabs/messageloop/pkg/topics      10.777s
-ok      github.com/deeplooplabs/messageloop/pkg/websocket   4.662s
-ok      github.com/deeplooplabs/messageloop/proxy           5.014s
+ok      github.com/messageloopio/messageloop         0.300s
+ok      github.com/messageloopio/messageloop/pkg/topics      10.777s
+ok      github.com/messageloopio/messageloop/pkg/websocket   4.662s
+ok      github.com/messageloopio/messageloop/proxy           5.014s
 ```
 
 ### ✅ Build Verification

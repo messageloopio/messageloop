@@ -18,7 +18,7 @@ A realtime messaging platform server written in Go, providing pub/sub messaging 
 ### Installation
 
 ```bash
-git clone https://github.com/deeplooplabs/messageloop.git
+git clone https://github.com/messageloopio/messageloop.git
 cd messageloop
 go mod download
 ```
@@ -55,7 +55,7 @@ broker:
 ### Go SDK
 
 ```go
-import "github.com/deeplooplabs/messageloop/sdks/go"
+import "github.com/messageloopio/messageloop/sdks/go"
 
 client, err := messageloop.Dial(context.Background(),
     "ws://localhost:9080/ws",

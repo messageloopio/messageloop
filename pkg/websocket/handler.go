@@ -5,11 +5,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/deeplooplabs/messageloop"
-	sharedpb "github.com/deeplooplabs/messageloop/genproto/shared/v1"
-	clientpb "github.com/deeplooplabs/messageloop/genproto/v1"
 	"github.com/gorilla/websocket"
 	"github.com/lynx-go/x/log"
+	"github.com/messageloopio/messageloop"
+	sharedpb "github.com/messageloopio/messageloop/genproto/shared/v1"
+	clientpb "github.com/messageloopio/messageloop/genproto/v1"
 )
 
 type Handler struct {

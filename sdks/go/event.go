@@ -4,8 +4,8 @@ import (
 	"github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
 	"github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
-	clientpb "github.com/deeplooplabs/messageloop/genproto/v1"
 	"github.com/google/uuid"
+	clientpb "github.com/messageloopio/messageloop/genproto/v1"
 )
 
 // Message represents a received message from a subscribed channel.

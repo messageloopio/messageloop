@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/deeplooplabs/messageloop"
-	"github.com/deeplooplabs/messageloop/config"
+	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/config"
 	"github.com/redis/go-redis/v9"
 )
 

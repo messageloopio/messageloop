@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	messageloopgo "github.com/deeplooplabs/messageloop/sdks/go"
+	messageloopgo "github.com/messageloopio/messageloop/sdks/go"
 )
 
 func main() {

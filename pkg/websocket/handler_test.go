@@ -4,10 +4,10 @@ import (
 	"testing"
 
 	cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
-	"github.com/deeplooplabs/messageloop"
-	clientpb "github.com/deeplooplabs/messageloop/genproto/v1"
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/encoding/json"
+	"github.com/messageloopio/messageloop"
+	clientpb "github.com/messageloopio/messageloop/genproto/v1"
 	"github.com/stretchr/testify/require"
 )
 

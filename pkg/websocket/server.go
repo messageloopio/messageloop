@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/deeplooplabs/messageloop"
 	"github.com/lynx-go/lynx"
 	"github.com/lynx-go/x/log"
+	"github.com/messageloopio/messageloop"
 )
 
 type Server struct {

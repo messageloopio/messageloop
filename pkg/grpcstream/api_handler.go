@@ -4,10 +4,10 @@ import (
 	"context"
 
 	cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
-	clientpb "github.com/deeplooplabs/messageloop/genproto/v1"
-	serverpb "github.com/deeplooplabs/messageloop/genproto/server/v1"
-	"github.com/deeplooplabs/messageloop"
 	"github.com/lynx-go/x/log"
+	"github.com/messageloopio/messageloop"
+	serverpb "github.com/messageloopio/messageloop/genproto/server/v1"
+	clientpb "github.com/messageloopio/messageloop/genproto/v1"
 )
 
 type apiServiceHandler struct {

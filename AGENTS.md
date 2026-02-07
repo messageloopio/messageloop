@@ -53,9 +53,9 @@ import (
     "time"
 
     cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
-    sharedpb "github.com/deeplooplabs/messageloop/genproto/shared/v1"
-    clientpb "github.com/deeplooplabs/messageloop/genproto/v1"
-    "github.com/deeplooplabs/messageloop/proxy"
+    sharedpb "github.com/messageloopio/messageloop/genproto/shared/v1"
+    clientpb "github.com/messageloopio/messageloop/genproto/v1"
+    "github.com/messageloopio/messageloop/proxy"
     "github.com/lynx-go/x/log"
     "github.com/samber/lo"
     "google.golang.org/protobuf/proto"

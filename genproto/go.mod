@@ -1,4 +1,4 @@
-module github.com/deeplooplabs/messageloop/genproto
+module github.com/messageloopio/messageloop/genproto
 
 go 1.25
 

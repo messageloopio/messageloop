@@ -88,13 +88,13 @@ func CloudEventToPb(event *cloudevents.Event) (*pb.CloudEvent, error)
 // 之前
 import (
     pb "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
-    messageloopgo "github.com/deeplooplabs/messageloop/sdks/go"
+    messageloopgo "github.com/messageloopio/messageloop/sdks/go"
 )
 
 // 现在
 import (
     cloudevents "github.com/cloudevents/sdk-go/v2"
-    messageloopgo "github.com/deeplooplabs/messageloop/sdks/go"
+    messageloopgo "github.com/messageloopio/messageloop/sdks/go"
 )
 ```
 

@@ -6,12 +6,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/deeplooplabs/messageloop/config"
-	"github.com/deeplooplabs/messageloop/proxy"
-	clientpb "github.com/deeplooplabs/messageloop/genproto/v1"
 	cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
+	"github.com/messageloopio/messageloop/config"
+	clientpb "github.com/messageloopio/messageloop/genproto/v1"
+	"github.com/messageloopio/messageloop/proxy"
 )
 
 type Node struct {

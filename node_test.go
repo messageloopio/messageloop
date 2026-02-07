@@ -8,7 +8,7 @@ import (
 	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
-	"github.com/deeplooplabs/messageloop/proxy"
+	"github.com/messageloopio/messageloop/proxy"
 )
 
 func TestNewNode(t *testing.T) {

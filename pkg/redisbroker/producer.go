@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/deeplooplabs/messageloop"
+	"github.com/messageloopio/messageloop"
 	"github.com/redis/go-redis/v9"
 )
 

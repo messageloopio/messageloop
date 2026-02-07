@@ -10,7 +10,7 @@ package serverpb
 
 import (
 	pb "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
-	v1 "github.com/deeplooplabs/messageloop/genproto/shared/v1"
+	v1 "github.com/messageloopio/messageloop/genproto/shared/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -836,7 +836,7 @@ const file_server_v1_api_proto_rawDesc = "" +
 	"Disconnect\x12(.messageloop.server.v1.DisconnectRequest\x1a).messageloop.server.v1.DisconnectResponse\x12^\n" +
 	"\tSubscribe\x12'.messageloop.server.v1.SubscribeRequest\x1a(.messageloop.server.v1.SubscribeResponse\x12d\n" +
 	"\vUnsubscribe\x12).messageloop.server.v1.UnsubscribeRequest\x1a*.messageloop.server.v1.UnsubscribeResponse\x12U\n" +
-	"\x06Survey\x12$.messageloop.server.v1.SurveyRequest\x1a%.messageloop.server.v1.SurveyResponseBDZBgithub.com/deeplooplabs/messageloop/genproto/go/server/v1;serverpbb\x06proto3"
+	"\x06Survey\x12$.messageloop.server.v1.SurveyRequest\x1a%.messageloop.server.v1.SurveyResponseBEZCgithub.com/messageloopio/messageloop/genproto/go/server/v1;serverpbb\x06proto3"
 
 var (
 	file_server_v1_api_proto_rawDescOnce sync.Once

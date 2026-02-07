@@ -10,8 +10,8 @@ import (
 	"net/http"
 	"time"
 
-	proxypb "github.com/deeplooplabs/messageloop/genproto/proxy/v1"
 	"github.com/lynx-go/x/log"
+	proxypb "github.com/messageloopio/messageloop/genproto/proxy/v1"
 )
 
 // HTTPProxy implements Proxy using HTTP transport.

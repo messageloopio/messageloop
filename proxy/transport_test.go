@@ -15,7 +15,7 @@ import (
 	"google.golang.org/grpc"
 
 	cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
-	proxypb "github.com/deeplooplabs/messageloop/genproto/proxy/v1"
+	proxypb "github.com/messageloopio/messageloop/genproto/proxy/v1"
 )
 
 func TestNewHTTPProxy(t *testing.T) {
