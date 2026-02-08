@@ -5,32 +5,52 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/messageloopio/messageloop"
 	"github.com/redis/go-redis/v9"
 )
 
-// consume runs the consumer loop that reads messages from Redis Streams using Consumer Groups.
-// It combines stream reading (for persistence) with pub/sub (for real-time notifications).
+// consume runs the consumer loop that reads messages from Redis Streams and Pub/Sub.
+// It uses separate goroutines for stream reading and pub/sub handling to avoid blocking.
 func (b *redisBroker) consume() {
 	defer b.wg.Done()
 
 	// Consumer ID for this node
 	consumerID := fmt.Sprintf("node-%s", b.nodeID)
 
-	// Start with empty stream list
+	// Shared state between goroutines
 	var streams []string
+	var mu sync.RWMutex
 	pendingIDs := make(map[string]string) // stream -> last read ID
+
+	// Channel for pub/sub messages - buffered to avoid blocking
+	pubsubCh := make(chan *redis.Message, 100)
 
 	// Create a pub/sub connection for real-time notifications
 	pubSub := b.client.PSubscribe(b.ctx, b.options.PubSubPrefix+"*")
 	defer pubSub.Close()
 
-	// Channel for pub/sub messages
-	pubsubCh := pubSub.Channel()
+	// Start pub/sub reader goroutine
+	go func() {
+		for {
+			msg, err := pubSub.Receive(b.ctx)
+			if err != nil {
+				close(pubsubCh)
+				return
+			}
+			if m, ok := msg.(*redis.Message); ok {
+				select {
+				case pubsubCh <- m:
+				case <-b.ctx.Done():
+					return
+				}
+			}
+		}
+	}()
 
-	// Create a stream reader context that we can restart
+	// Create a stream reader context
 	streamCtx, streamCancel := context.WithCancel(b.ctx)
 	defer streamCancel()
 
@@ -43,10 +63,13 @@ func (b *redisBroker) consume() {
 			if !ok {
 				return
 			}
-			// Handle real-time pub/sub notification
+			// Handle real-time pub/sub notification immediately
 			if err := b.handlePubSubMessage(msg); err != nil {
 				log.Printf("[redisbroker] error handling pub/sub message: %v", err)
 			}
+
+		case <-streamCtx.Done():
+			return
 
 		default:
 			// Check for new subscriptions
@@ -56,12 +79,14 @@ func (b *redisBroker) consume() {
 				stream := b.options.StreamPrefix + ch
 				// Check if we already track this stream
 				tracked := false
+				mu.RLock()
 				for _, s := range streams {
 					if s == stream {
 						tracked = true
 						break
 					}
 				}
+				mu.RUnlock()
 				if !tracked {
 					newSubs = append(newSubs, ch)
 				}
@@ -71,32 +96,22 @@ func (b *redisBroker) consume() {
 			// Add new streams to our list
 			for _, ch := range newSubs {
 				stream := b.options.StreamPrefix + ch
-				// XReadGroup requires alternating stream keys and IDs: [key1, id1, key2, id2, ...]
+				mu.Lock()
 				streams = append(streams, stream, ">")
 				pendingIDs[stream] = ">"
+				mu.Unlock()
 				log.Printf("[redisbroker] starting to consume stream: %s", stream)
 			}
 
-			// If we have streams to read, use XReadGroup
+			// If we have streams to read, read them
 			if len(streams) > 0 {
-				if err := b.readStreams(streamCtx, consumerID, streams, pendingIDs); err != nil {
-					if err == context.Canceled {
-						return
-					}
-					log.Printf("[redisbroker] stream read error, will retry: %v", err)
-					// Wait before retrying
-					select {
-					case <-b.ctx.Done():
-						return
-					case <-time.After(time.Second):
-					}
-				}
+				b.readStreams(streamCtx, consumerID, &mu, &pendingIDs, streams)
 			} else {
-				// No streams to read, wait a bit before checking again
+				// No streams, wait a bit before checking again
 				select {
 				case <-b.ctx.Done():
 					return
-				case <-time.After(500 * time.Millisecond):
+				case <-time.After(50 * time.Millisecond):
 				}
 			}
 		}
@@ -104,22 +119,28 @@ func (b *redisBroker) consume() {
 }
 
 // readStreams reads messages from Redis Streams using XReadGroup.
-func (b *redisBroker) readStreams(ctx context.Context, consumerID string, streams []string, pendingIDs map[string]string) error {
+// This function is non-blocking and returns immediately when there's no data.
+func (b *redisBroker) readStreams(ctx context.Context, consumerID string, mu *sync.RWMutex, pendingIDs *map[string]string, streams []string) {
 	// Build the stream IDs argument for XReadGroup
 	args := redis.XReadGroupArgs{
 		Group:    b.options.ConsumerGroup,
 		Consumer: consumerID,
 		Streams:  streams,
 		Count:    10,
-		Block:    5 * time.Second, // Block for up to 5 seconds
+		Block:    100 * time.Millisecond, // Short block for faster response
 	}
 
 	result, err := b.client.XReadGroup(ctx, &args).Result()
 	if err != nil {
 		if err == context.DeadlineExceeded || err == context.Canceled {
-			return err
+			return
 		}
-		return fmt.Errorf("XReadGroup failed: %w", err)
+		// redis: nil means no messages available (not an error)
+		return
+	}
+
+	if result == nil {
+		return
 	}
 
 	// Process each stream's messages
@@ -134,34 +155,33 @@ func (b *redisBroker) readStreams(ctx context.Context, consumerID string, stream
 			// Parse the message payload
 			payload, ok := msg.Values["payload"].(string)
 			if !ok {
-				log.Printf("[redisbroker] invalid message format in stream %s", stream)
+				// Skip messages with invalid format, ack to remove from stream
+				b.client.XAck(ctx, stream, b.options.ConsumerGroup, msg.ID)
 				continue
 			}
 
 			redisMsg, err := deserializeMessage([]byte(payload))
 			if err != nil {
-				log.Printf("[redisbroker] failed to deserialize message: %v", err)
+				// Skip messages that can't be deserialized, ack to remove from stream
+				b.client.XAck(ctx, stream, b.options.ConsumerGroup, msg.ID)
 				continue
 			}
 
 			// Handle the message
 			if err := b.handleMessage(ch, redisMsg); err != nil {
-				log.Printf("[redisbroker] error handling message: %v", err)
 				// Don't ack on error - message will be retried
 				continue
 			}
 
 			// Acknowledge the message
-			if err := b.client.XAck(ctx, stream, b.options.ConsumerGroup, msg.ID).Err(); err != nil {
-				log.Printf("[redisbroker] failed to ack message: %v", err)
-			}
+			b.client.XAck(ctx, stream, b.options.ConsumerGroup, msg.ID)
 
 			// Update pending ID
-			pendingIDs[stream] = msg.ID
+			mu.Lock()
+			(*pendingIDs)[stream] = msg.ID
+			mu.Unlock()
 		}
 	}
-
-	return nil
 }
 
 // handlePubSubMessage processes a message received from Redis Pub/Sub.

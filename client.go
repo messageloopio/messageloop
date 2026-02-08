@@ -433,7 +433,7 @@ func (c *ClientSession) handleRPC(ctx context.Context, in *clientpb.InboundMessa
 
 func (c *ClientSession) handlePublish(ctx context.Context, in *clientpb.InboundMessage, event *cloudevents.CloudEvent) error {
 	if !c.Authenticated() {
-		return DisconnectStale
+		return DisconnectConnectionClosed
 	}
 	if event == nil {
 		return errors.New("missing data in publish message")
@@ -460,13 +460,6 @@ func (c *ClientSession) handlePublish(ctx context.Context, in *clientpb.InboundM
 		data = binaryData
 		isText = false
 	}
-
-	log.DebugContext(ctx, "publish data",
-		"channel", channel,
-		"textData", textData,
-		"binaryDataLen", len(binaryData),
-		"isText", isText,
-	)
 
 	if err := c.node.Publish(channel, data, WithClientDesc(c.ClientInfo()), WithAsBytes(true), WithIsText(isText)); err != nil {
 		return err
