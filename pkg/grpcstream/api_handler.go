@@ -67,7 +67,7 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverpb.PublishRe
 				out := messageloop.MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
 					out.Envelope = &clientpb.OutboundMessage_Publication{
 						Publication: &clientpb.Publication{
-							Envelopes: []*clientpb.Message{msg},
+							Messages: []*clientpb.Message{msg},
 						},
 					}
 				})

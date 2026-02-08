@@ -235,7 +235,7 @@ func (h *subShard) broadcastPublication(channel string, pub *Publication) error 
 
 	out := MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_Publication{Publication: &clientpb.Publication{
-			Envelopes: []*clientpb.Message{msg},
+			Messages: []*clientpb.Message{msg},
 		}}
 	})
 

@@ -20,7 +20,7 @@
     "messageloopv1Publication": {
       "type": "object",
       "properties": {
-        "envelopes": {
+        "messages": {
           "type": "array",
           "items": {
             "type": "object",

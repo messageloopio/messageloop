@@ -80,7 +80,7 @@ message Message {
 }
 
 message Publication {
-  repeated Message envelopes = 3;
+  repeated Message messages = 3;
 }
 
 message Connected {

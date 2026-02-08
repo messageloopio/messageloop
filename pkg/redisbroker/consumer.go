@@ -71,8 +71,8 @@ func (b *redisBroker) consume() {
 			// Add new streams to our list
 			for _, ch := range newSubs {
 				stream := b.options.StreamPrefix + ch
-				streams = append(streams, stream)
-				// Start reading from "> " (new messages only)
+				// XReadGroup requires alternating stream keys and IDs: [key1, id1, key2, id2, ...]
+				streams = append(streams, stream, ">")
 				pendingIDs[stream] = ">"
 				log.Printf("[redisbroker] starting to consume stream: %s", stream)
 			}

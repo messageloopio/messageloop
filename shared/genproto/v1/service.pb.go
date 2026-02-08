@@ -767,7 +767,7 @@ func (x *Message) GetPayload() *pb.CloudEvent {
 
 type Publication struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Envelopes     []*Message             `protobuf:"bytes,3,rep,name=envelopes,proto3" json:"envelopes,omitempty"`
+	Messages      []*Message             `protobuf:"bytes,3,rep,name=messages,proto3" json:"messages,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -802,9 +802,9 @@ func (*Publication) Descriptor() ([]byte, []int) {
 	return file_v1_service_proto_rawDescGZIP(), []int{6}
 }
 
-func (x *Publication) GetEnvelopes() []*Message {
+func (x *Publication) GetMessages() []*Message {
 	if x != nil {
-		return x.Envelopes
+		return x.Messages
 	}
 	return nil
 }
@@ -1520,9 +1520,9 @@ const file_v1_service_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
 	"\achannel\x18\x02 \x01(\tR\achannel\x12\x16\n" +
 	"\x06offset\x18\x03 \x01(\x04R\x06offset\x127\n" +
-	"\apayload\x18\x04 \x01(\v2\x1d.io.cloudevents.v1.CloudEventR\apayload\"D\n" +
-	"\vPublication\x125\n" +
-	"\tenvelopes\x18\x03 \x03(\v2\x17.messageloop.v1.MessageR\tenvelopes\"\xb0\x01\n" +
+	"\apayload\x18\x04 \x01(\v2\x1d.io.cloudevents.v1.CloudEventR\apayload\"B\n" +
+	"\vPublication\x123\n" +
+	"\bmessages\x18\x03 \x03(\v2\x17.messageloop.v1.MessageR\bmessages\"\xb0\x01\n" +
 	"\tConnected\x12\x1e\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\n" +
@@ -1633,7 +1633,7 @@ var file_v1_service_proto_depIdxs = []int32{
 	24, // 24: messageloop.v1.RPCReply.error:type_name -> messageloop.shared.v1.Error
 	23, // 25: messageloop.v1.RPCReply.payload:type_name -> io.cloudevents.v1.CloudEvent
 	23, // 26: messageloop.v1.Message.payload:type_name -> io.cloudevents.v1.CloudEvent
-	5,  // 27: messageloop.v1.Publication.envelopes:type_name -> messageloop.v1.Message
+	5,  // 27: messageloop.v1.Publication.messages:type_name -> messageloop.v1.Message
 	8,  // 28: messageloop.v1.Connected.subscriptions:type_name -> messageloop.v1.Subscription
 	6,  // 29: messageloop.v1.Connected.publications:type_name -> messageloop.v1.Publication
 	8,  // 30: messageloop.v1.Subscribe.subscriptions:type_name -> messageloop.v1.Subscription
