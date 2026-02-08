@@ -121,7 +121,7 @@ func TestRPCTimeout_FastResponse(t *testing.T) {
 	}
 
 	start := time.Now()
-	err = client.onRPC(ctx, in, event)
+	err = client.handleRPC(ctx, in, event)
 	duration := time.Since(start)
 
 	// Should succeed without timeout
@@ -168,7 +168,7 @@ func TestRPCTimeout_SlowResponse(t *testing.T) {
 	}
 
 	start := time.Now()
-	err = client.onRPC(ctx, in, event)
+	err = client.handleRPC(ctx, in, event)
 	duration := time.Since(start)
 
 	// Should not return error (error is sent to client via Send)

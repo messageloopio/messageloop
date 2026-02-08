@@ -182,23 +182,23 @@ func (c *ClientSession) handleMessage(ctx context.Context, in *clientpb.InboundM
 
 	switch msg := in.Envelope.(type) {
 	case *clientpb.InboundMessage_Connect:
-		return c.onConnect(ctx, in, msg.Connect)
+		return c.handleConnect(ctx, in, msg.Connect)
 	case *clientpb.InboundMessage_Publish:
-		return c.onPublish(ctx, in, msg.Publish)
+		return c.handlePublish(ctx, in, msg.Publish)
 	case *clientpb.InboundMessage_Subscribe:
-		return c.onSubscribe(ctx, in, msg.Subscribe)
+		return c.handleSubscribe(ctx, in, msg.Subscribe)
 	case *clientpb.InboundMessage_RpcRequest:
-		return c.onRPC(ctx, in, msg.RpcRequest)
+		return c.handleRPC(ctx, in, msg.RpcRequest)
 	case *clientpb.InboundMessage_Unsubscribe:
-		return c.onUnsubscribe(ctx, in, msg.Unsubscribe)
+		return c.handleUnsubscribe(ctx, in, msg.Unsubscribe)
 	case *clientpb.InboundMessage_Ping:
-		return c.onPing(ctx, in, msg.Ping)
+		return c.handlePing(ctx, in, msg.Ping)
 	case *clientpb.InboundMessage_SubRefresh:
-		return c.onSubRefresh(ctx, in, msg.SubRefresh)
+		return c.handleSubRefresh(ctx, in, msg.SubRefresh)
 	case *clientpb.InboundMessage_SurveyRequest:
-		return c.onSurvey(ctx, in, msg.SurveyRequest)
+		return c.handleSurvey(ctx, in, msg.SurveyRequest)
 	case *clientpb.InboundMessage_SurveyResponse:
-		return c.onSurveyResponse(ctx, in, msg.SurveyResponse)
+		return c.handleSurveyResponse(ctx, in, msg.SurveyResponse)
 	}
 	return nil
 }
@@ -211,7 +211,7 @@ const (
 	SystemMethodAuthenticate = "$authenticate"
 )
 
-func (c *ClientSession) onConnect(ctx context.Context, in *clientpb.InboundMessage, connect *clientpb.Connect) error {
+func (c *ClientSession) handleConnect(ctx context.Context, in *clientpb.InboundMessage, connect *clientpb.Connect) error {
 	c.mu.RLock()
 	authenticated := c.authenticated
 	closed := c.status == statusClosed
@@ -328,7 +328,7 @@ func (c *ClientSession) Authenticated() bool {
 	return c.authenticated
 }
 
-func (c *ClientSession) onRPC(ctx context.Context, in *clientpb.InboundMessage, event *cloudevents.CloudEvent) error {
+func (c *ClientSession) handleRPC(ctx context.Context, in *clientpb.InboundMessage, event *cloudevents.CloudEvent) error {
 	// Extract channel and method from the InboundMessage
 	channel := in.Channel
 	method := in.Method
@@ -431,28 +431,29 @@ func (c *ClientSession) onRPC(ctx context.Context, in *clientpb.InboundMessage, 
 	}))
 }
 
-func (c *ClientSession) onPublish(ctx context.Context, in *clientpb.InboundMessage, event *cloudevents.CloudEvent) error {
+func (c *ClientSession) handlePublish(ctx context.Context, in *clientpb.InboundMessage, event *cloudevents.CloudEvent) error {
 	if !c.Authenticated() {
 		return DisconnectStale
+	}
+	if event == nil {
+		return errors.New("missing data in publish message")
+	}
+	if in.Channel == "" {
+		return errors.New("missing channel in publish message")
+	}
+	if event.Source == "" {
+		event.Source = c.session
 	}
 
 	// Extract channel from InboundMessage
 	channel := in.Channel
-	if channel == "" {
-		// Fallback to event source if channel is not set
-		if event != nil && event.Source != "" {
-			channel = event.Source
-		}
-	}
 
 	// Extract data from CloudEvent
 	var data []byte
-	if event != nil {
-		if binaryData := event.GetBinaryData(); len(binaryData) > 0 {
-			data = binaryData
-		} else if textData := event.GetTextData(); textData != "" {
-			data = []byte(textData)
-		}
+	if binaryData := event.GetBinaryData(); len(binaryData) > 0 {
+		data = binaryData
+	} else if textData := event.GetTextData(); textData != "" {
+		data = []byte(textData)
 	}
 
 	if err := c.node.Publish(channel, data, WithClientDesc(c.ClientInfo()), WithAsBytes(true)); err != nil {
@@ -467,7 +468,7 @@ func (c *ClientSession) onPublish(ctx context.Context, in *clientpb.InboundMessa
 	}))
 }
 
-func (c *ClientSession) onSubscribe(ctx context.Context, in *clientpb.InboundMessage, sub *clientpb.Subscribe) error {
+func (c *ClientSession) handleSubscribe(ctx context.Context, in *clientpb.InboundMessage, sub *clientpb.Subscribe) error {
 	subs := []*clientpb.Subscription{}
 	for _, ch := range sub.Subscriptions {
 		// Proxy ACL check - check if there's a proxy configured for subscription ACL
@@ -540,7 +541,7 @@ func (c *ClientSession) write(ctx context.Context, msg proto.Message) error {
 	return c.transport.Write(bytes)
 }
 
-func (c *ClientSession) onUnsubscribe(ctx context.Context, in *clientpb.InboundMessage, unsubscribe *clientpb.Unsubscribe) error {
+func (c *ClientSession) handleUnsubscribe(ctx context.Context, in *clientpb.InboundMessage, unsubscribe *clientpb.Unsubscribe) error {
 	for _, sub := range unsubscribe.Subscriptions {
 		// Remove subscription
 		_ = c.node.RemoveSubscription(sub.Channel, c)
@@ -565,7 +566,7 @@ func (c *ClientSession) onUnsubscribe(ctx context.Context, in *clientpb.InboundM
 	}))
 }
 
-func (c *ClientSession) onPing(ctx context.Context, in *clientpb.InboundMessage, ping *clientpb.Ping) error {
+func (c *ClientSession) handlePing(ctx context.Context, in *clientpb.InboundMessage, ping *clientpb.Ping) error {
 	c.ResetActivity()
 	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_Pong{
@@ -574,7 +575,7 @@ func (c *ClientSession) onPing(ctx context.Context, in *clientpb.InboundMessage,
 	}))
 }
 
-func (c *ClientSession) onSubRefresh(ctx context.Context, in *clientpb.InboundMessage, refresh *clientpb.SubRefresh) error {
+func (c *ClientSession) handleSubRefresh(ctx context.Context, in *clientpb.InboundMessage, refresh *clientpb.SubRefresh) error {
 	// SubRefresh is used to refresh subscriptions, currently just acknowledges the refresh
 	// The proxy is notified through OnSubscribed/OnUnsubscribed, so no additional action needed here
 	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
@@ -584,9 +585,9 @@ func (c *ClientSession) onSubRefresh(ctx context.Context, in *clientpb.InboundMe
 	}))
 }
 
-// onSurvey handles incoming survey requests from the server.
+// handleSurvey handles incoming survey requests from the server.
 // The client should process the survey request and send a response back.
-func (c *ClientSession) onSurvey(ctx context.Context, in *clientpb.InboundMessage, req *clientpb.SurveyRequest) error {
+func (c *ClientSession) handleSurvey(ctx context.Context, in *clientpb.InboundMessage, req *clientpb.SurveyRequest) error {
 	c.ResetActivity()
 
 	// Store the request ID for response routing
@@ -634,9 +635,9 @@ func (c *ClientSession) LastSurveyRequestID() string {
 	return c.lastSurveyRequestID
 }
 
-// onSurveyResponse handles incoming survey responses from clients.
+// handleSurveyResponse handles incoming survey responses from clients.
 // This is called when a client sends a SurveyResponse back to the server.
-func (c *ClientSession) onSurveyResponse(ctx context.Context, in *clientpb.InboundMessage, resp *clientpb.SurveyResponse) error {
+func (c *ClientSession) handleSurveyResponse(ctx context.Context, in *clientpb.InboundMessage, resp *clientpb.SurveyResponse) error {
 	c.ResetActivity()
 
 	// Extract payload from the survey response

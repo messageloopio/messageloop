@@ -268,7 +268,7 @@ func TestNode_Survey_Basic(t *testing.T) {
 		}
 	}
 
-	// Give onSurvey time to process
+	// Give handleSurvey time to process
 	time.Sleep(100 * time.Millisecond)
 
 	// Clear transport messages from survey responses
@@ -404,7 +404,7 @@ func TestNode_Survey_AllClientsRespond(t *testing.T) {
 					if sr := msg.GetSurveyRequest(); sr != nil {
 						t.Logf("Client %d: parsed request ID: %s", i, sr.RequestId)
 						// Now simulate the client receiving and processing the survey request
-						// This calls onSurvey which stores the request ID
+						// This calls handleSurvey which stores the request ID
 						inboundMsg := &clientpb.InboundMessage{
 							Id:      sr.RequestId,
 							Channel: "survey-channel-respond",
@@ -419,7 +419,7 @@ func TestNode_Survey_AllClientsRespond(t *testing.T) {
 		}
 	}
 
-	// Give onSurvey time to process and send responses
+	// Give handleSurvey time to process and send responses
 	time.Sleep(100 * time.Millisecond)
 
 	// Clear transport messages from survey responses (they were sent by clients)
@@ -604,7 +604,7 @@ func TestNode_Survey_ConcurrentClients(t *testing.T) {
 		}
 	}
 
-	// Give onSurvey time to process
+	// Give handleSurvey time to process
 	time.Sleep(100 * time.Millisecond)
 
 	// Clear transport messages
