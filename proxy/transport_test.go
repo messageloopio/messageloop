@@ -14,7 +14,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
-	cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
+	format "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
+	pb "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v1"
 )
 
@@ -79,25 +81,25 @@ func TestHTTPProxy_RPC(t *testing.T) {
 	defer p.Close()
 
 	ctx := context.Background()
+	event := cloudevents.NewEvent()
+	event.SetID("req-123")
+	event.SetSource("test.source")
+	event.SetType("test.request")
+	event.SetSpecVersion("1.0")
+	event.SetDataContentType("application/json")
+	_ = event.SetData("application/json", `{"input":"data"}`)
+
 	req := &RPCProxyRequest{
 		ID:      "req-123",
 		Channel: "test.channel",
 		Method:  "testMethod",
-		Event: &cloudevents.CloudEvent{
-			Id:          "req-123",
-			Source:      "test.source",
-			Type:        "test.request",
-			SpecVersion: "1.0",
-			Data: &cloudevents.CloudEvent_TextData{
-				TextData: `{"input":"data"}`,
-			},
-		},
+		Event:   &event,
 	}
 
 	resp, err := p.RPC(ctx, req)
 	require.NoError(t, err)
 	assert.NotNil(t, resp.Event)
-	assert.Equal(t, "resp-123", resp.Event.Id)
+	assert.Equal(t, "resp-123", resp.Event.ID())
 }
 
 func TestHTTPProxy_Timeout(t *testing.T) {
@@ -120,11 +122,12 @@ func TestHTTPProxy_Timeout(t *testing.T) {
 	defer p.Close()
 
 	ctx := context.Background()
+	event := cloudevents.NewEvent()
 	req := &RPCProxyRequest{
 		ID:      "req-timeout",
 		Channel: "test",
 		Method:  "test",
-		Event:   &cloudevents.CloudEvent{},
+		Event:   &event,
 	}
 
 	_, err = p.RPC(ctx, req)
@@ -168,17 +171,21 @@ func TestGRPCProxy_RPC(t *testing.T) {
 		handler: func(ctx context.Context, req *proxypb.RPCRequest) (*proxypb.RPCResponse, error) {
 			expectedReq = req
 			close(serverReady)
+
+			// Create response event
+			respEvent := cloudevents.NewEvent()
+			respEvent.SetID("resp-grpc-123")
+			respEvent.SetSource("grpc-proxy-test")
+			respEvent.SetType("test.response")
+			respEvent.SetSpecVersion("1.0")
+			respEvent.SetDataContentType("application/json")
+			_ = respEvent.SetData("application/json", `{"result":"grpc-success"}`)
+
+			pbResp, _ := format.ToProto(&respEvent)
+
 			return &proxypb.RPCResponse{
-				Id: req.Id,
-				Payload: &cloudevents.CloudEvent{
-					Id:          "resp-grpc-123",
-					Source:      "grpc-proxy-test",
-					Type:        "test.response",
-					SpecVersion: "1.0",
-					Data: &cloudevents.CloudEvent_TextData{
-						TextData: `{"result":"grpc-success"}`,
-					},
-				},
+				Id:      req.Id,
+				Payload: pbResp,
 			}, nil
 		},
 	}
@@ -201,19 +208,19 @@ func TestGRPCProxy_RPC(t *testing.T) {
 	defer p.Close()
 
 	ctx := context.Background()
+	event := cloudevents.NewEvent()
+	event.SetID("req-grpc-123")
+	event.SetSource("grpc.source")
+	event.SetType("test.request")
+	event.SetSpecVersion("1.0")
+	event.SetDataContentType("application/json")
+	_ = event.SetData("application/json", `{"input":"grpc-data"}`)
+
 	req := &RPCProxyRequest{
 		ID:      "req-grpc-123",
 		Channel: "grpc.channel",
 		Method:  "grpcMethod",
-		Event: &cloudevents.CloudEvent{
-			Id:          "req-grpc-123",
-			Source:      "grpc.source",
-			Type:        "test.request",
-			SpecVersion: "1.0",
-			Data: &cloudevents.CloudEvent_TextData{
-				TextData: `{"input":"grpc-data"}`,
-			},
-		},
+		Event:   &event,
 	}
 
 	resp, err := p.RPC(ctx, req)
@@ -223,7 +230,7 @@ func TestGRPCProxy_RPC(t *testing.T) {
 	<-serverReady
 
 	assert.NotNil(t, resp.Event)
-	assert.Equal(t, "resp-grpc-123", resp.Event.Id)
+	assert.Equal(t, "resp-grpc-123", resp.Event.ID())
 	assert.Equal(t, "req-grpc-123", expectedReq.Id)
 	assert.Equal(t, "grpc.channel", expectedReq.Channel)
 	assert.Equal(t, "grpcMethod", expectedReq.Method)
@@ -267,6 +274,12 @@ func (m *mockGRPCServer) OnDisconnected(ctx context.Context, req *proxypb.OnDisc
 }
 
 func TestRPCProxyRequest_ToProtoRequest(t *testing.T) {
+	event := cloudevents.NewEvent()
+	event.SetID("event-1")
+	event.SetSource("source")
+	event.SetType("type")
+	event.SetSpecVersion("1.0")
+
 	req := &RPCProxyRequest{
 		ID:        "test-id",
 		ClientID:  "client-1",
@@ -274,18 +287,14 @@ func TestRPCProxyRequest_ToProtoRequest(t *testing.T) {
 		UserID:    "user-1",
 		Channel:   "test.channel",
 		Method:    "testMethod",
-		Event: &cloudevents.CloudEvent{
-			Id:          "event-1",
-			Source:      "source",
-			Type:        "type",
-			SpecVersion: "1.0",
-		},
+		Event:     &event,
 		Meta: map[string]string{
 			"key": "value",
 		},
 	}
 
-	protoReq := req.ToProtoRequest()
+	protoReq, err := req.ToProtoRequest()
+	require.NoError(t, err)
 
 	assert.Equal(t, "test-id", protoReq.Id)
 	assert.Equal(t, "test.channel", protoReq.Channel)
@@ -296,7 +305,7 @@ func TestRPCProxyRequest_ToProtoRequest(t *testing.T) {
 func TestFromProtoReply(t *testing.T) {
 	reply := &proxypb.RPCResponse{
 		Id: "reply-id",
-		Payload: &cloudevents.CloudEvent{
+		Payload: &pb.CloudEvent{
 			Id:          "event-1",
 			Source:      "source",
 			Type:        "type",
@@ -304,14 +313,16 @@ func TestFromProtoReply(t *testing.T) {
 		},
 	}
 
-	resp := FromProtoReply(reply)
+	resp, err := FromProtoReply(reply)
+	require.NoError(t, err)
 
-	assert.Equal(t, "event-1", resp.Event.Id)
+	assert.Equal(t, "event-1", resp.Event.ID())
 	assert.Nil(t, resp.Error)
 }
 
 func TestFromProtoReply_Nil(t *testing.T) {
-	resp := FromProtoReply(nil)
+	resp, err := FromProtoReply(nil)
+	require.NoError(t, err)
 
 	assert.NotNil(t, resp)
 	assert.Nil(t, resp.Event)

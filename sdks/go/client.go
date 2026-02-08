@@ -7,7 +7,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/v1"
@@ -294,7 +293,7 @@ func (c *client) handlePublication(pub *clientpb.Publication) {
 }
 
 // handleRPCReply handles the RPC reply message.
-func (c *client) handleRPCReply(msg *clientpb.OutboundMessage, event *pb.CloudEvent) {
+func (c *client) handleRPCReply(msg *clientpb.OutboundMessage, event *cloudevents.Event) {
 	id := msg.GetId()
 
 	c.pendingRPCMu.RLock()
@@ -626,22 +625,24 @@ func BuildUnsubscribeMessage(channels ...string) *clientpb.InboundMessage {
 }
 
 // BuildPublishMessage builds a Publish message.
-func BuildPublishMessage(channel string, event *pb.CloudEvent) *clientpb.InboundMessage {
+func BuildPublishMessage(channel string, event *cloudevents.Event) *clientpb.InboundMessage {
+	pbEvent, _ := CloudEventToPb(event) // Ignore error for backward compatibility
 	return &clientpb.InboundMessage{
 		Channel: channel,
 		Envelope: &clientpb.InboundMessage_Publish{
-			Publish: event,
+			Publish: pbEvent,
 		},
 	}
 }
 
 // BuildRPCMessage builds an RPC request message.
-func BuildRPCMessage(channel, method string, event *pb.CloudEvent) *clientpb.InboundMessage {
+func BuildRPCMessage(channel, method string, event *cloudevents.Event) *clientpb.InboundMessage {
+	pbEvent, _ := CloudEventToPb(event) // Ignore error for backward compatibility
 	return &clientpb.InboundMessage{
 		Channel: channel,
 		Method:  method,
 		Envelope: &clientpb.InboundMessage_RpcRequest{
-			RpcRequest: event,
+			RpcRequest: pbEvent,
 		},
 	}
 }
@@ -694,11 +695,12 @@ func BuildPublicationMessage(messages []*clientpb.Message) *clientpb.OutboundMes
 }
 
 // BuildRPCReplyMessage builds an RPC reply message.
-func BuildRPCReplyMessage(id string, event *pb.CloudEvent) *clientpb.OutboundMessage {
+func BuildRPCReplyMessage(id string, event *cloudevents.Event) *clientpb.OutboundMessage {
+	pbEvent, _ := CloudEventToPb(event) // Ignore error for backward compatibility
 	return &clientpb.OutboundMessage{
 		Id: id,
 		Envelope: &clientpb.OutboundMessage_RpcReply{
-			RpcReply: event,
+			RpcReply: pbEvent,
 		},
 	}
 }

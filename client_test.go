@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
+	pb "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/v1"
 )
 
@@ -392,7 +392,7 @@ func TestClientSession_HandleMessage_Publish_BeforeAuth(t *testing.T) {
 		Id:      "msg-1",
 		Channel: "test-channel",
 		Envelope: &clientpb.InboundMessage_Publish{
-			Publish: &cloudevents.CloudEvent{
+			Publish: &pb.CloudEvent{
 				Id:     "event-1",
 				Source: "test-source",
 				Type:   "test.event",
@@ -448,11 +448,11 @@ func TestClientSession_HandleMessage_Publish_AfterAuth(t *testing.T) {
 		Id:      "msg-2",
 		Channel: "test-channel",
 		Envelope: &clientpb.InboundMessage_Publish{
-			Publish: &cloudevents.CloudEvent{
+			Publish: &pb.CloudEvent{
 				Id:     "event-1",
 				Source: "test-source",
 				Type:   "test.event",
-				Data: &cloudevents.CloudEvent_TextData{
+				Data: &pb.CloudEvent_TextData{
 					TextData: "test payload",
 				},
 			},
@@ -555,7 +555,7 @@ func TestClientSession_HandleMessage_RpcRequest_NoProxy(t *testing.T) {
 	transport.messages = nil
 
 	// Send RPC request
-	event := &cloudevents.CloudEvent{
+	event := &pb.CloudEvent{
 		Id:     "rpc-1",
 		Source: "test-channel",
 		Type:   "test.method",
@@ -925,11 +925,11 @@ func TestClientSession_Publish_WithChannelFromEvent(t *testing.T) {
 		Id: "msg-2",
 		// Channel not set
 		Envelope: &clientpb.InboundMessage_Publish{
-			Publish: &cloudevents.CloudEvent{
+			Publish: &pb.CloudEvent{
 				Id:     "event-1",
 				Source: "event-source-channel", // Will be used as channel
 				Type:   "test.event",
-				Data: &cloudevents.CloudEvent_TextData{
+				Data: &pb.CloudEvent_TextData{
 					TextData: "test payload",
 				},
 			},
@@ -1048,11 +1048,11 @@ func TestClientSession_HandleMessage_WithBinaryData(t *testing.T) {
 		Id:      "msg-2",
 		Channel: "test-channel",
 		Envelope: &clientpb.InboundMessage_Publish{
-			Publish: &cloudevents.CloudEvent{
+			Publish: &pb.CloudEvent{
 				Id:     "event-1",
 				Source: "test-source",
 				Type:   "test.event",
-				Data: &cloudevents.CloudEvent_BinaryData{
+				Data: &pb.CloudEvent_BinaryData{
 					BinaryData: binaryPayload,
 				},
 			},

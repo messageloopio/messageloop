@@ -64,7 +64,10 @@ func NewGRPCProxy(cfg *ProxyConfig) (*GRPCProxy, error) {
 func (p *GRPCProxy) RPC(ctx context.Context, req *RPCProxyRequest) (*RPCProxyResponse, error) {
 	ctx = p.withTimeout(ctx)
 
-	protoReq := req.ToProtoRequest()
+	protoReq, err := req.ToProtoRequest()
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert request: %w", err)
+	}
 
 	log.DebugContext(ctx, "proxying gRPC RPC request",
 		"proxy", p.name,
@@ -78,7 +81,7 @@ func (p *GRPCProxy) RPC(ctx context.Context, req *RPCProxyRequest) (*RPCProxyRes
 		return nil, fmt.Errorf("gRPC request failed: %w", err)
 	}
 
-	return FromProtoReply(resp), nil
+	return FromProtoReply(resp)
 }
 
 // Authenticate implements Proxy.Authenticate.

@@ -70,7 +70,10 @@ func (p *HTTPProxy) RPC(ctx context.Context, req *RPCProxyRequest) (*RPCProxyRes
 	ctx = p.withTimeout(ctx)
 
 	// Build the HTTP request
-	protoReq := req.ToProtoRequest()
+	protoReq, err := req.ToProtoRequest()
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert request: %w", err)
+	}
 	body, err := json.Marshal(map[string]any{
 		"id":      protoReq.Id,
 		"channel": protoReq.Channel,
@@ -92,7 +95,7 @@ func (p *HTTPProxy) RPC(ctx context.Context, req *RPCProxyRequest) (*RPCProxyRes
 			if err := json.Unmarshal(respBody, &protoResp); err != nil {
 				return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 			}
-			return FromProtoReply(&protoResp), nil
+			return FromProtoReply(&protoResp)
 		},
 	)
 	if err != nil {

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
+	pb "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	"github.com/google/uuid"
 	"github.com/messageloopio/messageloop"
 	serverpb "github.com/messageloopio/messageloop/shared/genproto/server/v1"
@@ -36,7 +36,7 @@ func TestAPIServiceHandler_PublishToSessions(t *testing.T) {
 
 	// Create a test client
 	transport := &mockTransport{}
-	client, _, err := messageloop.NewClientSession(ctx, node, transport, messageloop.ProtobufMarshaler{})
+	client, closeFn, err := messageloop.NewClientSession(ctx, node, transport, messageloop.ProtobufMarshaler{})
 	require.NoError(t, err)
 	defer closeFn()
 
@@ -52,12 +52,12 @@ func TestAPIServiceHandler_PublishToSessions(t *testing.T) {
 				Destination: &serverpb.Publication_Destination{
 					Sessions: []string{client.SessionID()},
 				},
-				Payload: &cloudevents.CloudEvent{
+				Payload: &pb.CloudEvent{
 					Id:          uuid.NewString(),
 					Source:      "test-source",
 					Type:        "test.type",
 					SpecVersion: "1.0",
-					Data: &cloudevents.CloudEvent_TextData{
+					Data: &pb.CloudEvent_TextData{
 						TextData: "test payload",
 					},
 				},
@@ -84,12 +84,12 @@ func TestAPIServiceHandler_PublishToNonExistentSession(t *testing.T) {
 				Destination: &serverpb.Publication_Destination{
 					Sessions: []string{"non-existent-session-id"},
 				},
-				Payload: &cloudevents.CloudEvent{
+				Payload: &pb.CloudEvent{
 					Id:          uuid.NewString(),
 					Source:      "test-source",
 					Type:        "test.type",
 					SpecVersion: "1.0",
-					Data: &cloudevents.CloudEvent_TextData{
+					Data: &pb.CloudEvent_TextData{
 						TextData: "test payload",
 					},
 				},
@@ -105,6 +105,7 @@ func TestAPIServiceHandler_PublishToNonExistentSession(t *testing.T) {
 func TestAPIServiceHandler_PublishToChannels(t *testing.T) {
 	ctx := context.Background()
 	node := messageloop.NewNode(nil)
+	_ = node.Run() // Register event handler
 	handler := NewAPIServiceHandler(node)
 
 	// Test publishing to channels
@@ -116,12 +117,12 @@ func TestAPIServiceHandler_PublishToChannels(t *testing.T) {
 				Destination: &serverpb.Publication_Destination{
 					Channels: []string{"test-channel-1", "test-channel-2"},
 				},
-				Payload: &cloudevents.CloudEvent{
+				Payload: &pb.CloudEvent{
 					Id:          uuid.NewString(),
 					Source:      "test-source",
 					Type:        "test.type",
 					SpecVersion: "1.0",
-					Data: &cloudevents.CloudEvent_BinaryData{
+					Data: &pb.CloudEvent_BinaryData{
 						BinaryData: []byte("test payload"),
 					},
 				},
@@ -189,7 +190,7 @@ func TestAPIServiceHandler_Subscribe(t *testing.T) {
 
 	// Create a test client
 	transport := &mockTransport{}
-	client, _, err := messageloop.NewClientSession(ctx, node, transport, messageloop.ProtobufMarshaler{})
+	client, closeFn, err := messageloop.NewClientSession(ctx, node, transport, messageloop.ProtobufMarshaler{})
 	require.NoError(t, err)
 	defer closeFn()
 
@@ -233,7 +234,7 @@ func TestAPIServiceHandler_Unsubscribe(t *testing.T) {
 
 	// Create a test client
 	transport := &mockTransport{}
-	client, _, err := messageloop.NewClientSession(ctx, node, transport, messageloop.ProtobufMarshaler{})
+	client, closeFn, err := messageloop.NewClientSession(ctx, node, transport, messageloop.ProtobufMarshaler{})
 	require.NoError(t, err)
 	defer closeFn()
 

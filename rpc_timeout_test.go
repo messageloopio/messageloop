@@ -5,7 +5,8 @@ import (
 	"testing"
 	"time"
 
-	cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
+	pb "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/proxy"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/v1"
@@ -20,13 +21,13 @@ type MockSlowProxy struct {
 func (m *MockSlowProxy) RPC(ctx context.Context, req *proxy.RPCProxyRequest) (*proxy.RPCProxyResponse, error) {
 	select {
 	case <-time.After(m.delay):
+		event := cloudevents.NewEvent()
+		event.SetID(req.ID)
+		event.SetSource(req.Channel)
+		event.SetType(req.Method)
+		event.SetSpecVersion("1.0")
 		return &proxy.RPCProxyResponse{
-			Event: &cloudevents.CloudEvent{
-				Id:          req.ID,
-				Source:      req.Channel,
-				Type:        req.Method,
-				SpecVersion: "1.0",
-			},
+			Event: &event,
 		}, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -107,7 +108,7 @@ func TestRPCTimeout_FastResponse(t *testing.T) {
 	client.mu.Unlock()
 
 	// Send RPC request
-	event := &cloudevents.CloudEvent{
+	event := &pb.CloudEvent{
 		Id:          "test-1",
 		Source:      "test.channel",
 		Type:        "test.method",
@@ -154,7 +155,7 @@ func TestRPCTimeout_SlowResponse(t *testing.T) {
 	client.mu.Unlock()
 
 	// Send RPC request
-	event := &cloudevents.CloudEvent{
+	event := &pb.CloudEvent{
 		Id:          "test-2",
 		Source:      "test.channel",
 		Type:        "test.method",

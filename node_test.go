@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/messageloopio/messageloop/proxy"
 )
 
@@ -447,9 +447,11 @@ func TestNode_RPC_WithProxy(t *testing.T) {
 
 	mockProxy := &mockRPCProxy{
 		response: &proxy.RPCProxyResponse{
-			Event: &cloudevents.CloudEvent{
-				Id: "response-1",
-			},
+			Event: func() *cloudevents.Event {
+				e := cloudevents.NewEvent()
+				e.SetID("response-1")
+				return &e
+			}(),
 		},
 	}
 
@@ -474,8 +476,8 @@ func TestNode_RPC_WithProxy(t *testing.T) {
 	if resp == nil {
 		t.Error("RPC() should return response")
 	}
-	if resp.Event.Id != "response-1" {
-		t.Errorf("Response event ID = %s, want response-1", resp.Event.Id)
+	if resp.Event.ID() != "response-1" {
+		t.Errorf("Response event ID = %s, want response-1", resp.Event.ID())
 	}
 }
 

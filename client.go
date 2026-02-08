@@ -7,7 +7,9 @@ import (
 	"sync"
 	"time"
 
-	cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
+	format "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
+	pb "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
 	"github.com/messageloopio/messageloop/proxy"
@@ -328,17 +330,27 @@ func (c *ClientSession) Authenticated() bool {
 	return c.authenticated
 }
 
-func (c *ClientSession) handleRPC(ctx context.Context, in *clientpb.InboundMessage, event *cloudevents.CloudEvent) error {
+func (c *ClientSession) handleRPC(ctx context.Context, in *clientpb.InboundMessage, pbEvent *pb.CloudEvent) error {
+	// Convert pb.CloudEvent to cloudevents.Event
+	var event *cloudevents.Event
+	if pbEvent != nil {
+		var err error
+		event, err = format.FromProto(pbEvent)
+		if err != nil {
+			return fmt.Errorf("failed to convert event: %w", err)
+		}
+	}
+
 	// Extract channel and method from the InboundMessage
 	channel := in.Channel
 	method := in.Method
 
 	// Fallback to event fields if not set in InboundMessage
 	if channel == "" && event != nil {
-		channel = event.Source
+		channel = event.Source()
 	}
 	if method == "" && event != nil {
-		method = event.Type
+		method = event.Type()
 	}
 
 	// Apply RPC timeout from configuration or use default
@@ -385,9 +397,17 @@ func (c *ClientSession) handleRPC(ctx context.Context, in *clientpb.InboundMessa
 		// No proxy configured or proxy failed - return error to client
 		if errors.Is(err, proxy.ErrNoProxyFound) {
 			// No proxy configured - return original echo behavior
+			// Convert event back to pb for echo
+			var echoPayload *pb.CloudEvent
+			if event != nil {
+				echoPayload, err = format.ToProto(event)
+				if err != nil {
+					return fmt.Errorf("failed to convert event: %w", err)
+				}
+			}
 			return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 				out.Envelope = &clientpb.OutboundMessage_RpcReply{
-					RpcReply: event,
+					RpcReply: echoPayload,
 				}
 			}))
 		}
@@ -417,7 +437,16 @@ func (c *ClientSession) handleRPC(ctx context.Context, in *clientpb.InboundMessa
 		"duration", duration,
 	)
 
-	// Return the proxy response
+	// Return the proxy response - convert cloudevents.Event back to pb
+	var respPayload *pb.CloudEvent
+	if proxyResp.Event != nil {
+		var err error
+		respPayload, err = format.ToProto(proxyResp.Event)
+		if err != nil {
+			return fmt.Errorf("failed to convert response event: %w", err)
+		}
+	}
+
 	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 		if proxyResp.Error != nil {
 			out.Envelope = &clientpb.OutboundMessage_Error{
@@ -425,44 +454,51 @@ func (c *ClientSession) handleRPC(ctx context.Context, in *clientpb.InboundMessa
 			}
 		} else {
 			out.Envelope = &clientpb.OutboundMessage_RpcReply{
-				RpcReply: proxyResp.Event,
+				RpcReply: respPayload,
 			}
 		}
 	}))
 }
 
-func (c *ClientSession) handlePublish(ctx context.Context, in *clientpb.InboundMessage, event *cloudevents.CloudEvent) error {
+func (c *ClientSession) handlePublish(ctx context.Context, in *clientpb.InboundMessage, pbEvent *pb.CloudEvent) error {
 	if !c.Authenticated() {
-		return DisconnectConnectionClosed
+		return DisconnectStale
 	}
-	if event == nil {
+	if pbEvent == nil {
 		return errors.New("missing data in publish message")
 	}
-	if in.Channel == "" {
+
+	// Convert pb.CloudEvent to cloudevents.Event
+	event, err := format.FromProto(pbEvent)
+	if err != nil {
+		return fmt.Errorf("failed to convert event: %w", err)
+	}
+
+	// Extract channel from InboundMessage or fall back to event source
+	channel := in.Channel
+	if channel == "" {
+		channel = event.Source()
+	}
+	if channel == "" {
 		return errors.New("missing channel in publish message")
 	}
-	if event.Source == "" {
-		event.Source = c.session
-	}
-
-	// Extract channel from InboundMessage
-	channel := in.Channel
 
 	// Extract data from CloudEvent and track encoding type
-	var data []byte
+	data := event.Data()
 	isText := false
-	textData := event.GetTextData()
-	binaryData := event.GetBinaryData()
-	if textData != "" {
-		data = []byte(textData)
-		isText = true
-	} else if len(binaryData) > 0 {
-		data = binaryData
-		isText = false
+	if len(data) > 0 {
+		// Check content type
+		contentType := event.DataContentType()
+		isText = contentType == "text/plain" || contentType == "text/html" || contentType == "application/json"
 	}
 
 	// Preserve original CloudEvent type
-	eventType := event.GetType()
+	eventType := event.Type()
+
+	// Ensure source is set
+	if event.Source() == "" {
+		event.SetSource(c.session)
+	}
 
 	if err := c.node.Publish(channel, data, WithClientDesc(c.ClientInfo()), WithAsBytes(true), WithIsText(isText), WithEventType(eventType)); err != nil {
 		return err
@@ -615,21 +651,25 @@ func (c *ClientSession) handleSurvey(ctx context.Context, in *clientpb.InboundMe
 
 	// Send survey response - by default, echo back the same payload
 	// In a real implementation, the client application would handle this differently
-	responseEvent := &cloudevents.CloudEvent{
-		Id:          uuid.NewString(),
-		Source:      in.Channel,
-		SpecVersion: "1.0",
-		Type:        "com.messageloop.survey.response",
-		Data: &cloudevents.CloudEvent_BinaryData{
-			BinaryData: payload,
-		},
+	responseEvent := cloudevents.NewEvent()
+	responseEvent.SetID(uuid.NewString())
+	responseEvent.SetSource(in.Channel)
+	responseEvent.SetSpecVersion("1.0")
+	responseEvent.SetType("com.messageloop.survey.response")
+	responseEvent.SetDataContentType("application/octet-stream")
+	_ = responseEvent.SetData("application/octet-stream", payload)
+
+	// Convert to protobuf
+	pbResponse, err := format.ToProto(&responseEvent)
+	if err != nil {
+		return fmt.Errorf("failed to convert response event: %w", err)
 	}
 
 	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_SurveyResponse{
 			SurveyResponse: &clientpb.SurveyResponse{
 				RequestId: req.RequestId,
-				Payload:   responseEvent,
+				Payload:   pbResponse,
 			},
 		}
 	}))

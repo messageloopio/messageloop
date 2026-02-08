@@ -5,7 +5,9 @@ import (
 	"hash/fnv"
 	"sync"
 
-	cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
+	format "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
+	pb "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/v1"
@@ -207,13 +209,9 @@ func (h *subShard) broadcastPublication(channel string, pub *Publication) error 
 	}
 
 	ctx := context.TODO()
-	msg := &clientpb.Message{
-		Channel: channel,
-		Id:      uuid.NewString(),
-		Offset:  pub.Offset,
-	}
 
 	// Create CloudEvent from publication payload
+	var ce cloudevents.Event
 	if len(pub.Payload) > 0 {
 		// Use original event type, or default to channel + ".message"
 		eventType := pub.EventType
@@ -221,33 +219,37 @@ func (h *subShard) broadcastPublication(channel string, pub *Publication) error 
 			eventType = channel + ".message"
 		}
 
-		msg.Payload = &cloudevents.CloudEvent{
-			Id:          msg.Id,
-			Source:      channel,
-			SpecVersion: "1.0",
-			Type:        eventType,
-			Attributes: map[string]*cloudevents.CloudEventAttributeValue{
-				"datacontenttype": {
-					Attr: &cloudevents.CloudEventAttributeValue_CeString{
-						CeString: "application/octet-stream",
-					},
-				},
-			},
-		}
+		ce = cloudevents.NewEvent()
+		ce.SetID(uuid.NewString())
+		ce.SetSource(channel)
+		ce.SetSpecVersion("1.0")
+		ce.SetType(eventType)
+
 		if pub.IsText {
-			// Use TextData for text content
-			msg.Payload.Data = &cloudevents.CloudEvent_TextData{
-				TextData: string(pub.Payload),
-			}
-			msg.Payload.Attributes["datacontenttype"].Attr = &cloudevents.CloudEventAttributeValue_CeString{
-				CeString: "text/plain",
-			}
+			ce.SetDataContentType("text/plain")
+			_ = ce.SetData("text/plain", pub.Payload)
 		} else {
-			// Use BinaryData for binary content
-			msg.Payload.Data = &cloudevents.CloudEvent_BinaryData{
-				BinaryData: pub.Payload,
-			}
+			ce.SetDataContentType("application/octet-stream")
+			_ = ce.SetData("application/octet-stream", pub.Payload)
 		}
+	}
+
+	// Convert to protobuf
+	var payload *pb.CloudEvent
+	var err error
+	if len(pub.Payload) > 0 {
+		payload, err = format.ToProto(&ce)
+		if err != nil {
+			log.ErrorContext(ctx, "failed to convert event to protobuf", err)
+			return err
+		}
+	}
+
+	msg := &clientpb.Message{
+		Channel: channel,
+		Id:      uuid.NewString(),
+		Offset:  pub.Offset,
+		Payload: payload,
 	}
 
 	out := MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {

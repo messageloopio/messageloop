@@ -4,7 +4,9 @@ import (
 	"context"
 	"time"
 
-	cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
+	format "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
+	pb "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v1"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 )
@@ -47,35 +49,51 @@ type RPCProxyRequest struct {
 	UserID    string
 	Channel   string
 	Method    string
-	Event     *cloudevents.CloudEvent
+	Event     *cloudevents.Event
 	Meta      map[string]string
 }
 
 // RPCProxyResponse represents a response from the proxy backend.
 type RPCProxyResponse struct {
-	Event *cloudevents.CloudEvent
+	Event *cloudevents.Event
 	Error *sharedpb.Error
 }
 
 // ToProtoRequest converts an RPCProxyRequest to the protobuf RPCRequest.
-func (r *RPCProxyRequest) ToProtoRequest() *proxypb.RPCRequest {
+func (r *RPCProxyRequest) ToProtoRequest() (*proxypb.RPCRequest, error) {
+	var payload *pb.CloudEvent
+	if r.Event != nil {
+		var err error
+		payload, err = format.ToProto(r.Event)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return &proxypb.RPCRequest{
 		Id:      r.ID,
 		Channel: r.Channel,
 		Method:  r.Method,
-		Payload: r.Event,
-	}
+		Payload: payload,
+	}, nil
 }
 
 // FromProtoResponse creates an RPCProxyResponse from the protobuf RPCResponse.
-func FromProtoReply(reply *proxypb.RPCResponse) *RPCProxyResponse {
+func FromProtoReply(reply *proxypb.RPCResponse) (*RPCProxyResponse, error) {
 	if reply == nil {
-		return &RPCProxyResponse{}
+		return &RPCProxyResponse{}, nil
+	}
+	var event *cloudevents.Event
+	if reply.Payload != nil {
+		var err error
+		event, err = format.FromProto(reply.Payload)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return &RPCProxyResponse{
-		Event: reply.Payload,
+		Event: event,
 		Error: reply.Error,
-	}
+	}, nil
 }
 
 // ProxyConfig is the configuration for a single proxy instance.
