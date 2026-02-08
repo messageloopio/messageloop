@@ -205,8 +205,8 @@ func TestSubShard_NumSubscribers(t *testing.T) {
 	client1 := newTestClient(t, "session-1", "user-1")
 	client2 := newTestClient(t, "session-2", "user-2")
 
-	shard.addSub("test-channel", Subscriber{client: client1, ephemeral: false})
-	shard.addSub("test-channel", Subscriber{client: client2, ephemeral: true})
+	shard.addSub("test-channel", Subscriber{Client: client1, Ephemeral: false})
+	shard.addSub("test-channel", Subscriber{Client: client2, Ephemeral: true})
 
 	count := shard.NumSubscribers("test-channel")
 	if count != 2 {
@@ -218,7 +218,7 @@ func TestSubShard_AddSub_NewChannel(t *testing.T) {
 	shard := newSubShard(0)
 	client := newTestClient(t, "session-1", "user-1")
 
-	first, err := shard.addSub("test-channel", Subscriber{client: client, ephemeral: false})
+	first, err := shard.addSub("test-channel", Subscriber{Client: client, Ephemeral: false})
 	if err != nil {
 		t.Fatalf("addSub() error = %v", err)
 	}
@@ -237,9 +237,9 @@ func TestSubShard_AddSub_ExistingChannel(t *testing.T) {
 	client1 := newTestClient(t, "session-1", "user-1")
 	client2 := newTestClient(t, "session-2", "user-2")
 
-	shard.addSub("test-channel", Subscriber{client: client1, ephemeral: false})
+	shard.addSub("test-channel", Subscriber{Client: client1, Ephemeral: false})
 
-	first, err := shard.addSub("test-channel", Subscriber{client: client2, ephemeral: false})
+	first, err := shard.addSub("test-channel", Subscriber{Client: client2, Ephemeral: false})
 	if err != nil {
 		t.Fatalf("addSub() error = %v", err)
 	}

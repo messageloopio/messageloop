@@ -21,7 +21,7 @@ func TestHandler_marshaler(t *testing.T) {
 		Id:       uuid.NewString(),
 		Metadata: map[string]string{},
 		Envelope: &clientpb.OutboundMessage_Publication{
-			Publication: &clientpb.Publication{Envelopes: []*clientpb.Message{
+			Publication: &clientpb.Publication{Messages: []*clientpb.Message{
 				{
 					Id:      uuid.NewString(),
 					Channel: "/topic/test",
