@@ -93,12 +93,13 @@ func (b *redisBroker) xMessageToPublication(ch string, msg redis.XMessage) (*mes
 	position := b.parseStreamID(msg.ID)
 
 	return &messageloop.Publication{
-		Channel:  ch,
-		Offset:   position.Offset,
-		Metadata: nil,
-		Payload:  redisMsg.Payload,
-		Time:     time.Now().UnixMilli(), // Could extract from message ID timestamp
-		IsText:   redisMsg.IsText,
+		Channel:   ch,
+		Offset:    position.Offset,
+		Metadata:  nil,
+		Payload:   redisMsg.Payload,
+		Time:      time.Now().UnixMilli(), // Could extract from message ID timestamp
+		IsText:    redisMsg.IsText,
+		EventType: redisMsg.EventType,
 	}, nil
 }
 

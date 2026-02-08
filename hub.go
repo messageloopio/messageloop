@@ -215,11 +215,17 @@ func (h *subShard) broadcastPublication(channel string, pub *Publication) error 
 
 	// Create CloudEvent from publication payload
 	if len(pub.Payload) > 0 {
+		// Use original event type, or default to channel + ".message"
+		eventType := pub.EventType
+		if eventType == "" {
+			eventType = channel + ".message"
+		}
+
 		msg.Payload = &cloudevents.CloudEvent{
 			Id:          msg.Id,
 			Source:      channel,
 			SpecVersion: "1.0",
-			Type:        channel + ".message",
+			Type:        eventType,
 			Attributes: map[string]*cloudevents.CloudEventAttributeValue{
 				"datacontenttype": {
 					Attr: &cloudevents.CloudEventAttributeValue_CeString{

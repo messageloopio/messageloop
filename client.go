@@ -461,7 +461,10 @@ func (c *ClientSession) handlePublish(ctx context.Context, in *clientpb.InboundM
 		isText = false
 	}
 
-	if err := c.node.Publish(channel, data, WithClientDesc(c.ClientInfo()), WithAsBytes(true), WithIsText(isText)); err != nil {
+	// Preserve original CloudEvent type
+	eventType := event.GetType()
+
+	if err := c.node.Publish(channel, data, WithClientDesc(c.ClientInfo()), WithAsBytes(true), WithIsText(isText), WithEventType(eventType)); err != nil {
 		return err
 	}
 	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {

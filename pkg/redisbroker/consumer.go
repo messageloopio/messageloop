@@ -226,12 +226,13 @@ func (b *redisBroker) handlePublication(ch string, msg *redisMessage) error {
 	// We need to set offset from the stream ID
 	// Since we receive via pub/sub, we use 0 as offset for real-time messages
 	pub := &messageloop.Publication{
-		Channel:  ch,
-		Offset:   0, // Will be set by caller if needed
-		Metadata: nil,
-		Payload:  msg.Payload,
-		Time:     time.Now().UnixMilli(),
-		IsText:   msg.IsText,
+		Channel:   ch,
+		Offset:    0, // Will be set by caller if needed
+		Metadata:  nil,
+		Payload:   msg.Payload,
+		Time:      time.Now().UnixMilli(),
+		IsText:    msg.IsText,
+		EventType: msg.EventType,
 	}
 
 	return b.handler.HandlePublication(ch, pub)
