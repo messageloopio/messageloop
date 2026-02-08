@@ -669,8 +669,8 @@ func TestHub_GetSubscribers(t *testing.T) {
 		clients[i].authenticated = true
 		clients[i].mu.Unlock()
 
-		node.addClient(clients[i])
-		err = node.addSubscription(ctx, "test-channel", subscriber{client: clients[i], ephemeral: false})
+		node.AddClient(clients[i])
+		err = node.AddSubscription(ctx, "test-channel", Subscriber{Client: clients[i], Ephemeral: false})
 		if err != nil {
 			t.Fatalf("addSubscription() error = %v", err)
 		}

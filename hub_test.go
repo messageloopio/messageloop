@@ -270,7 +270,7 @@ func TestSubShard_RemoveSub_Success(t *testing.T) {
 	shard := newSubShard(0)
 	client := newTestClient(t, "session-1", "user-1")
 
-	shard.addSub("test-channel", Subscriber{client: client, ephemeral: false})
+	shard.addSub("test-channel", Subscriber{Client:client, Ephemeral: false})
 
 	// Remove the subscription
 	empty, found := shard.removeSub("test-channel", client)
@@ -293,8 +293,8 @@ func TestSubShard_RemoveSub_OneOfMany(t *testing.T) {
 	client1 := newTestClient(t, "session-1", "user-1")
 	client2 := newTestClient(t, "session-2", "user-2")
 
-	shard.addSub("test-channel", Subscriber{client: client1, ephemeral: false})
-	shard.addSub("test-channel", Subscriber{client: client2, ephemeral: false})
+	shard.addSub("test-channel", Subscriber{Client:client1, Ephemeral: false})
+	shard.addSub("test-channel", Subscriber{Client:client2, Ephemeral: false})
 
 	// Remove one subscription
 	empty, found := shard.removeSub("test-channel", client1)
@@ -346,8 +346,8 @@ func TestHub_NumSubscribers(t *testing.T) {
 
 	shardIdx := index("test-channel", numHubShards)
 	shard := h.subShards[shardIdx]
-	shard.addSub("test-channel", Subscriber{client: client1, ephemeral: false})
-	shard.addSub("test-channel", Subscriber{client: client2, ephemeral: false})
+	shard.addSub("test-channel", Subscriber{Client:client1, Ephemeral: false})
+	shard.addSub("test-channel", Subscriber{Client:client2, Ephemeral: false})
 
 	count := h.NumSubscribers("test-channel")
 	if count != 2 {
@@ -359,7 +359,7 @@ func TestHub_AddSub(t *testing.T) {
 	h := newHub(0)
 	client := newTestClient(t, "session-1", "user-1")
 
-	first, err := h.addSub("test-channel", Subscriber{client: client, ephemeral: false})
+	first, err := h.addSub("test-channel", Subscriber{Client:client, Ephemeral: false})
 	if err != nil {
 		t.Fatalf("addSub() error = %v", err)
 	}
@@ -377,7 +377,7 @@ func TestHub_RemoveSub(t *testing.T) {
 	h := newHub(0)
 	client := newTestClient(t, "session-1", "user-1")
 
-	h.addSub("test-channel", Subscriber{client: client, ephemeral: false})
+	h.addSub("test-channel", Subscriber{Client:client, Ephemeral: false})
 
 	empty, found := h.removeSub("test-channel", client)
 	if !empty {
@@ -401,8 +401,8 @@ func TestSubShard_BroadcastPublication(t *testing.T) {
 	client1 := newTestClientWithTransport(t, "session-1", "user-1", transport1)
 	client2 := newTestClientWithTransport(t, "session-2", "user-2", transport2)
 
-	shard.addSub("test-channel", Subscriber{client: client1, ephemeral: false})
-	shard.addSub("test-channel", Subscriber{client: client2, ephemeral: false})
+	shard.addSub("test-channel", Subscriber{Client:client1, Ephemeral: false})
+	shard.addSub("test-channel", Subscriber{Client:client2, Ephemeral: false})
 
 	pub := &Publication{
 		Channel:  "test-channel",
@@ -449,8 +449,8 @@ func TestHub_BroadcastPublication(t *testing.T) {
 	client1 := newTestClientWithTransport(t, "session-1", "user-1", transport1)
 	client2 := newTestClientWithTransport(t, "session-2", "user-2", transport2)
 
-	h.addSub("test-channel", Subscriber{client: client1, ephemeral: false})
-	h.addSub("test-channel", Subscriber{client: client2, ephemeral: false})
+	h.addSub("test-channel", Subscriber{Client:client1, Ephemeral: false})
+	h.addSub("test-channel", Subscriber{Client:client2, Ephemeral: false})
 
 	pub := &Publication{
 		Channel:  "test-channel",
@@ -593,7 +593,7 @@ func TestHub_ConcurrentSubscribe(t *testing.T) {
 		go func(n int) {
 			defer wg.Done()
 			client := newTestClient(t, fmt.Sprintf("session-%d", n), fmt.Sprintf("user-%d", n))
-			h.addSub("test-channel", Subscriber{client: client, ephemeral: false})
+			h.addSub("test-channel", Subscriber{Client:client, Ephemeral: false})
 		}(i)
 	}
 
@@ -616,7 +616,7 @@ func TestSubShard_ConcurrentOperations(t *testing.T) {
 		go func(n int) {
 			defer wg.Done()
 			client := newTestClient(t, fmt.Sprintf("session-%d", n), fmt.Sprintf("user-%d", n))
-			shard.addSub("test-channel", Subscriber{client: client, ephemeral: false})
+			shard.addSub("test-channel", Subscriber{Client:client, Ephemeral: false})
 		}(i)
 	}
 
@@ -636,8 +636,8 @@ func TestHub_BroadcastPublication_MultipleChannels(t *testing.T) {
 	client1 := newTestClientWithTransport(t, "session-1", "user-1", transport1)
 	client2 := newTestClientWithTransport(t, "session-2", "user-2", transport2)
 
-	h.addSub("channel-1", Subscriber{client: client1, ephemeral: false})
-	h.addSub("channel-2", Subscriber{client: client2, ephemeral: false})
+	h.addSub("channel-1", Subscriber{Client:client1, Ephemeral: false})
+	h.addSub("channel-2", Subscriber{Client:client2, Ephemeral: false})
 
 	pub1 := &Publication{
 		Channel:  "channel-1",
@@ -665,7 +665,7 @@ func TestSubShard_AddSub_EphemeralFlag(t *testing.T) {
 	client := newTestClient(t, "session-1", "user-1")
 
 	// Add ephemeral subscription
-	first, err := shard.addSub("test-channel", Subscriber{client: client, ephemeral: true})
+	first, err := shard.addSub("test-channel", Subscriber{Client:client, Ephemeral: true})
 	if err != nil {
 		t.Fatalf("addSub() error = %v", err)
 	}
@@ -682,7 +682,7 @@ func TestSubShard_AddSub_EphemeralFlag(t *testing.T) {
 	}
 
 	sub := subs["session-1"]
-	if !sub.ephemeral {
+	if !sub.Ephemeral {
 		t.Error("ephemeral flag should be preserved")
 	}
 }
@@ -693,7 +693,7 @@ func TestHub_MultipleChannels(t *testing.T) {
 
 	channels := []string{"channel-1", "channel-2", "channel-3"}
 	for _, ch := range channels {
-		h.addSub(ch, Subscriber{client: client, ephemeral: false})
+		h.addSub(ch, Subscriber{Client:client, Ephemeral: false})
 	}
 
 	for _, ch := range channels {
