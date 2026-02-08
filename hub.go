@@ -227,9 +227,20 @@ func (h *subShard) broadcastPublication(channel string, pub *Publication) error 
 					},
 				},
 			},
-			Data: &cloudevents.CloudEvent_BinaryData{
+		}
+		if pub.IsText {
+			// Use TextData for text content
+			msg.Payload.Data = &cloudevents.CloudEvent_TextData{
+				TextData: string(pub.Payload),
+			}
+			msg.Payload.Attributes["datacontenttype"].Attr = &cloudevents.CloudEventAttributeValue_CeString{
+				CeString: "text/plain",
+			}
+		} else {
+			// Use BinaryData for binary content
+			msg.Payload.Data = &cloudevents.CloudEvent_BinaryData{
 				BinaryData: pub.Payload,
-			},
+			}
 		}
 	}
 

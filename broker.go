@@ -7,6 +7,7 @@ type Publication struct {
 	Offset   uint64
 	Metadata map[string]interface{}
 	IsBlob   bool
+	IsText   bool // true if original data was text_data, false if binary_data
 	Payload  []byte
 	Time     int64
 }
@@ -60,9 +61,16 @@ func WithAsBytes(asBytes bool) PublishOption {
 	}
 }
 
+func WithIsText(isText bool) PublishOption {
+	return func(opts *PublishOptions) {
+		opts.IsText = isText
+	}
+}
+
 type PublishOptions struct {
 	ClientDesc *ClientDesc
 	AsBytes    bool
+	IsText     bool
 }
 
 // BrokerEventHandler can handle messages received from PUB/SUB system.

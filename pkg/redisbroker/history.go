@@ -98,6 +98,7 @@ func (b *redisBroker) xMessageToPublication(ch string, msg redis.XMessage) (*mes
 		Metadata: nil,
 		Payload:  redisMsg.Payload,
 		Time:     time.Now().UnixMilli(), // Could extract from message ID timestamp
+		IsText:   redisMsg.IsText,
 	}, nil
 }
 

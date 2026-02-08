@@ -211,6 +211,7 @@ func (b *redisBroker) handlePublication(ch string, msg *redisMessage) error {
 		Metadata: nil,
 		Payload:  msg.Payload,
 		Time:     time.Now().UnixMilli(),
+		IsText:   msg.IsText,
 	}
 
 	return b.handler.HandlePublication(ch, pub)

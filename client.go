@@ -448,15 +448,27 @@ func (c *ClientSession) handlePublish(ctx context.Context, in *clientpb.InboundM
 	// Extract channel from InboundMessage
 	channel := in.Channel
 
-	// Extract data from CloudEvent
+	// Extract data from CloudEvent and track encoding type
 	var data []byte
-	if binaryData := event.GetBinaryData(); len(binaryData) > 0 {
-		data = binaryData
-	} else if textData := event.GetTextData(); textData != "" {
+	isText := false
+	textData := event.GetTextData()
+	binaryData := event.GetBinaryData()
+	if textData != "" {
 		data = []byte(textData)
+		isText = true
+	} else if len(binaryData) > 0 {
+		data = binaryData
+		isText = false
 	}
 
-	if err := c.node.Publish(channel, data, WithClientDesc(c.ClientInfo()), WithAsBytes(true)); err != nil {
+	log.DebugContext(ctx, "publish data",
+		"channel", channel,
+		"textData", textData,
+		"binaryDataLen", len(binaryData),
+		"isText", isText,
+	)
+
+	if err := c.node.Publish(channel, data, WithClientDesc(c.ClientInfo()), WithAsBytes(true), WithIsText(isText)); err != nil {
 		return err
 	}
 	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
