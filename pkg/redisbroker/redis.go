@@ -22,16 +22,18 @@ type redisBroker struct {
 	handler messageloop.BrokerEventHandler
 	options *Options
 
-	subMu      sync.RWMutex
-	subscribed map[string]struct{}
+	subMu        sync.RWMutex
+	subscribed   map[string]struct{}
+	subNotifyCh  chan struct{} // Notification channel for subscription changes
 }
 
 // New creates a new Redis broker.
 func New(cfg config.RedisConfig, nodeID string) messageloop.Broker {
 	return &redisBroker{
-		nodeID:     nodeID,
-		options:    NewOptions(cfg),
-		subscribed: make(map[string]struct{}),
+		nodeID:      nodeID,
+		options:     NewOptions(cfg),
+		subscribed:  make(map[string]struct{}),
+		subNotifyCh: make(chan struct{}, 1), // Buffered channel for subscription notifications
 	}
 }
 
@@ -83,6 +85,10 @@ func (b *redisBroker) Subscribe(ch string) error {
 	_ = b.client.XGroupCreate(ctx, stream, group, "0").Err()
 
 	b.subscribed[ch] = struct{}{}
+
+	// Notify consumer about subscription change
+	b.notifySubscriptionChanged()
+
 	return nil
 }
 
@@ -92,6 +98,10 @@ func (b *redisBroker) Unsubscribe(ch string) error {
 	defer b.subMu.Unlock()
 
 	delete(b.subscribed, ch)
+
+	// Notify consumer about subscription change
+	b.notifySubscriptionChanged()
+
 	return nil
 }
 
@@ -137,4 +147,14 @@ func (b *redisBroker) Close() error {
 		return b.client.Close()
 	}
 	return nil
+}
+
+// notifySubscriptionChanged sends a notification about subscription changes.
+// Uses non-blocking send to avoid blocking the caller.
+func (b *redisBroker) notifySubscriptionChanged() {
+	select {
+	case b.subNotifyCh <- struct{}{}:
+	default:
+		// Channel already has a pending notification, no need to send again
+	}
 }

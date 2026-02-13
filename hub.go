@@ -258,12 +258,18 @@ func (h *subShard) broadcastPublication(channel string, pub *Publication) error 
 		}}
 	})
 
+	// Send to all subscribers in parallel
+	var wg sync.WaitGroup
 	for _, sub := range subscribers {
-		if err := sub.Client.Send(ctx, out); err != nil {
-			log.ErrorContext(ctx, "send publication error", err)
-			continue
-		}
+		wg.Add(1)
+		go func(sub Subscriber) {
+			defer wg.Done()
+			if err := sub.Client.Send(ctx, out); err != nil {
+				log.ErrorContext(ctx, "send publication error", err)
+			}
+		}(sub)
 	}
+	wg.Wait()
 
 	return nil
 }
@@ -274,8 +280,8 @@ func (h *Hub) add(c *ClientSession) {
 	if c.SessionID() != "" {
 		h.sessions[c.SessionID()] = c
 	}
-	h.mu.Unlock()
 	h.connShards[index(c.UserID(), numHubShards)].add(c)
+	h.mu.Unlock()
 }
 
 // NumSubscribers returns number of current subscribers for a given channel.

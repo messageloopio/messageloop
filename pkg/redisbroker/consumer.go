@@ -59,20 +59,8 @@ func (b *redisBroker) consume() {
 		case <-b.ctx.Done():
 			return
 
-		case msg, ok := <-pubsubCh:
-			if !ok {
-				return
-			}
-			// Handle real-time pub/sub notification immediately
-			if err := b.handlePubSubMessage(msg); err != nil {
-				log.Printf("[redisbroker] error handling pub/sub message: %v", err)
-			}
-
-		case <-streamCtx.Done():
-			return
-
-		default:
-			// Check for new subscriptions
+		case <-b.subNotifyCh:
+			// Subscription changed, check for new subscriptions
 			b.subMu.RLock()
 			newSubs := make([]string, 0, len(b.subscribed))
 			for ch := range b.subscribed {
@@ -103,15 +91,60 @@ func (b *redisBroker) consume() {
 				log.Printf("[redisbroker] starting to consume stream: %s", stream)
 			}
 
-			// If we have streams to read, read them
+		case msg, ok := <-pubsubCh:
+			if !ok {
+				return
+			}
+			// Handle real-time pub/sub notification immediately
+			if err := b.handlePubSubMessage(msg); err != nil {
+				log.Printf("[redisbroker] error handling pub/sub message: %v", err)
+			}
+
+		case <-streamCtx.Done():
+			return
+
+		default:
+			// Check for new subscriptions (fallback for initial state)
+			b.subMu.RLock()
+			newSubs := make([]string, 0, len(b.subscribed))
+			for ch := range b.subscribed {
+				stream := b.options.StreamPrefix + ch
+				tracked := false
+				mu.RLock()
+				for _, s := range streams {
+					if s == stream {
+						tracked = true
+						break
+					}
+				}
+				mu.RUnlock()
+				if !tracked {
+					newSubs = append(newSubs, ch)
+				}
+			}
+			b.subMu.RUnlock()
+
+			for _, ch := range newSubs {
+				stream := b.options.StreamPrefix + ch
+				mu.Lock()
+				streams = append(streams, stream, ">")
+				pendingIDs[stream] = ">"
+				mu.Unlock()
+				log.Printf("[redisbroker] starting to consume stream: %s", stream)
+			}
+
+			// If we have streams to read, read them; otherwise wait for notifications
 			if len(streams) > 0 {
 				b.readStreams(streamCtx, consumerID, &mu, &pendingIDs, streams)
 			} else {
-				// No streams, wait a bit before checking again
+				// Wait longer since we have notification mechanism
 				select {
 				case <-b.ctx.Done():
 					return
-				case <-time.After(50 * time.Millisecond):
+				case <-b.subNotifyCh:
+					// Notification received, loop will handle it
+				case <-time.After(100 * time.Millisecond):
+					// Periodic check as fallback
 				}
 			}
 		}
