@@ -1,7 +1,10 @@
 version: '3'
 
-tasks:
+vars:
+  Version: v0.1.0
+  Comment: "release v0.1.0: init release"
 
+tasks:
   init:
     dir: '{{.USER_WORKING_DIR}}'
     cmds:
@@ -25,3 +28,24 @@ tasks:
       - go get -u github.com/lynx-go/lynx/contrib/kafka
       - go get -u github.com/lynx-go/lynx/contrib/schedule
       - go mod tidy
+
+  release-tag:
+    dir: '{{.USER_WORKING_DIR}}'
+    cmds:
+      - git tag -a {{ .Version }} -m "{{ .Comment }}"
+      - git push origin {{ .Version }}
+
+  release-all:
+    cmds:
+      - task: release-tag
+        vars:
+          Version: "{{.Version}}"
+          Comment: "{{.Comment}}"
+      - task: release-tag
+        vars:
+          Version: "shared/{{.Version}}"
+          Comment: "{{.Comment}}"
+      - task: release-tag
+        vars:
+          Version: "sdks/go/{{.Version}}"
+          Comment: "{{.Comment}}"
