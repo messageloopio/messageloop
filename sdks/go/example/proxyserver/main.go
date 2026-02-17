@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
-	cloudevents "github.com/cloudevents/sdk-go/v2"
 	protobuf "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
-	pb "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
+	"github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/messageloopio/messageloop/sdks/go"
 	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v1"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
