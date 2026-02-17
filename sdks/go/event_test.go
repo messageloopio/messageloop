@@ -190,7 +190,7 @@ func TestWrapPublicationToEvents(t *testing.T) {
 
 	// Create publication
 	pub := &clientpb.Publication{
-		Envelopes: []*clientpb.Message{
+		Messages: []*clientpb.Message{
 			{
 				Id:      "msg-1",
 				Channel: "test.channel",

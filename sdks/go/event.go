@@ -29,8 +29,8 @@ func wrapPublicationToEvents(pub *clientpb.Publication) []*cloudevents.Event {
 	if pub == nil {
 		return nil
 	}
-	events := make([]*cloudevents.Event, 0, len(pub.GetEnvelopes()))
-	for _, env := range pub.GetEnvelopes() {
+	events := make([]*cloudevents.Event, 0, len(pub.GetMessages()))
+	for _, env := range pub.GetMessages() {
 		if env == nil {
 			continue
 		}

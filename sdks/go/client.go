@@ -215,7 +215,8 @@ func (c *client) handleMessage(msg *clientpb.OutboundMessage) {
 		c.handlePublication(env.Publication)
 
 	case *clientpb.OutboundMessage_RpcReply:
-		c.handleRPCReply(msg, env.RpcReply)
+		ce, _ := PbToCloudEvent(env.RpcReply)
+		c.handleRPCReply(msg, ce)
 
 	case *clientpb.OutboundMessage_PublishAck:
 		// PublishAck is handled via RPC reply mechanism
@@ -688,7 +689,7 @@ func BuildPublicationMessage(messages []*clientpb.Message) *clientpb.OutboundMes
 	return &clientpb.OutboundMessage{
 		Envelope: &clientpb.OutboundMessage_Publication{
 			Publication: &clientpb.Publication{
-				Envelopes: messages,
+				Messages: messages,
 			},
 		},
 	}

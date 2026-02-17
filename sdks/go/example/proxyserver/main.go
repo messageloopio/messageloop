@@ -8,7 +8,10 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	cloudevents "github.com/cloudevents/sdk-go/v2"
+	protobuf "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
 	pb "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	"github.com/messageloopio/messageloop/sdks/go"
 	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v1"
@@ -18,7 +21,13 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// MyRPCHandler implements custom RPC handling.
+// ============================================================================
+// Approach 1: Traditional switch-based handler
+// ============================================================================
+
+// MyRPCHandler implements custom RPC handling using a switch statement.
+// This approach works well for simple cases but can become unwieldy
+// as the number of methods grows.
 type MyRPCHandler struct{}
 
 func (h *MyRPCHandler) HandleRPC(ctx context.Context, req *messageloopgo.RPCRequest) (*messageloopgo.RPCResponse, error) {
@@ -28,12 +37,15 @@ func (h *MyRPCHandler) HandleRPC(ctx context.Context, req *messageloopgo.RPCRequ
 	case "echo":
 		// Echo back the request
 		return &messageloopgo.RPCResponse{
-			Event: req.Event.Event,
+			Payload: req.Payload,
 		}, nil
 
 	case "getUser":
 		// Example: Get user by ID
-		userID := req.Event.Event.GetTextData()
+		var userID string
+		if req.Payload != nil {
+			_ = req.Payload.DataAs(&userID)
+		}
 		responseEvent := messageloopgo.NewTextCloudEvent(
 			req.ID,
 			"/proxy/echo",
@@ -41,12 +53,15 @@ func (h *MyRPCHandler) HandleRPC(ctx context.Context, req *messageloopgo.RPCRequ
 			"User: "+userID,
 		)
 		return &messageloopgo.RPCResponse{
-			Event: responseEvent,
+			Payload: responseEvent,
 		}, nil
 
 	case "sum":
 		// Example: Parse and calculate sum
-		data := req.Event.Event.GetTextData()
+		var data string
+		if req.Payload != nil {
+			_ = req.Payload.DataAs(&data)
+		}
 		var a, b int
 		if _, err := fmt.Sscanf(data, "%d,%d", &a, &b); err == nil {
 			result := fmt.Sprintf("%d", a+b)
@@ -57,7 +72,7 @@ func (h *MyRPCHandler) HandleRPC(ctx context.Context, req *messageloopgo.RPCRequ
 				result,
 			)
 			return &messageloopgo.RPCResponse{
-				Event: responseEvent,
+				Payload: responseEvent,
 			}, nil
 		}
 		return &messageloopgo.RPCResponse{
@@ -77,6 +92,119 @@ func (h *MyRPCHandler) HandleRPC(ctx context.Context, req *messageloopgo.RPCRequ
 			},
 		}, nil
 	}
+}
+
+// ============================================================================
+// Approach 2: RPCMux-based handler (recommended for larger services)
+// ============================================================================
+
+// newRPCMux creates an RPC multiplexer with handlers and middleware.
+// This approach provides better organization and extensibility.
+func newRPCMux() *messageloopgo.RPCMux {
+	mux := messageloopgo.NewRPCMux()
+
+	// Register middleware (applied in registration order: logging -> recovery -> handler)
+	mux.Use(loggingMiddleware)
+	mux.Use(recoveryMiddleware)
+
+	// Register handlers
+	mux.Handle("echo", handleEcho)
+	mux.Handle("getUser", handleGetUser)
+	mux.Handle("sum", handleSum)
+
+	return mux
+}
+
+// loggingMiddleware logs RPC requests and their duration.
+func loggingMiddleware(next messageloopgo.RPCHandlerFunc) messageloopgo.RPCHandlerFunc {
+	return func(ctx context.Context, req *messageloopgo.RPCRequest) (*messageloopgo.RPCResponse, error) {
+		start := time.Now()
+		resp, err := next(ctx, req)
+		duration := time.Since(start)
+
+		if err != nil {
+			log.Printf("[RPC] method=%s duration=%v error=%v", req.Method, duration, err)
+		} else if resp.Error != nil {
+			log.Printf("[RPC] method=%s duration=%v error_code=%s", req.Method, duration, resp.Error.Code)
+		} else {
+			log.Printf("[RPC] method=%s duration=%v success=true", req.Method, duration)
+		}
+
+		return resp, err
+	}
+}
+
+// recoveryMiddleware recovers from panics and returns an error response.
+func recoveryMiddleware(next messageloopgo.RPCHandlerFunc) messageloopgo.RPCHandlerFunc {
+	return func(ctx context.Context, req *messageloopgo.RPCRequest) (resp *messageloopgo.RPCResponse, err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[RPC] PANIC: method=%s recovered=%v", req.Method, r)
+				resp = &messageloopgo.RPCResponse{
+					Error: &sharedpb.Error{
+						Code:    "INTERNAL_ERROR",
+						Type:    "server_error",
+						Message: fmt.Sprintf("Internal server error: %v", r),
+					},
+				}
+				err = nil
+			}
+		}()
+		return next(ctx, req)
+	}
+}
+
+// handleEcho echoes back the request.
+func handleEcho(ctx context.Context, req *messageloopgo.RPCRequest) (*messageloopgo.RPCResponse, error) {
+	return &messageloopgo.RPCResponse{
+		Payload: req.Payload,
+	}, nil
+}
+
+// handleGetUser simulates getting user info.
+func handleGetUser(ctx context.Context, req *messageloopgo.RPCRequest) (*messageloopgo.RPCResponse, error) {
+	var userID string
+	if req.Payload != nil {
+		_ = req.Payload.DataAs(&userID)
+	}
+	responseEvent := messageloopgo.NewTextCloudEvent(
+		req.ID,
+		"/proxy/getUser",
+		"getUser.response",
+		"User: "+userID,
+	)
+	return &messageloopgo.RPCResponse{
+		Payload: responseEvent,
+	}, nil
+}
+
+// handleSum calculates the sum of two numbers.
+func handleSum(ctx context.Context, req *messageloopgo.RPCRequest) (*messageloopgo.RPCResponse, error) {
+	var data string
+	if req.Payload != nil {
+		_ = req.Payload.DataAs(&data)
+	}
+	var a, b int
+	if _, err := fmt.Sscanf(data, "%d,%d", &a, &b); err != nil {
+		return &messageloopgo.RPCResponse{
+			Error: &sharedpb.Error{
+				Code:    "INVALID_INPUT",
+				Type:    "validation_error",
+				Message: "Expected format: a,b (e.g., 10,20)",
+			},
+		}, nil
+	}
+
+	result := fmt.Sprintf("%d", a+b)
+	responseEvent := messageloopgo.NewTextCloudEvent(
+		req.ID,
+		"/proxy/sum",
+		"sum.response",
+		result,
+	)
+	return &messageloopgo.RPCResponse{
+		Payload: responseEvent,
+	}, nil
 }
 
 // MyAuthHandler implements custom authentication.
@@ -159,16 +287,19 @@ type MyProxyService struct {
 func (s *MyProxyService) RPC(ctx context.Context, req *proxypb.RPCRequest) (*proxypb.RPCResponse, error) {
 	log.Printf("[RPC Request] id=%s channel=%s method=%s", req.Id, req.Channel, req.Method)
 
+	// Convert pb.CloudEvent to cloudevents.Event
+	var payload *cloudevents.Event
+	if pbPayload := req.GetPayload(); pbPayload != nil {
+		if ce, err := protobuf.FromProto(pbPayload); err == nil {
+			payload = ce
+		}
+	}
+
 	rpcReq := &messageloopgo.RPCRequest{
 		ID:      req.Id,
 		Channel: req.Channel,
 		Method:  req.Method,
-		Event: &messageloopgo.RPCProxyEvent{
-			ID:      req.Id,
-			Channel: req.Channel,
-			Method:  req.Method,
-			Event:   req.GetPayload(),
-		},
+		Payload: payload,
 	}
 
 	resp, err := s.rpcHandler.HandleRPC(ctx, rpcReq)
@@ -184,10 +315,11 @@ func (s *MyProxyService) RPC(ctx context.Context, req *proxypb.RPCRequest) (*pro
 		}, nil
 	}
 
+	// Convert cloudevents.Event to pb.CloudEvent
 	var event *pb.CloudEvent
-	if resp.Event != nil {
-		if ce, ok := resp.Event.(*pb.CloudEvent); ok {
-			event = ce
+	if resp.Payload != nil {
+		if pbEvent, err := protobuf.ToProto(resp.Payload); err == nil {
+			event = pbEvent
 		}
 	}
 
@@ -312,9 +444,20 @@ func hasPrefix(s, prefix string) bool {
 }
 
 func main() {
+	// Choose RPC handler approach:
+	//
+	// Approach 1: Traditional switch-based handler (simpler for few methods)
+	// rpcHandler := &MyRPCHandler{}
+	//
+	// Approach 2: RPCMux-based handler (recommended for larger services)
+	// - Better organization with explicit method registration
+	// - Middleware support for logging, recovery, auth, etc.
+	// - Easy to extend with new methods
+	rpcHandler := newRPCMux()
+
 	// Create the proxy service with custom handlers
 	handler := &MyProxyService{
-		rpcHandler:       &MyRPCHandler{},
+		rpcHandler:       rpcHandler,
 		authHandler:      &MyAuthHandler{},
 		aclHandler:       &MyACLHandler{},
 		lifecycleHandler: &MyLifecycleHandler{},

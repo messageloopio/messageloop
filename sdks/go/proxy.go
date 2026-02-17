@@ -6,7 +6,9 @@ import (
 	"log/slog"
 	"net"
 
-	"github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
+	protobuf "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
+	pb "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v1"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	"google.golang.org/grpc"
@@ -27,21 +29,13 @@ type RPCRequest struct {
 	ID      string
 	Channel string
 	Method  string
-	Event   *RPCProxyEvent
-}
-
-// RPCProxyEvent wraps the CloudEvent from an RPC request.
-type RPCProxyEvent struct {
-	ID      string
-	Channel string
-	Method  string
-	Event   *pb.CloudEvent
+	Payload *cloudevents.Event
 }
 
 // RPCResponse represents the response to an RPC request.
 type RPCResponse struct {
-	Event interface{} // Can be *pb.CloudEvent or any proto.Message
-	Error *sharedpb.Error
+	Payload *cloudevents.Event
+	Error   *sharedpb.Error
 }
 
 // AuthHandler defines the interface for handling authentication requests.
@@ -169,16 +163,19 @@ func (h *HandlerImpl) RPC(ctx context.Context, req *proxypb.RPCRequest) (*proxyp
 		"method", req.Method,
 	)
 
+	// Convert pb.CloudEvent to cloudevents.Event
+	var payload *cloudevents.Event
+	if pbPayload := req.GetPayload(); pbPayload != nil {
+		if ce, err := protobuf.FromProto(pbPayload); err == nil {
+			payload = ce
+		}
+	}
+
 	rpcReq := &RPCRequest{
 		ID:      req.Id,
 		Channel: req.Channel,
 		Method:  req.Method,
-		Event: &RPCProxyEvent{
-			ID:      req.Id,
-			Channel: req.Channel,
-			Method:  req.Method,
-			Event:   req.GetPayload(),
-		},
+		Payload: payload,
 	}
 
 	resp, err := h.RPCHandlerImpl.HandleRPC(ctx, rpcReq)
@@ -201,10 +198,12 @@ func (h *HandlerImpl) RPC(ctx context.Context, req *proxypb.RPCRequest) (*proxyp
 		)
 	}
 
-	// Handle Event - if it's already a CloudEvent, use it directly
+	// Convert cloudevents.Event to pb.CloudEvent
 	var event *pb.CloudEvent
-	if ce, ok := resp.Event.(*pb.CloudEvent); ok {
-		event = ce
+	if resp.Payload != nil {
+		if pbEvent, err := protobuf.ToProto(resp.Payload); err == nil {
+			event = pbEvent
+		}
 	}
 
 	return &proxypb.RPCResponse{
