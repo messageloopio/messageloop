@@ -299,7 +299,7 @@ export function protoToCloudEvent(event: CloudEvent): CloudEventSDKClass {
  * Extract messages from a Publication.
  */
 export function extractMessages(publication: Publication): Message[] {
-  return publication.envelopes || [];
+  return publication.messages || [];
 }
 
 /**
