@@ -53,5 +53,6 @@ tasks:
   release-sdk-ts:
     dir: '{{.USER_WORKING_DIR}}/sdks/ts'
     cmds:
+      - npm exec rimraf -- dist
       - npm run build
       - npm publish --access public --registry https://registry.npmjs.org/
