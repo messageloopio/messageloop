@@ -49,3 +49,8 @@ tasks:
         vars:
           Version: "sdks/go/{{.Version}}"
           Comment: "{{.Comment}}"
+
+  release-ts-sdk:
+    dir: '{{.USER_WORKING_DIR}}/sdks/ts'
+    cmds:
+      - npm run build
