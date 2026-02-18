@@ -9,6 +9,7 @@ transport:
   websocket:
     addr: ":9080"
     path: "/ws"
+    check_origin: true  # Set to true for development to allow cross-origin requests
   grpc:
     addr: ":9090"
 

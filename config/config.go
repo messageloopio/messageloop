@@ -32,6 +32,7 @@ type WebSocketTransport struct {
 	Addr        string `yaml:"addr" json:"addr"`
 	Path        string `yaml:"path" json:"path"`
 	ReadTimeout string `yaml:"read_timeout" json:"read_timeout"` // duration string
+	CheckOrigin bool   `yaml:"check_origin" json:"check_origin"` // Allow any origin when true
 }
 
 type GRPCTransport struct {

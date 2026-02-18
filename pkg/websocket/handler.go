@@ -28,6 +28,7 @@ func NewHandler(node *messageloop.Node, opt Options) *Handler {
 				"messageloop+json",
 				"messageloop+proto",
 			},
+			CheckOrigin: opt.CheckOrigin,
 		},
 	}
 	return handler

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/lynx-go/lynx"
@@ -92,10 +93,14 @@ func main() {
 			return err
 		}
 
-		wsServer := websocket.NewServer(websocket.Options{
+		wsOpts := websocket.Options{
 			Addr:   cfg.Transport.WebSocket.Addr,
 			WsPath: cfg.Transport.WebSocket.Path,
-		}, node)
+		}
+		if cfg.Transport.WebSocket.CheckOrigin {
+			wsOpts.CheckOrigin = func(r *http.Request) bool { return true }
+		}
+		wsServer := websocket.NewServer(wsOpts, node)
 		if err := app.Hooks(lynx.Components(wsServer, grpcServer)); err != nil {
 			return err
 		}

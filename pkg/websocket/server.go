@@ -21,6 +21,7 @@ type Options struct {
 	Addr        string
 	WsPath      string
 	ReadTimeout time.Duration
+	CheckOrigin func(r *http.Request) bool
 }
 
 func DefaultOptions() Options {
