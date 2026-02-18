@@ -1,4 +1,21 @@
 /**
+ * Connection state for the MessageLoop client.
+ */
+export type ConnectionState =
+  | "connecting"
+  | "connected"
+  | "disconnected"
+  | "reconnecting";
+
+/**
+ * Event emitted when connection state changes.
+ */
+export interface ConnectionStateChangeEvent {
+  previousState: ConnectionState;
+  newState: ConnectionState;
+}
+
+/**
  * MessageLoop client type definition.
  */
 export interface IClient {
@@ -20,4 +37,22 @@ export interface IClient {
   getSessionId(): string | null;
   isConnected(): boolean;
   getSubscribedChannels(): string[];
+
+  // Multi-handler support
+  addMessageHandler(
+    handler: (events: import("../event/converters").ReceivedMessage[]) => void
+  ): () => void;
+  removeMessageHandler(
+    handler: (events: import("../event/converters").ReceivedMessage[]) => void
+  ): void;
+  addStateChangeHandler(
+    handler: (event: ConnectionStateChangeEvent) => void
+  ): () => void;
+
+  // Connection state
+  getConnectionState(): ConnectionState;
+
+  // Reconnect control
+  disableAutoReconnect(): void;
+  enableAutoReconnect(): void;
 }

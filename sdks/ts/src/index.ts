@@ -1,7 +1,11 @@
 // Main exports
 export { MessageLoopClient } from "./client";
 export type { ClientOptions, ClientOption } from "./client";
-export type { IClient } from "./client/types";
+export type {
+  IClient,
+  ConnectionState,
+  ConnectionStateChangeEvent,
+} from "./client/types";
 
 // Transport exports
 export type { Transport, TransportFactory } from "./transport/transport";
@@ -43,6 +47,9 @@ export {
   withConnectTimeout,
   withRPCTimeout,
   withEphemeral,
+  withAutoReconnect,
+  withReconnectDelay,
+  withReconnectMaxAttempts,
 } from "./client/options";
 
 // Re-export CloudEvent from cloudevents

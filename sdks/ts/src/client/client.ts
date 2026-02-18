@@ -4,6 +4,10 @@ import type { ReceivedMessage } from "../event/converters";
 import type { Transport } from "../transport/transport";
 import type { Codec } from "../transport/codec/codec";
 import type { ClientOptions, ClientOption } from "./options";
+import type {
+  ConnectionState,
+  ConnectionStateChangeEvent,
+} from "./types";
 
 import { WebSocketTransport } from "../transport/websocket";
 import { jsonCodec, protobufCodec } from "../transport/codec";
@@ -28,8 +32,19 @@ export class MessageLoopClient {
   private sessionId: string | null = null;
   private isConnectedFlag = false;
   private isClosedFlag = false;
+  private url: string = "";
 
-  // Handlers
+  // Connection state
+  private connectionState: ConnectionState = "disconnected";
+  private autoReconnectEnabled = true;
+
+  // Multi-handler support using Sets
+  private messageHandlers: Set<(events: ReceivedMessage[]) => void> =
+    new Set();
+  private stateChangeHandlers: Set<(event: ConnectionStateChangeEvent) => void> =
+    new Set();
+
+  // Legacy handlers (for backward compatibility)
   private messageHandler: ((events: ReceivedMessage[]) => void) | null = null;
   private errorHandler: ((error: Error) => void) | null = null;
   private connectedHandler: ((sessionId: string) => void) | null = null;
@@ -39,11 +54,19 @@ export class MessageLoopClient {
   private subscribedChannels: Set<string> = new Set();
 
   // RPC pending requests
-  private pendingRPC: Map<string, { resolve: (event: CloudEvent) => void; reject: (err: Error) => void }> = new Map();
+  private pendingRPC: Map<
+    string,
+    { resolve: (event: CloudEvent) => void; reject: (err: Error) => void }
+  > = new Map();
 
   // Ping/Pong
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private pingTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Reconnection
+  private reconnectAttempts = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private isReconnecting = false;
 
   /**
    * Create a new MessageLoop client.
@@ -52,6 +75,7 @@ export class MessageLoopClient {
   private constructor(options: ClientOptions) {
     this.options = options;
     this.codec = options.encoding === "proto" ? protobufCodec : jsonCodec;
+    this.autoReconnectEnabled = options.autoReconnect;
 
     // Add auto-subscribe channels to subscribed set
     for (const channel of options.autoSubscribe) {
@@ -65,24 +89,39 @@ export class MessageLoopClient {
    * @param options - Client option setters
    * @returns Connected client instance
    */
-  static async dial(url: string, options: ClientOption[] = []): Promise<MessageLoopClient> {
+  static async dial(
+    url: string,
+    options: ClientOption[] = []
+  ): Promise<MessageLoopClient> {
     const opts = buildClientOptions(options);
     const codec = opts.encoding === "proto" ? protobufCodec : jsonCodec;
 
-    const transport = await WebSocketTransport.dial(url, codec, {
-      timeout: opts.connectTimeout,
-    });
-
     const client = new MessageLoopClient(opts);
-    client.transport = transport;
+    client.url = url;
+    client.setConnectionState("connecting");
 
-    // Start receiving messages
-    client.startMessageLoop();
+    try {
+      const transport = await WebSocketTransport.dial(url, codec, {
+        timeout: opts.connectTimeout,
+      });
 
-    // Wait for connection
-    await client.waitForConnection();
+      client.transport = transport;
 
-    return client;
+      // Start receiving messages
+      client.startMessageLoop();
+
+      // Wait for connection
+      await client.waitForConnection();
+
+      return client;
+    } catch (err) {
+      client.setConnectionState("disconnected");
+      // Attempt reconnection if enabled
+      if (client.autoReconnectEnabled && !client.isClosedFlag) {
+        client.attemptReconnect();
+      }
+      throw err;
+    }
   }
 
   /**
@@ -143,6 +182,17 @@ export class MessageLoopClient {
       case "connected": {
         this.sessionId = parsed.data.sessionId || null;
         this.isConnectedFlag = true;
+        this.reconnectAttempts = 0;
+        this.isReconnecting = false;
+
+        // Update connection state
+        const wasReconnecting = this.connectionState === "reconnecting";
+        this.setConnectionState("connected");
+
+        // Resubscribe to channels after reconnection
+        if (wasReconnecting && this.subscribedChannels.size > 0) {
+          this.resubscribeAllChannels();
+        }
 
         // Start ping loop
         this.startPingLoop();
@@ -167,8 +217,19 @@ export class MessageLoopClient {
           });
         }
 
-        if (this.messageHandler && messages.length > 0) {
-          this.messageHandler(messages);
+        if (messages.length > 0) {
+          // Notify legacy handler
+          if (this.messageHandler) {
+            this.messageHandler(messages);
+          }
+          // Notify all registered handlers
+          for (const handler of this.messageHandlers) {
+            try {
+              handler(messages);
+            } catch {
+              // Ignore handler errors
+            }
+          }
         }
         break;
       }
@@ -208,6 +269,143 @@ export class MessageLoopClient {
   private handleError(err: Error): void {
     if (this.errorHandler) {
       this.errorHandler(err);
+    }
+
+    // Trigger reconnection for connection errors
+    if (
+      this.autoReconnectEnabled &&
+      !this.isClosedFlag &&
+      !this.isReconnecting &&
+      this.connectionState === "connected"
+    ) {
+      this.handleDisconnect();
+    }
+  }
+
+  /**
+   * Set the connection state and notify handlers.
+   */
+  private setConnectionState(newState: ConnectionState): void {
+    const previousState = this.connectionState;
+    if (previousState === newState) return;
+
+    this.connectionState = newState;
+
+    // Notify state change handlers
+    const event: ConnectionStateChangeEvent = {
+      previousState,
+      newState,
+    };
+    for (const handler of this.stateChangeHandlers) {
+      try {
+        handler(event);
+      } catch {
+        // Ignore handler errors
+      }
+    }
+  }
+
+  /**
+   * Handle unexpected disconnect.
+   */
+  private handleDisconnect(): void {
+    this.isConnectedFlag = false;
+    this.stopPingLoop();
+    this.setConnectionState("disconnected");
+
+    // Attempt reconnection if enabled
+    if (this.autoReconnectEnabled && !this.isClosedFlag) {
+      this.attemptReconnect();
+    }
+  }
+
+  /**
+   * Attempt to reconnect with exponential backoff.
+   */
+  private attemptReconnect(): void {
+    if (this.isReconnecting || this.isClosedFlag) return;
+
+    // Check max attempts
+    if (
+      this.options.reconnectMaxAttempts > 0 &&
+      this.reconnectAttempts >= this.options.reconnectMaxAttempts
+    ) {
+      this.setConnectionState("disconnected");
+      return;
+    }
+
+    this.isReconnecting = true;
+    this.setConnectionState("reconnecting");
+
+    // Calculate delay with exponential backoff
+    const delay = Math.min(
+      this.options.reconnectInitialDelay *
+        Math.pow(this.options.reconnectBackoffMultiplier, this.reconnectAttempts),
+      this.options.reconnectMaxDelay
+    );
+
+    this.reconnectAttempts++;
+
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnect().catch(() => {
+        // Reconnect failed, will retry
+      });
+    }, delay);
+  }
+
+  /**
+   * Perform reconnection.
+   */
+  private async reconnect(): Promise<void> {
+    if (this.isClosedFlag || !this.url) {
+      this.isReconnecting = false;
+      return;
+    }
+
+    try {
+      // Clean up old transport
+      if (this.transport) {
+        try {
+          await this.transport.close();
+        } catch {
+          // Ignore cleanup errors
+        }
+        this.transport = null;
+      }
+
+      this.setConnectionState("connecting");
+
+      // Create new transport
+      const transport = await WebSocketTransport.dial(this.url, this.codec, {
+        timeout: this.options.connectTimeout,
+      });
+
+      this.transport = transport;
+      this.startMessageLoop();
+
+      // Send connect message
+      await this.connect();
+    } catch {
+      this.isReconnecting = false;
+      // Schedule next attempt
+      if (this.autoReconnectEnabled && !this.isClosedFlag) {
+        this.attemptReconnect();
+      }
+    }
+  }
+
+  /**
+   * Resubscribe to all channels after reconnection.
+   */
+  private async resubscribeAllChannels(): Promise<void> {
+    if (this.subscribedChannels.size === 0) return;
+
+    const channels = Array.from(this.subscribedChannels);
+    try {
+      const msg = createSubscribeMessage(channels, this.options.ephemeral);
+      await this.send(msg);
+    } catch {
+      // Ignore resubscribe errors
     }
   }
 
@@ -296,6 +494,13 @@ export class MessageLoopClient {
     if (this.isClosedFlag) return;
     this.isClosedFlag = true;
 
+    // Stop reconnection
+    this.isReconnecting = false;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
     // Stop ping loop
     this.stopPingLoop();
 
@@ -313,6 +518,7 @@ export class MessageLoopClient {
 
     this.isConnectedFlag = false;
     this.sessionId = null;
+    this.setConnectionState("disconnected");
 
     // Notify closed handler
     if (this.closedHandler) {
@@ -443,6 +649,68 @@ export class MessageLoopClient {
   getSubscribedChannels(): string[] {
     return Array.from(this.subscribedChannels);
   }
+
+  // ========== Multi-handler API ==========
+
+  /**
+   * Add a message handler. Returns a function to remove the handler.
+   */
+  addMessageHandler(
+    handler: (events: ReceivedMessage[]) => void
+  ): () => void {
+    this.messageHandlers.add(handler);
+    return () => this.removeMessageHandler(handler);
+  }
+
+  /**
+   * Remove a message handler.
+   */
+  removeMessageHandler(handler: (events: ReceivedMessage[]) => void): void {
+    this.messageHandlers.delete(handler);
+  }
+
+  /**
+   * Add a state change handler. Returns a function to remove the handler.
+   */
+  addStateChangeHandler(
+    handler: (event: ConnectionStateChangeEvent) => void
+  ): () => void {
+    this.stateChangeHandlers.add(handler);
+    return () => this.stateChangeHandlers.delete(handler);
+  }
+
+  /**
+   * Get the current connection state.
+   */
+  getConnectionState(): ConnectionState {
+    return this.connectionState;
+  }
+
+  /**
+   * Disable automatic reconnection.
+   */
+  disableAutoReconnect(): void {
+    this.autoReconnectEnabled = false;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.isReconnecting = false;
+  }
+
+  /**
+   * Enable automatic reconnection.
+   */
+  enableAutoReconnect(): void {
+    this.autoReconnectEnabled = true;
+  }
+
+  /**
+   * Check if connected (alias for backward compatibility).
+   */
+  isConnected(): boolean {
+    return this.isConnectedFlag;
+  }
 }
 
 /**
@@ -461,6 +729,11 @@ function buildClientOptions(setters: ClientOption[]): ClientOptions {
     connectTimeout: 30000,
     rpcTimeout: 30000,
     ephemeral: false,
+    autoReconnect: true,
+    reconnectInitialDelay: 1000,
+    reconnectMaxDelay: 30000,
+    reconnectMaxAttempts: 0,
+    reconnectBackoffMultiplier: 2,
   };
 
   for (const setter of setters) {

@@ -24,6 +24,16 @@ export interface ClientOptions {
   rpcTimeout: number;
   /** Whether subscriptions are ephemeral */
   ephemeral: boolean;
+  /** Enable automatic reconnection on disconnect */
+  autoReconnect: boolean;
+  /** Initial reconnection delay in milliseconds */
+  reconnectInitialDelay: number;
+  /** Maximum reconnection delay in milliseconds */
+  reconnectMaxDelay: number;
+  /** Maximum reconnection attempts (0 = unlimited) */
+  reconnectMaxAttempts: number;
+  /** Exponential backoff multiplier for reconnection delays */
+  reconnectBackoffMultiplier: number;
 }
 
 /**
@@ -40,6 +50,11 @@ const defaultOptions: Partial<ClientOptions> = {
   connectTimeout: 30000,
   rpcTimeout: 30000,
   ephemeral: false,
+  autoReconnect: true,
+  reconnectInitialDelay: 1000,
+  reconnectMaxDelay: 30000,
+  reconnectMaxAttempts: 0,
+  reconnectBackoffMultiplier: 2,
 };
 
 /**
@@ -147,6 +162,37 @@ export function withEphemeral(ephemeral: boolean): ClientOption {
 }
 
 /**
+ * With auto-reconnect option.
+ */
+export function withAutoReconnect(enabled: boolean): ClientOption {
+  return (options: ClientOptions) => {
+    options.autoReconnect = enabled;
+  };
+}
+
+/**
+ * With reconnection delay options.
+ * @param initial - Initial delay in milliseconds
+ * @param max - Maximum delay in milliseconds
+ */
+export function withReconnectDelay(initial: number, max: number): ClientOption {
+  return (options: ClientOptions) => {
+    options.reconnectInitialDelay = initial;
+    options.reconnectMaxDelay = max;
+  };
+}
+
+/**
+ * With maximum reconnection attempts.
+ * @param attempts - Maximum attempts (0 = unlimited)
+ */
+export function withReconnectMaxAttempts(attempts: number): ClientOption {
+  return (options: ClientOptions) => {
+    options.reconnectMaxAttempts = attempts;
+  };
+}
+
+/**
  * Build client options from option setters.
  */
 export function buildClientOptions(
@@ -164,6 +210,11 @@ export function buildClientOptions(
     connectTimeout: defaultOptions.connectTimeout!,
     rpcTimeout: defaultOptions.rpcTimeout!,
     ephemeral: defaultOptions.ephemeral!,
+    autoReconnect: defaultOptions.autoReconnect!,
+    reconnectInitialDelay: defaultOptions.reconnectInitialDelay!,
+    reconnectMaxDelay: defaultOptions.reconnectMaxDelay!,
+    reconnectMaxAttempts: defaultOptions.reconnectMaxAttempts!,
+    reconnectBackoffMultiplier: defaultOptions.reconnectBackoffMultiplier!,
   };
 
   // Generate random client ID if not provided
