@@ -7,19 +7,19 @@
 import {
   MessageLoopClient,
   createCloudEvent,
-  withClientId,
-  withAutoSubscribe,
-  withToken,
-  withEncoding,
+  setClientId,
+  setAutoSubscribe,
+  setToken,
+  setEncoding,
 } from "../src/index";
 
 async function main() {
   // Create and connect client
   const client = await MessageLoopClient.dial("ws://localhost:9080/ws", [
-    withClientId("node-client-001"),
-    withAutoSubscribe("chat.general", "notifications"),
-    withToken("your-auth-token"),
-    withEncoding("json"),
+    setClientId("node-client-001"),
+    setAutoSubscribe("chat.general", "notifications"),
+    setToken("your-auth-token"),
+    setEncoding("json"),
   ]);
 
   console.log(`Connected with session: ${client.getSessionId()}`);

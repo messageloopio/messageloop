@@ -95,8 +95,8 @@
     import {
       MessageLoopClient,
       createCloudEvent,
-      withClientId,
-      withAutoSubscribe,
+      setClientId,
+      setAutoSubscribe,
     } from '../dist/esm/index.js';
 
     let client = null;
@@ -153,8 +153,8 @@
         client = await MessageLoopClient.dial(
           'ws://localhost:9080/ws',
           [
-            withClientId('browser-' + Math.random().toString(36).substr(2, 9)),
-            withAutoSubscribe('chat.general'),
+            setClientId('browser-' + Math.random().toString(36).substr(2, 9)),
+            setAutoSubscribe('chat.general'),
           ]
         );
 

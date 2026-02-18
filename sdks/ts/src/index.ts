@@ -36,20 +36,20 @@ export {
 
 // Option builders
 export {
-  withEncoding,
-  withClientId,
-  withClientType,
-  withToken,
-  withVersion,
-  withAutoSubscribe,
-  withPingInterval,
-  withPingTimeout,
-  withConnectTimeout,
-  withRPCTimeout,
-  withEphemeral,
-  withAutoReconnect,
-  withReconnectDelay,
-  withReconnectMaxAttempts,
+  setEncoding,
+  setClientId,
+  setClientType,
+  setToken,
+  setVersion,
+  setAutoSubscribe,
+  setPingInterval,
+  setPingTimeout,
+  setConnectTimeout,
+  setRPCTimeout,
+  setEphemeral,
+  setAutoReconnect,
+  setReconnectDelay,
+  setReconnectMaxAttempts,
 } from "./client/options";
 
 // Re-export CloudEvent from cloudevents

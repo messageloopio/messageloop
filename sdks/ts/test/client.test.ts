@@ -1,97 +1,97 @@
 import {
-  withEncoding,
-  withClientId,
-  withClientType,
-  withToken,
-  withVersion,
-  withAutoSubscribe,
-  withPingInterval,
-  withPingTimeout,
-  withConnectTimeout,
-  withRPCTimeout,
-  withEphemeral,
+  setEncoding,
+  setClientId,
+  setClientType,
+  setToken,
+  setVersion,
+  setAutoSubscribe,
+  setPingInterval,
+  setPingTimeout,
+  setConnectTimeout,
+  setRPCTimeout,
+  setEphemeral,
   buildClientOptions,
 } from "../src/client/options";
 
 describe("Client Options", () => {
-  describe("withEncoding", () => {
+  describe("setEncoding", () => {
     it("should set encoding to proto", () => {
-      const options = buildClientOptions([withEncoding("proto")]);
+      const options = buildClientOptions([setEncoding("proto")]);
       expect(options.encoding).toEqual("proto");
     });
 
     it("should set encoding to json", () => {
-      const options = buildClientOptions([withEncoding("json")]);
+      const options = buildClientOptions([setEncoding("json")]);
       expect(options.encoding).toEqual("json");
     });
   });
 
-  describe("withClientId", () => {
+  describe("setClientId", () => {
     it("should set custom client ID", () => {
-      const options = buildClientOptions([withClientId("custom-id")]);
+      const options = buildClientOptions([setClientId("custom-id")]);
       expect(options.clientId).toEqual("custom-id");
     });
   });
 
-  describe("withClientType", () => {
+  describe("setClientType", () => {
     it("should set client type", () => {
-      const options = buildClientOptions([withClientType("web")]);
+      const options = buildClientOptions([setClientType("web")]);
       expect(options.clientType).toEqual("web");
     });
   });
 
-  describe("withToken", () => {
+  describe("setToken", () => {
     it("should set authentication token", () => {
-      const options = buildClientOptions([withToken("secret-token")]);
+      const options = buildClientOptions([setToken("secret-token")]);
       expect(options.token).toEqual("secret-token");
     });
   });
 
-  describe("withVersion", () => {
+  describe("setVersion", () => {
     it("should set client version", () => {
-      const options = buildClientOptions([withVersion("2.0.0")]);
+      const options = buildClientOptions([setVersion("2.0.0")]);
       expect(options.version).toEqual("2.0.0");
     });
   });
 
-  describe("withAutoSubscribe", () => {
+  describe("setAutoSubscribe", () => {
     it("should set auto-subscribe channels", () => {
-      const options = buildClientOptions([withAutoSubscribe("ch1", "ch2")]);
+      const options = buildClientOptions([setAutoSubscribe("ch1", "ch2")]);
       expect(options.autoSubscribe).toEqual(["ch1", "ch2"]);
     });
   });
 
-  describe("withPingInterval", () => {
+  describe("setPingInterval", () => {
     it("should set ping interval", () => {
-      const options = buildClientOptions([withPingInterval(15000)]);
+      const options = buildClientOptions([setPingInterval(15000)]);
       expect(options.pingInterval).toEqual(15000);
     });
   });
 
-  describe("withPingTimeout", () => {
+  describe("setPingTimeout", () => {
     it("should set ping timeout", () => {
-      const options = buildClientOptions([withPingTimeout(5000)]);
+      const options = buildClientOptions([setPingTimeout(5000)]);
       expect(options.pingTimeout).toEqual(5000);
     });
   });
 
-  describe("withConnectTimeout", () => {
+  describe("setConnectTimeout", () => {
     it("should set connection timeout", () => {
-      const options = buildClientOptions([withConnectTimeout(15000)]);
+      const options = buildClientOptions([setConnectTimeout(15000)]);
       expect(options.connectTimeout).toEqual(15000);
     });
   });
 
-  describe("withRPCTimeout", () => {
+  describe("setRPCTimeout", () => {
     it("should set RPC timeout", () => {
-      const options = buildClientOptions([withRPCTimeout(60000)]);
+      const options = buildClientOptions([setRPCTimeout(60000)]);
       expect(options.rpcTimeout).toEqual(60000);
     });
   });
 
-  describe("withEphemeral", () => {
+  describe("setEphemeral", () => {
     it("should set ephemeral flag", () => {
-      const options = buildClientOptions([withEphemeral(true)]);
+      const options = buildClientOptions([setEphemeral(true)]);
       expect(options.ephemeral).toEqual(true);
     });
   });
@@ -99,17 +99,17 @@ describe("Client Options", () => {
   describe("buildClientOptions", () => {
     it("should apply all options", () => {
       const options = buildClientOptions([
-        withEncoding("proto"),
-        withClientId("my-client"),
-        withClientType("web"),
-        withToken("token123"),
-        withVersion("1.1.0"),
-        withAutoSubscribe("channel1"),
-        withPingInterval(20000),
-        withPingTimeout(8000),
-        withConnectTimeout(20000),
-        withRPCTimeout(45000),
-        withEphemeral(true),
+        setEncoding("proto"),
+        setClientId("my-client"),
+        setClientType("web"),
+        setToken("token123"),
+        setVersion("1.1.0"),
+        setAutoSubscribe("channel1"),
+        setPingInterval(20000),
+        setPingTimeout(8000),
+        setConnectTimeout(20000),
+        setRPCTimeout(45000),
+        setEphemeral(true),
       ]);
 
       expect(options.encoding).toEqual("proto");

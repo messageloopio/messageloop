@@ -24,8 +24,8 @@ import { dial, createCloudEvent } from "@messageloop/sdk";
 
 // Create and connect client
 const client = await dial("ws://localhost:9080/ws", [
-  withClientId("my-client"),
-  withAutoSubscribe("chat.messages"),
+  setClientId("my-client"),
+  setAutoSubscribe("chat.messages"),
 ]);
 
 // Set up handlers

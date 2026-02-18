@@ -63,119 +63,119 @@ const defaultOptions: Partial<ClientOptions> = {
 export type ClientOption = (options: ClientOptions) => void;
 
 /**
- * With encoding option.
+ * Set encoding option.
  */
-export function withEncoding(encoding: "json" | "proto"): ClientOption {
+export function setEncoding(encoding: "json" | "proto"): ClientOption {
   return (options: ClientOptions) => {
     options.encoding = encoding;
   };
 }
 
 /**
- * With client ID option.
+ * Set client ID option.
  */
-export function withClientId(clientId: string): ClientOption {
+export function setClientId(clientId: string): ClientOption {
   return (options: ClientOptions) => {
     options.clientId = clientId;
   };
 }
 
 /**
- * With client type option.
+ * Set client type option.
  */
-export function withClientType(clientType: string): ClientOption {
+export function setClientType(clientType: string): ClientOption {
   return (options: ClientOptions) => {
     options.clientType = clientType;
   };
 }
 
 /**
- * With authentication token option.
+ * Set authentication token option.
  */
-export function withToken(token: string): ClientOption {
+export function setToken(token: string): ClientOption {
   return (options: ClientOptions) => {
     options.token = token;
   };
 }
 
 /**
- * With client version option.
+ * Set client version option.
  */
-export function withVersion(version: string): ClientOption {
+export function setVersion(version: string): ClientOption {
   return (options: ClientOptions) => {
     options.version = version;
   };
 }
 
 /**
- * With auto-subscribe channels option.
+ * Set auto-subscribe channels option.
  */
-export function withAutoSubscribe(...channels: string[]): ClientOption {
+export function setAutoSubscribe(...channels: string[]): ClientOption {
   return (options: ClientOptions) => {
     options.autoSubscribe = channels;
   };
 }
 
 /**
- * With ping interval option.
+ * Set ping interval option.
  */
-export function withPingInterval(interval: number): ClientOption {
+export function setPingInterval(interval: number): ClientOption {
   return (options: ClientOptions) => {
     options.pingInterval = interval;
   };
 }
 
 /**
- * With ping timeout option.
+ * Set ping timeout option.
  */
-export function withPingTimeout(timeout: number): ClientOption {
+export function setPingTimeout(timeout: number): ClientOption {
   return (options: ClientOptions) => {
     options.pingTimeout = timeout;
   };
 }
 
 /**
- * With connection timeout option.
+ * Set connection timeout option.
  */
-export function withConnectTimeout(timeout: number): ClientOption {
+export function setConnectTimeout(timeout: number): ClientOption {
   return (options: ClientOptions) => {
     options.connectTimeout = timeout;
   };
 }
 
 /**
- * With RPC timeout option.
+ * Set RPC timeout option.
  */
-export function withRPCTimeout(timeout: number): ClientOption {
+export function setRPCTimeout(timeout: number): ClientOption {
   return (options: ClientOptions) => {
     options.rpcTimeout = timeout;
   };
 }
 
 /**
- * With ephemeral subscriptions option.
+ * Set ephemeral subscriptions option.
  */
-export function withEphemeral(ephemeral: boolean): ClientOption {
+export function setEphemeral(ephemeral: boolean): ClientOption {
   return (options: ClientOptions) => {
     options.ephemeral = ephemeral;
   };
 }
 
 /**
- * With auto-reconnect option.
+ * Set auto-reconnect option.
  */
-export function withAutoReconnect(enabled: boolean): ClientOption {
+export function setAutoReconnect(enabled: boolean): ClientOption {
   return (options: ClientOptions) => {
     options.autoReconnect = enabled;
   };
 }
 
 /**
- * With reconnection delay options.
+ * Set reconnection delay options.
  * @param initial - Initial delay in milliseconds
  * @param max - Maximum delay in milliseconds
  */
-export function withReconnectDelay(initial: number, max: number): ClientOption {
+export function setReconnectDelay(initial: number, max: number): ClientOption {
   return (options: ClientOptions) => {
     options.reconnectInitialDelay = initial;
     options.reconnectMaxDelay = max;
@@ -183,10 +183,10 @@ export function withReconnectDelay(initial: number, max: number): ClientOption {
 }
 
 /**
- * With maximum reconnection attempts.
+ * Set maximum reconnection attempts.
  * @param attempts - Maximum attempts (0 = unlimited)
  */
-export function withReconnectMaxAttempts(attempts: number): ClientOption {
+export function setReconnectMaxAttempts(attempts: number): ClientOption {
   return (options: ClientOptions) => {
     options.reconnectMaxAttempts = attempts;
   };
