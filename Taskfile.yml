@@ -50,7 +50,8 @@ tasks:
           Version: "sdks/go/{{.Version}}"
           Comment: "{{.Comment}}"
 
-  release-ts-sdk:
+  release-sdk-ts:
     dir: '{{.USER_WORKING_DIR}}/sdks/ts'
     cmds:
       - npm run build
+      - npm publish --access public --registry https://registry.npmjs.org/
