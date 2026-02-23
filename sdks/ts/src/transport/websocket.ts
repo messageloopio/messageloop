@@ -25,6 +25,12 @@ export class WebSocketTransport implements Transport {
     this.socket = socket;
     this.codec = codec;
 
+    // Check if socket is already open (happens when created via dial())
+    // WebSocket.OPEN = 1 (both browser and ws library use the same value)
+    if (socket.readyState === 1) {
+      this._connected = true;
+    }
+
     // Set up message handler - use any type for cross-environment compatibility
     this.socket.onmessage = (event: any) => {
       try {
@@ -48,7 +54,7 @@ export class WebSocketTransport implements Transport {
       this.closeListeners.forEach((listener) => listener(event?.code));
     };
 
-    // Set up open handler
+    // Set up open handler (for sockets that are still connecting)
     this.socket.onopen = () => {
       this._connected = true;
       this.processSendQueue();
