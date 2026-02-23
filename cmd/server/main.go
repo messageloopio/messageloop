@@ -11,7 +11,7 @@ import (
 	"github.com/messageloopio/messageloop"
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/pkg/grpcstream"
-	redisbroker "github.com/messageloopio/messageloop/pkg/redisbroker"
+	"github.com/messageloopio/messageloop/pkg/redisbroker"
 	"github.com/messageloopio/messageloop/pkg/websocket"
 	proxyproxy "github.com/messageloopio/messageloop/proxy"
 	"github.com/spf13/pflag"
@@ -35,7 +35,7 @@ func main() {
 	app := lynx.New(opts, func(ctx context.Context, app lynx.Lynx) error {
 		app.SetLogger(zap.MustNewLogger(app))
 		cfg := &config.Config{}
-		if err := app.Config().Unmarshal(cfg); err != nil {
+		if err := app.Config().Unmarshal(cfg, lynx.TagNameJSON); err != nil {
 			return err
 		}
 
@@ -98,6 +98,7 @@ func main() {
 			WsPath: cfg.Transport.WebSocket.Path,
 		}
 		if cfg.Transport.WebSocket.CheckOrigin {
+			app.Logger().Info("setting websocket CheckOrigin to allow all origins")
 			wsOpts.CheckOrigin = func(r *http.Request) bool { return true }
 		}
 		wsServer := websocket.NewServer(wsOpts, node)

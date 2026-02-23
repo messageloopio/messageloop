@@ -582,7 +582,14 @@ func (c *ClientSession) write(ctx context.Context, msg proto.Message) error {
 	if err != nil {
 		return err
 	}
-	return c.transport.Write(bytes)
+	log.DebugContext(ctx, "message marshaled", "size", len(bytes))
+	err = c.transport.Write(bytes)
+	if err != nil {
+		log.ErrorContext(ctx, "failed to write to transport", err)
+	} else {
+		log.DebugContext(ctx, "message written to transport successfully")
+	}
+	return err
 }
 
 func (c *ClientSession) handleUnsubscribe(ctx context.Context, in *clientpb.InboundMessage, unsubscribe *clientpb.Unsubscribe) error {
@@ -612,11 +619,18 @@ func (c *ClientSession) handleUnsubscribe(ctx context.Context, in *clientpb.Inbo
 
 func (c *ClientSession) handlePing(ctx context.Context, in *clientpb.InboundMessage, ping *clientpb.Ping) error {
 	c.ResetActivity()
-	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+	log.DebugContext(ctx, "received ping, sending pong", "message_id", in.Id)
+	err := c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_Pong{
 			Pong: &clientpb.Pong{},
 		}
 	}))
+	if err != nil {
+		log.ErrorContext(ctx, "failed to send pong", err)
+	} else {
+		log.DebugContext(ctx, "pong sent successfully", "message_id", in.Id)
+	}
+	return err
 }
 
 func (c *ClientSession) handleSubRefresh(ctx context.Context, in *clientpb.InboundMessage, refresh *clientpb.SubRefresh) error {
