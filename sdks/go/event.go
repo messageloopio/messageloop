@@ -140,17 +140,32 @@ func PayloadToCloudEvent(payload *sharedpb.Payload, source string) (*cloudevents
 	event.SetSpecVersion("1.0")
 	event.SetType("messageloop.message")
 
+	// Use content_type from payload if set, otherwise determine from data type
+	contentType := payload.GetContentType()
+
 	switch data := payload.GetData().(type) {
 	case *sharedpb.Payload_Json:
-		event.SetDataContentType(cloudevents.ApplicationJSON)
+		if contentType == "" {
+			contentType = cloudevents.ApplicationJSON
+		}
+		event.SetDataContentType(contentType)
 		jsonBytes, err := data.Json.MarshalJSON()
 		if err != nil {
 			return nil, err
 		}
-		_ = event.SetData(cloudevents.ApplicationJSON, jsonBytes)
+		_ = event.SetData(contentType, jsonBytes)
 	case *sharedpb.Payload_Binary:
-		event.SetDataContentType("application/octet-stream")
-		_ = event.SetData("application/octet-stream", data.Binary)
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+		event.SetDataContentType(contentType)
+		_ = event.SetData(contentType, data.Binary)
+	case *sharedpb.Payload_Text:
+		if contentType == "" {
+			contentType = "text/plain"
+		}
+		event.SetDataContentType(contentType)
+		_ = event.SetData(contentType, data.Text)
 	}
 
 	return &event, nil
@@ -166,6 +181,11 @@ func CloudEventToPayload(event *cloudevents.Event) (*sharedpb.Payload, error) {
 
 	contentType := event.DataContentType()
 	data := event.Data()
+
+	// Set content_type on payload
+	if contentType != "" {
+		payload.ContentType = contentType
+	}
 
 	if contentType == cloudevents.ApplicationJSON {
 		// Parse JSON data into Struct
@@ -183,6 +203,11 @@ func CloudEventToPayload(event *cloudevents.Event) (*sharedpb.Payload, error) {
 			payload.Data = &sharedpb.Payload_Json{
 				Json: s,
 			}
+		}
+	} else if contentType == "text/plain" || contentType == "text/html" {
+		// Use text payload for text content types
+		payload.Data = &sharedpb.Payload_Text{
+			Text: string(data),
 		}
 	} else {
 		// Use binary payload for other content types

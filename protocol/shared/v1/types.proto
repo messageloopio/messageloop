@@ -8,9 +8,11 @@ import "google/protobuf/struct.proto";
 
 // 统一的数据载荷类型
 message Payload {
+  string content_type = 1;              // 数据内容类型 (e.g., "application/json", "text/plain", "application/octet-stream")
   oneof data {
-    google.protobuf.Struct json = 1;   // JSON 对象，编码时可读
-    bytes binary = 2;                   // 二进制数据
+    google.protobuf.Struct json = 2;    // JSON 对象，编码时可读
+    bytes binary = 3;                   // 二进制数据
+    string text = 4;                    // 文本数据
   }
 }
 

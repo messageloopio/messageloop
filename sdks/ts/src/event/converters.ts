@@ -173,34 +173,47 @@ export function createSubRefreshMessage(
  */
 export function cloudEventToPayload(event: CloudEventSDK): Payload {
   const dataValue = event.data;
+  const contentType = event.datacontenttype || "";
 
   // Check if data is Uint8Array using type guard
   if (isUint8Array(dataValue)) {
     return create(PayloadSchema, {
+      contentType,
       data: { case: "binary", value: dataValue },
     });
   } else if (typeof dataValue === "string") {
+    // Check if content type indicates text
+    if (contentType.startsWith("text/")) {
+      return create(PayloadSchema, {
+        contentType,
+        data: { case: "text", value: dataValue },
+      });
+    }
     // Try to parse as JSON first
     try {
       const jsonData = JSON.parse(dataValue);
       return create(PayloadSchema, {
+        contentType,
         data: { case: "json", value: jsonData },
       });
     } catch {
-      // If not valid JSON, store as binary
+      // If not valid JSON, store as text
       return create(PayloadSchema, {
-        data: { case: "binary", value: new TextEncoder().encode(dataValue) },
+        contentType,
+        data: { case: "text", value: dataValue },
       });
     }
   } else if (dataValue && typeof dataValue === "object") {
     // JSON object
     return create(PayloadSchema, {
+      contentType,
       data: { case: "json", value: dataValue as Record<string, any> },
     });
   }
 
   // Default: empty binary
   return create(PayloadSchema, {
+    contentType,
     data: { case: "binary", value: new Uint8Array(0) },
   });
 }
@@ -216,23 +229,32 @@ function isUint8Array(value: unknown): value is Uint8Array {
  * Convert Payload protobuf to CloudEvent SDK format.
  */
 export function payloadToCloudEvent(payload: Payload, source: string = "messageloop"): CloudEventSDKClass {
-  let data: any;
+  let data: unknown;
+  let dataContentType: string | undefined;
 
   if (payload.data.case === "json") {
     data = payload.data.value;
+    dataContentType = payload.contentType || "application/json";
+  } else if (payload.data.case === "text") {
+    data = payload.data.value;
+    dataContentType = payload.contentType || "text/plain";
   } else if (payload.data.case === "binary") {
     data = payload.data.value;
+    dataContentType = payload.contentType || "application/octet-stream";
   } else {
     data = undefined;
   }
 
-  return new CloudEventSDKClass({
+  const eventOptions = {
     id: crypto.randomUUID(),
     source,
     specversion: "1.0",
     type: "messageloop.message",
     data,
-  });
+    datacontenttype: dataContentType,
+  };
+
+  return new CloudEventSDKClass(eventOptions) as CloudEventSDKClass;
 }
 
 /**

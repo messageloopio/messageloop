@@ -11,7 +11,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file shared/v1/types.proto.
  */
 export const file_shared_v1_types: GenFile = /*@__PURE__*/
-  fileDesc("ChVzaGFyZWQvdjEvdHlwZXMucHJvdG8SFW1lc3NhZ2Vsb29wLnNoYXJlZC52MSJMCgdQYXlsb2FkEicKBGpzb24YASABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0SAASEAoGYmluYXJ5GAIgASgMSABCBgoEZGF0YSJ5CghNZXRhZGF0YRI9CgdlbnRyaWVzGAEgAygLMiwubWVzc2FnZWxvb3Auc2hhcmVkLnYxLk1ldGFkYXRhLkVudHJpZXNFbnRyeRouCgxFbnRyaWVzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4AUJJWkdnaXRodWIuY29tL21lc3NhZ2Vsb29waW8vbWVzc2FnZWxvb3Avc2hhcmVkL2dlbnByb3RvL3NoYXJlZC92MTtzaGFyZWRwYmIGcHJvdG8z", [file_google_protobuf_struct]);
+  fileDesc("ChVzaGFyZWQvdjEvdHlwZXMucHJvdG8SFW1lc3NhZ2Vsb29wLnNoYXJlZC52MSJyCgdQYXlsb2FkEhQKDGNvbnRlbnRfdHlwZRgBIAEoCRInCgRqc29uGAIgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdEgAEhAKBmJpbmFyeRgDIAEoDEgAEg4KBHRleHQYBCABKAlIAEIGCgRkYXRhInkKCE1ldGFkYXRhEj0KB2VudHJpZXMYASADKAsyLC5tZXNzYWdlbG9vcC5zaGFyZWQudjEuTWV0YWRhdGEuRW50cmllc0VudHJ5Gi4KDEVudHJpZXNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBQklaR2dpdGh1Yi5jb20vbWVzc2FnZWxvb3Bpby9tZXNzYWdlbG9vcC9zaGFyZWQvZ2VucHJvdG8vc2hhcmVkL3YxO3NoYXJlZHBiYgZwcm90bzM", [file_google_protobuf_struct]);
 
 /**
  * 统一的数据载荷类型
@@ -20,13 +20,20 @@ export const file_shared_v1_types: GenFile = /*@__PURE__*/
  */
 export type Payload = Message<"messageloop.shared.v1.Payload"> & {
   /**
+   * 数据内容类型 (e.g., "application/json", "text/plain", "application/octet-stream")
+   *
+   * @generated from field: string content_type = 1;
+   */
+  contentType: string;
+
+  /**
    * @generated from oneof messageloop.shared.v1.Payload.data
    */
   data: {
     /**
      * JSON 对象，编码时可读
      *
-     * @generated from field: google.protobuf.Struct json = 1;
+     * @generated from field: google.protobuf.Struct json = 2;
      */
     value: JsonObject;
     case: "json";
@@ -34,10 +41,18 @@ export type Payload = Message<"messageloop.shared.v1.Payload"> & {
     /**
      * 二进制数据
      *
-     * @generated from field: bytes binary = 2;
+     * @generated from field: bytes binary = 3;
      */
     value: Uint8Array;
     case: "binary";
+  } | {
+    /**
+     * 文本数据
+     *
+     * @generated from field: string text = 4;
+     */
+    value: string;
+    case: "text";
   } | { case: undefined; value?: undefined };
 };
 

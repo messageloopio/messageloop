@@ -24,11 +24,13 @@ const (
 
 // 统一的数据载荷类型
 type Payload struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	ContentType string                 `protobuf:"bytes,1,opt,name=content_type,json=contentType,proto3" json:"content_type,omitempty"` // 数据内容类型 (e.g., "application/json", "text/plain", "application/octet-stream")
 	// Types that are valid to be assigned to Data:
 	//
 	//	*Payload_Json
 	//	*Payload_Binary
+	//	*Payload_Text
 	Data          isPayload_Data `protobuf_oneof:"data"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -64,6 +66,13 @@ func (*Payload) Descriptor() ([]byte, []int) {
 	return file_shared_v1_types_proto_rawDescGZIP(), []int{0}
 }
 
+func (x *Payload) GetContentType() string {
+	if x != nil {
+		return x.ContentType
+	}
+	return ""
+}
+
 func (x *Payload) GetData() isPayload_Data {
 	if x != nil {
 		return x.Data
@@ -89,21 +98,36 @@ func (x *Payload) GetBinary() []byte {
 	return nil
 }
 
+func (x *Payload) GetText() string {
+	if x != nil {
+		if x, ok := x.Data.(*Payload_Text); ok {
+			return x.Text
+		}
+	}
+	return ""
+}
+
 type isPayload_Data interface {
 	isPayload_Data()
 }
 
 type Payload_Json struct {
-	Json *structpb.Struct `protobuf:"bytes,1,opt,name=json,proto3,oneof"` // JSON 对象，编码时可读
+	Json *structpb.Struct `protobuf:"bytes,2,opt,name=json,proto3,oneof"` // JSON 对象，编码时可读
 }
 
 type Payload_Binary struct {
-	Binary []byte `protobuf:"bytes,2,opt,name=binary,proto3,oneof"` // 二进制数据
+	Binary []byte `protobuf:"bytes,3,opt,name=binary,proto3,oneof"` // 二进制数据
+}
+
+type Payload_Text struct {
+	Text string `protobuf:"bytes,4,opt,name=text,proto3,oneof"` // 文本数据
 }
 
 func (*Payload_Json) isPayload_Data() {}
 
 func (*Payload_Binary) isPayload_Data() {}
+
+func (*Payload_Text) isPayload_Data() {}
 
 // 统一的元数据类型
 type Metadata struct {
@@ -154,10 +178,12 @@ var File_shared_v1_types_proto protoreflect.FileDescriptor
 
 const file_shared_v1_types_proto_rawDesc = "" +
 	"\n" +
-	"\x15shared/v1/types.proto\x12\x15messageloop.shared.v1\x1a\x1cgoogle/protobuf/struct.proto\"Z\n" +
-	"\aPayload\x12-\n" +
-	"\x04json\x18\x01 \x01(\v2\x17.google.protobuf.StructH\x00R\x04json\x12\x18\n" +
-	"\x06binary\x18\x02 \x01(\fH\x00R\x06binaryB\x06\n" +
+	"\x15shared/v1/types.proto\x12\x15messageloop.shared.v1\x1a\x1cgoogle/protobuf/struct.proto\"\x93\x01\n" +
+	"\aPayload\x12!\n" +
+	"\fcontent_type\x18\x01 \x01(\tR\vcontentType\x12-\n" +
+	"\x04json\x18\x02 \x01(\v2\x17.google.protobuf.StructH\x00R\x04json\x12\x18\n" +
+	"\x06binary\x18\x03 \x01(\fH\x00R\x06binary\x12\x14\n" +
+	"\x04text\x18\x04 \x01(\tH\x00R\x04textB\x06\n" +
 	"\x04data\"\x8e\x01\n" +
 	"\bMetadata\x12F\n" +
 	"\aentries\x18\x01 \x03(\v2,.messageloop.shared.v1.Metadata.EntriesEntryR\aentries\x1a:\n" +
@@ -202,6 +228,7 @@ func file_shared_v1_types_proto_init() {
 	file_shared_v1_types_proto_msgTypes[0].OneofWrappers = []any{
 		(*Payload_Json)(nil),
 		(*Payload_Binary)(nil),
+		(*Payload_Text)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

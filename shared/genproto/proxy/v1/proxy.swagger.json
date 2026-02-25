@@ -110,6 +110,10 @@
     "v1Payload": {
       "type": "object",
       "properties": {
+        "contentType": {
+          "type": "string",
+          "title": "数据内容类型 (e.g., \"application/json\", \"text/plain\", \"application/octet-stream\")"
+        },
         "json": {
           "type": "object",
           "title": "JSON 对象，编码时可读"
@@ -118,6 +122,10 @@
           "type": "string",
           "format": "byte",
           "title": "二进制数据"
+        },
+        "text": {
+          "type": "string",
+          "title": "文本数据"
         }
       },
       "title": "统一的数据载荷类型"
