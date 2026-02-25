@@ -7,8 +7,6 @@ import (
 	"net"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
-	protobuf "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
-	pb "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v1"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	"google.golang.org/grpc"
@@ -163,10 +161,10 @@ func (h *HandlerImpl) RPC(ctx context.Context, req *proxypb.RPCRequest) (*proxyp
 		"method", req.Method,
 	)
 
-	// Convert pb.CloudEvent to cloudevents.Event
+	// Convert Payload to cloudevents.Event
 	var payload *cloudevents.Event
 	if pbPayload := req.GetPayload(); pbPayload != nil {
-		if ce, err := protobuf.FromProto(pbPayload); err == nil {
+		if ce, err := PayloadToCloudEvent(pbPayload, req.Channel); err == nil {
 			payload = ce
 		}
 	}
@@ -198,18 +196,18 @@ func (h *HandlerImpl) RPC(ctx context.Context, req *proxypb.RPCRequest) (*proxyp
 		)
 	}
 
-	// Convert cloudevents.Event to pb.CloudEvent
-	var event *pb.CloudEvent
+	// Convert cloudevents.Event to Payload
+	var respPayload *sharedpb.Payload
 	if resp.Payload != nil {
-		if pbEvent, err := protobuf.ToProto(resp.Payload); err == nil {
-			event = pbEvent
+		if p, err := CloudEventToPayload(resp.Payload); err == nil {
+			respPayload = p
 		}
 	}
 
 	return &proxypb.RPCResponse{
 		Id:      req.Id,
 		Error:   resp.Error,
-		Payload: event,
+		Payload: respPayload,
 	}, nil
 }
 

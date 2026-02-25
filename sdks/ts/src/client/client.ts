@@ -1,4 +1,4 @@
-import type { CloudEvent } from "cloudevents";
+import { CloudEvent, type CloudEvent as CloudEventType } from "cloudevents";
 import type { OutboundMessage } from "../proto/v1/service_pb";
 import type { ReceivedMessage } from "../event/converters";
 import type { Transport } from "../transport/transport";
@@ -19,7 +19,8 @@ import {
   createRPCRequestMessage,
   createPingMessage,
   parseOutboundMessage,
-  protoToCloudEvent,
+  payloadToCloudEvent,
+  extractRpcReply,
 } from "../event/converters";
 
 /**
@@ -216,13 +217,13 @@ export class MessageLoopClient {
       case "publication": {
         // Convert messages to ReceivedMessage format
         const messages: ReceivedMessage[] = [];
-        const envelopes = parsed.data.envelopes || [];
-        for (const env of envelopes) {
+        const msgs = parsed.data.messages || [];
+        for (const msg of msgs) {
           messages.push({
-            id: env.id,
-            channel: env.channel,
-            offset: env.offset,
-            event: protoToCloudEvent(env.payload!),
+            id: msg.id,
+            channel: msg.channel,
+            offset: msg.offset,
+            event: msg.payload ? payloadToCloudEvent(msg.payload, msg.channel) : new CloudEvent({ id: msg.id, source: msg.channel, type: "messageloop.message" }),
           });
         }
 
@@ -248,8 +249,15 @@ export class MessageLoopClient {
         const pending = this.pendingRPC.get(id);
         if (pending) {
           this.pendingRPC.delete(id);
-          const event = protoToCloudEvent(parsed.data.payload!);
-          pending.resolve(event);
+          const reply = parsed.data;
+          if (reply.error) {
+            const err = new Error(reply.error.message || "RPC error");
+            (err as any).code = reply.error.code;
+            pending.reject(err);
+          } else {
+            const event = reply.payload ? payloadToCloudEvent(reply.payload) : new CloudEvent({ id, source: "rpc", type: "messageloop.rpc.reply" });
+            pending.resolve(event);
+          }
         }
         break;
       }

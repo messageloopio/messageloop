@@ -13,10 +13,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/structpb"
 
-	cloudevents "github.com/cloudevents/sdk-go/v2"
-	format "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
-	pb "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v1"
 )
 
@@ -53,15 +52,11 @@ func TestHTTPProxy_RPC(t *testing.T) {
 		err := json.NewDecoder(r.Body).Decode(&reqBody)
 		require.NoError(t, err)
 
-		// Build response using JSON directly to avoid protobuf marshaling issues
+		// Build response using JSON directly with new Payload structure
 		respJSON := `{
 			"id": "` + reqBody["id"].(string) + `",
 			"payload": {
-				"id": "resp-123",
-				"source": "proxy-test",
-				"type": "test.response",
-				"spec_version": "1.0",
-				"text_data": "{\"result\":\"success\"}"
+				"json": {"result": "success"}
 			}
 		}`
 
@@ -81,25 +76,23 @@ func TestHTTPProxy_RPC(t *testing.T) {
 	defer p.Close()
 
 	ctx := context.Background()
-	event := cloudevents.NewEvent()
-	event.SetID("req-123")
-	event.SetSource("test.source")
-	event.SetType("test.request")
-	event.SetSpecVersion("1.0")
-	event.SetDataContentType("application/json")
-	_ = event.SetData("application/json", `{"input":"data"}`)
 
+	// Create Payload
+	s, _ := structpb.NewStruct(map[string]interface{}{"input": "data"})
 	req := &RPCProxyRequest{
 		ID:      "req-123",
 		Channel: "test.channel",
 		Method:  "testMethod",
-		Event:   &event,
+		Payload: &sharedpb.Payload{
+			Data: &sharedpb.Payload_Json{
+				Json: s,
+			},
+		},
 	}
 
 	resp, err := p.RPC(ctx, req)
 	require.NoError(t, err)
-	assert.NotNil(t, resp.Event)
-	assert.Equal(t, "resp-123", resp.Event.ID())
+	assert.NotNil(t, resp.Payload)
 }
 
 func TestHTTPProxy_Timeout(t *testing.T) {
@@ -122,12 +115,16 @@ func TestHTTPProxy_Timeout(t *testing.T) {
 	defer p.Close()
 
 	ctx := context.Background()
-	event := cloudevents.NewEvent()
+	s, _ := structpb.NewStruct(map[string]interface{}{})
 	req := &RPCProxyRequest{
 		ID:      "req-timeout",
 		Channel: "test",
 		Method:  "test",
-		Event:   &event,
+		Payload: &sharedpb.Payload{
+			Data: &sharedpb.Payload_Json{
+				Json: s,
+			},
+		},
 	}
 
 	_, err = p.RPC(ctx, req)
@@ -172,20 +169,16 @@ func TestGRPCProxy_RPC(t *testing.T) {
 			expectedReq = req
 			close(serverReady)
 
-			// Create response event
-			respEvent := cloudevents.NewEvent()
-			respEvent.SetID("resp-grpc-123")
-			respEvent.SetSource("grpc-proxy-test")
-			respEvent.SetType("test.response")
-			respEvent.SetSpecVersion("1.0")
-			respEvent.SetDataContentType("application/json")
-			_ = respEvent.SetData("application/json", `{"result":"grpc-success"}`)
-
-			pbResp, _ := format.ToProto(&respEvent)
+			// Create response payload
+			s, _ := structpb.NewStruct(map[string]interface{}{"result": "grpc-success"})
 
 			return &proxypb.RPCResponse{
-				Id:      req.Id,
-				Payload: pbResp,
+				Id: req.Id,
+				Payload: &sharedpb.Payload{
+					Data: &sharedpb.Payload_Json{
+						Json: s,
+					},
+				},
 			}, nil
 		},
 	}
@@ -208,19 +201,18 @@ func TestGRPCProxy_RPC(t *testing.T) {
 	defer p.Close()
 
 	ctx := context.Background()
-	event := cloudevents.NewEvent()
-	event.SetID("req-grpc-123")
-	event.SetSource("grpc.source")
-	event.SetType("test.request")
-	event.SetSpecVersion("1.0")
-	event.SetDataContentType("application/json")
-	_ = event.SetData("application/json", `{"input":"grpc-data"}`)
 
+	// Create request payload
+	reqPayload, _ := structpb.NewStruct(map[string]interface{}{"input": "grpc-data"})
 	req := &RPCProxyRequest{
 		ID:      "req-grpc-123",
 		Channel: "grpc.channel",
 		Method:  "grpcMethod",
-		Event:   &event,
+		Payload: &sharedpb.Payload{
+			Data: &sharedpb.Payload_Json{
+				Json: reqPayload,
+			},
+		},
 	}
 
 	resp, err := p.RPC(ctx, req)
@@ -229,8 +221,7 @@ func TestGRPCProxy_RPC(t *testing.T) {
 	// Wait for server to process
 	<-serverReady
 
-	assert.NotNil(t, resp.Event)
-	assert.Equal(t, "resp-grpc-123", resp.Event.ID())
+	assert.NotNil(t, resp.Payload)
 	assert.Equal(t, "req-grpc-123", expectedReq.Id)
 	assert.Equal(t, "grpc.channel", expectedReq.Channel)
 	assert.Equal(t, "grpcMethod", expectedReq.Method)
@@ -274,11 +265,7 @@ func (m *mockGRPCServer) OnDisconnected(ctx context.Context, req *proxypb.OnDisc
 }
 
 func TestRPCProxyRequest_ToProtoRequest(t *testing.T) {
-	event := cloudevents.NewEvent()
-	event.SetID("event-1")
-	event.SetSource("source")
-	event.SetType("type")
-	event.SetSpecVersion("1.0")
+	s, _ := structpb.NewStruct(map[string]interface{}{"data": "test"})
 
 	req := &RPCProxyRequest{
 		ID:        "test-id",
@@ -287,7 +274,11 @@ func TestRPCProxyRequest_ToProtoRequest(t *testing.T) {
 		UserID:    "user-1",
 		Channel:   "test.channel",
 		Method:    "testMethod",
-		Event:     &event,
+		Payload: &sharedpb.Payload{
+			Data: &sharedpb.Payload_Json{
+				Json: s,
+			},
+		},
 		Meta: map[string]string{
 			"key": "value",
 		},
@@ -299,24 +290,25 @@ func TestRPCProxyRequest_ToProtoRequest(t *testing.T) {
 	assert.Equal(t, "test-id", protoReq.Id)
 	assert.Equal(t, "test.channel", protoReq.Channel)
 	assert.Equal(t, "testMethod", protoReq.Method)
-	assert.Equal(t, "event-1", protoReq.Payload.Id)
+	assert.NotNil(t, protoReq.Payload)
 }
 
 func TestFromProtoReply(t *testing.T) {
+	s, _ := structpb.NewStruct(map[string]interface{}{"result": "ok"})
+
 	reply := &proxypb.RPCResponse{
 		Id: "reply-id",
-		Payload: &pb.CloudEvent{
-			Id:          "event-1",
-			Source:      "source",
-			Type:        "type",
-			SpecVersion: "1.0",
+		Payload: &sharedpb.Payload{
+			Data: &sharedpb.Payload_Json{
+				Json: s,
+			},
 		},
 	}
 
 	resp, err := FromProtoReply(reply)
 	require.NoError(t, err)
 
-	assert.Equal(t, "event-1", resp.Event.ID())
+	assert.NotNil(t, resp.Payload)
 	assert.Nil(t, resp.Error)
 }
 
@@ -325,6 +317,6 @@ func TestFromProtoReply_Nil(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.NotNil(t, resp)
-	assert.Nil(t, resp.Event)
+	assert.Nil(t, resp.Payload)
 	assert.Nil(t, resp.Error)
 }

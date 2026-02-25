@@ -4,11 +4,12 @@ import (
 	"context"
 	"testing"
 
-	pb "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	"github.com/google/uuid"
 	"github.com/messageloopio/messageloop"
 	serverpb "github.com/messageloopio/messageloop/shared/genproto/server/v1"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // mockTransport is a simple transport for testing
@@ -43,6 +44,9 @@ func TestAPIServiceHandler_PublishToSessions(t *testing.T) {
 	// Authenticate the client (required for it to be in the hub)
 	node.AddClient(client)
 
+	// Create payload
+	s, _ := structpb.NewStruct(map[string]interface{}{"message": "test payload"})
+
 	// Test publishing to the session
 	req := &serverpb.PublishRequest{
 		RequestId: uuid.NewString(),
@@ -52,13 +56,9 @@ func TestAPIServiceHandler_PublishToSessions(t *testing.T) {
 				Destination: &serverpb.Publication_Destination{
 					Sessions: []string{client.SessionID()},
 				},
-				Payload: &pb.CloudEvent{
-					Id:          uuid.NewString(),
-					Source:      "test-source",
-					Type:        "test.type",
-					SpecVersion: "1.0",
-					Data: &pb.CloudEvent_TextData{
-						TextData: "test payload",
+				Payload: &sharedpb.Payload{
+					Data: &sharedpb.Payload_Json{
+						Json: s,
 					},
 				},
 			},
@@ -75,6 +75,9 @@ func TestAPIServiceHandler_PublishToNonExistentSession(t *testing.T) {
 	node := messageloop.NewNode(nil)
 	handler := NewAPIServiceHandler(node)
 
+	// Create payload
+	s, _ := structpb.NewStruct(map[string]interface{}{"message": "test payload"})
+
 	// Test publishing to a non-existent session - should not error
 	req := &serverpb.PublishRequest{
 		RequestId: uuid.NewString(),
@@ -84,13 +87,9 @@ func TestAPIServiceHandler_PublishToNonExistentSession(t *testing.T) {
 				Destination: &serverpb.Publication_Destination{
 					Sessions: []string{"non-existent-session-id"},
 				},
-				Payload: &pb.CloudEvent{
-					Id:          uuid.NewString(),
-					Source:      "test-source",
-					Type:        "test.type",
-					SpecVersion: "1.0",
-					Data: &pb.CloudEvent_TextData{
-						TextData: "test payload",
+				Payload: &sharedpb.Payload{
+					Data: &sharedpb.Payload_Json{
+						Json: s,
 					},
 				},
 			},
@@ -108,6 +107,7 @@ func TestAPIServiceHandler_PublishToChannels(t *testing.T) {
 	_ = node.Run() // Register event handler
 	handler := NewAPIServiceHandler(node)
 
+	// Create payload with binary data
 	// Test publishing to channels
 	req := &serverpb.PublishRequest{
 		RequestId: uuid.NewString(),
@@ -117,13 +117,9 @@ func TestAPIServiceHandler_PublishToChannels(t *testing.T) {
 				Destination: &serverpb.Publication_Destination{
 					Channels: []string{"test-channel-1", "test-channel-2"},
 				},
-				Payload: &pb.CloudEvent{
-					Id:          uuid.NewString(),
-					Source:      "test-source",
-					Type:        "test.type",
-					SpecVersion: "1.0",
-					Data: &pb.CloudEvent_BinaryData{
-						BinaryData: []byte("test payload"),
+				Payload: &sharedpb.Payload{
+					Data: &sharedpb.Payload_Binary{
+						Binary: []byte("test payload"),
 					},
 				},
 				Options: &serverpb.Publication_Options{

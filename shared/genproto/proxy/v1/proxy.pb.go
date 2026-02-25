@@ -9,7 +9,6 @@
 package proxypb
 
 import (
-	pb "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	v1 "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -30,7 +29,8 @@ type RPCRequest struct {
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Channel       string                 `protobuf:"bytes,2,opt,name=channel,proto3" json:"channel,omitempty"`
 	Method        string                 `protobuf:"bytes,3,opt,name=method,proto3" json:"method,omitempty"`
-	Payload       *pb.CloudEvent         `protobuf:"bytes,4,opt,name=payload,proto3" json:"payload,omitempty"`
+	Payload       *v1.Payload            `protobuf:"bytes,4,opt,name=payload,proto3" json:"payload,omitempty"`
+	Metadata      *v1.Metadata           `protobuf:"bytes,5,opt,name=metadata,proto3" json:"metadata,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -86,9 +86,16 @@ func (x *RPCRequest) GetMethod() string {
 	return ""
 }
 
-func (x *RPCRequest) GetPayload() *pb.CloudEvent {
+func (x *RPCRequest) GetPayload() *v1.Payload {
 	if x != nil {
 		return x.Payload
+	}
+	return nil
+}
+
+func (x *RPCRequest) GetMetadata() *v1.Metadata {
+	if x != nil {
+		return x.Metadata
 	}
 	return nil
 }
@@ -96,8 +103,9 @@ func (x *RPCRequest) GetPayload() *pb.CloudEvent {
 type RPCResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Error         *v1.Error              `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
-	Payload       *pb.CloudEvent         `protobuf:"bytes,3,opt,name=payload,proto3" json:"payload,omitempty"`
+	Payload       *v1.Payload            `protobuf:"bytes,2,opt,name=payload,proto3" json:"payload,omitempty"`
+	Metadata      *v1.Metadata           `protobuf:"bytes,3,opt,name=metadata,proto3" json:"metadata,omitempty"`
+	Error         *v1.Error              `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -139,16 +147,23 @@ func (x *RPCResponse) GetId() string {
 	return ""
 }
 
-func (x *RPCResponse) GetError() *v1.Error {
+func (x *RPCResponse) GetPayload() *v1.Payload {
 	if x != nil {
-		return x.Error
+		return x.Payload
 	}
 	return nil
 }
 
-func (x *RPCResponse) GetPayload() *pb.CloudEvent {
+func (x *RPCResponse) GetMetadata() *v1.Metadata {
 	if x != nil {
-		return x.Payload
+		return x.Metadata
+	}
+	return nil
+}
+
+func (x *RPCResponse) GetError() *v1.Error {
+	if x != nil {
+		return x.Error
 	}
 	return nil
 }
@@ -809,17 +824,19 @@ var File_proxy_v1_proxy_proto protoreflect.FileDescriptor
 
 const file_proxy_v1_proxy_proto_rawDesc = "" +
 	"\n" +
-	"\x14proxy/v1/proxy.proto\x12\x14messageloop.proxy.v1\x1a\x16shared/v1/errors.proto\x1a&includes/cloudevents/cloudevents.proto\"\x87\x01\n" +
+	"\x14proxy/v1/proxy.proto\x12\x14messageloop.proxy.v1\x1a\x15shared/v1/types.proto\x1a\x16shared/v1/errors.proto\"\xc5\x01\n" +
 	"\n" +
 	"RPCRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
 	"\achannel\x18\x02 \x01(\tR\achannel\x12\x16\n" +
-	"\x06method\x18\x03 \x01(\tR\x06method\x127\n" +
-	"\apayload\x18\x04 \x01(\v2\x1d.io.cloudevents.v1.CloudEventR\apayload\"\x8a\x01\n" +
+	"\x06method\x18\x03 \x01(\tR\x06method\x128\n" +
+	"\apayload\x18\x04 \x01(\v2\x1e.messageloop.shared.v1.PayloadR\apayload\x12;\n" +
+	"\bmetadata\x18\x05 \x01(\v2\x1f.messageloop.shared.v1.MetadataR\bmetadata\"\xc8\x01\n" +
 	"\vRPCResponse\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x122\n" +
-	"\x05error\x18\x02 \x01(\v2\x1c.messageloop.shared.v1.ErrorR\x05error\x127\n" +
-	"\apayload\x18\x03 \x01(\v2\x1d.io.cloudevents.v1.CloudEventR\apayload\"\x8b\x01\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x128\n" +
+	"\apayload\x18\x02 \x01(\v2\x1e.messageloop.shared.v1.PayloadR\apayload\x12;\n" +
+	"\bmetadata\x18\x03 \x01(\v2\x1f.messageloop.shared.v1.MetadataR\bmetadata\x122\n" +
+	"\x05error\x18\x04 \x01(\v2\x1c.messageloop.shared.v1.ErrorR\x05error\"\x8b\x01\n" +
 	"\x13AuthenticateRequest\x12\x1a\n" +
 	"\busername\x18\x01 \x01(\tR\busername\x12\x1a\n" +
 	"\bpassword\x18\x02 \x01(\tR\bpassword\x12\x1f\n" +
@@ -900,34 +917,37 @@ var file_proxy_v1_proxy_proto_goTypes = []any{
 	(*OnUnsubscribedResponse)(nil), // 12: messageloop.proxy.v1.OnUnsubscribedResponse
 	(*OnDisconnectedRequest)(nil),  // 13: messageloop.proxy.v1.OnDisconnectedRequest
 	(*OnDisconnectedResponse)(nil), // 14: messageloop.proxy.v1.OnDisconnectedResponse
-	(*pb.CloudEvent)(nil),          // 15: io.cloudevents.v1.CloudEvent
-	(*v1.Error)(nil),               // 16: messageloop.shared.v1.Error
+	(*v1.Payload)(nil),             // 15: messageloop.shared.v1.Payload
+	(*v1.Metadata)(nil),            // 16: messageloop.shared.v1.Metadata
+	(*v1.Error)(nil),               // 17: messageloop.shared.v1.Error
 }
 var file_proxy_v1_proxy_proto_depIdxs = []int32{
-	15, // 0: messageloop.proxy.v1.RPCRequest.payload:type_name -> io.cloudevents.v1.CloudEvent
-	16, // 1: messageloop.proxy.v1.RPCResponse.error:type_name -> messageloop.shared.v1.Error
-	15, // 2: messageloop.proxy.v1.RPCResponse.payload:type_name -> io.cloudevents.v1.CloudEvent
-	16, // 3: messageloop.proxy.v1.AuthenticateResponse.error:type_name -> messageloop.shared.v1.Error
-	4,  // 4: messageloop.proxy.v1.AuthenticateResponse.user_info:type_name -> messageloop.proxy.v1.UserInfo
-	0,  // 5: messageloop.proxy.v1.ProxyService.RPC:input_type -> messageloop.proxy.v1.RPCRequest
-	2,  // 6: messageloop.proxy.v1.ProxyService.Authenticate:input_type -> messageloop.proxy.v1.AuthenticateRequest
-	5,  // 7: messageloop.proxy.v1.ProxyService.SubscribeAcl:input_type -> messageloop.proxy.v1.SubscribeAclRequest
-	7,  // 8: messageloop.proxy.v1.ProxyService.OnConnected:input_type -> messageloop.proxy.v1.OnConnectedRequest
-	9,  // 9: messageloop.proxy.v1.ProxyService.OnSubscribed:input_type -> messageloop.proxy.v1.OnSubscribedRequest
-	11, // 10: messageloop.proxy.v1.ProxyService.OnUnsubscribed:input_type -> messageloop.proxy.v1.OnUnsubscribedRequest
-	13, // 11: messageloop.proxy.v1.ProxyService.OnDisconnected:input_type -> messageloop.proxy.v1.OnDisconnectedRequest
-	1,  // 12: messageloop.proxy.v1.ProxyService.RPC:output_type -> messageloop.proxy.v1.RPCResponse
-	3,  // 13: messageloop.proxy.v1.ProxyService.Authenticate:output_type -> messageloop.proxy.v1.AuthenticateResponse
-	6,  // 14: messageloop.proxy.v1.ProxyService.SubscribeAcl:output_type -> messageloop.proxy.v1.SubscribeAclResponse
-	8,  // 15: messageloop.proxy.v1.ProxyService.OnConnected:output_type -> messageloop.proxy.v1.OnConnectedResponse
-	10, // 16: messageloop.proxy.v1.ProxyService.OnSubscribed:output_type -> messageloop.proxy.v1.OnSubscribedResponse
-	12, // 17: messageloop.proxy.v1.ProxyService.OnUnsubscribed:output_type -> messageloop.proxy.v1.OnUnsubscribedResponse
-	14, // 18: messageloop.proxy.v1.ProxyService.OnDisconnected:output_type -> messageloop.proxy.v1.OnDisconnectedResponse
-	12, // [12:19] is the sub-list for method output_type
-	5,  // [5:12] is the sub-list for method input_type
-	5,  // [5:5] is the sub-list for extension type_name
-	5,  // [5:5] is the sub-list for extension extendee
-	0,  // [0:5] is the sub-list for field type_name
+	15, // 0: messageloop.proxy.v1.RPCRequest.payload:type_name -> messageloop.shared.v1.Payload
+	16, // 1: messageloop.proxy.v1.RPCRequest.metadata:type_name -> messageloop.shared.v1.Metadata
+	15, // 2: messageloop.proxy.v1.RPCResponse.payload:type_name -> messageloop.shared.v1.Payload
+	16, // 3: messageloop.proxy.v1.RPCResponse.metadata:type_name -> messageloop.shared.v1.Metadata
+	17, // 4: messageloop.proxy.v1.RPCResponse.error:type_name -> messageloop.shared.v1.Error
+	17, // 5: messageloop.proxy.v1.AuthenticateResponse.error:type_name -> messageloop.shared.v1.Error
+	4,  // 6: messageloop.proxy.v1.AuthenticateResponse.user_info:type_name -> messageloop.proxy.v1.UserInfo
+	0,  // 7: messageloop.proxy.v1.ProxyService.RPC:input_type -> messageloop.proxy.v1.RPCRequest
+	2,  // 8: messageloop.proxy.v1.ProxyService.Authenticate:input_type -> messageloop.proxy.v1.AuthenticateRequest
+	5,  // 9: messageloop.proxy.v1.ProxyService.SubscribeAcl:input_type -> messageloop.proxy.v1.SubscribeAclRequest
+	7,  // 10: messageloop.proxy.v1.ProxyService.OnConnected:input_type -> messageloop.proxy.v1.OnConnectedRequest
+	9,  // 11: messageloop.proxy.v1.ProxyService.OnSubscribed:input_type -> messageloop.proxy.v1.OnSubscribedRequest
+	11, // 12: messageloop.proxy.v1.ProxyService.OnUnsubscribed:input_type -> messageloop.proxy.v1.OnUnsubscribedRequest
+	13, // 13: messageloop.proxy.v1.ProxyService.OnDisconnected:input_type -> messageloop.proxy.v1.OnDisconnectedRequest
+	1,  // 14: messageloop.proxy.v1.ProxyService.RPC:output_type -> messageloop.proxy.v1.RPCResponse
+	3,  // 15: messageloop.proxy.v1.ProxyService.Authenticate:output_type -> messageloop.proxy.v1.AuthenticateResponse
+	6,  // 16: messageloop.proxy.v1.ProxyService.SubscribeAcl:output_type -> messageloop.proxy.v1.SubscribeAclResponse
+	8,  // 17: messageloop.proxy.v1.ProxyService.OnConnected:output_type -> messageloop.proxy.v1.OnConnectedResponse
+	10, // 18: messageloop.proxy.v1.ProxyService.OnSubscribed:output_type -> messageloop.proxy.v1.OnSubscribedResponse
+	12, // 19: messageloop.proxy.v1.ProxyService.OnUnsubscribed:output_type -> messageloop.proxy.v1.OnUnsubscribedResponse
+	14, // 20: messageloop.proxy.v1.ProxyService.OnDisconnected:output_type -> messageloop.proxy.v1.OnDisconnectedResponse
+	14, // [14:21] is the sub-list for method output_type
+	7,  // [7:14] is the sub-list for method input_type
+	7,  // [7:7] is the sub-list for extension type_name
+	7,  // [7:7] is the sub-list for extension extendee
+	0,  // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_proxy_v1_proxy_proto_init() }

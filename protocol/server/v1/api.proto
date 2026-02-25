@@ -6,7 +6,7 @@ package messageloop.server.v1;
 // buf:lint:ignore FILE_SAME_GO_PACKAGE
 option go_package = "github.com/messageloopio/messageloop/shared/genproto/go/server/v1;serverpb";
 
-import "includes/cloudevents/cloudevents.proto";
+import "shared/v1/types.proto";
 import "shared/v1/errors.proto";
 
 service APIService {
@@ -17,11 +17,39 @@ service APIService {
   rpc Survey(SurveyRequest) returns(SurveyResponse);
 }
 
+// --- Publish ---
+
+message Publication {
+  message Options {
+    bool add_history = 1;
+  }
+  message Destination {
+    repeated string sessions = 1;
+    repeated string channels = 2;
+  }
+
+  string id = 1;
+  Destination destination = 2;
+  Options options = 3;
+  messageloop.shared.v1.Payload payload = 4;
+  messageloop.shared.v1.Metadata metadata = 5;
+}
+
+message PublishRequest {
+  string request_id = 1;
+  repeated Publication publications = 2;
+}
+
+message PublishResponse {}
+
+// --- Survey ---
+
 message SurveyRequest {
   string request_id = 1;
   string channel = 2;
-  io.cloudevents.v1.CloudEvent payload = 3;
-  int32 timeout_ms = 4;
+  messageloop.shared.v1.Payload payload = 3;
+  messageloop.shared.v1.Metadata metadata = 4;
+  int32 timeout_ms = 5;
 }
 
 message SurveyResponse {
@@ -31,36 +59,12 @@ message SurveyResponse {
 
 message SurveyResult {
   string session_id = 1;
-  io.cloudevents.v1.CloudEvent payload = 2;
-  messageloop.shared.v1.Error error = 3;
+  messageloop.shared.v1.Payload payload = 2;
+  messageloop.shared.v1.Metadata metadata = 3;
+  messageloop.shared.v1.Error error = 4;
 }
 
-message Publication {
-  message Options {
-    bool add_history = 1;
-  }
-
-  message Destination {
-    repeated string sessions = 1;
-    repeated string channels = 2;
-  }
-
-  string id = 1;
-  Destination destination = 2;
-  Options options = 3;
-
-  io.cloudevents.v1.CloudEvent payload = 4;
-}
-
-message PublishRequest {
-  string request_id = 1;
-  map<string, string> metadata = 2;
-  repeated Publication publications = 3;
-}
-
-message PublishResponse {
-
-}
+// --- Disconnect ---
 
 message DisconnectRequest {
   repeated string sessions = 1;
@@ -71,6 +75,8 @@ message DisconnectRequest {
 message DisconnectResponse {
   map<string, bool> results = 1;
 }
+
+// --- Subscribe/Unsubscribe ---
 
 message SubscribeRequest {
   string session_id = 1;

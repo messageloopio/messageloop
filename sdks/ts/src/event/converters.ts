@@ -1,5 +1,3 @@
-import type { CloudEvent } from "../proto/includes/cloudevents/cloudevents_pb";
-import { CloudEventSchema } from "../proto/includes/cloudevents/cloudevents_pb";
 import type { CloudEvent as CloudEventSDK } from "cloudevents";
 import { CloudEvent as CloudEventSDKClass } from "cloudevents";
 import { create } from "@bufbuild/protobuf";
@@ -13,12 +11,14 @@ import {
   SubscriptionSchema,
   SubRefreshSchema,
   PingSchema,
+  PublishSchema,
+  RpcRequestSchema,
 } from "../proto/v1/service_pb";
 
-import type { CloudEventAttributeValue } from "../proto/includes/cloudevents/cloudevents_pb";
-import { CloudEventAttributeValueSchema } from "../proto/includes/cloudevents/cloudevents_pb";
+import { PayloadSchema, MetadataSchema } from "../proto/shared/v1/types_pb";
 
-import type { InboundMessage, OutboundMessage, Message, Publication } from "../proto/v1/service_pb";
+import type { InboundMessage, OutboundMessage, Message, Publication, Publish, RpcRequest, RpcReply } from "../proto/v1/service_pb";
+import type { Payload, Metadata } from "../proto/shared/v1/types_pb";
 
 /**
  * Generate a unique message ID.
@@ -29,33 +29,6 @@ export function generateMessageId(): string {
   const now = Date.now() * 1_000_000;
   counter = (counter + 1) % 10000;
   return `${now}-${counter}`;
-}
-
-/**
- * Create a CloudEventAttributeValue with string value.
- */
-function stringAttr(value: string): CloudEventAttributeValue {
-  return create(CloudEventAttributeValueSchema, {
-    attr: { case: "ceString", value },
-  });
-}
-
-/**
- * Create a CloudEventAttributeValue with boolean value.
- */
-function booleanAttr(value: boolean): CloudEventAttributeValue {
-  return create(CloudEventAttributeValueSchema, {
-    attr: { case: "ceBoolean", value },
-  });
-}
-
-/**
- * Create a CloudEventAttributeValue with integer value.
- */
-function integerAttr(value: number): CloudEventAttributeValue {
-  return create(CloudEventAttributeValueSchema, {
-    attr: { case: "ceInteger", value },
-  });
 }
 
 /**
@@ -138,11 +111,14 @@ export function createPublishMessage(
   channel: string,
   event: CloudEventSDK
 ): InboundMessage {
-  const protoEvent = cloudEventToProto(event);
+  const payload = cloudEventToPayload(event);
+  const publish = create(PublishSchema, {
+    channel,
+    payload,
+  });
   return create(InboundMessageSchema, {
     id: generateMessageId(),
-    channel,
-    envelope: { case: "publish", value: protoEvent },
+    envelope: { case: "publish", value: publish },
   });
 }
 
@@ -154,12 +130,15 @@ export function createRPCRequestMessage(
   method: string,
   event: CloudEventSDK
 ): InboundMessage {
-  const protoEvent = cloudEventToProto(event);
-  return create(InboundMessageSchema, {
-    id: generateMessageId(),
+  const payload = cloudEventToPayload(event);
+  const rpcRequest = create(RpcRequestSchema, {
     channel,
     method,
-    envelope: { case: "rpcRequest", value: protoEvent },
+    payload,
+  });
+  return create(InboundMessageSchema, {
+    id: generateMessageId(),
+    envelope: { case: "rpcRequest", value: rpcRequest },
   });
 }
 
@@ -190,56 +169,39 @@ export function createSubRefreshMessage(
 }
 
 /**
- * Convert CloudEvent SDK to protobuf format.
+ * Convert CloudEvent SDK to Payload protobuf format.
  */
-export function cloudEventToProto(event: CloudEventSDK): CloudEvent {
-  const attributes: Record<string, CloudEventAttributeValue> = {};
-
-  const eventId = event.id || "";
-  const eventSource = event.source || "";
-  const eventSpecVersion: string = (event.specVersion as string) || "";
-  const eventType: string = (event.type as string) || "";
-  const eventSubject: string = (event.subject as string) || "";
-  const eventDataContentType: string = (event.datacontenttype as string) || "";
-
-  if (event.id && typeof event.id === "string") attributes["id"] = stringAttr(event.id);
-  if (event.source && typeof event.source === "string") attributes["source"] = stringAttr(event.source);
-  if (event.specVersion && typeof event.specVersion === "string") attributes["specversion"] = stringAttr(event.specVersion);
-  if (event.type && typeof event.type === "string") attributes["type"] = stringAttr(event.type);
-  if (event.subject && typeof event.subject === "string") attributes["subject"] = stringAttr(event.subject);
-  if (event.datacontenttype && typeof event.datacontenttype === "string") attributes["datacontenttype"] = stringAttr(event.datacontenttype);
-
-  for (const [key, value] of Object.entries(event.extensions || {})) {
-    if (typeof value === "string") {
-      attributes[key] = stringAttr(value);
-    } else if (typeof value === "number") {
-      attributes[key] = integerAttr(Math.round(value));
-    } else if (typeof value === "boolean") {
-      attributes[key] = booleanAttr(value);
-    }
-  }
-
-  let data: { case: "binaryData"; value: Uint8Array } | { case: "textData"; value: string } | { case: undefined };
+export function cloudEventToPayload(event: CloudEventSDK): Payload {
+  const dataValue = event.data;
 
   // Check if data is Uint8Array using type guard
-  const dataValue = event.data;
   if (isUint8Array(dataValue)) {
-    data = { case: "binaryData", value: dataValue };
+    return create(PayloadSchema, {
+      data: { case: "binary", value: dataValue },
+    });
   } else if (typeof dataValue === "string") {
-    data = { case: "textData", value: dataValue };
-  } else if (dataValue) {
-    data = { case: "textData", value: JSON.stringify(dataValue) };
-  } else {
-    data = { case: undefined };
+    // Try to parse as JSON first
+    try {
+      const jsonData = JSON.parse(dataValue);
+      return create(PayloadSchema, {
+        data: { case: "json", value: jsonData },
+      });
+    } catch {
+      // If not valid JSON, store as binary
+      return create(PayloadSchema, {
+        data: { case: "binary", value: new TextEncoder().encode(dataValue) },
+      });
+    }
+  } else if (dataValue && typeof dataValue === "object") {
+    // JSON object
+    return create(PayloadSchema, {
+      data: { case: "json", value: dataValue as Record<string, any> },
+    });
   }
 
-  return create(CloudEventSchema, {
-    id: eventId || crypto.randomUUID(),
-    source: eventSource,
-    specVersion: eventSpecVersion,
-    type: eventType,
-    attributes,
-    data,
+  // Default: empty binary
+  return create(PayloadSchema, {
+    data: { case: "binary", value: new Uint8Array(0) },
   });
 }
 
@@ -251,47 +213,25 @@ function isUint8Array(value: unknown): value is Uint8Array {
 }
 
 /**
- * Convert protobuf CloudEvent to SDK format.
+ * Convert Payload protobuf to CloudEvent SDK format.
  */
-export function protoToCloudEvent(event: CloudEvent): CloudEventSDKClass {
-  const extensions: Record<string, string | number | boolean> = {};
-
-  for (const [key, value] of Object.entries(event.attributes || {})) {
-    // Skip reserved attributes that should be on the top-level
-    if (key === "specversion" || key === "type" || key === "source" ||
-        key === "id" || key === "subject" || key === "datacontenttype") {
-      continue;
-    }
-    if (value.attr.case === "ceString") {
-      extensions[key] = value.attr.value;
-    } else if (value.attr.case === "ceInteger") {
-      extensions[key] = value.attr.value;
-    } else if (value.attr.case === "ceBoolean") {
-      extensions[key] = value.attr.value;
-    }
-  }
-
+export function payloadToCloudEvent(payload: Payload, source: string = "messageloop"): CloudEventSDKClass {
   let data: any;
-  if (event.data.case === "binaryData") {
-    data = event.data.value;
-  } else if (event.data.case === "textData") {
-    const text = event.data.value;
-    try {
-      data = JSON.parse(text);
-    } catch {
-      data = text;
-    }
-  } else if (event.data.case === "protoData") {
-    data = event.data.value;
+
+  if (payload.data.case === "json") {
+    data = payload.data.value;
+  } else if (payload.data.case === "binary") {
+    data = payload.data.value;
+  } else {
+    data = undefined;
   }
 
   return new CloudEventSDKClass({
-    id: event.id,
-    source: event.source,
-    specversion: event.specVersion, // Note: CloudEvents SDK uses lowercase 'specversion'
-    type: event.type,
+    id: crypto.randomUUID(),
+    source,
+    specversion: "1.0",
+    type: "messageloop.message",
     data,
-    extensions: Object.keys(extensions).length > 0 ? extensions : undefined,
   });
 }
 
@@ -316,11 +256,12 @@ export interface ReceivedMessage {
  * Convert a Message proto to ReceivedMessage.
  */
 export function messageToReceived(msg: Message): ReceivedMessage {
+  const payload = msg.payload;
   return {
     id: msg.id,
     channel: msg.channel,
     offset: msg.offset,
-    event: protoToCloudEvent(msg.payload!),
+    event: payload ? payloadToCloudEvent(payload, msg.channel) : new CloudEventSDKClass({ id: msg.id, source: msg.channel, type: "messageloop.message" }),
   };
 }
 
@@ -330,7 +271,7 @@ export function messageToReceived(msg: Message): ReceivedMessage {
 export function parseOutboundMessage(
   msg: OutboundMessage
 ): {
-  type: "connected" | "error" | "subscribeAck" | "unsubscribeAck" | "publishAck" | "publication" | "rpcReply" | "pong" | "subRefreshAck";
+  type: "connected" | "error" | "subscribeAck" | "unsubscribeAck" | "publishAck" | "publication" | "rpcReply" | "pong" | "subRefreshAck" | "surveyRequest" | "surveyReply";
   data: any;
   id: string;
 } {
@@ -355,12 +296,31 @@ export function parseOutboundMessage(
     return { type: "pong", data: envelope.value, id };
   } else if (envelope.case === "subRefreshAck") {
     return { type: "subRefreshAck", data: envelope.value, id };
+  } else if (envelope.case === "surveyRequest") {
+    return { type: "surveyRequest", data: envelope.value, id };
+  } else if (envelope.case === "surveyReply") {
+    return { type: "surveyReply", data: envelope.value, id };
   }
 
   return { type: "error", data: new Error("Unknown message type"), id };
 }
 
+/**
+ * Extract payload and error from RpcReply.
+ */
+export function extractRpcReply(reply: RpcReply): {
+  requestId: string;
+  payload: Payload | undefined;
+  error: { code: string; message: string } | undefined;
+} {
+  return {
+    requestId: reply.requestId,
+    payload: reply.payload,
+    error: reply.error ? { code: reply.error.code, message: reply.error.message } : undefined,
+  };
+}
+
 // Re-export types that might be needed
-export type { CloudEvent };
 export { create };
-export type { InboundMessage, OutboundMessage, Message, Publication };
+export type { InboundMessage, OutboundMessage, Message, Publication, Publish, RpcRequest, RpcReply };
+export type { Payload, Metadata };

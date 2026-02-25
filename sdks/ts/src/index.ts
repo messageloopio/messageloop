@@ -28,10 +28,13 @@ export {
   createPingMessage,
   createSubRefreshMessage,
   generateMessageId,
-  cloudEventToProto,
-  protoToCloudEvent,
+  cloudEventToPayload,
+  payloadToCloudEvent,
   parseOutboundMessage,
+  extractRpcReply,
   type ReceivedMessage,
+  type Payload,
+  type Metadata,
 } from "./event";
 
 // Option builders

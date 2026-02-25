@@ -6,17 +6,17 @@
 
 import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { Metadata, Payload } from "../../shared/v1/types_pb";
+import { file_shared_v1_types } from "../../shared/v1/types_pb";
 import type { Error } from "../../shared/v1/errors_pb";
 import { file_shared_v1_errors } from "../../shared/v1/errors_pb";
-import type { CloudEvent } from "../../includes/cloudevents/cloudevents_pb";
-import { file_includes_cloudevents_cloudevents } from "../../includes/cloudevents/cloudevents_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file proxy/v1/proxy.proto.
  */
 export const file_proxy_v1_proxy: GenFile = /*@__PURE__*/
-  fileDesc("ChRwcm94eS92MS9wcm94eS5wcm90bxIUbWVzc2FnZWxvb3AucHJveHkudjEiaQoKUlBDUmVxdWVzdBIKCgJpZBgBIAEoCRIPCgdjaGFubmVsGAIgASgJEg4KBm1ldGhvZBgDIAEoCRIuCgdwYXlsb2FkGAQgASgLMh0uaW8uY2xvdWRldmVudHMudjEuQ2xvdWRFdmVudCJ2CgtSUENSZXNwb25zZRIKCgJpZBgBIAEoCRIrCgVlcnJvchgCIAEoCzIcLm1lc3NhZ2Vsb29wLnNoYXJlZC52MS5FcnJvchIuCgdwYXlsb2FkGAMgASgLMh0uaW8uY2xvdWRldmVudHMudjEuQ2xvdWRFdmVudCJhChNBdXRoZW50aWNhdGVSZXF1ZXN0EhAKCHVzZXJuYW1lGAEgASgJEhAKCHBhc3N3b3JkGAIgASgJEhMKC2NsaWVudF90eXBlGAMgASgJEhEKCWNsaWVudF9pZBgEIAEoCSJ2ChRBdXRoZW50aWNhdGVSZXNwb25zZRIrCgVlcnJvchgBIAEoCzIcLm1lc3NhZ2Vsb29wLnNoYXJlZC52MS5FcnJvchIxCgl1c2VyX2luZm8YAiABKAsyHi5tZXNzYWdlbG9vcC5wcm94eS52MS5Vc2VySW5mbyJfCghVc2VySW5mbxIKCgJpZBgBIAEoCRIQCgh1c2VybmFtZRgCIAEoCRINCgV0b2tlbhgDIAEoCRITCgtjbGllbnRfdHlwZRgEIAEoCRIRCgljbGllbnRfaWQYBSABKAkiNQoTU3Vic2NyaWJlQWNsUmVxdWVzdBIPCgdjaGFubmVsGAEgASgJEg0KBXRva2VuGAIgASgJIhYKFFN1YnNjcmliZUFjbFJlc3BvbnNlIjoKEk9uQ29ubmVjdGVkUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEhAKCHVzZXJuYW1lGAIgASgJIhUKE09uQ29ubmVjdGVkUmVzcG9uc2UiTAoTT25TdWJzY3JpYmVkUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEg8KB2NoYW5uZWwYAiABKAkSEAoIdXNlcm5hbWUYAyABKAkiFgoUT25TdWJzY3JpYmVkUmVzcG9uc2UiTgoVT25VbnN1YnNjcmliZWRSZXF1ZXN0EhIKCnNlc3Npb25faWQYASABKAkSDwoHY2hhbm5lbBgCIAEoCRIQCgh1c2VybmFtZRgDIAEoCSIYChZPblVuc3Vic2NyaWJlZFJlc3BvbnNlIj0KFU9uRGlzY29ubmVjdGVkUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEhAKCHVzZXJuYW1lGAIgASgJIhgKFk9uRGlzY29ubmVjdGVkUmVzcG9uc2UyzQUKDFByb3h5U2VydmljZRJKCgNSUEMSIC5tZXNzYWdlbG9vcC5wcm94eS52MS5SUENSZXF1ZXN0GiEubWVzc2FnZWxvb3AucHJveHkudjEuUlBDUmVzcG9uc2USZQoMQXV0aGVudGljYXRlEikubWVzc2FnZWxvb3AucHJveHkudjEuQXV0aGVudGljYXRlUmVxdWVzdBoqLm1lc3NhZ2Vsb29wLnByb3h5LnYxLkF1dGhlbnRpY2F0ZVJlc3BvbnNlEmUKDFN1YnNjcmliZUFjbBIpLm1lc3NhZ2Vsb29wLnByb3h5LnYxLlN1YnNjcmliZUFjbFJlcXVlc3QaKi5tZXNzYWdlbG9vcC5wcm94eS52MS5TdWJzY3JpYmVBY2xSZXNwb25zZRJiCgtPbkNvbm5lY3RlZBIoLm1lc3NhZ2Vsb29wLnByb3h5LnYxLk9uQ29ubmVjdGVkUmVxdWVzdBopLm1lc3NhZ2Vsb29wLnByb3h5LnYxLk9uQ29ubmVjdGVkUmVzcG9uc2USZQoMT25TdWJzY3JpYmVkEikubWVzc2FnZWxvb3AucHJveHkudjEuT25TdWJzY3JpYmVkUmVxdWVzdBoqLm1lc3NhZ2Vsb29wLnByb3h5LnYxLk9uU3Vic2NyaWJlZFJlc3BvbnNlEmsKDk9uVW5zdWJzY3JpYmVkEisubWVzc2FnZWxvb3AucHJveHkudjEuT25VbnN1YnNjcmliZWRSZXF1ZXN0GiwubWVzc2FnZWxvb3AucHJveHkudjEuT25VbnN1YnNjcmliZWRSZXNwb25zZRJrCg5PbkRpc2Nvbm5lY3RlZBIrLm1lc3NhZ2Vsb29wLnByb3h5LnYxLk9uRGlzY29ubmVjdGVkUmVxdWVzdBosLm1lc3NhZ2Vsb29wLnByb3h5LnYxLk9uRGlzY29ubmVjdGVkUmVzcG9uc2VCSlpIZ2l0aHViLmNvbS9tZXNzYWdlbG9vcGlvL21lc3NhZ2Vsb29wL3NoYXJlZC9nZW5wcm90by9nby9wcm94eS92MTtwcm94eXBiYgZwcm90bzM", [file_shared_v1_errors, file_includes_cloudevents_cloudevents]);
+  fileDesc("ChRwcm94eS92MS9wcm94eS5wcm90bxIUbWVzc2FnZWxvb3AucHJveHkudjEinQEKClJQQ1JlcXVlc3QSCgoCaWQYASABKAkSDwoHY2hhbm5lbBgCIAEoCRIOCgZtZXRob2QYAyABKAkSLwoHcGF5bG9hZBgEIAEoCzIeLm1lc3NhZ2Vsb29wLnNoYXJlZC52MS5QYXlsb2FkEjEKCG1ldGFkYXRhGAUgASgLMh8ubWVzc2FnZWxvb3Auc2hhcmVkLnYxLk1ldGFkYXRhIqoBCgtSUENSZXNwb25zZRIKCgJpZBgBIAEoCRIvCgdwYXlsb2FkGAIgASgLMh4ubWVzc2FnZWxvb3Auc2hhcmVkLnYxLlBheWxvYWQSMQoIbWV0YWRhdGEYAyABKAsyHy5tZXNzYWdlbG9vcC5zaGFyZWQudjEuTWV0YWRhdGESKwoFZXJyb3IYBCABKAsyHC5tZXNzYWdlbG9vcC5zaGFyZWQudjEuRXJyb3IiYQoTQXV0aGVudGljYXRlUmVxdWVzdBIQCgh1c2VybmFtZRgBIAEoCRIQCghwYXNzd29yZBgCIAEoCRITCgtjbGllbnRfdHlwZRgDIAEoCRIRCgljbGllbnRfaWQYBCABKAkidgoUQXV0aGVudGljYXRlUmVzcG9uc2USKwoFZXJyb3IYASABKAsyHC5tZXNzYWdlbG9vcC5zaGFyZWQudjEuRXJyb3ISMQoJdXNlcl9pbmZvGAIgASgLMh4ubWVzc2FnZWxvb3AucHJveHkudjEuVXNlckluZm8iXwoIVXNlckluZm8SCgoCaWQYASABKAkSEAoIdXNlcm5hbWUYAiABKAkSDQoFdG9rZW4YAyABKAkSEwoLY2xpZW50X3R5cGUYBCABKAkSEQoJY2xpZW50X2lkGAUgASgJIjUKE1N1YnNjcmliZUFjbFJlcXVlc3QSDwoHY2hhbm5lbBgBIAEoCRINCgV0b2tlbhgCIAEoCSIWChRTdWJzY3JpYmVBY2xSZXNwb25zZSI6ChJPbkNvbm5lY3RlZFJlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRIQCgh1c2VybmFtZRgCIAEoCSIVChNPbkNvbm5lY3RlZFJlc3BvbnNlIkwKE09uU3Vic2NyaWJlZFJlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRIPCgdjaGFubmVsGAIgASgJEhAKCHVzZXJuYW1lGAMgASgJIhYKFE9uU3Vic2NyaWJlZFJlc3BvbnNlIk4KFU9uVW5zdWJzY3JpYmVkUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEg8KB2NoYW5uZWwYAiABKAkSEAoIdXNlcm5hbWUYAyABKAkiGAoWT25VbnN1YnNjcmliZWRSZXNwb25zZSI9ChVPbkRpc2Nvbm5lY3RlZFJlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRIQCgh1c2VybmFtZRgCIAEoCSIYChZPbkRpc2Nvbm5lY3RlZFJlc3BvbnNlMs0FCgxQcm94eVNlcnZpY2USSgoDUlBDEiAubWVzc2FnZWxvb3AucHJveHkudjEuUlBDUmVxdWVzdBohLm1lc3NhZ2Vsb29wLnByb3h5LnYxLlJQQ1Jlc3BvbnNlEmUKDEF1dGhlbnRpY2F0ZRIpLm1lc3NhZ2Vsb29wLnByb3h5LnYxLkF1dGhlbnRpY2F0ZVJlcXVlc3QaKi5tZXNzYWdlbG9vcC5wcm94eS52MS5BdXRoZW50aWNhdGVSZXNwb25zZRJlCgxTdWJzY3JpYmVBY2wSKS5tZXNzYWdlbG9vcC5wcm94eS52MS5TdWJzY3JpYmVBY2xSZXF1ZXN0GioubWVzc2FnZWxvb3AucHJveHkudjEuU3Vic2NyaWJlQWNsUmVzcG9uc2USYgoLT25Db25uZWN0ZWQSKC5tZXNzYWdlbG9vcC5wcm94eS52MS5PbkNvbm5lY3RlZFJlcXVlc3QaKS5tZXNzYWdlbG9vcC5wcm94eS52MS5PbkNvbm5lY3RlZFJlc3BvbnNlEmUKDE9uU3Vic2NyaWJlZBIpLm1lc3NhZ2Vsb29wLnByb3h5LnYxLk9uU3Vic2NyaWJlZFJlcXVlc3QaKi5tZXNzYWdlbG9vcC5wcm94eS52MS5PblN1YnNjcmliZWRSZXNwb25zZRJrCg5PblVuc3Vic2NyaWJlZBIrLm1lc3NhZ2Vsb29wLnByb3h5LnYxLk9uVW5zdWJzY3JpYmVkUmVxdWVzdBosLm1lc3NhZ2Vsb29wLnByb3h5LnYxLk9uVW5zdWJzY3JpYmVkUmVzcG9uc2USawoOT25EaXNjb25uZWN0ZWQSKy5tZXNzYWdlbG9vcC5wcm94eS52MS5PbkRpc2Nvbm5lY3RlZFJlcXVlc3QaLC5tZXNzYWdlbG9vcC5wcm94eS52MS5PbkRpc2Nvbm5lY3RlZFJlc3BvbnNlQkpaSGdpdGh1Yi5jb20vbWVzc2FnZWxvb3Bpby9tZXNzYWdlbG9vcC9zaGFyZWQvZ2VucHJvdG8vZ28vcHJveHkvdjE7cHJveHlwYmIGcHJvdG8z", [file_shared_v1_types, file_shared_v1_errors]);
 
 /**
  * @generated from message messageloop.proxy.v1.RPCRequest
@@ -38,9 +38,14 @@ export type RPCRequest = Message<"messageloop.proxy.v1.RPCRequest"> & {
   method: string;
 
   /**
-   * @generated from field: io.cloudevents.v1.CloudEvent payload = 4;
+   * @generated from field: messageloop.shared.v1.Payload payload = 4;
    */
-  payload?: CloudEvent;
+  payload?: Payload;
+
+  /**
+   * @generated from field: messageloop.shared.v1.Metadata metadata = 5;
+   */
+  metadata?: Metadata;
 };
 
 /**
@@ -60,14 +65,19 @@ export type RPCResponse = Message<"messageloop.proxy.v1.RPCResponse"> & {
   id: string;
 
   /**
-   * @generated from field: messageloop.shared.v1.Error error = 2;
+   * @generated from field: messageloop.shared.v1.Payload payload = 2;
    */
-  error?: Error;
+  payload?: Payload;
 
   /**
-   * @generated from field: io.cloudevents.v1.CloudEvent payload = 3;
+   * @generated from field: messageloop.shared.v1.Metadata metadata = 3;
    */
-  payload?: CloudEvent;
+  metadata?: Metadata;
+
+  /**
+   * @generated from field: messageloop.shared.v1.Error error = 4;
+   */
+  error?: Error;
 };
 
 /**
@@ -358,7 +368,7 @@ export const OnDisconnectedResponseSchema: GenMessage<OnDisconnectedResponse> = 
  */
 export const ProxyService: GenService<{
   /**
-   * 远程调用
+   * RPC 调用
    *
    * @generated from rpc messageloop.proxy.v1.ProxyService.RPC
    */
@@ -388,6 +398,8 @@ export const ProxyService: GenService<{
     output: typeof SubscribeAclResponseSchema;
   },
   /**
+   * 生命周期钩子
+   *
    * @generated from rpc messageloop.proxy.v1.ProxyService.OnConnected
    */
   onConnected: {

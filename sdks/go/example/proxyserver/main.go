@@ -10,8 +10,6 @@ import (
 	"syscall"
 	"time"
 
-	protobuf "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
-	"github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/messageloopio/messageloop/sdks/go"
 	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v1"
@@ -287,10 +285,10 @@ type MyProxyService struct {
 func (s *MyProxyService) RPC(ctx context.Context, req *proxypb.RPCRequest) (*proxypb.RPCResponse, error) {
 	log.Printf("[RPC Request] id=%s channel=%s method=%s", req.Id, req.Channel, req.Method)
 
-	// Convert pb.CloudEvent to cloudevents.Event
+	// Convert Payload to cloudevents.Event
 	var payload *cloudevents.Event
 	if pbPayload := req.GetPayload(); pbPayload != nil {
-		if ce, err := protobuf.FromProto(pbPayload); err == nil {
+		if ce, err := messageloopgo.PayloadToCloudEvent(pbPayload, req.Channel); err == nil {
 			payload = ce
 		}
 	}
@@ -315,11 +313,11 @@ func (s *MyProxyService) RPC(ctx context.Context, req *proxypb.RPCRequest) (*pro
 		}, nil
 	}
 
-	// Convert cloudevents.Event to pb.CloudEvent
-	var event *pb.CloudEvent
+	// Convert cloudevents.Event to Payload
+	var respPayload *sharedpb.Payload
 	if resp.Payload != nil {
-		if pbEvent, err := protobuf.ToProto(resp.Payload); err == nil {
-			event = pbEvent
+		if p, err := messageloopgo.CloudEventToPayload(resp.Payload); err == nil {
+			respPayload = p
 		}
 	}
 
@@ -332,7 +330,7 @@ func (s *MyProxyService) RPC(ctx context.Context, req *proxypb.RPCRequest) (*pro
 	return &proxypb.RPCResponse{
 		Id:      req.Id,
 		Error:   resp.Error,
-		Payload: event,
+		Payload: respPayload,
 	}, nil
 }
 

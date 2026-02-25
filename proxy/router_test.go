@@ -15,7 +15,7 @@ type mockRPCProxy struct {
 
 func (m *mockRPCProxy) RPC(ctx context.Context, req *RPCProxyRequest) (*RPCProxyResponse, error) {
 	return &RPCProxyResponse{
-		Event: req.Event,
+		Payload: req.Payload,
 	}, nil
 }
 

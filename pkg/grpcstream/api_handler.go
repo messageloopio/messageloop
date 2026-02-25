@@ -6,6 +6,7 @@ import (
 	"github.com/lynx-go/x/log"
 	"github.com/messageloopio/messageloop"
 	serverpb "github.com/messageloopio/messageloop/shared/genproto/server/v1"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/v1"
 )
 
@@ -22,13 +23,14 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverpb.PublishRe
 	log.InfoContext(ctx, "server side API Publish", "request_id", req.RequestId)
 
 	for _, pub := range req.Publications {
-		// Extract data from CloudEvent payload
+		// Extract data from Payload
 		var data []byte
 		if pub.Payload != nil {
-			if binaryData := pub.Payload.GetBinaryData(); len(binaryData) > 0 {
-				data = binaryData
-			} else if textData := pub.Payload.GetTextData(); textData != "" {
-				data = []byte(textData)
+			switch p := pub.Payload.Data.(type) {
+			case *sharedpb.Payload_Binary:
+				data = p.Binary
+			case *sharedpb.Payload_Json:
+				data = []byte(p.Json.String())
 			}
 		}
 
@@ -54,14 +56,11 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverpb.PublishRe
 					continue
 				}
 
-				// Create OutboundMessage with CloudEvent payload
+				// Create OutboundMessage with Payload
 				msg := &clientpb.Message{
 					Channel: "", // Session-based, no channel
 					Id:      pub.Id,
-				}
-
-				if pub.Payload != nil {
-					msg.Payload = pub.Payload
+					Payload: pub.Payload, // sharedpb.Payload is same type
 				}
 
 				out := messageloop.MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {

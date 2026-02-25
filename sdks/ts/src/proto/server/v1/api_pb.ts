@@ -6,8 +6,8 @@
 
 import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
-import type { CloudEvent } from "../../includes/cloudevents/cloudevents_pb";
-import { file_includes_cloudevents_cloudevents } from "../../includes/cloudevents/cloudevents_pb";
+import type { Metadata, Payload } from "../../shared/v1/types_pb";
+import { file_shared_v1_types } from "../../shared/v1/types_pb";
 import type { Error } from "../../shared/v1/errors_pb";
 import { file_shared_v1_errors } from "../../shared/v1/errors_pb";
 import type { Message } from "@bufbuild/protobuf";
@@ -16,88 +16,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file server/v1/api.proto.
  */
 export const file_server_v1_api: GenFile = /*@__PURE__*/
-  fileDesc("ChNzZXJ2ZXIvdjEvYXBpLnByb3RvEhVtZXNzYWdlbG9vcC5zZXJ2ZXIudjEieAoNU3VydmV5UmVxdWVzdBISCgpyZXF1ZXN0X2lkGAEgASgJEg8KB2NoYW5uZWwYAiABKAkSLgoHcGF5bG9hZBgDIAEoCzIdLmlvLmNsb3VkZXZlbnRzLnYxLkNsb3VkRXZlbnQSEgoKdGltZW91dF9tcxgEIAEoBSJaCg5TdXJ2ZXlSZXNwb25zZRISCgpyZXF1ZXN0X2lkGAEgASgJEjQKB3Jlc3VsdHMYAiADKAsyIy5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuU3VydmV5UmVzdWx0In8KDFN1cnZleVJlc3VsdBISCgpzZXNzaW9uX2lkGAEgASgJEi4KB3BheWxvYWQYAiABKAsyHS5pby5jbG91ZGV2ZW50cy52MS5DbG91ZEV2ZW50EisKBWVycm9yGAMgASgLMhwubWVzc2FnZWxvb3Auc2hhcmVkLnYxLkVycm9yIp4CCgtQdWJsaWNhdGlvbhIKCgJpZBgBIAEoCRJDCgtkZXN0aW5hdGlvbhgCIAEoCzIuLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5QdWJsaWNhdGlvbi5EZXN0aW5hdGlvbhI7CgdvcHRpb25zGAMgASgLMioubWVzc2FnZWxvb3Auc2VydmVyLnYxLlB1YmxpY2F0aW9uLk9wdGlvbnMSLgoHcGF5bG9hZBgEIAEoCzIdLmlvLmNsb3VkZXZlbnRzLnYxLkNsb3VkRXZlbnQaHgoHT3B0aW9ucxITCgthZGRfaGlzdG9yeRgBIAEoCBoxCgtEZXN0aW5hdGlvbhIQCghzZXNzaW9ucxgBIAMoCRIQCghjaGFubmVscxgCIAMoCSLWAQoOUHVibGlzaFJlcXVlc3QSEgoKcmVxdWVzdF9pZBgBIAEoCRJFCghtZXRhZGF0YRgCIAMoCzIzLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5QdWJsaXNoUmVxdWVzdC5NZXRhZGF0YUVudHJ5EjgKDHB1YmxpY2F0aW9ucxgDIAMoCzIiLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5QdWJsaWNhdGlvbhovCg1NZXRhZGF0YUVudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiEQoPUHVibGlzaFJlc3BvbnNlIkMKEURpc2Nvbm5lY3RSZXF1ZXN0EhAKCHNlc3Npb25zGAEgAygJEgwKBGNvZGUYAiABKA0SDgoGcmVhc29uGAMgASgJIo0BChJEaXNjb25uZWN0UmVzcG9uc2USRwoHcmVzdWx0cxgBIAMoCzI2Lm1lc3NhZ2Vsb29wLnNlcnZlci52MS5EaXNjb25uZWN0UmVzcG9uc2UuUmVzdWx0c0VudHJ5Gi4KDFJlc3VsdHNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAg6AjgBIjgKEFN1YnNjcmliZVJlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRIQCghjaGFubmVscxgCIAMoCSKLAQoRU3Vic2NyaWJlUmVzcG9uc2USRgoHcmVzdWx0cxgBIAMoCzI1Lm1lc3NhZ2Vsb29wLnNlcnZlci52MS5TdWJzY3JpYmVSZXNwb25zZS5SZXN1bHRzRW50cnkaLgoMUmVzdWx0c0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCDoCOAEiOgoSVW5zdWJzY3JpYmVSZXF1ZXN0EhIKCnNlc3Npb25faWQYASABKAkSEAoIY2hhbm5lbHMYAiADKAkijwEKE1Vuc3Vic2NyaWJlUmVzcG9uc2USSAoHcmVzdWx0cxgBIAMoCzI3Lm1lc3NhZ2Vsb29wLnNlcnZlci52MS5VbnN1YnNjcmliZVJlc3BvbnNlLlJlc3VsdHNFbnRyeRouCgxSZXN1bHRzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgIOgI4ATLmAwoKQVBJU2VydmljZRJYCgdQdWJsaXNoEiUubWVzc2FnZWxvb3Auc2VydmVyLnYxLlB1Ymxpc2hSZXF1ZXN0GiYubWVzc2FnZWxvb3Auc2VydmVyLnYxLlB1Ymxpc2hSZXNwb25zZRJhCgpEaXNjb25uZWN0EigubWVzc2FnZWxvb3Auc2VydmVyLnYxLkRpc2Nvbm5lY3RSZXF1ZXN0GikubWVzc2FnZWxvb3Auc2VydmVyLnYxLkRpc2Nvbm5lY3RSZXNwb25zZRJeCglTdWJzY3JpYmUSJy5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuU3Vic2NyaWJlUmVxdWVzdBooLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5TdWJzY3JpYmVSZXNwb25zZRJkCgtVbnN1YnNjcmliZRIpLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5VbnN1YnNjcmliZVJlcXVlc3QaKi5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuVW5zdWJzY3JpYmVSZXNwb25zZRJVCgZTdXJ2ZXkSJC5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuU3VydmV5UmVxdWVzdBolLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5TdXJ2ZXlSZXNwb25zZUJMWkpnaXRodWIuY29tL21lc3NhZ2Vsb29waW8vbWVzc2FnZWxvb3Avc2hhcmVkL2dlbnByb3RvL2dvL3NlcnZlci92MTtzZXJ2ZXJwYmIGcHJvdG8z", [file_includes_cloudevents_cloudevents, file_shared_v1_errors]);
-
-/**
- * @generated from message messageloop.server.v1.SurveyRequest
- */
-export type SurveyRequest = Message<"messageloop.server.v1.SurveyRequest"> & {
-  /**
-   * @generated from field: string request_id = 1;
-   */
-  requestId: string;
-
-  /**
-   * @generated from field: string channel = 2;
-   */
-  channel: string;
-
-  /**
-   * @generated from field: io.cloudevents.v1.CloudEvent payload = 3;
-   */
-  payload?: CloudEvent;
-
-  /**
-   * @generated from field: int32 timeout_ms = 4;
-   */
-  timeoutMs: number;
-};
-
-/**
- * Describes the message messageloop.server.v1.SurveyRequest.
- * Use `create(SurveyRequestSchema)` to create a new message.
- */
-export const SurveyRequestSchema: GenMessage<SurveyRequest> = /*@__PURE__*/
-  messageDesc(file_server_v1_api, 0);
-
-/**
- * @generated from message messageloop.server.v1.SurveyResponse
- */
-export type SurveyResponse = Message<"messageloop.server.v1.SurveyResponse"> & {
-  /**
-   * @generated from field: string request_id = 1;
-   */
-  requestId: string;
-
-  /**
-   * @generated from field: repeated messageloop.server.v1.SurveyResult results = 2;
-   */
-  results: SurveyResult[];
-};
-
-/**
- * Describes the message messageloop.server.v1.SurveyResponse.
- * Use `create(SurveyResponseSchema)` to create a new message.
- */
-export const SurveyResponseSchema: GenMessage<SurveyResponse> = /*@__PURE__*/
-  messageDesc(file_server_v1_api, 1);
-
-/**
- * @generated from message messageloop.server.v1.SurveyResult
- */
-export type SurveyResult = Message<"messageloop.server.v1.SurveyResult"> & {
-  /**
-   * @generated from field: string session_id = 1;
-   */
-  sessionId: string;
-
-  /**
-   * @generated from field: io.cloudevents.v1.CloudEvent payload = 2;
-   */
-  payload?: CloudEvent;
-
-  /**
-   * @generated from field: messageloop.shared.v1.Error error = 3;
-   */
-  error?: Error;
-};
-
-/**
- * Describes the message messageloop.server.v1.SurveyResult.
- * Use `create(SurveyResultSchema)` to create a new message.
- */
-export const SurveyResultSchema: GenMessage<SurveyResult> = /*@__PURE__*/
-  messageDesc(file_server_v1_api, 2);
+  fileDesc("ChNzZXJ2ZXIvdjEvYXBpLnByb3RvEhVtZXNzYWdlbG9vcC5zZXJ2ZXIudjEi0gIKC1B1YmxpY2F0aW9uEgoKAmlkGAEgASgJEkMKC2Rlc3RpbmF0aW9uGAIgASgLMi4ubWVzc2FnZWxvb3Auc2VydmVyLnYxLlB1YmxpY2F0aW9uLkRlc3RpbmF0aW9uEjsKB29wdGlvbnMYAyABKAsyKi5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuUHVibGljYXRpb24uT3B0aW9ucxIvCgdwYXlsb2FkGAQgASgLMh4ubWVzc2FnZWxvb3Auc2hhcmVkLnYxLlBheWxvYWQSMQoIbWV0YWRhdGEYBSABKAsyHy5tZXNzYWdlbG9vcC5zaGFyZWQudjEuTWV0YWRhdGEaHgoHT3B0aW9ucxITCgthZGRfaGlzdG9yeRgBIAEoCBoxCgtEZXN0aW5hdGlvbhIQCghzZXNzaW9ucxgBIAMoCRIQCghjaGFubmVscxgCIAMoCSJeCg5QdWJsaXNoUmVxdWVzdBISCgpyZXF1ZXN0X2lkGAEgASgJEjgKDHB1YmxpY2F0aW9ucxgCIAMoCzIiLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5QdWJsaWNhdGlvbiIRCg9QdWJsaXNoUmVzcG9uc2UirAEKDVN1cnZleVJlcXVlc3QSEgoKcmVxdWVzdF9pZBgBIAEoCRIPCgdjaGFubmVsGAIgASgJEi8KB3BheWxvYWQYAyABKAsyHi5tZXNzYWdlbG9vcC5zaGFyZWQudjEuUGF5bG9hZBIxCghtZXRhZGF0YRgEIAEoCzIfLm1lc3NhZ2Vsb29wLnNoYXJlZC52MS5NZXRhZGF0YRISCgp0aW1lb3V0X21zGAUgASgFIloKDlN1cnZleVJlc3BvbnNlEhIKCnJlcXVlc3RfaWQYASABKAkSNAoHcmVzdWx0cxgCIAMoCzIjLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5TdXJ2ZXlSZXN1bHQiswEKDFN1cnZleVJlc3VsdBISCgpzZXNzaW9uX2lkGAEgASgJEi8KB3BheWxvYWQYAiABKAsyHi5tZXNzYWdlbG9vcC5zaGFyZWQudjEuUGF5bG9hZBIxCghtZXRhZGF0YRgDIAEoCzIfLm1lc3NhZ2Vsb29wLnNoYXJlZC52MS5NZXRhZGF0YRIrCgVlcnJvchgEIAEoCzIcLm1lc3NhZ2Vsb29wLnNoYXJlZC52MS5FcnJvciJDChFEaXNjb25uZWN0UmVxdWVzdBIQCghzZXNzaW9ucxgBIAMoCRIMCgRjb2RlGAIgASgNEg4KBnJlYXNvbhgDIAEoCSKNAQoSRGlzY29ubmVjdFJlc3BvbnNlEkcKB3Jlc3VsdHMYASADKAsyNi5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuRGlzY29ubmVjdFJlc3BvbnNlLlJlc3VsdHNFbnRyeRouCgxSZXN1bHRzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgIOgI4ASI4ChBTdWJzY3JpYmVSZXF1ZXN0EhIKCnNlc3Npb25faWQYASABKAkSEAoIY2hhbm5lbHMYAiADKAkiiwEKEVN1YnNjcmliZVJlc3BvbnNlEkYKB3Jlc3VsdHMYASADKAsyNS5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuU3Vic2NyaWJlUmVzcG9uc2UuUmVzdWx0c0VudHJ5Gi4KDFJlc3VsdHNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAg6AjgBIjoKElVuc3Vic2NyaWJlUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEhAKCGNoYW5uZWxzGAIgAygJIo8BChNVbnN1YnNjcmliZVJlc3BvbnNlEkgKB3Jlc3VsdHMYASADKAsyNy5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuVW5zdWJzY3JpYmVSZXNwb25zZS5SZXN1bHRzRW50cnkaLgoMUmVzdWx0c0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCDoCOAEy5gMKCkFQSVNlcnZpY2USWAoHUHVibGlzaBIlLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5QdWJsaXNoUmVxdWVzdBomLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5QdWJsaXNoUmVzcG9uc2USYQoKRGlzY29ubmVjdBIoLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5EaXNjb25uZWN0UmVxdWVzdBopLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5EaXNjb25uZWN0UmVzcG9uc2USXgoJU3Vic2NyaWJlEicubWVzc2FnZWxvb3Auc2VydmVyLnYxLlN1YnNjcmliZVJlcXVlc3QaKC5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuU3Vic2NyaWJlUmVzcG9uc2USZAoLVW5zdWJzY3JpYmUSKS5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuVW5zdWJzY3JpYmVSZXF1ZXN0GioubWVzc2FnZWxvb3Auc2VydmVyLnYxLlVuc3Vic2NyaWJlUmVzcG9uc2USVQoGU3VydmV5EiQubWVzc2FnZWxvb3Auc2VydmVyLnYxLlN1cnZleVJlcXVlc3QaJS5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuU3VydmV5UmVzcG9uc2VCTFpKZ2l0aHViLmNvbS9tZXNzYWdlbG9vcGlvL21lc3NhZ2Vsb29wL3NoYXJlZC9nZW5wcm90by9nby9zZXJ2ZXIvdjE7c2VydmVycGJiBnByb3RvMw", [file_shared_v1_types, file_shared_v1_errors]);
 
 /**
  * @generated from message messageloop.server.v1.Publication
@@ -119,9 +38,14 @@ export type Publication = Message<"messageloop.server.v1.Publication"> & {
   options?: Publication_Options;
 
   /**
-   * @generated from field: io.cloudevents.v1.CloudEvent payload = 4;
+   * @generated from field: messageloop.shared.v1.Payload payload = 4;
    */
-  payload?: CloudEvent;
+  payload?: Payload;
+
+  /**
+   * @generated from field: messageloop.shared.v1.Metadata metadata = 5;
+   */
+  metadata?: Metadata;
 };
 
 /**
@@ -129,7 +53,7 @@ export type Publication = Message<"messageloop.server.v1.Publication"> & {
  * Use `create(PublicationSchema)` to create a new message.
  */
 export const PublicationSchema: GenMessage<Publication> = /*@__PURE__*/
-  messageDesc(file_server_v1_api, 3);
+  messageDesc(file_server_v1_api, 0);
 
 /**
  * @generated from message messageloop.server.v1.Publication.Options
@@ -146,7 +70,7 @@ export type Publication_Options = Message<"messageloop.server.v1.Publication.Opt
  * Use `create(Publication_OptionsSchema)` to create a new message.
  */
 export const Publication_OptionsSchema: GenMessage<Publication_Options> = /*@__PURE__*/
-  messageDesc(file_server_v1_api, 3, 0);
+  messageDesc(file_server_v1_api, 0, 0);
 
 /**
  * @generated from message messageloop.server.v1.Publication.Destination
@@ -168,7 +92,7 @@ export type Publication_Destination = Message<"messageloop.server.v1.Publication
  * Use `create(Publication_DestinationSchema)` to create a new message.
  */
 export const Publication_DestinationSchema: GenMessage<Publication_Destination> = /*@__PURE__*/
-  messageDesc(file_server_v1_api, 3, 1);
+  messageDesc(file_server_v1_api, 0, 1);
 
 /**
  * @generated from message messageloop.server.v1.PublishRequest
@@ -180,12 +104,7 @@ export type PublishRequest = Message<"messageloop.server.v1.PublishRequest"> & {
   requestId: string;
 
   /**
-   * @generated from field: map<string, string> metadata = 2;
-   */
-  metadata: { [key: string]: string };
-
-  /**
-   * @generated from field: repeated messageloop.server.v1.Publication publications = 3;
+   * @generated from field: repeated messageloop.server.v1.Publication publications = 2;
    */
   publications: Publication[];
 };
@@ -195,7 +114,7 @@ export type PublishRequest = Message<"messageloop.server.v1.PublishRequest"> & {
  * Use `create(PublishRequestSchema)` to create a new message.
  */
 export const PublishRequestSchema: GenMessage<PublishRequest> = /*@__PURE__*/
-  messageDesc(file_server_v1_api, 4);
+  messageDesc(file_server_v1_api, 1);
 
 /**
  * @generated from message messageloop.server.v1.PublishResponse
@@ -208,6 +127,97 @@ export type PublishResponse = Message<"messageloop.server.v1.PublishResponse"> &
  * Use `create(PublishResponseSchema)` to create a new message.
  */
 export const PublishResponseSchema: GenMessage<PublishResponse> = /*@__PURE__*/
+  messageDesc(file_server_v1_api, 2);
+
+/**
+ * @generated from message messageloop.server.v1.SurveyRequest
+ */
+export type SurveyRequest = Message<"messageloop.server.v1.SurveyRequest"> & {
+  /**
+   * @generated from field: string request_id = 1;
+   */
+  requestId: string;
+
+  /**
+   * @generated from field: string channel = 2;
+   */
+  channel: string;
+
+  /**
+   * @generated from field: messageloop.shared.v1.Payload payload = 3;
+   */
+  payload?: Payload;
+
+  /**
+   * @generated from field: messageloop.shared.v1.Metadata metadata = 4;
+   */
+  metadata?: Metadata;
+
+  /**
+   * @generated from field: int32 timeout_ms = 5;
+   */
+  timeoutMs: number;
+};
+
+/**
+ * Describes the message messageloop.server.v1.SurveyRequest.
+ * Use `create(SurveyRequestSchema)` to create a new message.
+ */
+export const SurveyRequestSchema: GenMessage<SurveyRequest> = /*@__PURE__*/
+  messageDesc(file_server_v1_api, 3);
+
+/**
+ * @generated from message messageloop.server.v1.SurveyResponse
+ */
+export type SurveyResponse = Message<"messageloop.server.v1.SurveyResponse"> & {
+  /**
+   * @generated from field: string request_id = 1;
+   */
+  requestId: string;
+
+  /**
+   * @generated from field: repeated messageloop.server.v1.SurveyResult results = 2;
+   */
+  results: SurveyResult[];
+};
+
+/**
+ * Describes the message messageloop.server.v1.SurveyResponse.
+ * Use `create(SurveyResponseSchema)` to create a new message.
+ */
+export const SurveyResponseSchema: GenMessage<SurveyResponse> = /*@__PURE__*/
+  messageDesc(file_server_v1_api, 4);
+
+/**
+ * @generated from message messageloop.server.v1.SurveyResult
+ */
+export type SurveyResult = Message<"messageloop.server.v1.SurveyResult"> & {
+  /**
+   * @generated from field: string session_id = 1;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: messageloop.shared.v1.Payload payload = 2;
+   */
+  payload?: Payload;
+
+  /**
+   * @generated from field: messageloop.shared.v1.Metadata metadata = 3;
+   */
+  metadata?: Metadata;
+
+  /**
+   * @generated from field: messageloop.shared.v1.Error error = 4;
+   */
+  error?: Error;
+};
+
+/**
+ * Describes the message messageloop.server.v1.SurveyResult.
+ * Use `create(SurveyResultSchema)` to create a new message.
+ */
+export const SurveyResultSchema: GenMessage<SurveyResult> = /*@__PURE__*/
   messageDesc(file_server_v1_api, 5);
 
 /**

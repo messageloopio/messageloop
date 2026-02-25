@@ -6,12 +6,11 @@ import (
 	"sync"
 	"time"
 
-	cloudevents "github.com/cloudevents/sdk-go/v2"
-	format "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/proxy"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/v1"
 )
 
@@ -288,21 +287,14 @@ func (n *Node) Survey(ctx context.Context, channel string, payload []byte, timeo
 
 // sendSurveyRequest sends a survey request to a single client session.
 func (n *Node) sendSurveyRequest(ctx context.Context, session *ClientSession, survey *Survey) {
-	// Create the CloudEvent for the survey request
-	event := cloudevents.NewEvent()
-	event.SetID(survey.ID())
-	event.SetSource(survey.Channel())
-	event.SetSpecVersion("1.0")
-	event.SetType("com.messageloop.survey")
-	event.SetDataContentType("application/octet-stream")
-	_ = event.SetData("application/octet-stream", survey.Payload())
-
-	// Convert to protobuf
-	pbEvent, err := format.ToProto(&event)
-	if err != nil {
-		log.WarnContext(ctx, "failed to convert survey event to protobuf", "session", session.SessionID(), "error", err)
-		survey.AddResponse(session.SessionID(), nil, err)
-		return
+	// Create the Payload for the survey request
+	var payload *sharedpb.Payload
+	if len(survey.Payload()) > 0 {
+		payload = &sharedpb.Payload{
+			Data: &sharedpb.Payload_Binary{
+				Binary: survey.Payload(),
+			},
+		}
 	}
 
 	// Create outbound message with survey request
@@ -310,7 +302,7 @@ func (n *Node) sendSurveyRequest(ctx context.Context, session *ClientSession, su
 		out.Envelope = &clientpb.OutboundMessage_SurveyRequest{
 			SurveyRequest: &clientpb.SurveyRequest{
 				RequestId: survey.ID(),
-				Payload:   pbEvent,
+				Payload:   payload,
 			},
 		}
 	})

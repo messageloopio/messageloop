@@ -34,12 +34,13 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ProxyServiceClient interface {
-	// 远程调用
+	// RPC 调用
 	RPC(ctx context.Context, in *RPCRequest, opts ...grpc.CallOption) (*RPCResponse, error)
 	// 认证
 	Authenticate(ctx context.Context, in *AuthenticateRequest, opts ...grpc.CallOption) (*AuthenticateResponse, error)
 	// 订阅权限校验
 	SubscribeAcl(ctx context.Context, in *SubscribeAclRequest, opts ...grpc.CallOption) (*SubscribeAclResponse, error)
+	// 生命周期钩子
 	OnConnected(ctx context.Context, in *OnConnectedRequest, opts ...grpc.CallOption) (*OnConnectedResponse, error)
 	OnSubscribed(ctx context.Context, in *OnSubscribedRequest, opts ...grpc.CallOption) (*OnSubscribedResponse, error)
 	OnUnsubscribed(ctx context.Context, in *OnUnsubscribedRequest, opts ...grpc.CallOption) (*OnUnsubscribedResponse, error)
@@ -128,12 +129,13 @@ func (c *proxyServiceClient) OnDisconnected(ctx context.Context, in *OnDisconnec
 // All implementations must embed UnimplementedProxyServiceServer
 // for forward compatibility.
 type ProxyServiceServer interface {
-	// 远程调用
+	// RPC 调用
 	RPC(context.Context, *RPCRequest) (*RPCResponse, error)
 	// 认证
 	Authenticate(context.Context, *AuthenticateRequest) (*AuthenticateResponse, error)
 	// 订阅权限校验
 	SubscribeAcl(context.Context, *SubscribeAclRequest) (*SubscribeAclResponse, error)
+	// 生命周期钩子
 	OnConnected(context.Context, *OnConnectedRequest) (*OnConnectedResponse, error)
 	OnSubscribed(context.Context, *OnSubscribedRequest) (*OnSubscribedResponse, error)
 	OnUnsubscribed(context.Context, *OnUnsubscribedRequest) (*OnUnsubscribedResponse, error)

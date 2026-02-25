@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	pb "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/v1"
 )
 
@@ -389,13 +389,15 @@ func TestClientSession_HandleMessage_Publish_BeforeAuth(t *testing.T) {
 	}
 
 	msg := &clientpb.InboundMessage{
-		Id:      "msg-1",
-		Channel: "test-channel",
+		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_Publish{
-			Publish: &pb.CloudEvent{
-				Id:     "event-1",
-				Source: "test-source",
-				Type:   "test.event",
+			Publish: &clientpb.Publish{
+				Channel: "test-channel",
+				Payload: &sharedpb.Payload{
+					Data: &sharedpb.Payload_Binary{
+						Binary: []byte("test payload"),
+					},
+				},
 			},
 		},
 	}
@@ -445,15 +447,14 @@ func TestClientSession_HandleMessage_Publish_AfterAuth(t *testing.T) {
 
 	// Now publish
 	pubMsg := &clientpb.InboundMessage{
-		Id:      "msg-2",
-		Channel: "test-channel",
+		Id: "msg-2",
 		Envelope: &clientpb.InboundMessage_Publish{
-			Publish: &pb.CloudEvent{
-				Id:     "event-1",
-				Source: "test-source",
-				Type:   "test.event",
-				Data: &pb.CloudEvent_TextData{
-					TextData: "test payload",
+			Publish: &clientpb.Publish{
+				Channel: "test-channel",
+				Payload: &sharedpb.Payload{
+					Data: &sharedpb.Payload_Binary{
+						Binary: []byte("test payload"),
+					},
 				},
 			},
 		},
@@ -555,17 +556,18 @@ func TestClientSession_HandleMessage_RpcRequest_NoProxy(t *testing.T) {
 	transport.messages = nil
 
 	// Send RPC request
-	event := &pb.CloudEvent{
-		Id:     "rpc-1",
-		Source: "test-channel",
-		Type:   "test.method",
-	}
 	rpcMsg := &clientpb.InboundMessage{
-		Id:      "msg-2",
-		Channel: "test-channel",
-		Method:  "test.method",
+		Id: "msg-2",
 		Envelope: &clientpb.InboundMessage_RpcRequest{
-			RpcRequest: event,
+			RpcRequest: &clientpb.RpcRequest{
+				Channel: "test-channel",
+				Method:  "test.method",
+				Payload: &sharedpb.Payload{
+					Data: &sharedpb.Payload_Binary{
+						Binary: []byte("rpc payload"),
+					},
+				},
+			},
 		},
 	}
 
@@ -852,8 +854,7 @@ func TestClientSession_ConcurrentMessages(t *testing.T) {
 
 func TestMakeOutboundMessage(t *testing.T) {
 	inMsg := &clientpb.InboundMessage{
-		Id:       "in-1",
-		Metadata: map[string]string{"key": "value"},
+		Id: "in-1",
 	}
 
 	outMsg := MakeOutboundMessage(inMsg, func(out *clientpb.OutboundMessage) {
@@ -864,9 +865,6 @@ func TestMakeOutboundMessage(t *testing.T) {
 
 	if outMsg.Id != "in-1" {
 		t.Errorf("Id should be copied from InboundMessage, got %s", outMsg.Id)
-	}
-	if outMsg.Metadata["key"] != "value" {
-		t.Error("Metadata should be copied from InboundMessage")
 	}
 	if outMsg.Time == 0 {
 		t.Error("Time should be set")
@@ -885,9 +883,6 @@ func TestMakeOutboundMessage_WithoutInbound(t *testing.T) {
 
 	if outMsg.Id == "" {
 		t.Error("Id should be generated")
-	}
-	if outMsg.Metadata == nil {
-		t.Error("Metadata should be initialized")
 	}
 	if outMsg.Time == 0 {
 		t.Error("Time should be set")
@@ -920,17 +915,16 @@ func TestClientSession_Publish_WithChannelFromEvent(t *testing.T) {
 	// Reset transport messages
 	transport.messages = nil
 
-	// Publish without channel in InboundMessage, but with source in event
+	// Publish with channel in Publish message
 	pubMsg := &clientpb.InboundMessage{
 		Id: "msg-2",
-		// Channel not set
 		Envelope: &clientpb.InboundMessage_Publish{
-			Publish: &pb.CloudEvent{
-				Id:     "event-1",
-				Source: "event-source-channel", // Will be used as channel
-				Type:   "test.event",
-				Data: &pb.CloudEvent_TextData{
-					TextData: "test payload",
+			Publish: &clientpb.Publish{
+				Channel: "event-source-channel",
+				Payload: &sharedpb.Payload{
+					Data: &sharedpb.Payload_Binary{
+						Binary: []byte("test payload"),
+					},
 				},
 			},
 		},
@@ -1045,15 +1039,14 @@ func TestClientSession_HandleMessage_WithBinaryData(t *testing.T) {
 	// Publish with binary data
 	binaryPayload := []byte{0x01, 0x02, 0x03, 0x04}
 	pubMsg := &clientpb.InboundMessage{
-		Id:      "msg-2",
-		Channel: "test-channel",
+		Id: "msg-2",
 		Envelope: &clientpb.InboundMessage_Publish{
-			Publish: &pb.CloudEvent{
-				Id:     "event-1",
-				Source: "test-source",
-				Type:   "test.event",
-				Data: &pb.CloudEvent_BinaryData{
-					BinaryData: binaryPayload,
+			Publish: &clientpb.Publish{
+				Channel: "test-channel",
+				Payload: &sharedpb.Payload{
+					Data: &sharedpb.Payload_Binary{
+						Binary: binaryPayload,
+					},
 				},
 			},
 		},

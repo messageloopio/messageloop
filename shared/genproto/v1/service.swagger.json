@@ -29,6 +29,20 @@
         }
       }
     },
+    "messageloopv1Publish": {
+      "type": "object",
+      "properties": {
+        "channel": {
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/definitions/v1Payload"
+        },
+        "metadata": {
+          "$ref": "#/definitions/v1Metadata"
+        }
+      }
+    },
     "messageloopv1Subscribe": {
       "type": "object",
       "properties": {
@@ -44,25 +58,14 @@
     "messageloopv1SurveyRequest": {
       "type": "object",
       "properties": {
-        "requestId": {
+        "request_id": {
           "type": "string"
         },
         "payload": {
-          "$ref": "#/definitions/v1CloudEvent"
-        }
-      }
-    },
-    "messageloopv1SurveyResponse": {
-      "type": "object",
-      "properties": {
-        "requestId": {
-          "type": "string"
+          "$ref": "#/definitions/v1Payload"
         },
-        "payload": {
-          "$ref": "#/definitions/v1CloudEvent"
-        },
-        "error": {
-          "$ref": "#/definitions/v1Error"
+        "metadata": {
+          "$ref": "#/definitions/v1Metadata"
         }
       }
     },
@@ -115,85 +118,6 @@
           }
         }
       }
-    },
-    "v1CloudEvent": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string",
-          "description": "Unique event identifier."
-        },
-        "source": {
-          "type": "string",
-          "description": "URI of the event source."
-        },
-        "specVersion": {
-          "type": "string",
-          "description": "Version of the spec in use."
-        },
-        "type": {
-          "type": "string",
-          "description": "Event type identifier."
-        },
-        "attributes": {
-          "type": "object",
-          "additionalProperties": {
-            "$ref": "#/definitions/v1CloudEventAttributeValue"
-          },
-          "title": "Optional \u0026 Extension Attributes"
-        },
-        "binaryData": {
-          "type": "string",
-          "format": "byte",
-          "description": "If the event is binary data then the datacontenttype attribute\r\nshould be set to an appropriate media-type."
-        },
-        "textData": {
-          "type": "string",
-          "description": "If the event is string data then the datacontenttype attribute\r\nshould be set to an appropriate media-type such as application/json."
-        },
-        "protoData": {
-          "$ref": "#/definitions/protobufAny",
-          "description": "If the event is a protobuf then it must be encoded using this Any\r\ntype. The datacontenttype attribute should be set to\r\napplication/protobuf and the dataschema attribute set to the message\r\ntype."
-        }
-      },
-      "description": "CloudEvent is copied from\r\nhttps://github.com/cloudevents/spec/blob/main/cloudevents/formats/protobuf-format.md."
-    },
-    "v1CloudEventAttributeValue": {
-      "type": "object",
-      "properties": {
-        "ceBoolean": {
-          "type": "boolean",
-          "description": "Boolean value."
-        },
-        "ceInteger": {
-          "type": "integer",
-          "format": "int32",
-          "description": "Integer value."
-        },
-        "ceString": {
-          "type": "string",
-          "description": "String value."
-        },
-        "ceBytes": {
-          "type": "string",
-          "format": "byte",
-          "description": "Byte string value."
-        },
-        "ceUri": {
-          "type": "string",
-          "description": "URI value."
-        },
-        "ceUriRef": {
-          "type": "string",
-          "description": "URI reference value."
-        },
-        "ceTimestamp": {
-          "type": "string",
-          "format": "date-time",
-          "description": "Timestamp value."
-        }
-      },
-      "description": "CloudEventAttribute enables extensions to use any of the seven allowed\r\ndata types as the value of an envelope key."
     },
     "v1Connect": {
       "type": "object",
@@ -272,21 +196,30 @@
           "format": "uint64"
         },
         "payload": {
-          "$ref": "#/definitions/v1CloudEvent"
+          "$ref": "#/definitions/v1Payload"
+        },
+        "metadata": {
+          "$ref": "#/definitions/v1Metadata"
         }
       }
+    },
+    "v1Metadata": {
+      "type": "object",
+      "properties": {
+        "entries": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "title": "统一的元数据类型"
     },
     "v1OutboundMessage": {
       "type": "object",
       "properties": {
         "id": {
           "type": "string"
-        },
-        "metadata": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          }
         },
         "time": {
           "type": "string",
@@ -304,17 +237,14 @@
         "unsubscribe_ack": {
           "$ref": "#/definitions/v1UnsubscribeAck"
         },
-        "rpc_reply": {
-          "$ref": "#/definitions/v1CloudEvent"
-        },
-        "pong": {
-          "$ref": "#/definitions/v1Pong"
-        },
         "publish_ack": {
           "$ref": "#/definitions/v1PublishAck"
         },
         "publication": {
           "$ref": "#/definitions/messageloopv1Publication"
+        },
+        "rpc_reply": {
+          "$ref": "#/definitions/v1RpcReply"
         },
         "sub_refresh_ack": {
           "$ref": "#/definitions/v1SubRefreshAck"
@@ -322,10 +252,29 @@
         "survey_request": {
           "$ref": "#/definitions/messageloopv1SurveyRequest"
         },
-        "survey_response": {
-          "$ref": "#/definitions/messageloopv1SurveyResponse"
+        "survey_reply": {
+          "$ref": "#/definitions/v1SurveyReply"
+        },
+        "pong": {
+          "$ref": "#/definitions/v1Pong"
         }
-      }
+      },
+      "title": "服务端 -\u003e 客户端"
+    },
+    "v1Payload": {
+      "type": "object",
+      "properties": {
+        "json": {
+          "type": "object",
+          "title": "JSON 对象，编码时可读"
+        },
+        "binary": {
+          "type": "string",
+          "format": "byte",
+          "title": "二进制数据"
+        }
+      },
+      "title": "统一的数据载荷类型"
     },
     "v1Ping": {
       "type": "object"
@@ -336,9 +285,48 @@
     "v1PublishAck": {
       "type": "object",
       "properties": {
+        "id": {
+          "type": "string",
+          "title": "消息 ID，便于追踪"
+        },
         "offset": {
           "type": "string",
-          "format": "uint64"
+          "format": "uint64",
+          "title": "流位置"
+        }
+      }
+    },
+    "v1RpcReply": {
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/definitions/v1Payload"
+        },
+        "metadata": {
+          "$ref": "#/definitions/v1Metadata"
+        },
+        "error": {
+          "$ref": "#/definitions/v1Error"
+        }
+      }
+    },
+    "v1RpcRequest": {
+      "type": "object",
+      "properties": {
+        "channel": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/definitions/v1Payload"
+        },
+        "metadata": {
+          "$ref": "#/definitions/v1Metadata"
         }
       }
     },
@@ -379,6 +367,23 @@
         },
         "token": {
           "type": "string"
+        }
+      }
+    },
+    "v1SurveyReply": {
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/definitions/v1Payload"
+        },
+        "metadata": {
+          "$ref": "#/definitions/v1Metadata"
+        },
+        "error": {
+          "$ref": "#/definitions/v1Error"
         }
       }
     },

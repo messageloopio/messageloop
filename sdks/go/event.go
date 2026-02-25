@@ -1,11 +1,11 @@
 package messageloopgo
 
 import (
-	"github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
-	"github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/google/uuid"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/v1"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // Message represents a received message from a subscribed channel.
@@ -34,15 +34,15 @@ func wrapPublicationToEvents(pub *clientpb.Publication) []*cloudevents.Event {
 		if env == nil {
 			continue
 		}
-		pbEvent := env.GetPayload()
-		event, err := PbToCloudEvent(pbEvent)
+		payload := env.GetPayload()
+		event, err := PayloadToCloudEvent(payload, env.GetChannel())
 		if err == nil && event != nil {
 			// Attach channel and offset as CloudEvent extensions so consumers
 			// using OnMessage(fn events []*cloudevents.Event) can access them.
 			if ch := env.GetChannel(); ch != "" {
 				event.SetExtension("messageloop_channel", ch)
 			}
-			// Offset is uint64; store as number (will become string when serialized by Pb conversion)
+			// Offset is uint64; store as number
 			event.SetExtension("messageloop_offset", env.GetOffset())
 			events = append(events, event)
 		}
@@ -84,7 +84,7 @@ func NewProtoMessage(eventType string, data any) (*cloudevents.Event, error) {
 	event.SetSource("messageloop/go-sdk")
 	event.SetSpecVersion("1.0")
 	event.SetType(eventType)
-	if err := event.SetData(format.ContentTypeProtobuf, data); err != nil {
+	if err := event.SetData(cloudevents.ApplicationJSON, data); err != nil {
 		return nil, err
 	}
 	return &event, nil
@@ -128,12 +128,76 @@ func (m *Message) String() string {
 	return ""
 }
 
-// PbToCloudEvent converts pb.CloudEvent to cloudevents.Event using the official SDK.
-func PbToCloudEvent(pbEvent *pb.CloudEvent) (*cloudevents.Event, error) {
-	return format.FromProto(pbEvent)
+// PayloadToCloudEvent converts sharedpb.Payload to cloudevents.Event.
+func PayloadToCloudEvent(payload *sharedpb.Payload, source string) (*cloudevents.Event, error) {
+	if payload == nil {
+		return nil, nil
+	}
+
+	event := cloudevents.NewEvent()
+	event.SetID(uuid.NewString())
+	event.SetSource(source)
+	event.SetSpecVersion("1.0")
+	event.SetType("messageloop.message")
+
+	switch data := payload.GetData().(type) {
+	case *sharedpb.Payload_Json:
+		event.SetDataContentType(cloudevents.ApplicationJSON)
+		jsonBytes, err := data.Json.MarshalJSON()
+		if err != nil {
+			return nil, err
+		}
+		_ = event.SetData(cloudevents.ApplicationJSON, jsonBytes)
+	case *sharedpb.Payload_Binary:
+		event.SetDataContentType("application/octet-stream")
+		_ = event.SetData("application/octet-stream", data.Binary)
+	}
+
+	return &event, nil
 }
 
-// CloudEventToPb converts cloudevents.Event to pb.CloudEvent using the official SDK.
-func CloudEventToPb(event *cloudevents.Event) (*pb.CloudEvent, error) {
-	return format.ToProto(event)
+// CloudEventToPayload converts cloudevents.Event to sharedpb.Payload.
+func CloudEventToPayload(event *cloudevents.Event) (*sharedpb.Payload, error) {
+	if event == nil {
+		return nil, nil
+	}
+
+	payload := &sharedpb.Payload{}
+
+	contentType := event.DataContentType()
+	data := event.Data()
+
+	if contentType == cloudevents.ApplicationJSON {
+		// Parse JSON data into Struct
+		var jsonData map[string]interface{}
+		if err := event.DataAs(&jsonData); err != nil {
+			// If parsing fails, try as raw bytes
+			payload.Data = &sharedpb.Payload_Binary{
+				Binary: data,
+			}
+		} else {
+			s, err := structpb.NewStruct(jsonData)
+			if err != nil {
+				return nil, err
+			}
+			payload.Data = &sharedpb.Payload_Json{
+				Json: s,
+			}
+		}
+	} else {
+		// Use binary payload for other content types
+		payload.Data = &sharedpb.Payload_Binary{
+			Binary: data,
+		}
+	}
+
+	return payload, nil
+}
+
+// RpcReplyToPayload extracts payload from RpcReply message.
+func RpcReplyToPayload(reply *clientpb.RpcReply) (*sharedpb.Payload, *sharedpb.Error) {
+	if reply == nil {
+		return nil, nil
+	}
+	return reply.GetPayload(), reply.GetError()
 }

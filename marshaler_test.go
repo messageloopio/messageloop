@@ -207,10 +207,6 @@ func TestProtoJSONMarshaler_UseBytes(t *testing.T) {
 func TestProtoJSONMarshaler_Marshal_Unmarshal(t *testing.T) {
 	original := &clientpb.OutboundMessage{
 		Id: "test-id-456",
-		Metadata: map[string]string{
-			"key1": "value1",
-			"key2": "value2",
-		},
 		Envelope: &clientpb.OutboundMessage_Connected{
 			Connected: &clientpb.Connected{
 				SessionId: "session-123",

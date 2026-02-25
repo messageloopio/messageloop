@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package messageloop.shared.v1;
+
+option go_package = "github.com/messageloopio/messageloop/shared/genproto/shared/v1;sharedpb";
+
+import "google/protobuf/struct.proto";
+
+// 统一的数据载荷类型
+message Payload {
+  oneof data {
+    google.protobuf.Struct json = 1;   // JSON 对象，编码时可读
+    bytes binary = 2;                   // 二进制数据
+  }
+}
+
+// 统一的元数据类型
+message Metadata {
+  map<string, string> entries = 1;
+}

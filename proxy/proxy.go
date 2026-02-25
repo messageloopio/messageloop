@@ -4,9 +4,6 @@ import (
 	"context"
 	"time"
 
-	cloudevents "github.com/cloudevents/sdk-go/v2"
-	format "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
-	pb "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v1"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 )
@@ -49,31 +46,29 @@ type RPCProxyRequest struct {
 	UserID    string
 	Channel   string
 	Method    string
-	Event     *cloudevents.Event
+	Payload   *sharedpb.Payload
 	Meta      map[string]string
 }
 
 // RPCProxyResponse represents a response from the proxy backend.
 type RPCProxyResponse struct {
-	Event *cloudevents.Event
-	Error *sharedpb.Error
+	Payload *sharedpb.Payload
+	Meta    map[string]string
+	Error   *sharedpb.Error
 }
 
 // ToProtoRequest converts an RPCProxyRequest to the protobuf RPCRequest.
 func (r *RPCProxyRequest) ToProtoRequest() (*proxypb.RPCRequest, error) {
-	var payload *pb.CloudEvent
-	if r.Event != nil {
-		var err error
-		payload, err = format.ToProto(r.Event)
-		if err != nil {
-			return nil, err
-		}
+	var metadata *sharedpb.Metadata
+	if r.Meta != nil {
+		metadata = &sharedpb.Metadata{Entries: r.Meta}
 	}
 	return &proxypb.RPCRequest{
-		Id:      r.ID,
-		Channel: r.Channel,
-		Method:  r.Method,
-		Payload: payload,
+		Id:       r.ID,
+		Channel:  r.Channel,
+		Method:   r.Method,
+		Payload:  r.Payload,
+		Metadata: metadata,
 	}, nil
 }
 
@@ -82,17 +77,14 @@ func FromProtoReply(reply *proxypb.RPCResponse) (*RPCProxyResponse, error) {
 	if reply == nil {
 		return &RPCProxyResponse{}, nil
 	}
-	var event *cloudevents.Event
-	if reply.Payload != nil {
-		var err error
-		event, err = format.FromProto(reply.Payload)
-		if err != nil {
-			return nil, err
-		}
+	var meta map[string]string
+	if reply.Metadata != nil {
+		meta = reply.Metadata.Entries
 	}
 	return &RPCProxyResponse{
-		Event: event,
-		Error: reply.Error,
+		Payload: reply.Payload,
+		Meta:    meta,
+		Error:   reply.Error,
 	}, nil
 }
 

@@ -5,11 +5,9 @@ import (
 	"hash/fnv"
 	"sync"
 
-	cloudevents "github.com/cloudevents/sdk-go/v2"
-	format "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
-	pb "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/v1"
 )
 
@@ -210,46 +208,32 @@ func (h *subShard) broadcastPublication(channel string, pub *Publication) error 
 
 	ctx := context.TODO()
 
-	// Create CloudEvent from publication payload
-	var ce cloudevents.Event
+	// Create Payload from publication data
+	var payload *sharedpb.Payload
 	if len(pub.Payload) > 0 {
-		// Use original event type, or default to channel + ".message"
-		eventType := pub.EventType
-		if eventType == "" {
-			eventType = channel + ".message"
-		}
-
-		ce = cloudevents.NewEvent()
-		ce.SetID(uuid.NewString())
-		ce.SetSource(channel)
-		ce.SetSpecVersion("1.0")
-		ce.SetType(eventType)
-
-		if pub.IsText {
-			ce.SetDataContentType("text/plain")
-			_ = ce.SetData("text/plain", pub.Payload)
-		} else {
-			ce.SetDataContentType("application/octet-stream")
-			_ = ce.SetData("application/octet-stream", pub.Payload)
+		payload = &sharedpb.Payload{
+			Data: &sharedpb.Payload_Binary{
+				Binary: pub.Payload,
+			},
 		}
 	}
 
-	// Convert to protobuf
-	var payload *pb.CloudEvent
-	var err error
-	if len(pub.Payload) > 0 {
-		payload, err = format.ToProto(&ce)
-		if err != nil {
-			log.ErrorContext(ctx, "failed to convert event to protobuf", err)
-			return err
+	// Create metadata
+	var metadata *sharedpb.Metadata
+	if pub.EventType != "" {
+		metadata = &sharedpb.Metadata{
+			Entries: map[string]string{
+				"event_type": pub.EventType,
+			},
 		}
 	}
 
 	msg := &clientpb.Message{
-		Channel: channel,
-		Id:      uuid.NewString(),
-		Offset:  pub.Offset,
-		Payload: payload,
+		Channel:  channel,
+		Id:       uuid.NewString(),
+		Offset:   pub.Offset,
+		Payload:  payload,
+		Metadata: metadata,
 	}
 
 	out := MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {

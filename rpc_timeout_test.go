@@ -5,12 +5,12 @@ import (
 	"testing"
 	"time"
 
-	cloudevents "github.com/cloudevents/sdk-go/v2"
-	pb "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/proxy"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/v1"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // MockSlowProxy simulates a slow RPC backend
@@ -21,13 +21,17 @@ type MockSlowProxy struct {
 func (m *MockSlowProxy) RPC(ctx context.Context, req *proxy.RPCProxyRequest) (*proxy.RPCProxyResponse, error) {
 	select {
 	case <-time.After(m.delay):
-		event := cloudevents.NewEvent()
-		event.SetID(req.ID)
-		event.SetSource(req.Channel)
-		event.SetType(req.Method)
-		event.SetSpecVersion("1.0")
+		s, _ := structpb.NewStruct(map[string]interface{}{
+			"id":     req.ID,
+			"source": req.Channel,
+			"type":   req.Method,
+		})
 		return &proxy.RPCProxyResponse{
-			Event: &event,
+			Payload: &sharedpb.Payload{
+				Data: &sharedpb.Payload_Json{
+					Json: s,
+				},
+			},
 		}, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -108,21 +112,23 @@ func TestRPCTimeout_FastResponse(t *testing.T) {
 	client.mu.Unlock()
 
 	// Send RPC request
-	event := &pb.CloudEvent{
-		Id:          "test-1",
-		Source:      "test.channel",
-		Type:        "test.method",
-		SpecVersion: "1.0",
+	s, _ := structpb.NewStruct(map[string]interface{}{"data": "test"})
+	rpcReq := &clientpb.RpcRequest{
+		Channel: "test.channel",
+		Method:  "test.method",
+		Payload: &sharedpb.Payload{
+			Data: &sharedpb.Payload_Json{
+				Json: s,
+			},
+		},
 	}
 
 	in := &clientpb.InboundMessage{
-		Id:      "msg-1",
-		Channel: "test.channel",
-		Method:  "test.method",
+		Id: "msg-1",
 	}
 
 	start := time.Now()
-	err = client.handleRPC(ctx, in, event)
+	err = client.handleRPC(ctx, in, rpcReq)
 	duration := time.Since(start)
 
 	// Should succeed without timeout
@@ -155,21 +161,23 @@ func TestRPCTimeout_SlowResponse(t *testing.T) {
 	client.mu.Unlock()
 
 	// Send RPC request
-	event := &pb.CloudEvent{
-		Id:          "test-2",
-		Source:      "test.channel",
-		Type:        "test.method",
-		SpecVersion: "1.0",
+	s, _ := structpb.NewStruct(map[string]interface{}{"data": "test"})
+	rpcReq := &clientpb.RpcRequest{
+		Channel: "test.channel",
+		Method:  "test.method",
+		Payload: &sharedpb.Payload{
+			Data: &sharedpb.Payload_Json{
+				Json: s,
+			},
+		},
 	}
 
 	in := &clientpb.InboundMessage{
-		Id:      "msg-2",
-		Channel: "test.channel",
-		Method:  "test.method",
+		Id: "msg-2",
 	}
 
 	start := time.Now()
-	err = client.handleRPC(ctx, in, event)
+	err = client.handleRPC(ctx, in, rpcReq)
 	duration := time.Since(start)
 
 	// Should not return error (error is sent to client via Send)

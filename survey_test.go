@@ -6,8 +6,9 @@ import (
 	"testing"
 	"time"
 
-	cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/v1"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 func TestSurvey_NewSurvey(t *testing.T) {
@@ -197,8 +198,7 @@ func TestNode_Survey_Basic(t *testing.T) {
 
 		// Subscribe to channel (use unique channel for this test)
 		subMsg := &clientpb.InboundMessage{
-			Id:      "msg-sub-" + string(rune('0'+i)),
-			Channel: "survey-channel-basic",
+			Id: "msg-sub-" + string(rune('0'+i)),
 			Envelope: &clientpb.InboundMessage_Subscribe{
 				Subscribe: &clientpb.Subscribe{
 					Subscriptions: []*clientpb.Subscription{
@@ -255,8 +255,7 @@ func TestNode_Survey_Basic(t *testing.T) {
 					if sr := msg.GetSurveyRequest(); sr != nil {
 						// Simulate client processing the survey request
 						inboundMsg := &clientpb.InboundMessage{
-							Id:      sr.RequestId,
-							Channel: "survey-channel-basic",
+							Id: sr.RequestId,
 							Envelope: &clientpb.InboundMessage_SurveyRequest{
 								SurveyRequest: sr,
 							},
@@ -279,19 +278,17 @@ func TestNode_Survey_Basic(t *testing.T) {
 	// Send survey responses back
 	for i := 0; i < numClients; i++ {
 		requestID := clients[i].LastSurveyRequestID()
+		respData, _ := structpb.NewStruct(map[string]interface{}{
+			"message": "response from client " + string(rune('0'+i)),
+		})
 		responseMsg := &clientpb.InboundMessage{
-			Id:      "msg-survey-resp-" + string(rune('0'+i)),
-			Channel: "survey-channel-basic",
-			Envelope: &clientpb.InboundMessage_SurveyResponse{
-				SurveyResponse: &clientpb.SurveyResponse{
+			Id: "msg-survey-resp-" + string(rune('0'+i)),
+			Envelope: &clientpb.InboundMessage_SurveyReply{
+				SurveyReply: &clientpb.SurveyReply{
 					RequestId: requestID,
-					Payload: &cloudevents.CloudEvent{
-						Id:          "response-" + string(rune('0'+i)),
-						Source:      "survey-channel-basic",
-						SpecVersion: "1.0",
-						Type:        "com.messageloop.survey.response",
-						Data: &cloudevents.CloudEvent_BinaryData{
-							BinaryData: []byte("response from client " + string(rune('0'+i))),
+					Payload: &sharedpb.Payload{
+						Data: &sharedpb.Payload_Json{
+							Json: respData,
 						},
 					},
 				},
@@ -349,8 +346,7 @@ func TestNode_Survey_AllClientsRespond(t *testing.T) {
 
 		// Subscribe to channel (use unique channel for this test)
 		subMsg := &clientpb.InboundMessage{
-			Id:      "msg-sub-" + string(rune('0'+i)),
-			Channel: "survey-channel-respond",
+			Id: "msg-sub-" + string(rune('0'+i)),
 			Envelope: &clientpb.InboundMessage_Subscribe{
 				Subscribe: &clientpb.Subscribe{
 					Subscriptions: []*clientpb.Subscription{
@@ -406,8 +402,7 @@ func TestNode_Survey_AllClientsRespond(t *testing.T) {
 						// Now simulate the client receiving and processing the survey request
 						// This calls handleSurvey which stores the request ID
 						inboundMsg := &clientpb.InboundMessage{
-							Id:      sr.RequestId,
-							Channel: "survey-channel-respond",
+							Id: sr.RequestId,
 							Envelope: &clientpb.InboundMessage_SurveyRequest{
 								SurveyRequest: sr,
 							},
@@ -432,19 +427,17 @@ func TestNode_Survey_AllClientsRespond(t *testing.T) {
 		requestID := clients[i].LastSurveyRequestID()
 		t.Logf("Client %d: sending response with request ID: %s", i, requestID)
 
+		respData, _ := structpb.NewStruct(map[string]interface{}{
+			"message": "response from client " + string(rune('0'+i)),
+		})
 		responseMsg := &clientpb.InboundMessage{
-			Id:      "msg-survey-resp-" + string(rune('0'+i)),
-			Channel: "survey-channel-respond",
-			Envelope: &clientpb.InboundMessage_SurveyResponse{
-				SurveyResponse: &clientpb.SurveyResponse{
+			Id: "msg-survey-resp-" + string(rune('0'+i)),
+			Envelope: &clientpb.InboundMessage_SurveyReply{
+				SurveyReply: &clientpb.SurveyReply{
 					RequestId: requestID,
-					Payload: &cloudevents.CloudEvent{
-						Id:          "response-" + string(rune('0'+i)),
-						Source:      "survey-channel-respond",
-						SpecVersion: "1.0",
-						Type:        "com.messageloop.survey.response",
-						Data: &cloudevents.CloudEvent_BinaryData{
-							BinaryData: []byte("response from client " + string(rune('0'+i))),
+					Payload: &sharedpb.Payload{
+						Data: &sharedpb.Payload_Json{
+							Json: respData,
 						},
 					},
 				},
@@ -535,8 +528,7 @@ func TestNode_Survey_ConcurrentClients(t *testing.T) {
 
 			// Subscribe to channel (use unique channel for this test)
 			subMsg := &clientpb.InboundMessage{
-				Id:      "msg-sub-" + string(rune('0'+i)),
-				Channel: "survey-channel-concurrent",
+				Id: "msg-sub-" + string(rune('0'+i)),
 				Envelope: &clientpb.InboundMessage_Subscribe{
 					Subscribe: &clientpb.Subscribe{
 						Subscriptions: []*clientpb.Subscription{
@@ -591,8 +583,7 @@ func TestNode_Survey_ConcurrentClients(t *testing.T) {
 					if sr := msg.GetSurveyRequest(); sr != nil {
 						// Simulate client processing
 						inboundMsg := &clientpb.InboundMessage{
-							Id:      sr.RequestId,
-							Channel: "survey-channel-concurrent",
+							Id: sr.RequestId,
 							Envelope: &clientpb.InboundMessage_SurveyRequest{
 								SurveyRequest: sr,
 							},
@@ -615,19 +606,17 @@ func TestNode_Survey_ConcurrentClients(t *testing.T) {
 	// Send responses
 	for i := 0; i < numClients; i++ {
 		requestID := clients[i].LastSurveyRequestID()
+		respData, _ := structpb.NewStruct(map[string]interface{}{
+			"message": "response from client " + string(rune('0'+i)),
+		})
 		responseMsg := &clientpb.InboundMessage{
-			Id:      "msg-survey-resp-" + string(rune('0'+i)),
-			Channel: "survey-channel-concurrent",
-			Envelope: &clientpb.InboundMessage_SurveyResponse{
-				SurveyResponse: &clientpb.SurveyResponse{
+			Id: "msg-survey-resp-" + string(rune('0'+i)),
+			Envelope: &clientpb.InboundMessage_SurveyReply{
+				SurveyReply: &clientpb.SurveyReply{
 					RequestId: requestID,
-					Payload: &cloudevents.CloudEvent{
-						Id:          "response-" + string(rune('0'+i)),
-						Source:      "survey-channel-concurrent",
-						SpecVersion: "1.0",
-						Type:        "com.messageloop.survey.response",
-						Data: &cloudevents.CloudEvent_BinaryData{
-							BinaryData: []byte("response from client " + string(rune('0'+i))),
+					Payload: &sharedpb.Payload{
+						Data: &sharedpb.Payload_Json{
+							Json: respData,
 						},
 					},
 				},

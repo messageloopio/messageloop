@@ -7,8 +7,9 @@ import (
 	"testing"
 	"time"
 
-	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/messageloopio/messageloop/proxy"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 func TestNewNode(t *testing.T) {
@@ -445,13 +446,14 @@ func TestNode_RPC_WithProxy(t *testing.T) {
 	node := NewNode(nil)
 	ctx := context.Background()
 
+	s, _ := structpb.NewStruct(map[string]interface{}{"id": "response-1"})
 	mockProxy := &mockRPCProxy{
 		response: &proxy.RPCProxyResponse{
-			Event: func() *cloudevents.Event {
-				e := cloudevents.NewEvent()
-				e.SetID("response-1")
-				return &e
-			}(),
+			Payload: &sharedpb.Payload{
+				Data: &sharedpb.Payload_Json{
+					Json: s,
+				},
+			},
 		},
 	}
 
@@ -476,8 +478,8 @@ func TestNode_RPC_WithProxy(t *testing.T) {
 	if resp == nil {
 		t.Error("RPC() should return response")
 	}
-	if resp.Event.ID() != "response-1" {
-		t.Errorf("Response event ID = %s, want response-1", resp.Event.ID())
+	if resp.Payload == nil {
+		t.Error("Response payload should not be nil")
 	}
 }
 

@@ -5,39 +5,41 @@ package messageloop.proxy.v1;
 
 option go_package = "github.com/messageloopio/messageloop/shared/genproto/go/proxy/v1;proxypb";
 
+import "shared/v1/types.proto";
 import "shared/v1/errors.proto";
-import "includes/cloudevents/cloudevents.proto";
 
 service ProxyService {
-  // 远程调用
+  // RPC 调用
   rpc RPC(RPCRequest) returns(RPCResponse);
   // 认证
   rpc Authenticate(AuthenticateRequest) returns(AuthenticateResponse);
   // 订阅权限校验
   rpc SubscribeAcl(SubscribeAclRequest) returns(SubscribeAclResponse);
-
-  rpc OnConnected(OnConnectedRequest) returns (OnConnectedResponse);
-
-  rpc OnSubscribed(OnSubscribedRequest) returns (OnSubscribedResponse);
-
+  // 生命周期钩子
+  rpc OnConnected(OnConnectedRequest) returns(OnConnectedResponse);
+  rpc OnSubscribed(OnSubscribedRequest) returns(OnSubscribedResponse);
   rpc OnUnsubscribed(OnUnsubscribedRequest) returns(OnUnsubscribedResponse);
-
   rpc OnDisconnected(OnDisconnectedRequest) returns(OnDisconnectedResponse);
 }
 
+// --- RPC ---
 
 message RPCRequest {
   string id = 1;
   string channel = 2;
   string method = 3;
-  io.cloudevents.v1.CloudEvent payload = 4;
+  messageloop.shared.v1.Payload payload = 4;
+  messageloop.shared.v1.Metadata metadata = 5;
 }
 
 message RPCResponse {
   string id = 1;
-  shared.v1.Error error = 2;
-  io.cloudevents.v1.CloudEvent payload = 3;
+  messageloop.shared.v1.Payload payload = 2;
+  messageloop.shared.v1.Metadata metadata = 3;
+  messageloop.shared.v1.Error error = 4;
 }
+
+// --- Authenticate ---
 
 message AuthenticateRequest {
   string username = 1;
@@ -47,7 +49,7 @@ message AuthenticateRequest {
 }
 
 message AuthenticateResponse {
-  shared.v1.Error error = 1;
+  messageloop.shared.v1.Error error = 1;
   UserInfo user_info = 2;
 }
 
@@ -59,31 +61,31 @@ message UserInfo {
   string client_id = 5;
 }
 
+// --- SubscribeAcl ---
+
 message SubscribeAclRequest {
   string channel = 1;
   string token = 2;
 }
 
-message SubscribeAclResponse {
+message SubscribeAclResponse {}
 
-}
+// --- 生命周期钩子 ---
 
 message OnConnectedRequest {
   string session_id = 1;
   string username = 2;
 }
 
-message OnConnectedResponse{
-}
+message OnConnectedResponse {}
 
 message OnSubscribedRequest {
   string session_id = 1;
   string channel = 2;
   string username = 3;
 }
-message OnSubscribedResponse {
 
-}
+message OnSubscribedResponse {}
 
 message OnUnsubscribedRequest {
   string session_id = 1;
@@ -91,15 +93,10 @@ message OnUnsubscribedRequest {
   string username = 3;
 }
 
-message OnUnsubscribedResponse {
-
-}
+message OnUnsubscribedResponse {}
 
 message OnDisconnectedRequest {
   string session_id = 1;
   string username = 2;
-
 }
-message OnDisconnectedResponse {
-
-}
+message OnDisconnectedResponse {}

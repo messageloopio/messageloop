@@ -1,5 +1,5 @@
-import type { CloudEvent as CloudEventProto } from "../proto/includes/cloudevents/cloudevents_pb";
 import { CloudEvent as CloudEventSDK, type CloudEvent as CloudEventSDKType } from "cloudevents";
+import type { Payload } from "../proto/shared/v1/types_pb";
 
 /**
  * Create a CloudEvent with the given properties.
@@ -55,31 +55,32 @@ export function createCloudEvent(options: {
 }
 
 /**
- * Convert a CloudEvent SDK instance to protobuf format.
+ * Convert a CloudEvent SDK instance to Payload protobuf format.
  * @param event - CloudEvent SDK instance
- * @returns Protobuf CloudEvent
- * @deprecated Use cloudEventToProto from converters.ts instead
+ * @returns Protobuf Payload
+ * @deprecated Use cloudEventToPayload from converters.ts instead
  */
-export function toProtoCloudEvent(event: CloudEventSDKType): CloudEventProto {
+export function toProtoCloudEvent(event: CloudEventSDKType): Payload {
   // Import and use the conversion from converters
-  const { cloudEventToProto } = require("./converters");
-  return cloudEventToProto(event);
+  const { cloudEventToPayload } = require("./converters");
+  return cloudEventToPayload(event);
 }
 
 /**
- * Convert a protobuf CloudEvent to SDK format.
- * @param event - Protobuf CloudEvent
+ * Convert a protobuf Payload to SDK format.
+ * @param payload - Protobuf Payload
+ * @param source - Source for the CloudEvent
  * @returns CloudEvent SDK instance
- * @deprecated Use protoToCloudEvent from converters.ts instead
+ * @deprecated Use payloadToCloudEvent from converters.ts instead
  */
 export function fromProtoCloudEvent(
-  event: CloudEventProto
+  payload: Payload,
+  source: string = "messageloop"
 ): CloudEventSDKType {
   // Import and use the conversion from converters
-  const { protoToCloudEvent } = require("./converters");
-  return protoToCloudEvent(event);
+  const { payloadToCloudEvent } = require("./converters");
+  return payloadToCloudEvent(payload, source);
 }
 
-// Re-export protobuf CloudEvent type
-export type { CloudEvent as CloudEvent } from "../proto/includes/cloudevents/cloudevents_pb";
-export type { CloudEventProto };
+// Re-export Payload type
+export type { Payload } from "../proto/shared/v1/types_pb";

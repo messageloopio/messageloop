@@ -7,9 +7,6 @@ import (
 	"sync"
 	"time"
 
-	cloudevents "github.com/cloudevents/sdk-go/v2"
-	format "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
-	pb "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
 	"github.com/messageloopio/messageloop/proxy"
@@ -199,8 +196,8 @@ func (c *ClientSession) handleMessage(ctx context.Context, in *clientpb.InboundM
 		return c.handleSubRefresh(ctx, in, msg.SubRefresh)
 	case *clientpb.InboundMessage_SurveyRequest:
 		return c.handleSurvey(ctx, in, msg.SurveyRequest)
-	case *clientpb.InboundMessage_SurveyResponse:
-		return c.handleSurveyResponse(ctx, in, msg.SurveyResponse)
+	case *clientpb.InboundMessage_SurveyReply:
+		return c.handleSurveyReply(ctx, in, msg.SurveyReply)
 	}
 	return nil
 }
@@ -301,15 +298,13 @@ func MakeOutboundMessage(in *clientpb.InboundMessage, bodyFunc func(out *clientp
 	var out *clientpb.OutboundMessage
 	if in != nil {
 		out = &clientpb.OutboundMessage{
-			Id:       in.Id,
-			Metadata: in.Metadata,
-			Time:     uint64(time.Now().UnixMilli()),
+			Id:   in.Id,
+			Time: uint64(time.Now().UnixMilli()),
 		}
 	} else {
 		out = &clientpb.OutboundMessage{
-			Id:       uuid.New().String(),
-			Metadata: map[string]string{},
-			Time:     uint64(time.Now().UnixMilli()),
+			Id:   uuid.New().String(),
+			Time: uint64(time.Now().UnixMilli()),
 		}
 	}
 	bodyFunc(out)
@@ -330,33 +325,25 @@ func (c *ClientSession) Authenticated() bool {
 	return c.authenticated
 }
 
-func (c *ClientSession) handleRPC(ctx context.Context, in *clientpb.InboundMessage, pbEvent *pb.CloudEvent) error {
-	// Convert pb.CloudEvent to cloudevents.Event
-	var event *cloudevents.Event
-	if pbEvent != nil {
-		var err error
-		event, err = format.FromProto(pbEvent)
-		if err != nil {
-			return fmt.Errorf("failed to convert event: %w", err)
-		}
-	}
+func (c *ClientSession) handleRPC(ctx context.Context, in *clientpb.InboundMessage, rpcReq *clientpb.RpcRequest) error {
+	// Extract channel and method from RpcRequest
+	channel := rpcReq.Channel
+	method := rpcReq.Method
 
-	// Extract channel and method from the InboundMessage
-	channel := in.Channel
-	method := in.Method
-
-	// Fallback to event fields if not set in InboundMessage
-	if channel == "" && event != nil {
-		channel = event.Source()
-	}
-	if method == "" && event != nil {
-		method = event.Type()
+	if channel == "" {
+		return errors.New("missing channel in RPC request")
 	}
 
 	// Apply RPC timeout from configuration or use default
 	rpcTimeout := c.node.GetRPCTimeout()
 	rpcCtx, cancel := context.WithTimeout(ctx, rpcTimeout)
 	defer cancel()
+
+	// Extract metadata
+	var meta map[string]string
+	if rpcReq.Metadata != nil {
+		meta = rpcReq.Metadata.Entries
+	}
 
 	// Check if there's a proxy configured for this channel/method
 	proxyReq := &proxy.RPCProxyRequest{
@@ -366,8 +353,8 @@ func (c *ClientSession) handleRPC(ctx context.Context, in *clientpb.InboundMessa
 		UserID:    c.user,
 		Channel:   channel,
 		Method:    method,
-		Event:     event,
-		Meta:      in.Metadata,
+		Payload:   rpcReq.Payload,
+		Meta:      meta,
 	}
 
 	startTime := time.Now()
@@ -394,20 +381,15 @@ func (c *ClientSession) handleRPC(ctx context.Context, in *clientpb.InboundMessa
 			}))
 		}
 
-		// No proxy configured or proxy failed - return error to client
+		// No proxy configured - return echo behavior
 		if errors.Is(err, proxy.ErrNoProxyFound) {
-			// No proxy configured - return original echo behavior
-			// Convert event back to pb for echo
-			var echoPayload *pb.CloudEvent
-			if event != nil {
-				echoPayload, err = format.ToProto(event)
-				if err != nil {
-					return fmt.Errorf("failed to convert event: %w", err)
-				}
-			}
 			return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 				out.Envelope = &clientpb.OutboundMessage_RpcReply{
-					RpcReply: echoPayload,
+					RpcReply: &clientpb.RpcReply{
+						RequestId: in.Id,
+						Payload:   rpcReq.Payload,
+						Metadata:  rpcReq.Metadata,
+					},
 				}
 			}))
 		}
@@ -437,16 +419,6 @@ func (c *ClientSession) handleRPC(ctx context.Context, in *clientpb.InboundMessa
 		"duration", duration,
 	)
 
-	// Return the proxy response - convert cloudevents.Event back to pb
-	var respPayload *pb.CloudEvent
-	if proxyResp.Event != nil {
-		var err error
-		respPayload, err = format.ToProto(proxyResp.Event)
-		if err != nil {
-			return fmt.Errorf("failed to convert response event: %w", err)
-		}
-	}
-
 	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 		if proxyResp.Error != nil {
 			out.Envelope = &clientpb.OutboundMessage_Error{
@@ -454,50 +426,47 @@ func (c *ClientSession) handleRPC(ctx context.Context, in *clientpb.InboundMessa
 			}
 		} else {
 			out.Envelope = &clientpb.OutboundMessage_RpcReply{
-				RpcReply: respPayload,
+				RpcReply: &clientpb.RpcReply{
+					RequestId: in.Id,
+					Payload:   proxyResp.Payload,
+					Metadata:  &sharedpb.Metadata{Entries: proxyResp.Meta},
+				},
 			}
 		}
 	}))
 }
 
-func (c *ClientSession) handlePublish(ctx context.Context, in *clientpb.InboundMessage, pbEvent *pb.CloudEvent) error {
+func (c *ClientSession) handlePublish(ctx context.Context, in *clientpb.InboundMessage, publish *clientpb.Publish) error {
 	if !c.Authenticated() {
 		return DisconnectStale
 	}
-	if pbEvent == nil {
-		return errors.New("missing data in publish message")
-	}
 
-	// Convert pb.CloudEvent to cloudevents.Event
-	event, err := format.FromProto(pbEvent)
-	if err != nil {
-		return fmt.Errorf("failed to convert event: %w", err)
-	}
-
-	// Extract channel from InboundMessage or fall back to event source
-	channel := in.Channel
-	if channel == "" {
-		channel = event.Source()
-	}
+	channel := publish.Channel
 	if channel == "" {
 		return errors.New("missing channel in publish message")
 	}
 
-	// Extract data from CloudEvent and track encoding type
-	data := event.Data()
-	isText := false
-	if len(data) > 0 {
-		// Check content type
-		contentType := event.DataContentType()
-		isText = contentType == "text/plain" || contentType == "text/html" || contentType == "application/json"
+	// Extract data from Payload
+	var data []byte
+	var isText bool
+	if publish.Payload != nil {
+		switch p := publish.Payload.Data.(type) {
+		case *sharedpb.Payload_Json:
+			// JSON data - marshal to bytes
+			data = []byte(p.Json.String())
+			isText = true
+		case *sharedpb.Payload_Binary:
+			data = p.Binary
+			isText = false
+		}
 	}
 
-	// Preserve original CloudEvent type
-	eventType := event.Type()
-
-	// Ensure source is set
-	if event.Source() == "" {
-		event.SetSource(c.session)
+	// Determine event type from metadata
+	eventType := "message"
+	if publish.Metadata != nil {
+		if t, ok := publish.Metadata.Entries["event_type"]; ok {
+			eventType = t
+		}
 	}
 
 	if err := c.node.Publish(channel, data, WithClientDesc(c.ClientInfo()), WithAsBytes(true), WithIsText(isText), WithEventType(eventType)); err != nil {
@@ -506,6 +475,7 @@ func (c *ClientSession) handlePublish(ctx context.Context, in *clientpb.InboundM
 	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_PublishAck{
 			PublishAck: &clientpb.PublishAck{
+				Id:     in.Id,
 				Offset: 0,
 			},
 		}
@@ -656,34 +626,25 @@ func (c *ClientSession) handleSurvey(ctx context.Context, in *clientpb.InboundMe
 	// Extract payload from the survey request
 	var payload []byte
 	if req.Payload != nil {
-		if binaryData := req.Payload.GetBinaryData(); len(binaryData) > 0 {
-			payload = binaryData
-		} else if textData := req.Payload.GetTextData(); textData != "" {
-			payload = []byte(textData)
+		switch p := req.Payload.Data.(type) {
+		case *sharedpb.Payload_Json:
+			payload = []byte(p.Json.String())
+		case *sharedpb.Payload_Binary:
+			payload = p.Binary
 		}
 	}
 
 	// Send survey response - by default, echo back the same payload
 	// In a real implementation, the client application would handle this differently
-	responseEvent := cloudevents.NewEvent()
-	responseEvent.SetID(uuid.NewString())
-	responseEvent.SetSource(in.Channel)
-	responseEvent.SetSpecVersion("1.0")
-	responseEvent.SetType("com.messageloop.survey.response")
-	responseEvent.SetDataContentType("application/octet-stream")
-	_ = responseEvent.SetData("application/octet-stream", payload)
-
-	// Convert to protobuf
-	pbResponse, err := format.ToProto(&responseEvent)
-	if err != nil {
-		return fmt.Errorf("failed to convert response event: %w", err)
-	}
-
 	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
-		out.Envelope = &clientpb.OutboundMessage_SurveyResponse{
-			SurveyResponse: &clientpb.SurveyResponse{
+		out.Envelope = &clientpb.OutboundMessage_SurveyReply{
+			SurveyReply: &clientpb.SurveyReply{
 				RequestId: req.RequestId,
-				Payload:   pbResponse,
+				Payload: &sharedpb.Payload{
+					Data: &sharedpb.Payload_Binary{
+						Binary: payload,
+					},
+				},
 			},
 		}
 	}))
@@ -697,27 +658,28 @@ func (c *ClientSession) LastSurveyRequestID() string {
 	return c.lastSurveyRequestID
 }
 
-// handleSurveyResponse handles incoming survey responses from clients.
-// This is called when a client sends a SurveyResponse back to the server.
-func (c *ClientSession) handleSurveyResponse(ctx context.Context, in *clientpb.InboundMessage, resp *clientpb.SurveyResponse) error {
+// handleSurveyReply handles incoming survey replies from clients.
+// This is called when a client sends a SurveyReply back to the server.
+func (c *ClientSession) handleSurveyReply(ctx context.Context, in *clientpb.InboundMessage, reply *clientpb.SurveyReply) error {
 	c.ResetActivity()
 
-	// Extract payload from the survey response
+	// Extract payload from the survey reply
 	var payload []byte
 	var respErr error
-	if resp.Error != nil {
-		respErr = fmt.Errorf("%s: %s", resp.Error.Code, resp.Error.Message)
+	if reply.Error != nil {
+		respErr = fmt.Errorf("%s: %s", reply.Error.Code, reply.Error.Message)
 	}
-	if resp.Payload != nil {
-		if binaryData := resp.Payload.GetBinaryData(); len(binaryData) > 0 {
-			payload = binaryData
-		} else if textData := resp.Payload.GetTextData(); textData != "" {
-			payload = []byte(textData)
+	if reply.Payload != nil {
+		switch p := reply.Payload.Data.(type) {
+		case *sharedpb.Payload_Json:
+			payload = []byte(p.Json.String())
+		case *sharedpb.Payload_Binary:
+			payload = p.Binary
 		}
 	}
 
-	// Use request_id from response, or fall back to stored request_id
-	requestID := resp.RequestId
+	// Use request_id from reply, or fall back to stored request_id
+	requestID := reply.RequestId
 	if requestID == "" {
 		c.mu.RLock()
 		requestID = c.lastSurveyRequestID
