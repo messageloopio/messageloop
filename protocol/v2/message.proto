@@ -6,4 +6,178 @@ option go_package = "github.com/lynx-go/messageloop/genproto/v2;v2";
 
 import "protocol/v2/common.proto";
 
-// Message 定义将在 Task 3 中完成
+// Message 封装所有应用层消息类型
+message Message {
+  oneof payload {
+    // 连接管理
+    Connect connect = 1;
+    Connected connected = 2;
+    Disconnect disconnect = 3;
+    Ping ping = 4;
+    Pong pong = 5;
+
+    // 订阅管理
+    Subscribe subscribe = 10;
+    Unsubscribe unsubscribe = 11;
+    SubscribeResult subscribe_result = 12;
+
+    // 发布/订阅
+    Publish publish = 20;
+    PublishResult publish_result = 21;
+    Publication publication = 22;
+
+    // RPC
+    RpcCall rpc_call = 30;
+    RpcReply rpc_reply = 31;
+
+    // 历史回放
+    HistoryRequest history_request = 40;
+    HistoryReply history_reply = 41;
+
+    // Survey（服务端发起）
+    SurveyRequest survey_request = 50;
+    SurveyResponse survey_response = 51;
+
+    // 错误
+    Error error = 99;
+  }
+}
+
+// ========== 连接管理 ==========
+
+message Connect {
+  string client_id = 1;                    // 客户端标识（可选）
+  string token = 2;                         // 认证令牌
+  string client_type = 3;                   // 客户端类型
+  map<string, bytes> metadata = 4;          // 客户端元数据
+  repeated Encoding preferred_encodings = 5; // 请求的编码格式
+  bool recover_subscriptions = 6;           // 是否恢复之前的订阅
+}
+
+message Connected {
+  string session_id = 1;                    // 服务端分配的会话 ID
+  Encoding encoding = 2;                    // 服务端选择的编码
+  string server_version = 3;                // 服务端信息
+  repeated string recovered_channels = 4;   // 恢复的订阅列表
+  map<string, bytes> metadata = 5;          // 服务端元数据
+}
+
+message Disconnect {
+  DisconnectCode code = 1;                  // 断开原因码
+  string reason = 2;                         // 人类可读的原因
+  bool reconnect_allowed = 3;                // 是否允许重连
+}
+
+message Ping {
+  int64 timestamp = 1;                      // 客户端时间戳
+}
+
+message Pong {
+  int64 timestamp = 1;                      // 回显客户端时间戳
+  int64 server_time = 2;                    // 服务端时间戳
+}
+
+// ========== 订阅管理 ==========
+
+message Subscribe {
+  repeated string channels = 1;        // 订阅的通道列表（支持通配符 *）
+  bool with_history = 2;                // 是否需要历史消息
+  StreamPosition since = 3;             // 历史消息起始位置
+  int32 history_limit = 4;              // 历史消息数量限制
+}
+
+message Unsubscribe {
+  repeated string channels = 1;        // 取消订阅的通道列表
+}
+
+message SubscribeResult {
+  repeated string subscribed = 1;       // 成功订阅的通道
+  repeated ChannelError failed = 2;     // 失败的通道及原因
+  repeated Publication history = 3;     // 历史消息（如果请求）
+}
+
+message ChannelError {
+  string channel = 1;                   // 通道名
+  ErrorCode code = 2;                   // 错误码
+  string message = 3;                   // 错误消息
+}
+
+// ========== 发布/订阅 ==========
+
+message Publish {
+  string channel = 1;                   // 目标通道
+  bytes data = 2;                       // 消息数据
+  string type = 3;                      // 消息类型（用户自定义）
+  map<string, bytes> metadata = 4;      // 应用层元数据
+  bool persist = 5;                     // 是否持久化到历史
+}
+
+message PublishResult {
+  bool success = 1;                     // 是否成功
+  StreamPosition position = 2;          // 流位置（如果持久化）
+  Error error = 3;                      // 错误信息（如果失败）
+}
+
+message Publication {
+  string channel = 1;                   // 来源通道
+  bytes data = 2;                       // 消息数据
+  string type = 3;                      // 消息类型
+  map<string, bytes> metadata = 4;      // 元数据
+  StreamPosition position = 5;          // 流位置（用于恢复）
+  string publisher_id = 6;              // 发布者信息（可选）
+}
+
+// ========== RPC ==========
+
+message RpcCall {
+  string channel = 1;                   // 目标通道
+  string method = 2;                     // 方法名
+  bytes data = 3;                       // 请求数据
+  map<string, bytes> metadata = 4;      // 元数据
+}
+
+message RpcReply {
+  bytes data = 1;                       // 响应数据
+  map<string, bytes> metadata = 2;      // 元数据
+  bool success = 3;                     // 是否成功
+  Error error = 4;                      // 错误信息（如果失败）
+}
+
+// ========== 历史回放 ==========
+
+message HistoryRequest {
+  string channel = 1;                   // 通道名
+  StreamPosition since = 2;             // 起始位置
+  int32 limit = 3;                      // 消息数量限制
+  bool reverse = 4;                     // 是否逆序
+}
+
+message HistoryReply {
+  repeated Publication publications = 1; // 历史消息
+  bool has_more = 2;                     // 是否还有更多
+  StreamPosition next_position = 3;      // 下一页位置
+}
+
+// ========== Survey ==========
+
+message SurveyRequest {
+  string survey_id = 1;                 // Survey ID
+  string channel = 2;                   // 目标通道
+  bytes data = 3;                       // Survey 数据
+  int32 timeout_ms = 4;                 // 超时时间（毫秒）
+}
+
+message SurveyResponse {
+  string survey_id = 1;                 // Survey ID
+  bytes data = 2;                       // 响应数据
+  map<string, bytes> metadata = 3;      // 元数据
+}
+
+// ========== 错误 ==========
+
+message Error {
+  ErrorCode code = 1;                   // 错误码
+  string message = 2;                    // 错误消息
+  bool fatal = 3;                       // 是否致命（需要断开连接）
+  map<string, string> context = 4;      // 额外上下文
+}
