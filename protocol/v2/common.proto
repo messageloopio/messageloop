@@ -1,0 +1,63 @@
+syntax = "proto3";
+
+package messageloop.v2;
+
+option go_package = "github.com/lynx-go/messageloop/genproto/v2;v2";
+
+// Encoding 定义编码类型
+enum Encoding {
+  ENCODING_UNSPECIFIED = 0;
+  ENCODING_JSON = 1;
+  ENCODING_PROTOBUF = 2;
+  ENCODING_MSGPACK = 3;    // 扩展预留
+  ENCODING_CBOR = 4;       // 扩展预留
+}
+
+// FrameFlags 定义帧标志位
+enum FrameFlags {
+  FLAG_NONE = 0x00;
+  FLAG_ACK_REQUIRED = 0x01;    // 需要 ACK 确认
+  FLAG_IS_ACK = 0x02;          // 这是一个 ACK 响应
+  FLAG_IS_NACK = 0x04;         // 这是一个 NACK(否定确认)
+  FLAG_COMPRESSED = 0x08;      // Payload 已压缩(gzip)
+  FLAG_RETRANSMIT = 0x10;      // 这是重发的消息
+  FLAG_PRIORITY = 0x20;        // 优先级标志(高优先级)
+}
+
+// StreamPosition 定义流位置(用于历史消息恢复)
+message StreamPosition {
+  uint64 offset = 1;    // 偏移量
+  string epoch = 2;     // 纪元(用于检测流重置)
+}
+
+// ErrorCode 定义错误码
+enum ErrorCode {
+  ERROR_UNKNOWN = 0;
+  ERROR_UNAUTHORIZED = 1;
+  ERROR_PERMISSION_DENIED = 2;
+  ERROR_INVALID_CHANNEL = 3;
+  ERROR_CHANNEL_LIMIT = 4;
+  ERROR_RATE_LIMIT = 5;
+  ERROR_INVALID_MESSAGE = 6;
+  ERROR_RPC_TIMEOUT = 7;
+  ERROR_RPC_NOT_FOUND = 8;
+  ERROR_INTERNAL = 9;
+  ERROR_SERVICE_UNAVAILABLE = 10;
+}
+
+// DisconnectCode 定义断开连接原因码
+enum DisconnectCode {
+  DISCONNECT_NORMAL = 0;
+  DISCONNECT_UNAUTHORIZED = 1;
+  DISCONNECT_TOKEN_EXPIRED = 2;
+  DISCONNECT_KICKED = 3;
+  DISCONNECT_PROTOCOL_ERROR = 10;
+  DISCONNECT_VERSION_MISMATCH = 11;
+  DISCONNECT_TOO_MANY_ERRORS = 12;
+  DISCONNECT_IDLE_TIMEOUT = 20;
+  DISCONNECT_CONNECTION_LIMIT = 21;
+  DISCONNECT_RATE_LIMIT = 22;
+  DISCONNECT_SERVER_SHUTDOWN = 30;
+  DISCONNECT_SERVER_RESTART = 31;
+  DISCONNECT_INTERNAL_ERROR = 32;
+}
