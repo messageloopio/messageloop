@@ -187,16 +187,15 @@ func (c *ClientV2) handleFrame(data []byte) error {
 	return nil
 }
 
-// sendACK sends an ACK frame for the given frame ID.
+// sendACK sends an ACK frame reusing the original frame's ID.
+// The client correlates ACKs by matching frame_id directly.
 func (c *ClientV2) sendACK(frameID string) error {
 	ack := &v2pb.Frame{
-		FrameId:   c.idGen.Generate(),
+		FrameId:   frameID,
 		SessionId: c.sessionID,
 		Timestamp: time.Now().UnixMilli(),
 		Flags:     uint32(v2pb.FrameFlags_FLAG_IS_ACK),
 		Encoding:  c.encoder.Encoding(),
-		// Payload carries the original frame_id being ACKed
-		Payload: []byte(frameID),
 	}
 	data, err := c.encoder.EncodeFrame(ack)
 	if err != nil {
