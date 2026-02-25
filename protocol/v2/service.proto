@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+// buf:lint:ignore PACKAGE_DIRECTORY_MATCH
+package messageloop.v2;
+
+option go_package = "github.com/messageloopio/messageloop/shared/genproto/v2;v2";
+
+// StreamFrame is the raw byte carrier for the v2 gRPC streaming transport.
+// It wraps an already-encoded Frame (Protobuf or JSON bytes) to avoid
+// double-encoding — gRPC carries it as an opaque payload.
+message StreamFrame {
+  bytes data = 1;
+}
+
+// MessagingServiceV2 provides the bidirectional streaming transport for
+// the v2 protocol. Each stream maps to one ClientV2 connection.
+service MessagingServiceV2 {
+  // MessageLoop is the core bidirectional stream.
+  // Both directions carry StreamFrame messages containing encoded v2 Frames.
+  // buf:lint:ignore RPC_REQUEST_STANDARD_NAME
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  rpc MessageLoop(stream StreamFrame) returns (stream StreamFrame);
+}
