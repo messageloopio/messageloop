@@ -6,4 +6,27 @@ option go_package = "github.com/lynx-go/messageloop/genproto/v2;v2";
 
 import "protocol/v2/common.proto";
 
-// Frame 定义将在 Task 2 中完成
+// Frame 是协议的核心传输单元
+// 负责消息边界、ID 生成、ACK、去重、编码协商
+message Frame {
+  // 服务端生成的全局唯一 ID（UUID 字符串）
+  string frame_id = 1;
+
+  // 会话 ID（服务端在 Connect 时生成）
+  string session_id = 2;
+
+  // 客户端递增序列号（用于去重和顺序保证）
+  uint64 client_seq = 3;
+
+  // Unix 毫秒时间戳（服务端生成）
+  int64 timestamp = 4;
+
+  // Frame 类型标志位（使用 FrameFlags 枚举值的组合）
+  uint32 flags = 5;
+
+  // 编码类型
+  Encoding encoding = 6;
+
+  // 应用层消息（编码后的字节）
+  bytes payload = 10;
+}
