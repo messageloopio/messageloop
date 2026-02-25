@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package messageloop.v2;
 
-option go_package = "github.com/lynx-go/messageloop/genproto/v2;v2";
+option go_package = "github.com/messageloopio/messageloop/shared/genproto/v2;v2";
 
 // Encoding 定义编码类型
 enum Encoding {
