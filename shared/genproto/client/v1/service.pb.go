@@ -483,6 +483,7 @@ type Connect struct {
 	Token         string                 `protobuf:"bytes,3,opt,name=token,proto3" json:"token,omitempty"`
 	Version       string                 `protobuf:"bytes,4,opt,name=version,proto3" json:"version,omitempty"`
 	Subscriptions []*Subscription        `protobuf:"bytes,5,rep,name=subscriptions,proto3" json:"subscriptions,omitempty"`
+	SessionId     string                 `protobuf:"bytes,6,opt,name=session_id,proto3" json:"session_id,omitempty"` // 上次会话 ID，为空表示新连接
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -552,11 +553,19 @@ func (x *Connect) GetSubscriptions() []*Subscription {
 	return nil
 }
 
+func (x *Connect) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
 type Connected struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,proto3" json:"session_id,omitempty"`
 	Subscriptions []*Subscription        `protobuf:"bytes,2,rep,name=subscriptions,proto3" json:"subscriptions,omitempty"`
 	Publications  []*Publication         `protobuf:"bytes,3,rep,name=publications,proto3" json:"publications,omitempty"`
+	Resumed       bool                   `protobuf:"varint,4,opt,name=resumed,proto3" json:"resumed,omitempty"` // 是否成功恢复会话
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -612,11 +621,20 @@ func (x *Connected) GetPublications() []*Publication {
 	return nil
 }
 
+func (x *Connected) GetResumed() bool {
+	if x != nil {
+		return x.Resumed
+	}
+	return false
+}
+
 type Subscription struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Channel       string                 `protobuf:"bytes,1,opt,name=channel,proto3" json:"channel,omitempty"`
 	Ephemeral     bool                   `protobuf:"varint,2,opt,name=ephemeral,proto3" json:"ephemeral,omitempty"`
 	Token         string                 `protobuf:"bytes,3,opt,name=token,proto3" json:"token,omitempty"`
+	Offset        uint64                 `protobuf:"varint,4,opt,name=offset,proto3" json:"offset,omitempty"`   // 恢复消息的起始 offset，0 表示从最新开始
+	Recover       bool                   `protobuf:"varint,5,opt,name=recover,proto3" json:"recover,omitempty"` // 是否需要恢复离线消息
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -670,6 +688,20 @@ func (x *Subscription) GetToken() string {
 		return x.Token
 	}
 	return ""
+}
+
+func (x *Subscription) GetOffset() uint64 {
+	if x != nil {
+		return x.Offset
+	}
+	return 0
+}
+
+func (x *Subscription) GetRecover() bool {
+	if x != nil {
+		return x.Recover
+	}
+	return false
 }
 
 type Subscribe struct {
@@ -1540,23 +1572,29 @@ const file_client_v1_service_proto_rawDesc = "" +
 	"\fsurvey_reply\x18\f \x01(\v2\".messageloop.client.v1.SurveyReplyH\x00R\fsurvey_reply\x121\n" +
 	"\x04pong\x18\r \x01(\v2\x1b.messageloop.client.v1.PongH\x00R\x04pongB\n" +
 	"\n" +
-	"\benvelope\"\xc4\x01\n" +
+	"\benvelope\"\xe4\x01\n" +
 	"\aConnect\x12\x1c\n" +
 	"\tclient_id\x18\x01 \x01(\tR\tclient_id\x12 \n" +
 	"\vclient_type\x18\x02 \x01(\tR\vclient_type\x12\x14\n" +
 	"\x05token\x18\x03 \x01(\tR\x05token\x12\x18\n" +
 	"\aversion\x18\x04 \x01(\tR\aversion\x12I\n" +
-	"\rsubscriptions\x18\x05 \x03(\v2#.messageloop.client.v1.SubscriptionR\rsubscriptions\"\xbe\x01\n" +
+	"\rsubscriptions\x18\x05 \x03(\v2#.messageloop.client.v1.SubscriptionR\rsubscriptions\x12\x1e\n" +
+	"\n" +
+	"session_id\x18\x06 \x01(\tR\n" +
+	"session_id\"\xd8\x01\n" +
 	"\tConnected\x12\x1e\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\n" +
 	"session_id\x12I\n" +
 	"\rsubscriptions\x18\x02 \x03(\v2#.messageloop.client.v1.SubscriptionR\rsubscriptions\x12F\n" +
-	"\fpublications\x18\x03 \x03(\v2\".messageloop.client.v1.PublicationR\fpublications\"\\\n" +
+	"\fpublications\x18\x03 \x03(\v2\".messageloop.client.v1.PublicationR\fpublications\x12\x18\n" +
+	"\aresumed\x18\x04 \x01(\bR\aresumed\"\x8e\x01\n" +
 	"\fSubscription\x12\x18\n" +
 	"\achannel\x18\x01 \x01(\tR\achannel\x12\x1c\n" +
 	"\tephemeral\x18\x02 \x01(\bR\tephemeral\x12\x14\n" +
-	"\x05token\x18\x03 \x01(\tR\x05token\"V\n" +
+	"\x05token\x18\x03 \x01(\tR\x05token\x12\x16\n" +
+	"\x06offset\x18\x04 \x01(\x04R\x06offset\x12\x18\n" +
+	"\arecover\x18\x05 \x01(\bR\arecover\"V\n" +
 	"\tSubscribe\x12I\n" +
 	"\rsubscriptions\x18\x01 \x03(\v2#.messageloop.client.v1.SubscriptionR\rsubscriptions\"Y\n" +
 	"\fSubscribeAck\x12I\n" +

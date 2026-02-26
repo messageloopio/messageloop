@@ -240,6 +240,16 @@ func (c *ClientSession) handleConnect(ctx context.Context, in *clientpb.InboundM
 		return DisconnectBadRequest
 	}
 
+	// Check if this is a resumption attempt
+	resumed := false
+	if connect.SessionId != "" {
+		// Try to find the old session
+		oldSession := c.node.hub.LookupSession(connect.SessionId)
+		if oldSession != nil {
+			resumed = true
+		}
+	}
+
 	// Proxy authentication - check if there's a proxy configured for authentication
 	var p proxy.Proxy
 	if connect.Token != "" {
@@ -295,13 +305,69 @@ func (c *ClientSession) handleConnect(ctx context.Context, in *clientpb.InboundM
 		_, _ = p.OnConnected(ctx, connectedReq) // Ignore error for notification
 	}
 
+	// Process subscriptions and handle recovery
+	subs := connect.Subscriptions
+	var pubs []*clientpb.Publication
+
+	for _, sub := range subs {
+		// Add subscription
+		c.node.hub.addSub(sub.Channel, NewSubscriber(c, sub.Ephemeral))
+
+		// Handle message recovery if requested
+		if sub.Recover && sub.Offset > 0 {
+			historyPubs, _, err := c.node.broker.History(sub.Channel, HistoryOptions{
+				Filter: HistoryFilter{
+					Since: &StreamPosition{
+						Offset: sub.Offset + 1, // Start from next message after last received
+					},
+					Limit: -1, // No limit
+				},
+			})
+			if err != nil {
+				log.WarnContext(ctx, "failed to recover messages", "channel", sub.Channel, "error", err)
+				continue
+			}
+			// Convert publications to protobuf format
+			for _, pub := range historyPubs {
+				payload := &sharedpb.Payload{}
+				if len(pub.Payload) > 0 {
+					payload.Data = &sharedpb.Payload_Binary{
+						Binary: pub.Payload,
+					}
+				}
+				// Create metadata with event_type if present
+				var metadata *sharedpb.Metadata
+				if pub.EventType != "" {
+					metadata = &sharedpb.Metadata{
+						Entries: map[string]string{
+							"event_type": pub.EventType,
+						},
+					}
+				}
+				pubs = append(pubs, &clientpb.Publication{
+					Messages: []*clientpb.Message{
+						{
+							Id:      uuid.New().String(),
+							Channel: sub.Channel,
+							Offset:  pub.Offset,
+							Payload: payload,
+							Metadata: metadata,
+						},
+					},
+				})
+			}
+		}
+	}
+
 	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_Connected{
 			Connected: &clientpb.Connected{
-				SessionId: c.SessionID(),
-				Subscriptions: lo.Map(c.Channels(), func(it string, i int) *clientpb.Subscription {
+				SessionId:   c.SessionID(),
+				Resumed:     resumed,
+				Publications: pubs,
+				Subscriptions: lo.Map(subs, func(it *clientpb.Subscription, i int) *clientpb.Subscription {
 					return &clientpb.Subscription{
-						Channel: it,
+						Channel: it.Channel,
 					}
 				}),
 			},

@@ -58,18 +58,22 @@ message Connect {
   string token = 3;
   string version = 4;
   repeated Subscription subscriptions = 5;
+  string session_id = 6 [json_name = "session_id"];  // 上次会话 ID，为空表示新连接
 }
 
 message Connected {
   string session_id = 1 [json_name = "session_id"];
   repeated Subscription subscriptions = 2;
   repeated Publication publications = 3;
+  bool resumed = 4;  // 是否成功恢复会话
 }
 
 message Subscription {
   string channel = 1;
   bool ephemeral = 2;
   string token = 3;
+  uint64 offset = 4;  // 恢复消息的起始 offset，0 表示从最新开始
+  bool recover = 5;   // 是否需要恢复离线消息
 }
 
 message Subscribe {

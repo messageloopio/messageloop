@@ -143,6 +143,10 @@
             "type": "object",
             "$ref": "#/definitions/v1Subscription"
           }
+        },
+        "session_id": {
+          "type": "string",
+          "title": "上次会话 ID，为空表示新连接"
         }
       }
     },
@@ -165,6 +169,10 @@
             "type": "object",
             "$ref": "#/definitions/messageloopclientv1Publication"
           }
+        },
+        "resumed": {
+          "type": "boolean",
+          "title": "是否成功恢复会话"
         }
       }
     },
@@ -378,6 +386,15 @@
         },
         "token": {
           "type": "string"
+        },
+        "offset": {
+          "type": "string",
+          "format": "uint64",
+          "title": "恢复消息的起始 offset，0 表示从最新开始"
+        },
+        "recover": {
+          "type": "boolean",
+          "title": "是否需要恢复离线消息"
         }
       }
     },
