@@ -7,7 +7,6 @@ A TypeScript SDK for MessageLoop messaging platform, supporting both Node.js and
 - WebSocket transport with JSON and Protobuf encoding
 - Pub/sub messaging with wildcard channel support
 - RPC-style request/response
-- CloudEvents integration
 - Automatic reconnection support (coming soon)
 - Heartbeat/ping-pong keepalive
 
@@ -20,7 +19,7 @@ npm install @messageloop/sdk
 ## Quick Start
 
 ```typescript
-import { dial, createCloudEvent } from "@messageloop/sdk";
+import { dial, createMessage } from "@messageloop/sdk";
 
 // Create and connect client
 const client = await dial("ws://localhost:9080/ws", [
@@ -31,20 +30,19 @@ const client = await dial("ws://localhost:9080/ws", [
 // Set up handlers
 client.onConnected((sessionId) => console.log("Connected:", sessionId));
 client.onMessage((events) => {
-  events.forEach((msg) => console.log("Message:", msg.event.type));
+  events.forEach((msg) => console.log("Message:", msg.payload));
 });
 client.onError((err) => console.error("Error:", err));
 
 // Publish a message
-const event = createCloudEvent({
-  source: "/client",
-  type: "chat.message",
-  data: { text: "Hello!" },
+const msg = createMessage({
+  channel: "chat.messages",
+  payload: { text: "Hello!" },
 });
-await client.publish("chat.messages", event);
+await client.publish(msg);
 
 // Make an RPC call
-const response = await client.rpc("user.service", "GetUser", requestEvent);
+const response = await client.rpc("user.service", "GetUser", requestMsg);
 
 // Clean up
 await client.close();
@@ -73,7 +71,7 @@ await client.close();
 - `close()` - Close the connection
 - `subscribe(...channels)` - Subscribe to channels
 - `unsubscribe(...channels)` - Unsubscribe from channels
-- `publish(channel, event)` - Publish a CloudEvent to a channel
+- `publish(channel, message)` - Publish a message to a channel
 - `rpc(channel, method, request, options?)` - Make an RPC call
 - `getSessionId()` - Get current session ID
 - `isConnected()` - Check connection status

@@ -6,8 +6,6 @@ replace github.com/messageloopio/messageloop/shared => ./shared
 
 require (
 	github.com/RoaringBitmap/roaring v1.9.4
-	github.com/cloudevents/sdk-go/binding/format/protobuf/v2 v2.16.2
-	github.com/cloudevents/sdk-go/v2 v2.16.2
 	github.com/gobwas/glob v0.2.3
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3

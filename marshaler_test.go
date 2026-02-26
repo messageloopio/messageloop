@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"testing"
 
-	cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
 )
@@ -270,77 +269,6 @@ func TestMarshalers(t *testing.T) {
 		}
 		// Just verify it doesn't panic
 		_ = m.UseBytes()
-	}
-}
-
-func TestJSONMarshaler_RoundTripCloudEvent(t *testing.T) {
-	m := JSONMarshaler{}
-
-	original := &cloudevents.CloudEvent{
-		Id:          "event-123",
-		Source:      "test-channel",
-		SpecVersion: "1.0",
-		Type:        "test.event",
-		Attributes: map[string]*cloudevents.CloudEventAttributeValue{
-			"datacontenttype": {
-				Attr: &cloudevents.CloudEventAttributeValue_CeString{
-					CeString: "application/json",
-				},
-			},
-		},
-		Data: &cloudevents.CloudEvent_TextData{
-			TextData: `{"message":"hello"}`,
-		},
-	}
-
-	data, err := m.Marshal(original)
-	if err != nil {
-		t.Fatalf("Marshal() error = %v", err)
-	}
-
-	var decoded cloudevents.CloudEvent
-	err = m.Unmarshal(data, &decoded)
-	if err != nil {
-		t.Fatalf("Unmarshal() error = %v", err)
-	}
-
-	if decoded.Id != original.Id {
-		t.Errorf("Id = %v, want %v", decoded.Id, original.Id)
-	}
-	if decoded.Source != original.Source {
-		t.Errorf("Source = %v, want %v", decoded.Source, original.Source)
-	}
-}
-
-func TestProtobufMarshaler_RoundTripCloudEvent(t *testing.T) {
-	m := ProtobufMarshaler{}
-
-	original := &cloudevents.CloudEvent{
-		Id:          "event-456",
-		Source:      "test-channel-2",
-		SpecVersion: "1.0",
-		Type:        "test.event.2",
-		Data: &cloudevents.CloudEvent_BinaryData{
-			BinaryData: []byte("test payload"),
-		},
-	}
-
-	data, err := m.Marshal(original)
-	if err != nil {
-		t.Fatalf("Marshal() error = %v", err)
-	}
-
-	var decoded cloudevents.CloudEvent
-	err = m.Unmarshal(data, &decoded)
-	if err != nil {
-		t.Fatalf("Unmarshal() error = %v", err)
-	}
-
-	if decoded.Id != original.Id {
-		t.Errorf("Id = %v, want %v", decoded.Id, original.Id)
-	}
-	if decoded.Source != original.Source {
-		t.Errorf("Source = %v, want %v", decoded.Source, original.Source)
 	}
 }
 

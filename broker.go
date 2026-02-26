@@ -8,7 +8,7 @@ type Publication struct {
 	Metadata  map[string]interface{}
 	IsBlob    bool
 	IsText    bool   // true if original data was text_data, false if binary_data
-	EventType string // original CloudEvent type (e.g., "hello")
+	EventType string // event type (e.g., "hello")
 	Payload   []byte
 	Time      int64
 }

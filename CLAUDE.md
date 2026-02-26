@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-MessageLoop is a realtime messaging platform server written in Go. It provides pub/sub messaging capabilities over WebSocket and gRPC streaming transports, using a CloudEvents-based protocol.
+MessageLoop is a realtime messaging platform server written in Go. It provides pub/sub messaging capabilities over WebSocket and gRPC streaming transports.
 
 ## Build and Test Commands
 
@@ -58,9 +58,9 @@ Config structure defined in `config/config.go` with example in `config-example.y
 
 **Client** (`client.go`) - Represents a single connection. Handles protocol messages:
 - `Connect` - Initial authentication and session establishment
-- `Publish` - Publish CloudEvents to channels
+- `Publish` - Publish messages to channels
 - `Subscribe` / `Unsubscribe` - Manage channel subscriptions
-- `RpcRequest` - RPC-style request/response using CloudEvents (proxied to backend with timeout protection)
+- `RpcRequest` - RPC-style request/response (proxied to backend with timeout protection)
 - `Ping` / `Pong` - Connection keepalive
 
 **Hub** (`hub.go`) - Sharded connection registry with 64 shards:
@@ -98,7 +98,7 @@ The system abstracts connection handling via the **Transport** interface (`trans
 
 ### Protocol
 
-The protocol uses CloudEvents for message passing:
+The protocol uses a simple message format for pub/sub:
 
 **Generated protobuf code** in `genproto/`:
 - `v1/` - Client protocol messages (InboundMessage, OutboundMessage, Connect, Subscribe, etc.)
@@ -106,12 +106,11 @@ The protocol uses CloudEvents for message passing:
 - `server/v1/` - Server API definitions
 - `proxy/v1/` - Proxy protocol
 - `event/v1/` - Event definitions
-- `includes/cloudevents/` - CloudEvent protobuf definitions
 
 **Key protocol types:**
-- `InboundMessage` - Client-to-server messages with oneof envelope for Connect, Subscribe, Publish (CloudEvent), RpcRequest (CloudEvent), etc.
-- `OutboundMessage` - Server-to-client messages with oneof envelope for Connected, SubscribeAck, PublishAck, Publication, RpcReply (CloudEvent), etc.
-- `Message` - Wrapper containing Channel, Id, Offset, and Event (CloudEvent)
+- `InboundMessage` - Client-to-server messages with oneof envelope for Connect, Subscribe, Publish, RpcRequest, etc.
+- `OutboundMessage` - Server-to-client messages with oneof envelope for Connected, SubscribeAck, PublishAck, Publication, RpcReply, etc.
+- `Message` - Wrapper containing Channel, Id, Offset, and Payload
 - `Publication` - Contains Envelopes (array of Message)
 
 **The `protocol` package** provides marshalers for JSON and protobuf encoding:
@@ -119,7 +118,7 @@ The protocol uses CloudEvents for message passing:
 - `ProtobufMarshaler{}` - Protobuf binary encoding
 - `ProtoJSONMarshaler` - Protobuf JSON encoding
 
-**Note:** The protocol is CloudEvents-based. `Publish` and `RpcRequest` use CloudEvents with `BinaryData` or `TextData` fields.
+**Note:** `Publish` and `RpcRequest` use Payload with Binary, Text, or Json data.
 
 ### Topic Matching
 
@@ -135,7 +134,7 @@ The protocol uses CloudEvents for message passing:
 2. **Protocol abstraction** - Core logic independent of transport; WebSocket and gRPC are pluggable
 3. **Marshaler selection** - WebSocket negotiates encoding via subprotocol; gRPC uses protobuf only
 4. **Disconnect handling** - Uses typed `Disconnect` errors (`disconnect.go`) to signal intentional disconnection with codes (3000-3509)
-5. **CloudEvents** - Publish and RPC operations wrap data in CloudEvents with BinaryData/TextData fields
+5. **Payload format** - Publish and RPC operations use Payload with Binary/Text/Json data
 6. **StreamPosition recovery** - History streams use offset + epoch semantics for reliable recovery
 
 ## TypeScript SDK
@@ -158,7 +157,6 @@ npm test
 
 ## Dependencies
 
-- `github.com/cloudevents/sdk-go/binding/format/protobuf/v2` - CloudEvent protobuf format
 - `github.com/lynx-go/lynx` - Application framework providing lifecycle management
 - `github.com/gorilla/websocket` - WebSocket implementation
 - `google.golang.org/grpc` - gRPC framework
