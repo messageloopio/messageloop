@@ -218,22 +218,11 @@ func (h *subShard) broadcastPublication(channel string, pub *Publication) error 
 		}
 	}
 
-	// Create metadata
-	var metadata *sharedpb.Metadata
-	if pub.EventType != "" {
-		metadata = &sharedpb.Metadata{
-			Entries: map[string]string{
-				"event_type": pub.EventType,
-			},
-		}
-	}
-
 	msg := &clientpb.Message{
-		Channel:  channel,
-		Id:       uuid.NewString(),
-		Offset:   pub.Offset,
-		Payload:  payload,
-		Metadata: metadata,
+		Channel: channel,
+		Id:      uuid.NewString(),
+		Offset:  pub.Offset,
+		Payload: payload,
 	}
 
 	out := MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {

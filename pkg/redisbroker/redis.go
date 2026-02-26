@@ -107,7 +107,7 @@ func (b *redisBroker) Unsubscribe(ch string) error {
 
 // Publish publishes data to a channel.
 func (b *redisBroker) Publish(ch string, data []byte, opts messageloop.PublishOptions) (messageloop.StreamPosition, bool, error) {
-	msg := newPublicationMessage(ch, data, opts.IsText, opts.EventType)
+	msg := newPublicationMessage(ch, data, opts.IsText)
 	return b.publishToRedis(ch, msg)
 }
 

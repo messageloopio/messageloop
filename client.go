@@ -335,15 +335,6 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 						Binary: pub.Payload,
 					}
 				}
-				// Create metadata with event_type if present
-				var metadata *sharedpb.Metadata
-				if pub.EventType != "" {
-					metadata = &sharedpb.Metadata{
-						Entries: map[string]string{
-							"event_type": pub.EventType,
-						},
-					}
-				}
 				pubs = append(pubs, &clientpb.Publication{
 					Messages: []*clientpb.Message{
 						{
@@ -351,7 +342,6 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 							Channel: sub.Channel,
 							Offset:  pub.Offset,
 							Payload: payload,
-							Metadata: metadata,
 						},
 					},
 				})
@@ -577,15 +567,7 @@ func (c *Client) handlePublish(ctx context.Context, in *clientpb.InboundMessage,
 		}
 	}
 
-	// Determine event type from metadata
-	eventType := "message"
-	if publish.Metadata != nil {
-		if t, ok := publish.Metadata.Entries["event_type"]; ok {
-			eventType = t
-		}
-	}
-
-	if err := c.node.Publish(channel, data, WithClientInfo(c.ClientInfo()), WithAsBytes(true), WithIsText(isText), WithEventType(eventType)); err != nil {
+	if err := c.node.Publish(channel, data, WithClientInfo(c.ClientInfo()), WithAsBytes(true), WithIsText(isText)); err != nil {
 		return err
 	}
 	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {

@@ -14,12 +14,11 @@ const (
 
 // redisMessage is the envelope format for messages stored in Redis.
 type redisMessage struct {
-	Type      string                  `json:"t"`
-	Channel   string                  `json:"ch"`
-	Payload   []byte                  `json:"p"`
-	Info      *messageloop.ClientInfo `json:"i,omitempty"`
-	IsText    bool                    `json:"isText,omitempty"`
-	EventType string                  `json:"eventType,omitempty"`
+	Type    string                  `json:"t"`
+	Channel string                  `json:"ch"`
+	Payload []byte                  `json:"p"`
+	Info    *messageloop.ClientInfo `json:"i,omitempty"`
+	IsText  bool                    `json:"isText,omitempty"`
 }
 
 func serializeMessage(msg *redisMessage) ([]byte, error) {
@@ -34,13 +33,12 @@ func deserializeMessage(data []byte) (*redisMessage, error) {
 	return &msg, nil
 }
 
-func newPublicationMessage(ch string, payload []byte, isText bool, eventType string) *redisMessage {
+func newPublicationMessage(ch string, payload []byte, isText bool) *redisMessage {
 	return &redisMessage{
-		Type:      messageTypePublication,
-		Channel:   ch,
-		Payload:   payload,
-		IsText:    isText,
-		EventType: eventType,
+		Type:    messageTypePublication,
+		Channel: ch,
+		Payload: payload,
+		IsText:  isText,
 	}
 }
 

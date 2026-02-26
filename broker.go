@@ -3,14 +3,13 @@ package messageloop
 import "time"
 
 type Publication struct {
-	Channel   string
-	Offset    uint64
-	Metadata  map[string]interface{}
-	IsBlob    bool
-	IsText    bool   // true if original data was text_data, false if binary_data
-	EventType string // event type (e.g., "hello")
-	Payload   []byte
-	Time      int64
+	Channel  string
+	Offset   uint64
+	Metadata map[string]interface{}
+	IsBlob   bool
+	IsText   bool   // true if original data was text_data, false if binary_data
+	Payload  []byte
+	Time     int64
 }
 type StreamPosition struct {
 	// Offset defines publication incremental offset inside a stream.
@@ -68,17 +67,10 @@ func WithIsText(isText bool) PublishOption {
 	}
 }
 
-func WithEventType(eventType string) PublishOption {
-	return func(opts *PublishOptions) {
-		opts.EventType = eventType
-	}
-}
-
 type PublishOptions struct {
 	ClientInfo *ClientInfo
 	AsBytes    bool
 	IsText     bool
-	EventType  string
 }
 
 // BrokerEventHandler can handle messages received from PUB/SUB system.
