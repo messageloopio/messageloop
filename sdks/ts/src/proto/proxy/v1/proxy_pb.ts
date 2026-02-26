@@ -16,7 +16,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file proxy/v1/proxy.proto.
  */
 export const file_proxy_v1_proxy: GenFile = /*@__PURE__*/
-  fileDesc("ChRwcm94eS92MS9wcm94eS5wcm90bxIUbWVzc2FnZWxvb3AucHJveHkudjEinQEKClJQQ1JlcXVlc3QSCgoCaWQYASABKAkSDwoHY2hhbm5lbBgCIAEoCRIOCgZtZXRob2QYAyABKAkSLwoHcGF5bG9hZBgEIAEoCzIeLm1lc3NhZ2Vsb29wLnNoYXJlZC52MS5QYXlsb2FkEjEKCG1ldGFkYXRhGAUgASgLMh8ubWVzc2FnZWxvb3Auc2hhcmVkLnYxLk1ldGFkYXRhIqoBCgtSUENSZXNwb25zZRIKCgJpZBgBIAEoCRIvCgdwYXlsb2FkGAIgASgLMh4ubWVzc2FnZWxvb3Auc2hhcmVkLnYxLlBheWxvYWQSMQoIbWV0YWRhdGEYAyABKAsyHy5tZXNzYWdlbG9vcC5zaGFyZWQudjEuTWV0YWRhdGESKwoFZXJyb3IYBCABKAsyHC5tZXNzYWdlbG9vcC5zaGFyZWQudjEuRXJyb3IiYQoTQXV0aGVudGljYXRlUmVxdWVzdBIQCgh1c2VybmFtZRgBIAEoCRIQCghwYXNzd29yZBgCIAEoCRITCgtjbGllbnRfdHlwZRgDIAEoCRIRCgljbGllbnRfaWQYBCABKAkidgoUQXV0aGVudGljYXRlUmVzcG9uc2USKwoFZXJyb3IYASABKAsyHC5tZXNzYWdlbG9vcC5zaGFyZWQudjEuRXJyb3ISMQoJdXNlcl9pbmZvGAIgASgLMh4ubWVzc2FnZWxvb3AucHJveHkudjEuVXNlckluZm8iXwoIVXNlckluZm8SCgoCaWQYASABKAkSEAoIdXNlcm5hbWUYAiABKAkSDQoFdG9rZW4YAyABKAkSEwoLY2xpZW50X3R5cGUYBCABKAkSEQoJY2xpZW50X2lkGAUgASgJIjUKE1N1YnNjcmliZUFjbFJlcXVlc3QSDwoHY2hhbm5lbBgBIAEoCRINCgV0b2tlbhgCIAEoCSIWChRTdWJzY3JpYmVBY2xSZXNwb25zZSI6ChJPbkNvbm5lY3RlZFJlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRIQCgh1c2VybmFtZRgCIAEoCSIVChNPbkNvbm5lY3RlZFJlc3BvbnNlIkwKE09uU3Vic2NyaWJlZFJlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRIPCgdjaGFubmVsGAIgASgJEhAKCHVzZXJuYW1lGAMgASgJIhYKFE9uU3Vic2NyaWJlZFJlc3BvbnNlIk4KFU9uVW5zdWJzY3JpYmVkUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEg8KB2NoYW5uZWwYAiABKAkSEAoIdXNlcm5hbWUYAyABKAkiGAoWT25VbnN1YnNjcmliZWRSZXNwb25zZSI9ChVPbkRpc2Nvbm5lY3RlZFJlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRIQCgh1c2VybmFtZRgCIAEoCSIYChZPbkRpc2Nvbm5lY3RlZFJlc3BvbnNlMs0FCgxQcm94eVNlcnZpY2USSgoDUlBDEiAubWVzc2FnZWxvb3AucHJveHkudjEuUlBDUmVxdWVzdBohLm1lc3NhZ2Vsb29wLnByb3h5LnYxLlJQQ1Jlc3BvbnNlEmUKDEF1dGhlbnRpY2F0ZRIpLm1lc3NhZ2Vsb29wLnByb3h5LnYxLkF1dGhlbnRpY2F0ZVJlcXVlc3QaKi5tZXNzYWdlbG9vcC5wcm94eS52MS5BdXRoZW50aWNhdGVSZXNwb25zZRJlCgxTdWJzY3JpYmVBY2wSKS5tZXNzYWdlbG9vcC5wcm94eS52MS5TdWJzY3JpYmVBY2xSZXF1ZXN0GioubWVzc2FnZWxvb3AucHJveHkudjEuU3Vic2NyaWJlQWNsUmVzcG9uc2USYgoLT25Db25uZWN0ZWQSKC5tZXNzYWdlbG9vcC5wcm94eS52MS5PbkNvbm5lY3RlZFJlcXVlc3QaKS5tZXNzYWdlbG9vcC5wcm94eS52MS5PbkNvbm5lY3RlZFJlc3BvbnNlEmUKDE9uU3Vic2NyaWJlZBIpLm1lc3NhZ2Vsb29wLnByb3h5LnYxLk9uU3Vic2NyaWJlZFJlcXVlc3QaKi5tZXNzYWdlbG9vcC5wcm94eS52MS5PblN1YnNjcmliZWRSZXNwb25zZRJrCg5PblVuc3Vic2NyaWJlZBIrLm1lc3NhZ2Vsb29wLnByb3h5LnYxLk9uVW5zdWJzY3JpYmVkUmVxdWVzdBosLm1lc3NhZ2Vsb29wLnByb3h5LnYxLk9uVW5zdWJzY3JpYmVkUmVzcG9uc2USawoOT25EaXNjb25uZWN0ZWQSKy5tZXNzYWdlbG9vcC5wcm94eS52MS5PbkRpc2Nvbm5lY3RlZFJlcXVlc3QaLC5tZXNzYWdlbG9vcC5wcm94eS52MS5PbkRpc2Nvbm5lY3RlZFJlc3BvbnNlQkBaPmdpdGh1Yi5jb20vbWVzc2FnZWxvb3Bpby9tZXNzYWdlbG9vcC9nZW5wcm90by9wcm94eS92MTtwcm94eXBiYgZwcm90bzM", [file_shared_v1_types, file_shared_v1_errors]);
+  fileDesc("ChRwcm94eS92MS9wcm94eS5wcm90bxIUbWVzc2FnZWxvb3AucHJveHkudjEinQEKClJQQ1JlcXVlc3QSCgoCaWQYASABKAkSDwoHY2hhbm5lbBgCIAEoCRIOCgZtZXRob2QYAyABKAkSLwoHcGF5bG9hZBgEIAEoCzIeLm1lc3NhZ2Vsb29wLnNoYXJlZC52MS5QYXlsb2FkEjEKCG1ldGFkYXRhGAUgASgLMh8ubWVzc2FnZWxvb3Auc2hhcmVkLnYxLk1ldGFkYXRhIqoBCgtSUENSZXNwb25zZRIKCgJpZBgBIAEoCRIvCgdwYXlsb2FkGAIgASgLMh4ubWVzc2FnZWxvb3Auc2hhcmVkLnYxLlBheWxvYWQSMQoIbWV0YWRhdGEYAyABKAsyHy5tZXNzYWdlbG9vcC5zaGFyZWQudjEuTWV0YWRhdGESKwoFZXJyb3IYBCABKAsyHC5tZXNzYWdlbG9vcC5zaGFyZWQudjEuRXJyb3IiTAoTQXV0aGVudGljYXRlUmVxdWVzdBIRCgljbGllbnRfaWQYASABKAkSDQoFdG9rZW4YAiABKAkSEwoLY2xpZW50X3R5cGUYAyABKAkidgoUQXV0aGVudGljYXRlUmVzcG9uc2USKwoFZXJyb3IYASABKAsyHC5tZXNzYWdlbG9vcC5zaGFyZWQudjEuRXJyb3ISMQoJdXNlcl9pbmZvGAIgASgLMh4ubWVzc2FnZWxvb3AucHJveHkudjEuVXNlckluZm8iXwoIVXNlckluZm8SCgoCaWQYASABKAkSEAoIdXNlcm5hbWUYAiABKAkSDQoFdG9rZW4YAyABKAkSEwoLY2xpZW50X3R5cGUYBCABKAkSEQoJY2xpZW50X2lkGAUgASgJIjUKE1N1YnNjcmliZUFjbFJlcXVlc3QSDwoHY2hhbm5lbBgBIAEoCRINCgV0b2tlbhgCIAEoCSIWChRTdWJzY3JpYmVBY2xSZXNwb25zZSIzChFQdWJsaXNoQWNsUmVxdWVzdBIPCgdjaGFubmVsGAEgASgJEg0KBXRva2VuGAIgASgJIhQKElB1Ymxpc2hBY2xSZXNwb25zZSI6ChJPbkNvbm5lY3RlZFJlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRIQCgh1c2VybmFtZRgCIAEoCSIVChNPbkNvbm5lY3RlZFJlc3BvbnNlIkwKE09uU3Vic2NyaWJlZFJlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRIPCgdjaGFubmVsGAIgASgJEhAKCHVzZXJuYW1lGAMgASgJIhYKFE9uU3Vic2NyaWJlZFJlc3BvbnNlIk4KFU9uVW5zdWJzY3JpYmVkUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEg8KB2NoYW5uZWwYAiABKAkSEAoIdXNlcm5hbWUYAyABKAkiGAoWT25VbnN1YnNjcmliZWRSZXNwb25zZSI9ChVPbkRpc2Nvbm5lY3RlZFJlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRIQCgh1c2VybmFtZRgCIAEoCSIYChZPbkRpc2Nvbm5lY3RlZFJlc3BvbnNlMq4GCgxQcm94eVNlcnZpY2USSgoDUlBDEiAubWVzc2FnZWxvb3AucHJveHkudjEuUlBDUmVxdWVzdBohLm1lc3NhZ2Vsb29wLnByb3h5LnYxLlJQQ1Jlc3BvbnNlEmUKDEF1dGhlbnRpY2F0ZRIpLm1lc3NhZ2Vsb29wLnByb3h5LnYxLkF1dGhlbnRpY2F0ZVJlcXVlc3QaKi5tZXNzYWdlbG9vcC5wcm94eS52MS5BdXRoZW50aWNhdGVSZXNwb25zZRJlCgxTdWJzY3JpYmVBY2wSKS5tZXNzYWdlbG9vcC5wcm94eS52MS5TdWJzY3JpYmVBY2xSZXF1ZXN0GioubWVzc2FnZWxvb3AucHJveHkudjEuU3Vic2NyaWJlQWNsUmVzcG9uc2USXwoKUHVibGlzaEFjbBInLm1lc3NhZ2Vsb29wLnByb3h5LnYxLlB1Ymxpc2hBY2xSZXF1ZXN0GigubWVzc2FnZWxvb3AucHJveHkudjEuUHVibGlzaEFjbFJlc3BvbnNlEmIKC09uQ29ubmVjdGVkEigubWVzc2FnZWxvb3AucHJveHkudjEuT25Db25uZWN0ZWRSZXF1ZXN0GikubWVzc2FnZWxvb3AucHJveHkudjEuT25Db25uZWN0ZWRSZXNwb25zZRJlCgxPblN1YnNjcmliZWQSKS5tZXNzYWdlbG9vcC5wcm94eS52MS5PblN1YnNjcmliZWRSZXF1ZXN0GioubWVzc2FnZWxvb3AucHJveHkudjEuT25TdWJzY3JpYmVkUmVzcG9uc2USawoOT25VbnN1YnNjcmliZWQSKy5tZXNzYWdlbG9vcC5wcm94eS52MS5PblVuc3Vic2NyaWJlZFJlcXVlc3QaLC5tZXNzYWdlbG9vcC5wcm94eS52MS5PblVuc3Vic2NyaWJlZFJlc3BvbnNlEmsKDk9uRGlzY29ubmVjdGVkEisubWVzc2FnZWxvb3AucHJveHkudjEuT25EaXNjb25uZWN0ZWRSZXF1ZXN0GiwubWVzc2FnZWxvb3AucHJveHkudjEuT25EaXNjb25uZWN0ZWRSZXNwb25zZUJAWj5naXRodWIuY29tL21lc3NhZ2Vsb29waW8vbWVzc2FnZWxvb3AvZ2VucHJvdG8vcHJveHkvdjE7cHJveHlwYmIGcHJvdG8z", [file_shared_v1_types, file_shared_v1_errors]);
 
 /**
  * @generated from message messageloop.proxy.v1.RPCRequest
@@ -92,24 +92,19 @@ export const RPCResponseSchema: GenMessage<RPCResponse> = /*@__PURE__*/
  */
 export type AuthenticateRequest = Message<"messageloop.proxy.v1.AuthenticateRequest"> & {
   /**
-   * @generated from field: string username = 1;
+   * @generated from field: string client_id = 1;
    */
-  username: string;
+  clientId: string;
 
   /**
-   * @generated from field: string password = 2;
+   * @generated from field: string token = 2;
    */
-  password: string;
+  token: string;
 
   /**
    * @generated from field: string client_type = 3;
    */
   clientType: string;
-
-  /**
-   * @generated from field: string client_id = 4;
-   */
-  clientId: string;
 };
 
 /**
@@ -214,6 +209,41 @@ export const SubscribeAclResponseSchema: GenMessage<SubscribeAclResponse> = /*@_
   messageDesc(file_proxy_v1_proxy, 6);
 
 /**
+ * @generated from message messageloop.proxy.v1.PublishAclRequest
+ */
+export type PublishAclRequest = Message<"messageloop.proxy.v1.PublishAclRequest"> & {
+  /**
+   * @generated from field: string channel = 1;
+   */
+  channel: string;
+
+  /**
+   * @generated from field: string token = 2;
+   */
+  token: string;
+};
+
+/**
+ * Describes the message messageloop.proxy.v1.PublishAclRequest.
+ * Use `create(PublishAclRequestSchema)` to create a new message.
+ */
+export const PublishAclRequestSchema: GenMessage<PublishAclRequest> = /*@__PURE__*/
+  messageDesc(file_proxy_v1_proxy, 7);
+
+/**
+ * @generated from message messageloop.proxy.v1.PublishAclResponse
+ */
+export type PublishAclResponse = Message<"messageloop.proxy.v1.PublishAclResponse"> & {
+};
+
+/**
+ * Describes the message messageloop.proxy.v1.PublishAclResponse.
+ * Use `create(PublishAclResponseSchema)` to create a new message.
+ */
+export const PublishAclResponseSchema: GenMessage<PublishAclResponse> = /*@__PURE__*/
+  messageDesc(file_proxy_v1_proxy, 8);
+
+/**
  * @generated from message messageloop.proxy.v1.OnConnectedRequest
  */
 export type OnConnectedRequest = Message<"messageloop.proxy.v1.OnConnectedRequest"> & {
@@ -233,7 +263,7 @@ export type OnConnectedRequest = Message<"messageloop.proxy.v1.OnConnectedReques
  * Use `create(OnConnectedRequestSchema)` to create a new message.
  */
 export const OnConnectedRequestSchema: GenMessage<OnConnectedRequest> = /*@__PURE__*/
-  messageDesc(file_proxy_v1_proxy, 7);
+  messageDesc(file_proxy_v1_proxy, 9);
 
 /**
  * @generated from message messageloop.proxy.v1.OnConnectedResponse
@@ -246,7 +276,7 @@ export type OnConnectedResponse = Message<"messageloop.proxy.v1.OnConnectedRespo
  * Use `create(OnConnectedResponseSchema)` to create a new message.
  */
 export const OnConnectedResponseSchema: GenMessage<OnConnectedResponse> = /*@__PURE__*/
-  messageDesc(file_proxy_v1_proxy, 8);
+  messageDesc(file_proxy_v1_proxy, 10);
 
 /**
  * @generated from message messageloop.proxy.v1.OnSubscribedRequest
@@ -273,7 +303,7 @@ export type OnSubscribedRequest = Message<"messageloop.proxy.v1.OnSubscribedRequ
  * Use `create(OnSubscribedRequestSchema)` to create a new message.
  */
 export const OnSubscribedRequestSchema: GenMessage<OnSubscribedRequest> = /*@__PURE__*/
-  messageDesc(file_proxy_v1_proxy, 9);
+  messageDesc(file_proxy_v1_proxy, 11);
 
 /**
  * @generated from message messageloop.proxy.v1.OnSubscribedResponse
@@ -286,7 +316,7 @@ export type OnSubscribedResponse = Message<"messageloop.proxy.v1.OnSubscribedRes
  * Use `create(OnSubscribedResponseSchema)` to create a new message.
  */
 export const OnSubscribedResponseSchema: GenMessage<OnSubscribedResponse> = /*@__PURE__*/
-  messageDesc(file_proxy_v1_proxy, 10);
+  messageDesc(file_proxy_v1_proxy, 12);
 
 /**
  * @generated from message messageloop.proxy.v1.OnUnsubscribedRequest
@@ -313,7 +343,7 @@ export type OnUnsubscribedRequest = Message<"messageloop.proxy.v1.OnUnsubscribed
  * Use `create(OnUnsubscribedRequestSchema)` to create a new message.
  */
 export const OnUnsubscribedRequestSchema: GenMessage<OnUnsubscribedRequest> = /*@__PURE__*/
-  messageDesc(file_proxy_v1_proxy, 11);
+  messageDesc(file_proxy_v1_proxy, 13);
 
 /**
  * @generated from message messageloop.proxy.v1.OnUnsubscribedResponse
@@ -326,7 +356,7 @@ export type OnUnsubscribedResponse = Message<"messageloop.proxy.v1.OnUnsubscribe
  * Use `create(OnUnsubscribedResponseSchema)` to create a new message.
  */
 export const OnUnsubscribedResponseSchema: GenMessage<OnUnsubscribedResponse> = /*@__PURE__*/
-  messageDesc(file_proxy_v1_proxy, 12);
+  messageDesc(file_proxy_v1_proxy, 14);
 
 /**
  * @generated from message messageloop.proxy.v1.OnDisconnectedRequest
@@ -348,7 +378,7 @@ export type OnDisconnectedRequest = Message<"messageloop.proxy.v1.OnDisconnected
  * Use `create(OnDisconnectedRequestSchema)` to create a new message.
  */
 export const OnDisconnectedRequestSchema: GenMessage<OnDisconnectedRequest> = /*@__PURE__*/
-  messageDesc(file_proxy_v1_proxy, 13);
+  messageDesc(file_proxy_v1_proxy, 15);
 
 /**
  * @generated from message messageloop.proxy.v1.OnDisconnectedResponse
@@ -361,7 +391,7 @@ export type OnDisconnectedResponse = Message<"messageloop.proxy.v1.OnDisconnecte
  * Use `create(OnDisconnectedResponseSchema)` to create a new message.
  */
 export const OnDisconnectedResponseSchema: GenMessage<OnDisconnectedResponse> = /*@__PURE__*/
-  messageDesc(file_proxy_v1_proxy, 14);
+  messageDesc(file_proxy_v1_proxy, 16);
 
 /**
  * @generated from service messageloop.proxy.v1.ProxyService
@@ -396,6 +426,16 @@ export const ProxyService: GenService<{
     methodKind: "unary";
     input: typeof SubscribeAclRequestSchema;
     output: typeof SubscribeAclResponseSchema;
+  },
+  /**
+   * 发布权限校验
+   *
+   * @generated from rpc messageloop.proxy.v1.ProxyService.PublishAcl
+   */
+  publishAcl: {
+    methodKind: "unary";
+    input: typeof PublishAclRequestSchema;
+    output: typeof PublishAclResponseSchema;
   },
   /**
    * 生命周期钩子

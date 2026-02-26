@@ -188,15 +188,15 @@ func handleSum(ctx context.Context, req *messageloopgo.RPCRequest) (*messageloop
 type MyAuthHandler struct{}
 
 func (h *MyAuthHandler) Authenticate(ctx context.Context, req *messageloopgo.AuthenticateRequest) (*messageloopgo.AuthenticateResponse, error) {
-	log.Printf("[Auth] username=%s client_type=%s", req.Username, req.ClientType)
+	log.Printf("[Auth] client_id=%s client_type=%s", req.ClientID, req.ClientType)
 
-	// Simple authentication: accept any non-empty username/password
-	if req.Username == "" || req.Password == "" {
+	// Simple authentication: accept any non-empty client_id/token
+	if req.ClientID == "" || req.Token == "" {
 		return &messageloopgo.AuthenticateResponse{
 			Error: &sharedpb.Error{
 				Code:    "INVALID_CREDENTIALS",
 				Type:    "auth_error",
-				Message: "Username and password are required",
+				Message: "Client ID and token are required",
 			},
 		}, nil
 	}
@@ -204,9 +204,9 @@ func (h *MyAuthHandler) Authenticate(ctx context.Context, req *messageloopgo.Aut
 	// Return user info on successful auth
 	return &messageloopgo.AuthenticateResponse{
 		UserInfo: &messageloopgo.UserInfo{
-			ID:         "user-" + req.Username,
-			Username:   req.Username,
-			Token:      "token-" + req.Username,
+			ID:         "user-" + req.ClientID,
+			Username:   req.ClientID,
+			Token:      req.Token,
 			ClientType: req.ClientType,
 			ClientID:   req.ClientID,
 		},
@@ -217,7 +217,19 @@ func (h *MyAuthHandler) Authenticate(ctx context.Context, req *messageloopgo.Aut
 type MyACLHandler struct{}
 
 func (h *MyACLHandler) CheckSubscribeACL(ctx context.Context, channel, token string) error {
-	log.Printf("[ACL] channel=%s token=%s", channel, token)
+	log.Printf("[SubscribeACL] channel=%s token=%s", channel, token)
+
+	// Simple ACL: allow all channels starting with "public."
+	// Require valid token for "private." channels
+	if hasPrefix(channel, "private.") && token == "" {
+		return status.Error(codes.PermissionDenied, "Authentication required for private channels")
+	}
+
+	return nil
+}
+
+func (h *MyACLHandler) CheckPublishACL(ctx context.Context, channel, token string) error {
+	log.Printf("[PublishACL] channel=%s token=%s", channel, token)
 
 	// Simple ACL: allow all channels starting with "public."
 	// Require valid token for "private." channels
@@ -313,18 +325,17 @@ func (s *MyProxyService) RPC(ctx context.Context, req *proxypb.RPCRequest) (*pro
 
 // Authenticate implements ProxyServiceServer.Authenticate.
 func (s *MyProxyService) Authenticate(ctx context.Context, req *proxypb.AuthenticateRequest) (*proxypb.AuthenticateResponse, error) {
-	log.Printf("[Authenticate Request] username=%s client_type=%s client_id=%s", req.Username, req.ClientType, req.ClientId)
+	log.Printf("[Authenticate Request] client_id=%s client_type=%s", req.ClientId, req.ClientType)
 
 	authReq := &messageloopgo.AuthenticateRequest{
-		Username:   req.Username,
-		Password:   req.Password,
-		ClientType: req.ClientType,
 		ClientID:   req.ClientId,
+		Token:      req.Token,
+		ClientType: req.ClientType,
 	}
 
 	resp, err := s.authHandler.Authenticate(ctx, authReq)
 	if err != nil {
-		log.Printf("[Authenticate Error] username=%s error=%s", req.Username, err.Error())
+		log.Printf("[Authenticate Error] client_id=%s error=%s", req.ClientId, err.Error())
 		return &proxypb.AuthenticateResponse{
 			Error: &sharedpb.Error{
 				Code:    "AUTH_ERROR",
@@ -335,11 +346,11 @@ func (s *MyProxyService) Authenticate(ctx context.Context, req *proxypb.Authenti
 	}
 
 	if resp.Error != nil {
-		log.Printf("[Authenticate Response] username=%s error_code=%s error_type=%s", req.Username, resp.Error.Code, resp.Error.Type)
+		log.Printf("[Authenticate Response] client_id=%s error_code=%s error_type=%s", req.ClientId, resp.Error.Code, resp.Error.Type)
 	} else if resp.UserInfo != nil {
-		log.Printf("[Authenticate Response] username=%s user_id=%s success=true", req.Username, resp.UserInfo.ID)
+		log.Printf("[Authenticate Response] client_id=%s user_id=%s success=true", req.ClientId, resp.UserInfo.ID)
 	} else {
-		log.Printf("[Authenticate Response] username=%s success=true", req.Username)
+		log.Printf("[Authenticate Response] client_id=%s success=true", req.ClientId)
 	}
 
 	return &proxypb.AuthenticateResponse{
@@ -360,6 +371,20 @@ func (s *MyProxyService) SubscribeAcl(ctx context.Context, req *proxypb.Subscrib
 
 	log.Printf("[SubscribeAcl Response] channel=%s allowed=true", req.Channel)
 	return &proxypb.SubscribeAclResponse{}, nil
+}
+
+// PublishAcl implements ProxyServiceServer.PublishAcl.
+func (s *MyProxyService) PublishAcl(ctx context.Context, req *proxypb.PublishAclRequest) (*proxypb.PublishAclResponse, error) {
+	log.Printf("[PublishAcl Request] channel=%s token=%s", req.Channel, req.Token)
+
+	err := s.aclHandler.CheckPublishACL(ctx, req.Channel, req.Token)
+	if err != nil {
+		log.Printf("[PublishAcl Response] channel=%s denied: %s", req.Channel, err.Error())
+		return &proxypb.PublishAclResponse{}, status.Error(codes.PermissionDenied, err.Error())
+	}
+
+	log.Printf("[PublishAcl Response] channel=%s allowed=true", req.Channel)
+	return &proxypb.PublishAclResponse{}, nil
 }
 
 // OnConnected implements ProxyServiceServer.OnConnected.

@@ -24,6 +24,7 @@ const (
 	ProxyService_RPC_FullMethodName            = "/messageloop.proxy.v1.ProxyService/RPC"
 	ProxyService_Authenticate_FullMethodName   = "/messageloop.proxy.v1.ProxyService/Authenticate"
 	ProxyService_SubscribeAcl_FullMethodName   = "/messageloop.proxy.v1.ProxyService/SubscribeAcl"
+	ProxyService_PublishAcl_FullMethodName     = "/messageloop.proxy.v1.ProxyService/PublishAcl"
 	ProxyService_OnConnected_FullMethodName    = "/messageloop.proxy.v1.ProxyService/OnConnected"
 	ProxyService_OnSubscribed_FullMethodName   = "/messageloop.proxy.v1.ProxyService/OnSubscribed"
 	ProxyService_OnUnsubscribed_FullMethodName = "/messageloop.proxy.v1.ProxyService/OnUnsubscribed"
@@ -40,6 +41,8 @@ type ProxyServiceClient interface {
 	Authenticate(ctx context.Context, in *AuthenticateRequest, opts ...grpc.CallOption) (*AuthenticateResponse, error)
 	// 订阅权限校验
 	SubscribeAcl(ctx context.Context, in *SubscribeAclRequest, opts ...grpc.CallOption) (*SubscribeAclResponse, error)
+	// 发布权限校验
+	PublishAcl(ctx context.Context, in *PublishAclRequest, opts ...grpc.CallOption) (*PublishAclResponse, error)
 	// 生命周期钩子
 	OnConnected(ctx context.Context, in *OnConnectedRequest, opts ...grpc.CallOption) (*OnConnectedResponse, error)
 	OnSubscribed(ctx context.Context, in *OnSubscribedRequest, opts ...grpc.CallOption) (*OnSubscribedResponse, error)
@@ -79,6 +82,16 @@ func (c *proxyServiceClient) SubscribeAcl(ctx context.Context, in *SubscribeAclR
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SubscribeAclResponse)
 	err := c.cc.Invoke(ctx, ProxyService_SubscribeAcl_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *proxyServiceClient) PublishAcl(ctx context.Context, in *PublishAclRequest, opts ...grpc.CallOption) (*PublishAclResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PublishAclResponse)
+	err := c.cc.Invoke(ctx, ProxyService_PublishAcl_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -135,6 +148,8 @@ type ProxyServiceServer interface {
 	Authenticate(context.Context, *AuthenticateRequest) (*AuthenticateResponse, error)
 	// 订阅权限校验
 	SubscribeAcl(context.Context, *SubscribeAclRequest) (*SubscribeAclResponse, error)
+	// 发布权限校验
+	PublishAcl(context.Context, *PublishAclRequest) (*PublishAclResponse, error)
 	// 生命周期钩子
 	OnConnected(context.Context, *OnConnectedRequest) (*OnConnectedResponse, error)
 	OnSubscribed(context.Context, *OnSubscribedRequest) (*OnSubscribedResponse, error)
@@ -158,6 +173,9 @@ func (UnimplementedProxyServiceServer) Authenticate(context.Context, *Authentica
 }
 func (UnimplementedProxyServiceServer) SubscribeAcl(context.Context, *SubscribeAclRequest) (*SubscribeAclResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SubscribeAcl not implemented")
+}
+func (UnimplementedProxyServiceServer) PublishAcl(context.Context, *PublishAclRequest) (*PublishAclResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PublishAcl not implemented")
 }
 func (UnimplementedProxyServiceServer) OnConnected(context.Context, *OnConnectedRequest) (*OnConnectedResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method OnConnected not implemented")
@@ -242,6 +260,24 @@ func _ProxyService_SubscribeAcl_Handler(srv interface{}, ctx context.Context, de
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ProxyServiceServer).SubscribeAcl(ctx, req.(*SubscribeAclRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ProxyService_PublishAcl_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PublishAclRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProxyServiceServer).PublishAcl(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ProxyService_PublishAcl_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProxyServiceServer).PublishAcl(ctx, req.(*PublishAclRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -336,6 +372,10 @@ var ProxyService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SubscribeAcl",
 			Handler:    _ProxyService_SubscribeAcl_Handler,
+		},
+		{
+			MethodName: "PublishAcl",
+			Handler:    _ProxyService_PublishAcl_Handler,
 		},
 		{
 			MethodName: "OnConnected",

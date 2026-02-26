@@ -93,7 +93,7 @@ func (p *GRPCProxy) Authenticate(ctx context.Context, req *AuthenticateProxyRequ
 	log.DebugContext(ctx, "proxying gRPC Authenticate request",
 		"proxy", p.name,
 		"endpoint", p.endpoint,
-		"username", req.Username,
+		"client_id", req.ClientID,
 	)
 
 	resp, err := p.client.Authenticate(ctx, protoReq)
@@ -122,6 +122,26 @@ func (p *GRPCProxy) SubscribeAcl(ctx context.Context, req *SubscribeAclProxyRequ
 	}
 
 	return FromProtoSubscribeAclResponse(resp), nil
+}
+
+// PublishAcl implements Proxy.PublishAcl.
+func (p *GRPCProxy) PublishAcl(ctx context.Context, req *PublishAclProxyRequest) (*PublishAclProxyResponse, error) {
+	ctx = p.withTimeout(ctx)
+
+	protoReq := req.ToProtoRequest()
+
+	log.DebugContext(ctx, "proxying gRPC PublishAcl request",
+		"proxy", p.name,
+		"endpoint", p.endpoint,
+		"channel", req.Channel,
+	)
+
+	resp, err := p.client.PublishAcl(ctx, protoReq)
+	if err != nil {
+		return nil, fmt.Errorf("gRPC publish acl failed: %w", err)
+	}
+
+	return FromProtoPublishAclResponse(resp), nil
 }
 
 // OnConnected implements Proxy.OnConnected.

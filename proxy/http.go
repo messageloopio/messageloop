@@ -110,10 +110,9 @@ func (p *HTTPProxy) Authenticate(ctx context.Context, req *AuthenticateProxyRequ
 
 	protoReq := req.ToProtoRequest()
 	body, err := json.Marshal(map[string]any{
-		"username":    protoReq.Username,
-		"password":    protoReq.Password,
-		"client_type": protoReq.ClientType,
 		"client_id":   protoReq.ClientId,
+		"token":       protoReq.Token,
+		"client_type": protoReq.ClientType,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
@@ -124,7 +123,7 @@ func (p *HTTPProxy) Authenticate(ctx context.Context, req *AuthenticateProxyRequ
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	result, err := p.doRequest(ctx, httpReq, "Authenticate", req.Username, "",
+	result, err := p.doRequest(ctx, httpReq, "Authenticate", req.ClientID, "",
 		func(respBody []byte) (any, error) {
 			var protoResp proxypb.AuthenticateResponse
 			if err := json.Unmarshal(respBody, &protoResp); err != nil {
@@ -170,6 +169,39 @@ func (p *HTTPProxy) SubscribeAcl(ctx context.Context, req *SubscribeAclProxyRequ
 		return nil, err
 	}
 	return result.(*SubscribeAclProxyResponse), nil
+}
+
+// PublishAcl implements Proxy.PublishAcl.
+func (p *HTTPProxy) PublishAcl(ctx context.Context, req *PublishAclProxyRequest) (*PublishAclProxyResponse, error) {
+	ctx = p.withTimeout(ctx)
+
+	protoReq := req.ToProtoRequest()
+	body, err := json.Marshal(map[string]any{
+		"channel": protoReq.Channel,
+		"token":   protoReq.Token,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	result, err := p.doRequest(ctx, httpReq, "PublishAcl", req.Channel, "",
+		func(respBody []byte) (any, error) {
+			var protoResp proxypb.PublishAclResponse
+			if err := json.Unmarshal(respBody, &protoResp); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+			}
+			return FromProtoPublishAclResponse(&protoResp), nil
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	return result.(*PublishAclProxyResponse), nil
 }
 
 // OnConnected implements Proxy.OnConnected.

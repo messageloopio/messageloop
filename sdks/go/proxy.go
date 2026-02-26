@@ -43,10 +43,9 @@ type AuthHandler interface {
 
 // AuthenticateRequest represents an authentication request.
 type AuthenticateRequest struct {
-	Username   string
-	Password   string
-	ClientType string
 	ClientID   string
+	Token      string
+	ClientType string
 }
 
 // AuthenticateResponse represents the response to an authentication request.
@@ -82,6 +81,8 @@ func (u *UserInfo) ToProto() *proxypb.UserInfo {
 type ACLHandler interface {
 	// CheckSubscribeACL checks if a client is allowed to subscribe to a channel.
 	CheckSubscribeACL(ctx context.Context, channel, token string) error
+	// CheckPublishACL checks if a client is allowed to publish to a channel.
+	CheckPublishACL(ctx context.Context, channel, token string) error
 }
 
 // LifecycleHandler defines the interface for handling client lifecycle events.
@@ -120,6 +121,10 @@ func (h *AuthHandlerImpl) Authenticate(ctx context.Context, req *AuthenticateReq
 type ACLHandlerImpl struct{}
 
 func (h *ACLHandlerImpl) CheckSubscribeACL(ctx context.Context, channel, token string) error {
+	return nil // Default: allow all
+}
+
+func (h *ACLHandlerImpl) CheckPublishACL(ctx context.Context, channel, token string) error {
 	return nil // Default: allow all
 }
 
@@ -211,16 +216,14 @@ func (h *HandlerImpl) RPC(ctx context.Context, req *proxypb.RPCRequest) (*proxyp
 // Authenticate implements ProxyServiceServer.Authenticate.
 func (h *HandlerImpl) Authenticate(ctx context.Context, req *proxypb.AuthenticateRequest) (*proxypb.AuthenticateResponse, error) {
 	slog.DebugContext(ctx, "received authenticate request",
-		"username", req.Username,
-		"client_type", req.ClientType,
 		"client_id", req.ClientId,
+		"client_type", req.ClientType,
 	)
 
 	authReq := &AuthenticateRequest{
-		Username:   req.Username,
-		Password:   req.Password,
-		ClientType: req.ClientType,
 		ClientID:   req.ClientId,
+		Token:      req.Token,
+		ClientType: req.ClientType,
 	}
 
 	resp, err := h.AuthHandlerImpl.Authenticate(ctx, authReq)
@@ -254,6 +257,21 @@ func (h *HandlerImpl) SubscribeAcl(ctx context.Context, req *proxypb.SubscribeAc
 	}
 
 	return &proxypb.SubscribeAclResponse{}, nil
+}
+
+// PublishAcl implements ProxyServiceServer.PublishAcl.
+func (h *HandlerImpl) PublishAcl(ctx context.Context, req *proxypb.PublishAclRequest) (*proxypb.PublishAclResponse, error) {
+	slog.DebugContext(ctx, "received publish ACL request",
+		"channel", req.Channel,
+	)
+
+	err := h.ACLHandlerImpl.CheckPublishACL(ctx, req.Channel, req.Token)
+	if err != nil {
+		slog.ErrorContext(ctx, "publish denied by ACL", "error", err)
+		return &proxypb.PublishAclResponse{}, status.Error(codes.PermissionDenied, err.Error())
+	}
+
+	return &proxypb.PublishAclResponse{}, nil
 }
 
 // OnConnected implements ProxyServiceServer.OnConnected.

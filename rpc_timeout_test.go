@@ -46,6 +46,10 @@ func (m *MockSlowProxy) SubscribeAcl(ctx context.Context, req *proxy.SubscribeAc
 	return &proxy.SubscribeAclProxyResponse{}, nil
 }
 
+func (m *MockSlowProxy) PublishAcl(ctx context.Context, req *proxy.PublishAclProxyRequest) (*proxy.PublishAclProxyResponse, error) {
+	return &proxy.PublishAclProxyResponse{}, nil
+}
+
 func (m *MockSlowProxy) OnConnected(ctx context.Context, req *proxy.OnConnectedProxyRequest) (*proxy.OnConnectedProxyResponse, error) {
 	return &proxy.OnConnectedProxyResponse{}, nil
 }

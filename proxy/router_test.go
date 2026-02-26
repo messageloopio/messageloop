@@ -27,6 +27,10 @@ func (m *mockRPCProxy) SubscribeAcl(ctx context.Context, req *SubscribeAclProxyR
 	return &SubscribeAclProxyResponse{}, nil
 }
 
+func (m *mockRPCProxy) PublishAcl(ctx context.Context, req *PublishAclProxyRequest) (*PublishAclProxyResponse, error) {
+	return &PublishAclProxyResponse{}, nil
+}
+
 func (m *mockRPCProxy) OnConnected(ctx context.Context, req *OnConnectedProxyRequest) (*OnConnectedProxyResponse, error) {
 	return &OnConnectedProxyResponse{}, nil
 }

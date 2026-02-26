@@ -130,6 +130,9 @@
       },
       "title": "统一的数据载荷类型"
     },
+    "v1PublishAclResponse": {
+      "type": "object"
+    },
     "v1RPCResponse": {
       "type": "object",
       "properties": {

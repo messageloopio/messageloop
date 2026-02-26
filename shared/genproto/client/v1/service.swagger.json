@@ -28,6 +28,9 @@
         },
         "metadata": {
           "$ref": "#/definitions/v1Metadata"
+        },
+        "token": {
+          "type": "string"
         }
       }
     },

@@ -19,6 +19,9 @@ type Proxy interface {
 	// SubscribeAcl forwards a subscription ACL check request to the backend service.
 	SubscribeAcl(ctx context.Context, req *SubscribeAclProxyRequest) (*SubscribeAclProxyResponse, error)
 
+	// PublishAcl forwards a publish ACL check request to the backend service.
+	PublishAcl(ctx context.Context, req *PublishAclProxyRequest) (*PublishAclProxyResponse, error)
+
 	// OnConnected notifies the backend when a client connects.
 	OnConnected(ctx context.Context, req *OnConnectedProxyRequest) (*OnConnectedProxyResponse, error)
 
@@ -153,19 +156,17 @@ const DefaultRPCTimeout = 30 * time.Second
 
 // AuthenticateProxyRequest represents an authentication request to be proxied.
 type AuthenticateProxyRequest struct {
-	Username   string
-	Password   string
-	ClientType string
 	ClientID   string
+	Token      string
+	ClientType string
 }
 
 // ToProtoRequest converts an AuthenticateProxyRequest to the protobuf AuthenticateRequest.
 func (r *AuthenticateProxyRequest) ToProtoRequest() *proxypb.AuthenticateRequest {
 	return &proxypb.AuthenticateRequest{
-		Username:   r.Username,
-		Password:   r.Password,
-		ClientType: r.ClientType,
 		ClientId:   r.ClientID,
+		Token:      r.Token,
+		ClientType: r.ClientType,
 	}
 }
 
@@ -230,6 +231,33 @@ func FromProtoSubscribeAclResponse(resp *proxypb.SubscribeAclResponse) *Subscrib
 		return &SubscribeAclProxyResponse{}
 	}
 	return &SubscribeAclProxyResponse{}
+}
+
+// PublishAclProxyRequest represents a publish ACL check request to be proxied.
+type PublishAclProxyRequest struct {
+	Channel string
+	Token   string
+}
+
+// ToProtoRequest converts a PublishAclProxyRequest to the protobuf PublishAclRequest.
+func (r *PublishAclProxyRequest) ToProtoRequest() *proxypb.PublishAclRequest {
+	return &proxypb.PublishAclRequest{
+		Channel: r.Channel,
+		Token:   r.Token,
+	}
+}
+
+// PublishAclProxyResponse represents a publish ACL response from the proxy backend.
+type PublishAclProxyResponse struct {
+	Error *sharedpb.Error
+}
+
+// FromProtoPublishAclResponse creates a PublishAclProxyResponse from the protobuf PublishAclResponse.
+func FromProtoPublishAclResponse(resp *proxypb.PublishAclResponse) *PublishAclProxyResponse {
+	if resp == nil {
+		return &PublishAclProxyResponse{}
+	}
+	return &PublishAclProxyResponse{}
 }
 
 // OnConnectedProxyRequest represents a client connected notification to be proxied.
