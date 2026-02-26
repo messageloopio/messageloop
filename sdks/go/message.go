@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 

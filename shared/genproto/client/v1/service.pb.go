@@ -2,9 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.10
 // 	protoc        (unknown)
-// source: v1/service.proto
-
-// buf:lint:ignore PACKAGE_DIRECTORY_MATCH
+// source: client/v1/service.proto
 
 package clientpb
 
@@ -47,7 +45,7 @@ type InboundMessage struct {
 
 func (x *InboundMessage) Reset() {
 	*x = InboundMessage{}
-	mi := &file_v1_service_proto_msgTypes[0]
+	mi := &file_client_v1_service_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -59,7 +57,7 @@ func (x *InboundMessage) String() string {
 func (*InboundMessage) ProtoMessage() {}
 
 func (x *InboundMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_v1_service_proto_msgTypes[0]
+	mi := &file_client_v1_service_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -72,7 +70,7 @@ func (x *InboundMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InboundMessage.ProtoReflect.Descriptor instead.
 func (*InboundMessage) Descriptor() ([]byte, []int) {
-	return file_v1_service_proto_rawDescGZIP(), []int{0}
+	return file_client_v1_service_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *InboundMessage) GetId() string {
@@ -260,7 +258,7 @@ type OutboundMessage struct {
 
 func (x *OutboundMessage) Reset() {
 	*x = OutboundMessage{}
-	mi := &file_v1_service_proto_msgTypes[1]
+	mi := &file_client_v1_service_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -272,7 +270,7 @@ func (x *OutboundMessage) String() string {
 func (*OutboundMessage) ProtoMessage() {}
 
 func (x *OutboundMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_v1_service_proto_msgTypes[1]
+	mi := &file_client_v1_service_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -285,7 +283,7 @@ func (x *OutboundMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OutboundMessage.ProtoReflect.Descriptor instead.
 func (*OutboundMessage) Descriptor() ([]byte, []int) {
-	return file_v1_service_proto_rawDescGZIP(), []int{1}
+	return file_client_v1_service_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *OutboundMessage) GetId() string {
@@ -491,7 +489,7 @@ type Connect struct {
 
 func (x *Connect) Reset() {
 	*x = Connect{}
-	mi := &file_v1_service_proto_msgTypes[2]
+	mi := &file_client_v1_service_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -503,7 +501,7 @@ func (x *Connect) String() string {
 func (*Connect) ProtoMessage() {}
 
 func (x *Connect) ProtoReflect() protoreflect.Message {
-	mi := &file_v1_service_proto_msgTypes[2]
+	mi := &file_client_v1_service_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -516,7 +514,7 @@ func (x *Connect) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Connect.ProtoReflect.Descriptor instead.
 func (*Connect) Descriptor() ([]byte, []int) {
-	return file_v1_service_proto_rawDescGZIP(), []int{2}
+	return file_client_v1_service_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Connect) GetClientId() string {
@@ -565,7 +563,7 @@ type Connected struct {
 
 func (x *Connected) Reset() {
 	*x = Connected{}
-	mi := &file_v1_service_proto_msgTypes[3]
+	mi := &file_client_v1_service_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -577,7 +575,7 @@ func (x *Connected) String() string {
 func (*Connected) ProtoMessage() {}
 
 func (x *Connected) ProtoReflect() protoreflect.Message {
-	mi := &file_v1_service_proto_msgTypes[3]
+	mi := &file_client_v1_service_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -590,7 +588,7 @@ func (x *Connected) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Connected.ProtoReflect.Descriptor instead.
 func (*Connected) Descriptor() ([]byte, []int) {
-	return file_v1_service_proto_rawDescGZIP(), []int{3}
+	return file_client_v1_service_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *Connected) GetSessionId() string {
@@ -625,7 +623,7 @@ type Subscription struct {
 
 func (x *Subscription) Reset() {
 	*x = Subscription{}
-	mi := &file_v1_service_proto_msgTypes[4]
+	mi := &file_client_v1_service_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -637,7 +635,7 @@ func (x *Subscription) String() string {
 func (*Subscription) ProtoMessage() {}
 
 func (x *Subscription) ProtoReflect() protoreflect.Message {
-	mi := &file_v1_service_proto_msgTypes[4]
+	mi := &file_client_v1_service_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -650,7 +648,7 @@ func (x *Subscription) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Subscription.ProtoReflect.Descriptor instead.
 func (*Subscription) Descriptor() ([]byte, []int) {
-	return file_v1_service_proto_rawDescGZIP(), []int{4}
+	return file_client_v1_service_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *Subscription) GetChannel() string {
@@ -683,7 +681,7 @@ type Subscribe struct {
 
 func (x *Subscribe) Reset() {
 	*x = Subscribe{}
-	mi := &file_v1_service_proto_msgTypes[5]
+	mi := &file_client_v1_service_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -695,7 +693,7 @@ func (x *Subscribe) String() string {
 func (*Subscribe) ProtoMessage() {}
 
 func (x *Subscribe) ProtoReflect() protoreflect.Message {
-	mi := &file_v1_service_proto_msgTypes[5]
+	mi := &file_client_v1_service_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -708,7 +706,7 @@ func (x *Subscribe) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Subscribe.ProtoReflect.Descriptor instead.
 func (*Subscribe) Descriptor() ([]byte, []int) {
-	return file_v1_service_proto_rawDescGZIP(), []int{5}
+	return file_client_v1_service_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *Subscribe) GetSubscriptions() []*Subscription {
@@ -727,7 +725,7 @@ type SubscribeAck struct {
 
 func (x *SubscribeAck) Reset() {
 	*x = SubscribeAck{}
-	mi := &file_v1_service_proto_msgTypes[6]
+	mi := &file_client_v1_service_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -739,7 +737,7 @@ func (x *SubscribeAck) String() string {
 func (*SubscribeAck) ProtoMessage() {}
 
 func (x *SubscribeAck) ProtoReflect() protoreflect.Message {
-	mi := &file_v1_service_proto_msgTypes[6]
+	mi := &file_client_v1_service_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -752,7 +750,7 @@ func (x *SubscribeAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubscribeAck.ProtoReflect.Descriptor instead.
 func (*SubscribeAck) Descriptor() ([]byte, []int) {
-	return file_v1_service_proto_rawDescGZIP(), []int{6}
+	return file_client_v1_service_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *SubscribeAck) GetSubscriptions() []*Subscription {
@@ -771,7 +769,7 @@ type Unsubscribe struct {
 
 func (x *Unsubscribe) Reset() {
 	*x = Unsubscribe{}
-	mi := &file_v1_service_proto_msgTypes[7]
+	mi := &file_client_v1_service_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -783,7 +781,7 @@ func (x *Unsubscribe) String() string {
 func (*Unsubscribe) ProtoMessage() {}
 
 func (x *Unsubscribe) ProtoReflect() protoreflect.Message {
-	mi := &file_v1_service_proto_msgTypes[7]
+	mi := &file_client_v1_service_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -796,7 +794,7 @@ func (x *Unsubscribe) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Unsubscribe.ProtoReflect.Descriptor instead.
 func (*Unsubscribe) Descriptor() ([]byte, []int) {
-	return file_v1_service_proto_rawDescGZIP(), []int{7}
+	return file_client_v1_service_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *Unsubscribe) GetSubscriptions() []*Subscription {
@@ -815,7 +813,7 @@ type UnsubscribeAck struct {
 
 func (x *UnsubscribeAck) Reset() {
 	*x = UnsubscribeAck{}
-	mi := &file_v1_service_proto_msgTypes[8]
+	mi := &file_client_v1_service_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -827,7 +825,7 @@ func (x *UnsubscribeAck) String() string {
 func (*UnsubscribeAck) ProtoMessage() {}
 
 func (x *UnsubscribeAck) ProtoReflect() protoreflect.Message {
-	mi := &file_v1_service_proto_msgTypes[8]
+	mi := &file_client_v1_service_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -840,7 +838,7 @@ func (x *UnsubscribeAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnsubscribeAck.ProtoReflect.Descriptor instead.
 func (*UnsubscribeAck) Descriptor() ([]byte, []int) {
-	return file_v1_service_proto_rawDescGZIP(), []int{8}
+	return file_client_v1_service_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *UnsubscribeAck) GetSubscriptions() []*Subscription {
@@ -861,7 +859,7 @@ type Publish struct {
 
 func (x *Publish) Reset() {
 	*x = Publish{}
-	mi := &file_v1_service_proto_msgTypes[9]
+	mi := &file_client_v1_service_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -873,7 +871,7 @@ func (x *Publish) String() string {
 func (*Publish) ProtoMessage() {}
 
 func (x *Publish) ProtoReflect() protoreflect.Message {
-	mi := &file_v1_service_proto_msgTypes[9]
+	mi := &file_client_v1_service_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -886,7 +884,7 @@ func (x *Publish) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Publish.ProtoReflect.Descriptor instead.
 func (*Publish) Descriptor() ([]byte, []int) {
-	return file_v1_service_proto_rawDescGZIP(), []int{9}
+	return file_client_v1_service_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *Publish) GetChannel() string {
@@ -920,7 +918,7 @@ type PublishAck struct {
 
 func (x *PublishAck) Reset() {
 	*x = PublishAck{}
-	mi := &file_v1_service_proto_msgTypes[10]
+	mi := &file_client_v1_service_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -932,7 +930,7 @@ func (x *PublishAck) String() string {
 func (*PublishAck) ProtoMessage() {}
 
 func (x *PublishAck) ProtoReflect() protoreflect.Message {
-	mi := &file_v1_service_proto_msgTypes[10]
+	mi := &file_client_v1_service_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -945,7 +943,7 @@ func (x *PublishAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PublishAck.ProtoReflect.Descriptor instead.
 func (*PublishAck) Descriptor() ([]byte, []int) {
-	return file_v1_service_proto_rawDescGZIP(), []int{10}
+	return file_client_v1_service_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *PublishAck) GetId() string {
@@ -975,7 +973,7 @@ type Message struct {
 
 func (x *Message) Reset() {
 	*x = Message{}
-	mi := &file_v1_service_proto_msgTypes[11]
+	mi := &file_client_v1_service_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -987,7 +985,7 @@ func (x *Message) String() string {
 func (*Message) ProtoMessage() {}
 
 func (x *Message) ProtoReflect() protoreflect.Message {
-	mi := &file_v1_service_proto_msgTypes[11]
+	mi := &file_client_v1_service_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1000,7 +998,7 @@ func (x *Message) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Message.ProtoReflect.Descriptor instead.
 func (*Message) Descriptor() ([]byte, []int) {
-	return file_v1_service_proto_rawDescGZIP(), []int{11}
+	return file_client_v1_service_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *Message) GetId() string {
@@ -1047,7 +1045,7 @@ type Publication struct {
 
 func (x *Publication) Reset() {
 	*x = Publication{}
-	mi := &file_v1_service_proto_msgTypes[12]
+	mi := &file_client_v1_service_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1059,7 +1057,7 @@ func (x *Publication) String() string {
 func (*Publication) ProtoMessage() {}
 
 func (x *Publication) ProtoReflect() protoreflect.Message {
-	mi := &file_v1_service_proto_msgTypes[12]
+	mi := &file_client_v1_service_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1072,7 +1070,7 @@ func (x *Publication) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Publication.ProtoReflect.Descriptor instead.
 func (*Publication) Descriptor() ([]byte, []int) {
-	return file_v1_service_proto_rawDescGZIP(), []int{12}
+	return file_client_v1_service_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *Publication) GetMessages() []*Message {
@@ -1094,7 +1092,7 @@ type RpcRequest struct {
 
 func (x *RpcRequest) Reset() {
 	*x = RpcRequest{}
-	mi := &file_v1_service_proto_msgTypes[13]
+	mi := &file_client_v1_service_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1106,7 +1104,7 @@ func (x *RpcRequest) String() string {
 func (*RpcRequest) ProtoMessage() {}
 
 func (x *RpcRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_v1_service_proto_msgTypes[13]
+	mi := &file_client_v1_service_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1119,7 +1117,7 @@ func (x *RpcRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RpcRequest.ProtoReflect.Descriptor instead.
 func (*RpcRequest) Descriptor() ([]byte, []int) {
-	return file_v1_service_proto_rawDescGZIP(), []int{13}
+	return file_client_v1_service_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *RpcRequest) GetChannel() string {
@@ -1162,7 +1160,7 @@ type RpcReply struct {
 
 func (x *RpcReply) Reset() {
 	*x = RpcReply{}
-	mi := &file_v1_service_proto_msgTypes[14]
+	mi := &file_client_v1_service_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1174,7 +1172,7 @@ func (x *RpcReply) String() string {
 func (*RpcReply) ProtoMessage() {}
 
 func (x *RpcReply) ProtoReflect() protoreflect.Message {
-	mi := &file_v1_service_proto_msgTypes[14]
+	mi := &file_client_v1_service_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1187,7 +1185,7 @@ func (x *RpcReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RpcReply.ProtoReflect.Descriptor instead.
 func (*RpcReply) Descriptor() ([]byte, []int) {
-	return file_v1_service_proto_rawDescGZIP(), []int{14}
+	return file_client_v1_service_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *RpcReply) GetRequestId() string {
@@ -1227,7 +1225,7 @@ type SubRefresh struct {
 
 func (x *SubRefresh) Reset() {
 	*x = SubRefresh{}
-	mi := &file_v1_service_proto_msgTypes[15]
+	mi := &file_client_v1_service_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1239,7 +1237,7 @@ func (x *SubRefresh) String() string {
 func (*SubRefresh) ProtoMessage() {}
 
 func (x *SubRefresh) ProtoReflect() protoreflect.Message {
-	mi := &file_v1_service_proto_msgTypes[15]
+	mi := &file_client_v1_service_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1252,7 +1250,7 @@ func (x *SubRefresh) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubRefresh.ProtoReflect.Descriptor instead.
 func (*SubRefresh) Descriptor() ([]byte, []int) {
-	return file_v1_service_proto_rawDescGZIP(), []int{15}
+	return file_client_v1_service_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *SubRefresh) GetChannels() []string {
@@ -1270,7 +1268,7 @@ type SubRefreshAck struct {
 
 func (x *SubRefreshAck) Reset() {
 	*x = SubRefreshAck{}
-	mi := &file_v1_service_proto_msgTypes[16]
+	mi := &file_client_v1_service_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1282,7 +1280,7 @@ func (x *SubRefreshAck) String() string {
 func (*SubRefreshAck) ProtoMessage() {}
 
 func (x *SubRefreshAck) ProtoReflect() protoreflect.Message {
-	mi := &file_v1_service_proto_msgTypes[16]
+	mi := &file_client_v1_service_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1295,7 +1293,7 @@ func (x *SubRefreshAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubRefreshAck.ProtoReflect.Descriptor instead.
 func (*SubRefreshAck) Descriptor() ([]byte, []int) {
-	return file_v1_service_proto_rawDescGZIP(), []int{16}
+	return file_client_v1_service_proto_rawDescGZIP(), []int{16}
 }
 
 type SurveyRequest struct {
@@ -1309,7 +1307,7 @@ type SurveyRequest struct {
 
 func (x *SurveyRequest) Reset() {
 	*x = SurveyRequest{}
-	mi := &file_v1_service_proto_msgTypes[17]
+	mi := &file_client_v1_service_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1321,7 +1319,7 @@ func (x *SurveyRequest) String() string {
 func (*SurveyRequest) ProtoMessage() {}
 
 func (x *SurveyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_v1_service_proto_msgTypes[17]
+	mi := &file_client_v1_service_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1334,7 +1332,7 @@ func (x *SurveyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SurveyRequest.ProtoReflect.Descriptor instead.
 func (*SurveyRequest) Descriptor() ([]byte, []int) {
-	return file_v1_service_proto_rawDescGZIP(), []int{17}
+	return file_client_v1_service_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *SurveyRequest) GetRequestId() string {
@@ -1370,7 +1368,7 @@ type SurveyReply struct {
 
 func (x *SurveyReply) Reset() {
 	*x = SurveyReply{}
-	mi := &file_v1_service_proto_msgTypes[18]
+	mi := &file_client_v1_service_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1382,7 +1380,7 @@ func (x *SurveyReply) String() string {
 func (*SurveyReply) ProtoMessage() {}
 
 func (x *SurveyReply) ProtoReflect() protoreflect.Message {
-	mi := &file_v1_service_proto_msgTypes[18]
+	mi := &file_client_v1_service_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1395,7 +1393,7 @@ func (x *SurveyReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SurveyReply.ProtoReflect.Descriptor instead.
 func (*SurveyReply) Descriptor() ([]byte, []int) {
-	return file_v1_service_proto_rawDescGZIP(), []int{18}
+	return file_client_v1_service_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *SurveyReply) GetRequestId() string {
@@ -1434,7 +1432,7 @@ type Ping struct {
 
 func (x *Ping) Reset() {
 	*x = Ping{}
-	mi := &file_v1_service_proto_msgTypes[19]
+	mi := &file_client_v1_service_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1446,7 +1444,7 @@ func (x *Ping) String() string {
 func (*Ping) ProtoMessage() {}
 
 func (x *Ping) ProtoReflect() protoreflect.Message {
-	mi := &file_v1_service_proto_msgTypes[19]
+	mi := &file_client_v1_service_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1459,7 +1457,7 @@ func (x *Ping) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Ping.ProtoReflect.Descriptor instead.
 func (*Ping) Descriptor() ([]byte, []int) {
-	return file_v1_service_proto_rawDescGZIP(), []int{19}
+	return file_client_v1_service_proto_rawDescGZIP(), []int{19}
 }
 
 type Pong struct {
@@ -1470,7 +1468,7 @@ type Pong struct {
 
 func (x *Pong) Reset() {
 	*x = Pong{}
-	mi := &file_v1_service_proto_msgTypes[20]
+	mi := &file_client_v1_service_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1482,7 +1480,7 @@ func (x *Pong) String() string {
 func (*Pong) ProtoMessage() {}
 
 func (x *Pong) ProtoReflect() protoreflect.Message {
-	mi := &file_v1_service_proto_msgTypes[20]
+	mi := &file_client_v1_service_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1495,70 +1493,70 @@ func (x *Pong) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Pong.ProtoReflect.Descriptor instead.
 func (*Pong) Descriptor() ([]byte, []int) {
-	return file_v1_service_proto_rawDescGZIP(), []int{20}
+	return file_client_v1_service_proto_rawDescGZIP(), []int{20}
 }
 
-var File_v1_service_proto protoreflect.FileDescriptor
+var File_client_v1_service_proto protoreflect.FileDescriptor
 
-const file_v1_service_proto_rawDesc = "" +
+const file_client_v1_service_proto_rawDesc = "" +
 	"\n" +
-	"\x10v1/service.proto\x12\x0emessageloop.v1\x1a\x15shared/v1/types.proto\x1a\x16shared/v1/errors.proto\"\xde\x04\n" +
+	"\x17client/v1/service.proto\x12\x15messageloop.client.v1\x1a\x15shared/v1/types.proto\x1a\x16shared/v1/errors.proto\"\x9d\x05\n" +
 	"\x0eInboundMessage\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
-	"\x04time\x18\x02 \x01(\x04R\x04time\x123\n" +
-	"\aconnect\x18\x03 \x01(\v2\x17.messageloop.v1.ConnectH\x00R\aconnect\x129\n" +
-	"\tsubscribe\x18\x04 \x01(\v2\x19.messageloop.v1.SubscribeH\x00R\tsubscribe\x12?\n" +
-	"\vunsubscribe\x18\x05 \x01(\v2\x1b.messageloop.v1.UnsubscribeH\x00R\vunsubscribe\x123\n" +
-	"\apublish\x18\x06 \x01(\v2\x17.messageloop.v1.PublishH\x00R\apublish\x12>\n" +
-	"\vrpc_request\x18\a \x01(\v2\x1a.messageloop.v1.RpcRequestH\x00R\vrpc_request\x12>\n" +
-	"\vsub_refresh\x18\b \x01(\v2\x1a.messageloop.v1.SubRefreshH\x00R\vsub_refresh\x12G\n" +
-	"\x0esurvey_request\x18\t \x01(\v2\x1d.messageloop.v1.SurveyRequestH\x00R\x0esurvey_request\x12A\n" +
+	"\x04time\x18\x02 \x01(\x04R\x04time\x12:\n" +
+	"\aconnect\x18\x03 \x01(\v2\x1e.messageloop.client.v1.ConnectH\x00R\aconnect\x12@\n" +
+	"\tsubscribe\x18\x04 \x01(\v2 .messageloop.client.v1.SubscribeH\x00R\tsubscribe\x12F\n" +
+	"\vunsubscribe\x18\x05 \x01(\v2\".messageloop.client.v1.UnsubscribeH\x00R\vunsubscribe\x12:\n" +
+	"\apublish\x18\x06 \x01(\v2\x1e.messageloop.client.v1.PublishH\x00R\apublish\x12E\n" +
+	"\vrpc_request\x18\a \x01(\v2!.messageloop.client.v1.RpcRequestH\x00R\vrpc_request\x12E\n" +
+	"\vsub_refresh\x18\b \x01(\v2!.messageloop.client.v1.SubRefreshH\x00R\vsub_refresh\x12N\n" +
+	"\x0esurvey_request\x18\t \x01(\v2$.messageloop.client.v1.SurveyRequestH\x00R\x0esurvey_request\x12H\n" +
 	"\fsurvey_reply\x18\n" +
-	" \x01(\v2\x1b.messageloop.v1.SurveyReplyH\x00R\fsurvey_reply\x12*\n" +
-	"\x04ping\x18\v \x01(\v2\x14.messageloop.v1.PingH\x00R\x04pingB\n" +
+	" \x01(\v2\".messageloop.client.v1.SurveyReplyH\x00R\fsurvey_reply\x121\n" +
+	"\x04ping\x18\v \x01(\v2\x1b.messageloop.client.v1.PingH\x00R\x04pingB\n" +
 	"\n" +
-	"\benvelope\"\x82\x06\n" +
+	"\benvelope\"\xc8\x06\n" +
 	"\x0fOutboundMessage\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04time\x18\x02 \x01(\x04R\x04time\x124\n" +
-	"\x05error\x18\x03 \x01(\v2\x1c.messageloop.shared.v1.ErrorH\x00R\x05error\x129\n" +
-	"\tconnected\x18\x04 \x01(\v2\x19.messageloop.v1.ConnectedH\x00R\tconnected\x12D\n" +
-	"\rsubscribe_ack\x18\x05 \x01(\v2\x1c.messageloop.v1.SubscribeAckH\x00R\rsubscribe_ack\x12J\n" +
-	"\x0funsubscribe_ack\x18\x06 \x01(\v2\x1e.messageloop.v1.UnsubscribeAckH\x00R\x0funsubscribe_ack\x12>\n" +
-	"\vpublish_ack\x18\a \x01(\v2\x1a.messageloop.v1.PublishAckH\x00R\vpublish_ack\x12?\n" +
-	"\vpublication\x18\b \x01(\v2\x1b.messageloop.v1.PublicationH\x00R\vpublication\x128\n" +
-	"\trpc_reply\x18\t \x01(\v2\x18.messageloop.v1.RpcReplyH\x00R\trpc_reply\x12I\n" +
+	"\x05error\x18\x03 \x01(\v2\x1c.messageloop.shared.v1.ErrorH\x00R\x05error\x12@\n" +
+	"\tconnected\x18\x04 \x01(\v2 .messageloop.client.v1.ConnectedH\x00R\tconnected\x12K\n" +
+	"\rsubscribe_ack\x18\x05 \x01(\v2#.messageloop.client.v1.SubscribeAckH\x00R\rsubscribe_ack\x12Q\n" +
+	"\x0funsubscribe_ack\x18\x06 \x01(\v2%.messageloop.client.v1.UnsubscribeAckH\x00R\x0funsubscribe_ack\x12E\n" +
+	"\vpublish_ack\x18\a \x01(\v2!.messageloop.client.v1.PublishAckH\x00R\vpublish_ack\x12F\n" +
+	"\vpublication\x18\b \x01(\v2\".messageloop.client.v1.PublicationH\x00R\vpublication\x12?\n" +
+	"\trpc_reply\x18\t \x01(\v2\x1f.messageloop.client.v1.RpcReplyH\x00R\trpc_reply\x12P\n" +
 	"\x0fsub_refresh_ack\x18\n" +
-	" \x01(\v2\x1d.messageloop.v1.SubRefreshAckH\x00R\x0fsub_refresh_ack\x12G\n" +
-	"\x0esurvey_request\x18\v \x01(\v2\x1d.messageloop.v1.SurveyRequestH\x00R\x0esurvey_request\x12A\n" +
-	"\fsurvey_reply\x18\f \x01(\v2\x1b.messageloop.v1.SurveyReplyH\x00R\fsurvey_reply\x12*\n" +
-	"\x04pong\x18\r \x01(\v2\x14.messageloop.v1.PongH\x00R\x04pongB\n" +
+	" \x01(\v2$.messageloop.client.v1.SubRefreshAckH\x00R\x0fsub_refresh_ack\x12N\n" +
+	"\x0esurvey_request\x18\v \x01(\v2$.messageloop.client.v1.SurveyRequestH\x00R\x0esurvey_request\x12H\n" +
+	"\fsurvey_reply\x18\f \x01(\v2\".messageloop.client.v1.SurveyReplyH\x00R\fsurvey_reply\x121\n" +
+	"\x04pong\x18\r \x01(\v2\x1b.messageloop.client.v1.PongH\x00R\x04pongB\n" +
 	"\n" +
-	"\benvelope\"\xbd\x01\n" +
+	"\benvelope\"\xc4\x01\n" +
 	"\aConnect\x12\x1c\n" +
 	"\tclient_id\x18\x01 \x01(\tR\tclient_id\x12 \n" +
 	"\vclient_type\x18\x02 \x01(\tR\vclient_type\x12\x14\n" +
 	"\x05token\x18\x03 \x01(\tR\x05token\x12\x18\n" +
-	"\aversion\x18\x04 \x01(\tR\aversion\x12B\n" +
-	"\rsubscriptions\x18\x05 \x03(\v2\x1c.messageloop.v1.SubscriptionR\rsubscriptions\"\xb0\x01\n" +
+	"\aversion\x18\x04 \x01(\tR\aversion\x12I\n" +
+	"\rsubscriptions\x18\x05 \x03(\v2#.messageloop.client.v1.SubscriptionR\rsubscriptions\"\xbe\x01\n" +
 	"\tConnected\x12\x1e\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\n" +
-	"session_id\x12B\n" +
-	"\rsubscriptions\x18\x02 \x03(\v2\x1c.messageloop.v1.SubscriptionR\rsubscriptions\x12?\n" +
-	"\fpublications\x18\x03 \x03(\v2\x1b.messageloop.v1.PublicationR\fpublications\"\\\n" +
+	"session_id\x12I\n" +
+	"\rsubscriptions\x18\x02 \x03(\v2#.messageloop.client.v1.SubscriptionR\rsubscriptions\x12F\n" +
+	"\fpublications\x18\x03 \x03(\v2\".messageloop.client.v1.PublicationR\fpublications\"\\\n" +
 	"\fSubscription\x12\x18\n" +
 	"\achannel\x18\x01 \x01(\tR\achannel\x12\x1c\n" +
 	"\tephemeral\x18\x02 \x01(\bR\tephemeral\x12\x14\n" +
-	"\x05token\x18\x03 \x01(\tR\x05token\"O\n" +
-	"\tSubscribe\x12B\n" +
-	"\rsubscriptions\x18\x01 \x03(\v2\x1c.messageloop.v1.SubscriptionR\rsubscriptions\"R\n" +
-	"\fSubscribeAck\x12B\n" +
-	"\rsubscriptions\x18\x01 \x03(\v2\x1c.messageloop.v1.SubscriptionR\rsubscriptions\"Q\n" +
-	"\vUnsubscribe\x12B\n" +
-	"\rsubscriptions\x18\x01 \x03(\v2\x1c.messageloop.v1.SubscriptionR\rsubscriptions\"T\n" +
-	"\x0eUnsubscribeAck\x12B\n" +
-	"\rsubscriptions\x18\x01 \x03(\v2\x1c.messageloop.v1.SubscriptionR\rsubscriptions\"\x9a\x01\n" +
+	"\x05token\x18\x03 \x01(\tR\x05token\"V\n" +
+	"\tSubscribe\x12I\n" +
+	"\rsubscriptions\x18\x01 \x03(\v2#.messageloop.client.v1.SubscriptionR\rsubscriptions\"Y\n" +
+	"\fSubscribeAck\x12I\n" +
+	"\rsubscriptions\x18\x01 \x03(\v2#.messageloop.client.v1.SubscriptionR\rsubscriptions\"X\n" +
+	"\vUnsubscribe\x12I\n" +
+	"\rsubscriptions\x18\x01 \x03(\v2#.messageloop.client.v1.SubscriptionR\rsubscriptions\"[\n" +
+	"\x0eUnsubscribeAck\x12I\n" +
+	"\rsubscriptions\x18\x01 \x03(\v2#.messageloop.client.v1.SubscriptionR\rsubscriptions\"\x9a\x01\n" +
 	"\aPublish\x12\x18\n" +
 	"\achannel\x18\x01 \x01(\tR\achannel\x128\n" +
 	"\apayload\x18\x02 \x01(\v2\x1e.messageloop.shared.v1.PayloadR\apayload\x12;\n" +
@@ -1572,9 +1570,9 @@ const file_v1_service_proto_rawDesc = "" +
 	"\achannel\x18\x02 \x01(\tR\achannel\x12\x16\n" +
 	"\x06offset\x18\x03 \x01(\x04R\x06offset\x128\n" +
 	"\apayload\x18\x04 \x01(\v2\x1e.messageloop.shared.v1.PayloadR\apayload\x12;\n" +
-	"\bmetadata\x18\x05 \x01(\v2\x1f.messageloop.shared.v1.MetadataR\bmetadata\"B\n" +
-	"\vPublication\x123\n" +
-	"\bmessages\x18\x01 \x03(\v2\x17.messageloop.v1.MessageR\bmessages\"\xb5\x01\n" +
+	"\bmetadata\x18\x05 \x01(\v2\x1f.messageloop.shared.v1.MetadataR\bmetadata\"I\n" +
+	"\vPublication\x12:\n" +
+	"\bmessages\x18\x01 \x03(\v2\x1e.messageloop.client.v1.MessageR\bmessages\"\xb5\x01\n" +
 	"\n" +
 	"RpcRequest\x12\x18\n" +
 	"\achannel\x18\x01 \x01(\tR\achannel\x12\x16\n" +
@@ -1606,94 +1604,94 @@ const file_v1_service_proto_rawDesc = "" +
 	"\bmetadata\x18\x03 \x01(\v2\x1f.messageloop.shared.v1.MetadataR\bmetadata\x122\n" +
 	"\x05error\x18\x04 \x01(\v2\x1c.messageloop.shared.v1.ErrorR\x05error\"\x06\n" +
 	"\x04Ping\"\x06\n" +
-	"\x04Pong2h\n" +
-	"\x12MessageLoopService\x12R\n" +
-	"\vMessageLoop\x12\x1e.messageloop.v1.InboundMessage\x1a\x1f.messageloop.v1.OutboundMessage(\x010\x01BLZJgithub.com/messageloopio/messageloop/shared/genproto/go/client/v1;clientpbb\x06proto3"
+	"\x04Pong2v\n" +
+	"\x12MessageLoopService\x12`\n" +
+	"\vMessageLoop\x12%.messageloop.client.v1.InboundMessage\x1a&.messageloop.client.v1.OutboundMessage(\x010\x01BBZ@github.com/messageloopio/messageloop/genproto/client/v1;clientpbb\x06proto3"
 
 var (
-	file_v1_service_proto_rawDescOnce sync.Once
-	file_v1_service_proto_rawDescData []byte
+	file_client_v1_service_proto_rawDescOnce sync.Once
+	file_client_v1_service_proto_rawDescData []byte
 )
 
-func file_v1_service_proto_rawDescGZIP() []byte {
-	file_v1_service_proto_rawDescOnce.Do(func() {
-		file_v1_service_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_v1_service_proto_rawDesc), len(file_v1_service_proto_rawDesc)))
+func file_client_v1_service_proto_rawDescGZIP() []byte {
+	file_client_v1_service_proto_rawDescOnce.Do(func() {
+		file_client_v1_service_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_client_v1_service_proto_rawDesc), len(file_client_v1_service_proto_rawDesc)))
 	})
-	return file_v1_service_proto_rawDescData
+	return file_client_v1_service_proto_rawDescData
 }
 
-var file_v1_service_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
-var file_v1_service_proto_goTypes = []any{
-	(*InboundMessage)(nil),  // 0: messageloop.v1.InboundMessage
-	(*OutboundMessage)(nil), // 1: messageloop.v1.OutboundMessage
-	(*Connect)(nil),         // 2: messageloop.v1.Connect
-	(*Connected)(nil),       // 3: messageloop.v1.Connected
-	(*Subscription)(nil),    // 4: messageloop.v1.Subscription
-	(*Subscribe)(nil),       // 5: messageloop.v1.Subscribe
-	(*SubscribeAck)(nil),    // 6: messageloop.v1.SubscribeAck
-	(*Unsubscribe)(nil),     // 7: messageloop.v1.Unsubscribe
-	(*UnsubscribeAck)(nil),  // 8: messageloop.v1.UnsubscribeAck
-	(*Publish)(nil),         // 9: messageloop.v1.Publish
-	(*PublishAck)(nil),      // 10: messageloop.v1.PublishAck
-	(*Message)(nil),         // 11: messageloop.v1.Message
-	(*Publication)(nil),     // 12: messageloop.v1.Publication
-	(*RpcRequest)(nil),      // 13: messageloop.v1.RpcRequest
-	(*RpcReply)(nil),        // 14: messageloop.v1.RpcReply
-	(*SubRefresh)(nil),      // 15: messageloop.v1.SubRefresh
-	(*SubRefreshAck)(nil),   // 16: messageloop.v1.SubRefreshAck
-	(*SurveyRequest)(nil),   // 17: messageloop.v1.SurveyRequest
-	(*SurveyReply)(nil),     // 18: messageloop.v1.SurveyReply
-	(*Ping)(nil),            // 19: messageloop.v1.Ping
-	(*Pong)(nil),            // 20: messageloop.v1.Pong
+var file_client_v1_service_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
+var file_client_v1_service_proto_goTypes = []any{
+	(*InboundMessage)(nil),  // 0: messageloop.client.v1.InboundMessage
+	(*OutboundMessage)(nil), // 1: messageloop.client.v1.OutboundMessage
+	(*Connect)(nil),         // 2: messageloop.client.v1.Connect
+	(*Connected)(nil),       // 3: messageloop.client.v1.Connected
+	(*Subscription)(nil),    // 4: messageloop.client.v1.Subscription
+	(*Subscribe)(nil),       // 5: messageloop.client.v1.Subscribe
+	(*SubscribeAck)(nil),    // 6: messageloop.client.v1.SubscribeAck
+	(*Unsubscribe)(nil),     // 7: messageloop.client.v1.Unsubscribe
+	(*UnsubscribeAck)(nil),  // 8: messageloop.client.v1.UnsubscribeAck
+	(*Publish)(nil),         // 9: messageloop.client.v1.Publish
+	(*PublishAck)(nil),      // 10: messageloop.client.v1.PublishAck
+	(*Message)(nil),         // 11: messageloop.client.v1.Message
+	(*Publication)(nil),     // 12: messageloop.client.v1.Publication
+	(*RpcRequest)(nil),      // 13: messageloop.client.v1.RpcRequest
+	(*RpcReply)(nil),        // 14: messageloop.client.v1.RpcReply
+	(*SubRefresh)(nil),      // 15: messageloop.client.v1.SubRefresh
+	(*SubRefreshAck)(nil),   // 16: messageloop.client.v1.SubRefreshAck
+	(*SurveyRequest)(nil),   // 17: messageloop.client.v1.SurveyRequest
+	(*SurveyReply)(nil),     // 18: messageloop.client.v1.SurveyReply
+	(*Ping)(nil),            // 19: messageloop.client.v1.Ping
+	(*Pong)(nil),            // 20: messageloop.client.v1.Pong
 	(*v1.Error)(nil),        // 21: messageloop.shared.v1.Error
 	(*v1.Payload)(nil),      // 22: messageloop.shared.v1.Payload
 	(*v1.Metadata)(nil),     // 23: messageloop.shared.v1.Metadata
 }
-var file_v1_service_proto_depIdxs = []int32{
-	2,  // 0: messageloop.v1.InboundMessage.connect:type_name -> messageloop.v1.Connect
-	5,  // 1: messageloop.v1.InboundMessage.subscribe:type_name -> messageloop.v1.Subscribe
-	7,  // 2: messageloop.v1.InboundMessage.unsubscribe:type_name -> messageloop.v1.Unsubscribe
-	9,  // 3: messageloop.v1.InboundMessage.publish:type_name -> messageloop.v1.Publish
-	13, // 4: messageloop.v1.InboundMessage.rpc_request:type_name -> messageloop.v1.RpcRequest
-	15, // 5: messageloop.v1.InboundMessage.sub_refresh:type_name -> messageloop.v1.SubRefresh
-	17, // 6: messageloop.v1.InboundMessage.survey_request:type_name -> messageloop.v1.SurveyRequest
-	18, // 7: messageloop.v1.InboundMessage.survey_reply:type_name -> messageloop.v1.SurveyReply
-	19, // 8: messageloop.v1.InboundMessage.ping:type_name -> messageloop.v1.Ping
-	21, // 9: messageloop.v1.OutboundMessage.error:type_name -> messageloop.shared.v1.Error
-	3,  // 10: messageloop.v1.OutboundMessage.connected:type_name -> messageloop.v1.Connected
-	6,  // 11: messageloop.v1.OutboundMessage.subscribe_ack:type_name -> messageloop.v1.SubscribeAck
-	8,  // 12: messageloop.v1.OutboundMessage.unsubscribe_ack:type_name -> messageloop.v1.UnsubscribeAck
-	10, // 13: messageloop.v1.OutboundMessage.publish_ack:type_name -> messageloop.v1.PublishAck
-	12, // 14: messageloop.v1.OutboundMessage.publication:type_name -> messageloop.v1.Publication
-	14, // 15: messageloop.v1.OutboundMessage.rpc_reply:type_name -> messageloop.v1.RpcReply
-	16, // 16: messageloop.v1.OutboundMessage.sub_refresh_ack:type_name -> messageloop.v1.SubRefreshAck
-	17, // 17: messageloop.v1.OutboundMessage.survey_request:type_name -> messageloop.v1.SurveyRequest
-	18, // 18: messageloop.v1.OutboundMessage.survey_reply:type_name -> messageloop.v1.SurveyReply
-	20, // 19: messageloop.v1.OutboundMessage.pong:type_name -> messageloop.v1.Pong
-	4,  // 20: messageloop.v1.Connect.subscriptions:type_name -> messageloop.v1.Subscription
-	4,  // 21: messageloop.v1.Connected.subscriptions:type_name -> messageloop.v1.Subscription
-	12, // 22: messageloop.v1.Connected.publications:type_name -> messageloop.v1.Publication
-	4,  // 23: messageloop.v1.Subscribe.subscriptions:type_name -> messageloop.v1.Subscription
-	4,  // 24: messageloop.v1.SubscribeAck.subscriptions:type_name -> messageloop.v1.Subscription
-	4,  // 25: messageloop.v1.Unsubscribe.subscriptions:type_name -> messageloop.v1.Subscription
-	4,  // 26: messageloop.v1.UnsubscribeAck.subscriptions:type_name -> messageloop.v1.Subscription
-	22, // 27: messageloop.v1.Publish.payload:type_name -> messageloop.shared.v1.Payload
-	23, // 28: messageloop.v1.Publish.metadata:type_name -> messageloop.shared.v1.Metadata
-	22, // 29: messageloop.v1.Message.payload:type_name -> messageloop.shared.v1.Payload
-	23, // 30: messageloop.v1.Message.metadata:type_name -> messageloop.shared.v1.Metadata
-	11, // 31: messageloop.v1.Publication.messages:type_name -> messageloop.v1.Message
-	22, // 32: messageloop.v1.RpcRequest.payload:type_name -> messageloop.shared.v1.Payload
-	23, // 33: messageloop.v1.RpcRequest.metadata:type_name -> messageloop.shared.v1.Metadata
-	22, // 34: messageloop.v1.RpcReply.payload:type_name -> messageloop.shared.v1.Payload
-	23, // 35: messageloop.v1.RpcReply.metadata:type_name -> messageloop.shared.v1.Metadata
-	21, // 36: messageloop.v1.RpcReply.error:type_name -> messageloop.shared.v1.Error
-	22, // 37: messageloop.v1.SurveyRequest.payload:type_name -> messageloop.shared.v1.Payload
-	23, // 38: messageloop.v1.SurveyRequest.metadata:type_name -> messageloop.shared.v1.Metadata
-	22, // 39: messageloop.v1.SurveyReply.payload:type_name -> messageloop.shared.v1.Payload
-	23, // 40: messageloop.v1.SurveyReply.metadata:type_name -> messageloop.shared.v1.Metadata
-	21, // 41: messageloop.v1.SurveyReply.error:type_name -> messageloop.shared.v1.Error
-	0,  // 42: messageloop.v1.MessageLoopService.MessageLoop:input_type -> messageloop.v1.InboundMessage
-	1,  // 43: messageloop.v1.MessageLoopService.MessageLoop:output_type -> messageloop.v1.OutboundMessage
+var file_client_v1_service_proto_depIdxs = []int32{
+	2,  // 0: messageloop.client.v1.InboundMessage.connect:type_name -> messageloop.client.v1.Connect
+	5,  // 1: messageloop.client.v1.InboundMessage.subscribe:type_name -> messageloop.client.v1.Subscribe
+	7,  // 2: messageloop.client.v1.InboundMessage.unsubscribe:type_name -> messageloop.client.v1.Unsubscribe
+	9,  // 3: messageloop.client.v1.InboundMessage.publish:type_name -> messageloop.client.v1.Publish
+	13, // 4: messageloop.client.v1.InboundMessage.rpc_request:type_name -> messageloop.client.v1.RpcRequest
+	15, // 5: messageloop.client.v1.InboundMessage.sub_refresh:type_name -> messageloop.client.v1.SubRefresh
+	17, // 6: messageloop.client.v1.InboundMessage.survey_request:type_name -> messageloop.client.v1.SurveyRequest
+	18, // 7: messageloop.client.v1.InboundMessage.survey_reply:type_name -> messageloop.client.v1.SurveyReply
+	19, // 8: messageloop.client.v1.InboundMessage.ping:type_name -> messageloop.client.v1.Ping
+	21, // 9: messageloop.client.v1.OutboundMessage.error:type_name -> messageloop.shared.v1.Error
+	3,  // 10: messageloop.client.v1.OutboundMessage.connected:type_name -> messageloop.client.v1.Connected
+	6,  // 11: messageloop.client.v1.OutboundMessage.subscribe_ack:type_name -> messageloop.client.v1.SubscribeAck
+	8,  // 12: messageloop.client.v1.OutboundMessage.unsubscribe_ack:type_name -> messageloop.client.v1.UnsubscribeAck
+	10, // 13: messageloop.client.v1.OutboundMessage.publish_ack:type_name -> messageloop.client.v1.PublishAck
+	12, // 14: messageloop.client.v1.OutboundMessage.publication:type_name -> messageloop.client.v1.Publication
+	14, // 15: messageloop.client.v1.OutboundMessage.rpc_reply:type_name -> messageloop.client.v1.RpcReply
+	16, // 16: messageloop.client.v1.OutboundMessage.sub_refresh_ack:type_name -> messageloop.client.v1.SubRefreshAck
+	17, // 17: messageloop.client.v1.OutboundMessage.survey_request:type_name -> messageloop.client.v1.SurveyRequest
+	18, // 18: messageloop.client.v1.OutboundMessage.survey_reply:type_name -> messageloop.client.v1.SurveyReply
+	20, // 19: messageloop.client.v1.OutboundMessage.pong:type_name -> messageloop.client.v1.Pong
+	4,  // 20: messageloop.client.v1.Connect.subscriptions:type_name -> messageloop.client.v1.Subscription
+	4,  // 21: messageloop.client.v1.Connected.subscriptions:type_name -> messageloop.client.v1.Subscription
+	12, // 22: messageloop.client.v1.Connected.publications:type_name -> messageloop.client.v1.Publication
+	4,  // 23: messageloop.client.v1.Subscribe.subscriptions:type_name -> messageloop.client.v1.Subscription
+	4,  // 24: messageloop.client.v1.SubscribeAck.subscriptions:type_name -> messageloop.client.v1.Subscription
+	4,  // 25: messageloop.client.v1.Unsubscribe.subscriptions:type_name -> messageloop.client.v1.Subscription
+	4,  // 26: messageloop.client.v1.UnsubscribeAck.subscriptions:type_name -> messageloop.client.v1.Subscription
+	22, // 27: messageloop.client.v1.Publish.payload:type_name -> messageloop.shared.v1.Payload
+	23, // 28: messageloop.client.v1.Publish.metadata:type_name -> messageloop.shared.v1.Metadata
+	22, // 29: messageloop.client.v1.Message.payload:type_name -> messageloop.shared.v1.Payload
+	23, // 30: messageloop.client.v1.Message.metadata:type_name -> messageloop.shared.v1.Metadata
+	11, // 31: messageloop.client.v1.Publication.messages:type_name -> messageloop.client.v1.Message
+	22, // 32: messageloop.client.v1.RpcRequest.payload:type_name -> messageloop.shared.v1.Payload
+	23, // 33: messageloop.client.v1.RpcRequest.metadata:type_name -> messageloop.shared.v1.Metadata
+	22, // 34: messageloop.client.v1.RpcReply.payload:type_name -> messageloop.shared.v1.Payload
+	23, // 35: messageloop.client.v1.RpcReply.metadata:type_name -> messageloop.shared.v1.Metadata
+	21, // 36: messageloop.client.v1.RpcReply.error:type_name -> messageloop.shared.v1.Error
+	22, // 37: messageloop.client.v1.SurveyRequest.payload:type_name -> messageloop.shared.v1.Payload
+	23, // 38: messageloop.client.v1.SurveyRequest.metadata:type_name -> messageloop.shared.v1.Metadata
+	22, // 39: messageloop.client.v1.SurveyReply.payload:type_name -> messageloop.shared.v1.Payload
+	23, // 40: messageloop.client.v1.SurveyReply.metadata:type_name -> messageloop.shared.v1.Metadata
+	21, // 41: messageloop.client.v1.SurveyReply.error:type_name -> messageloop.shared.v1.Error
+	0,  // 42: messageloop.client.v1.MessageLoopService.MessageLoop:input_type -> messageloop.client.v1.InboundMessage
+	1,  // 43: messageloop.client.v1.MessageLoopService.MessageLoop:output_type -> messageloop.client.v1.OutboundMessage
 	43, // [43:44] is the sub-list for method output_type
 	42, // [42:43] is the sub-list for method input_type
 	42, // [42:42] is the sub-list for extension type_name
@@ -1701,12 +1699,12 @@ var file_v1_service_proto_depIdxs = []int32{
 	0,  // [0:42] is the sub-list for field type_name
 }
 
-func init() { file_v1_service_proto_init() }
-func file_v1_service_proto_init() {
-	if File_v1_service_proto != nil {
+func init() { file_client_v1_service_proto_init() }
+func file_client_v1_service_proto_init() {
+	if File_client_v1_service_proto != nil {
 		return
 	}
-	file_v1_service_proto_msgTypes[0].OneofWrappers = []any{
+	file_client_v1_service_proto_msgTypes[0].OneofWrappers = []any{
 		(*InboundMessage_Connect)(nil),
 		(*InboundMessage_Subscribe)(nil),
 		(*InboundMessage_Unsubscribe)(nil),
@@ -1717,7 +1715,7 @@ func file_v1_service_proto_init() {
 		(*InboundMessage_SurveyReply)(nil),
 		(*InboundMessage_Ping)(nil),
 	}
-	file_v1_service_proto_msgTypes[1].OneofWrappers = []any{
+	file_client_v1_service_proto_msgTypes[1].OneofWrappers = []any{
 		(*OutboundMessage_Error)(nil),
 		(*OutboundMessage_Connected)(nil),
 		(*OutboundMessage_SubscribeAck)(nil),
@@ -1734,17 +1732,17 @@ func file_v1_service_proto_init() {
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_v1_service_proto_rawDesc), len(file_v1_service_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_client_v1_service_proto_rawDesc), len(file_client_v1_service_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   21,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_v1_service_proto_goTypes,
-		DependencyIndexes: file_v1_service_proto_depIdxs,
-		MessageInfos:      file_v1_service_proto_msgTypes,
+		GoTypes:           file_client_v1_service_proto_goTypes,
+		DependencyIndexes: file_client_v1_service_proto_depIdxs,
+		MessageInfos:      file_client_v1_service_proto_msgTypes,
 	}.Build()
-	File_v1_service_proto = out.File
-	file_v1_service_proto_goTypes = nil
-	file_v1_service_proto_depIdxs = nil
+	File_client_v1_service_proto = out.File
+	file_client_v1_service_proto_goTypes = nil
+	file_client_v1_service_proto_depIdxs = nil
 }

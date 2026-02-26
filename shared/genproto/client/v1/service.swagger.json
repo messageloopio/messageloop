@@ -1,7 +1,7 @@
 {
   "swagger": "2.0",
   "info": {
-    "title": "buf:lint:ignore PACKAGE_DIRECTORY_MATCH",
+    "title": "client/v1/service.proto",
     "version": "version not set"
   },
   "tags": [
@@ -17,19 +17,7 @@
   ],
   "paths": {},
   "definitions": {
-    "messageloopv1Publication": {
-      "type": "object",
-      "properties": {
-        "messages": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "$ref": "#/definitions/v1Message"
-          }
-        }
-      }
-    },
-    "messageloopv1Publish": {
+    "clientv1Publish": {
       "type": "object",
       "properties": {
         "channel": {
@@ -43,7 +31,7 @@
         }
       }
     },
-    "messageloopv1Subscribe": {
+    "clientv1Subscribe": {
       "type": "object",
       "properties": {
         "subscriptions": {
@@ -55,7 +43,31 @@
         }
       }
     },
-    "messageloopv1SurveyRequest": {
+    "clientv1Unsubscribe": {
+      "type": "object",
+      "properties": {
+        "subscriptions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Subscription"
+          }
+        }
+      }
+    },
+    "messageloopclientv1Publication": {
+      "type": "object",
+      "properties": {
+        "messages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Message"
+          }
+        }
+      }
+    },
+    "messageloopclientv1SurveyRequest": {
       "type": "object",
       "properties": {
         "request_id": {
@@ -66,18 +78,6 @@
         },
         "metadata": {
           "$ref": "#/definitions/v1Metadata"
-        }
-      }
-    },
-    "messageloopv1Unsubscribe": {
-      "type": "object",
-      "properties": {
-        "subscriptions": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "$ref": "#/definitions/v1Subscription"
-          }
         }
       }
     },
@@ -160,7 +160,7 @@
           "type": "array",
           "items": {
             "type": "object",
-            "$ref": "#/definitions/messageloopv1Publication"
+            "$ref": "#/definitions/messageloopclientv1Publication"
           }
         }
       }
@@ -241,7 +241,7 @@
           "$ref": "#/definitions/v1PublishAck"
         },
         "publication": {
-          "$ref": "#/definitions/messageloopv1Publication"
+          "$ref": "#/definitions/messageloopclientv1Publication"
         },
         "rpc_reply": {
           "$ref": "#/definitions/v1RpcReply"
@@ -250,7 +250,7 @@
           "$ref": "#/definitions/v1SubRefreshAck"
         },
         "survey_request": {
-          "$ref": "#/definitions/messageloopv1SurveyRequest"
+          "$ref": "#/definitions/messageloopclientv1SurveyRequest"
         },
         "survey_reply": {
           "$ref": "#/definitions/v1SurveyReply"

@@ -8,7 +8,7 @@ import (
 	"github.com/lynx-go/x/log"
 	"github.com/messageloopio/messageloop"
 	serverpb "github.com/messageloopio/messageloop/shared/genproto/server/v1"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/encoding"
 )

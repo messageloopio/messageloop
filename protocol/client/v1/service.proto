@@ -1,9 +1,8 @@
 syntax = "proto3";
 
-// buf:lint:ignore PACKAGE_DIRECTORY_MATCH
-package messageloop.v1;
+package messageloop.client.v1;
 
-option go_package = "github.com/messageloopio/messageloop/shared/genproto/go/client/v1;clientpb";
+option go_package = "github.com/messageloopio/messageloop/genproto/client/v1;clientpb";
 
 import "shared/v1/types.proto";
 import "shared/v1/errors.proto";

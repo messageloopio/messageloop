@@ -6,7 +6,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/encoding/json"
 	"github.com/messageloopio/messageloop"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/structpb"

@@ -9,7 +9,7 @@ import (
 	"time"
 
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
 )
 
 // capturingTransport captures all written messages for inspection

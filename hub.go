@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
 )
 
 const numHubShards = 64

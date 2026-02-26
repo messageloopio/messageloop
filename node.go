@@ -11,7 +11,7 @@ import (
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/proxy"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
 )
 
 type Node struct {

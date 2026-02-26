@@ -850,7 +850,7 @@ const file_server_v1_api_proto_rawDesc = "" +
 	"Disconnect\x12(.messageloop.server.v1.DisconnectRequest\x1a).messageloop.server.v1.DisconnectResponse\x12^\n" +
 	"\tSubscribe\x12'.messageloop.server.v1.SubscribeRequest\x1a(.messageloop.server.v1.SubscribeResponse\x12d\n" +
 	"\vUnsubscribe\x12).messageloop.server.v1.UnsubscribeRequest\x1a*.messageloop.server.v1.UnsubscribeResponse\x12U\n" +
-	"\x06Survey\x12$.messageloop.server.v1.SurveyRequest\x1a%.messageloop.server.v1.SurveyResponseBLZJgithub.com/messageloopio/messageloop/shared/genproto/go/server/v1;serverpbb\x06proto3"
+	"\x06Survey\x12$.messageloop.server.v1.SurveyRequest\x1a%.messageloop.server.v1.SurveyResponseBBZ@github.com/messageloopio/messageloop/genproto/server/v1;serverpbb\x06proto3"
 
 var (
 	file_server_v1_api_proto_rawDescOnce sync.Once

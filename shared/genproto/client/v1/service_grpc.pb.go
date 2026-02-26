@@ -2,9 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.0
 // - protoc             (unknown)
-// source: v1/service.proto
-
-// buf:lint:ignore PACKAGE_DIRECTORY_MATCH
+// source: client/v1/service.proto
 
 package clientpb
 
@@ -21,7 +19,7 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	MessageLoopService_MessageLoop_FullMethodName = "/messageloop.v1.MessageLoopService/MessageLoop"
+	MessageLoopService_MessageLoop_FullMethodName = "/messageloop.client.v1.MessageLoopService/MessageLoop"
 )
 
 // MessageLoopServiceClient is the client API for MessageLoopService service.
@@ -108,7 +106,7 @@ type MessageLoopService_MessageLoopServer = grpc.BidiStreamingServer[InboundMess
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var MessageLoopService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "messageloop.v1.MessageLoopService",
+	ServiceName: "messageloop.client.v1.MessageLoopService",
 	HandlerType: (*MessageLoopServiceServer)(nil),
 	Methods:     []grpc.MethodDesc{},
 	Streams: []grpc.StreamDesc{
@@ -119,5 +117,5 @@ var MessageLoopService_ServiceDesc = grpc.ServiceDesc{
 			ClientStreams: true,
 		},
 	},
-	Metadata: "v1/service.proto",
+	Metadata: "client/v1/service.proto",
 }
