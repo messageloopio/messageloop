@@ -1,5 +1,3 @@
-import type { CloudEvent as CloudEventSDK } from "cloudevents";
-import { CloudEvent as CloudEventSDKClass } from "cloudevents";
 import { create } from "@bufbuild/protobuf";
 
 // Import Schema constants for create function
@@ -17,8 +15,35 @@ import {
 
 import { PayloadSchema, MetadataSchema } from "../proto/shared/v1/types_pb";
 
-import type { InboundMessage, OutboundMessage, Message, Publication, Publish, RpcRequest, RpcReply } from "../proto/v1/service_pb";
+import type { InboundMessage, OutboundMessage, Message as ProtoMessage, Publication, Publish, RpcRequest, RpcReply } from "../proto/v1/service_pb";
 import type { Payload, Metadata } from "../proto/shared/v1/types_pb";
+
+import {
+  Message,
+  Data,
+  createMessage,
+  createJSONMessage,
+  createBinaryMessage,
+  createTextMessage,
+  createData,
+  messageToPayload,
+  payloadToMessage,
+  ReceivedMessage,
+} from "./message";
+
+// Re-export message types
+export type {
+  Message,
+  Data,
+  createMessage,
+  createJSONMessage,
+  createBinaryMessage,
+  createTextMessage,
+  createData,
+  messageToPayload,
+  payloadToMessage,
+  ReceivedMessage,
+};
 
 /**
  * Generate a unique message ID.
@@ -109,9 +134,9 @@ export function createUnsubscribeMessage(channels: string[]): InboundMessage {
  */
 export function createPublishMessage(
   channel: string,
-  event: CloudEventSDK
+  msg: Message
 ): InboundMessage {
-  const payload = cloudEventToPayload(event);
+  const payload = messageToPayload(msg);
   const publish = create(PublishSchema, {
     channel,
     payload,
@@ -128,9 +153,9 @@ export function createPublishMessage(
 export function createRPCRequestMessage(
   channel: string,
   method: string,
-  event: CloudEventSDK
+  msg: Message
 ): InboundMessage {
-  const payload = cloudEventToPayload(event);
+  const payload = messageToPayload(msg);
   const rpcRequest = create(RpcRequestSchema, {
     channel,
     method,
@@ -169,121 +194,25 @@ export function createSubRefreshMessage(
 }
 
 /**
- * Convert CloudEvent SDK to Payload protobuf format.
- */
-export function cloudEventToPayload(event: CloudEventSDK): Payload {
-  const dataValue = event.data;
-  const contentType = event.datacontenttype || "";
-
-  // Check if data is Uint8Array using type guard
-  if (isUint8Array(dataValue)) {
-    return create(PayloadSchema, {
-      contentType,
-      data: { case: "binary", value: dataValue },
-    });
-  } else if (typeof dataValue === "string") {
-    // Check if content type indicates text
-    if (contentType.startsWith("text/")) {
-      return create(PayloadSchema, {
-        contentType,
-        data: { case: "text", value: dataValue },
-      });
-    }
-    // Try to parse as JSON first
-    try {
-      const jsonData = JSON.parse(dataValue);
-      return create(PayloadSchema, {
-        contentType,
-        data: { case: "json", value: jsonData },
-      });
-    } catch {
-      // If not valid JSON, store as text
-      return create(PayloadSchema, {
-        contentType,
-        data: { case: "text", value: dataValue },
-      });
-    }
-  } else if (dataValue && typeof dataValue === "object") {
-    // JSON object
-    return create(PayloadSchema, {
-      contentType,
-      data: { case: "json", value: dataValue as Record<string, any> },
-    });
-  }
-
-  // Default: empty binary
-  return create(PayloadSchema, {
-    contentType,
-    data: { case: "binary", value: new Uint8Array(0) },
-  });
-}
-
-/**
- * Type guard for Uint8Array.
- */
-function isUint8Array(value: unknown): value is Uint8Array {
-  return value instanceof Uint8Array;
-}
-
-/**
- * Convert Payload protobuf to CloudEvent SDK format.
- */
-export function payloadToCloudEvent(payload: Payload, source: string = "messageloop"): CloudEventSDKClass {
-  let data: unknown;
-  let dataContentType: string | undefined;
-
-  if (payload.data.case === "json") {
-    data = payload.data.value;
-    dataContentType = payload.contentType || "application/json";
-  } else if (payload.data.case === "text") {
-    data = payload.data.value;
-    dataContentType = payload.contentType || "text/plain";
-  } else if (payload.data.case === "binary") {
-    data = payload.data.value;
-    dataContentType = payload.contentType || "application/octet-stream";
-  } else {
-    data = undefined;
-  }
-
-  const eventOptions = {
-    id: crypto.randomUUID(),
-    source,
-    specversion: "1.0",
-    type: "messageloop.message",
-    data,
-    datacontenttype: dataContentType,
-  };
-
-  return new CloudEventSDKClass(eventOptions) as CloudEventSDKClass;
-}
-
-/**
  * Extract messages from a Publication.
  */
-export function extractMessages(publication: Publication): Message[] {
+export function extractMessages(publication: Publication): ProtoMessage[] {
   return publication.messages || [];
 }
 
 /**
- * Received message type
+ * Convert a proto Message to ReceivedMessage.
  */
-export interface ReceivedMessage {
-  id: string;
-  channel: string;
-  offset: bigint;
-  event: CloudEventSDKClass;
-}
-
-/**
- * Convert a Message proto to ReceivedMessage.
- */
-export function messageToReceived(msg: Message): ReceivedMessage {
-  const payload = msg.payload;
+export function messageToReceived(msg: ProtoMessage): ReceivedMessage {
+  const emptyPayload = create(PayloadSchema, {
+    contentType: "",
+    data: { case: "binary", value: new Uint8Array(0) },
+  });
   return {
     id: msg.id,
     channel: msg.channel,
     offset: msg.offset,
-    event: payload ? payloadToCloudEvent(payload, msg.channel) : new CloudEventSDKClass({ id: msg.id, source: msg.channel, type: "messageloop.message" }),
+    message: payloadToMessage(msg.payload ?? emptyPayload, msg.id),
   };
 }
 
@@ -344,5 +273,5 @@ export function extractRpcReply(reply: RpcReply): {
 
 // Re-export types that might be needed
 export { create };
-export type { InboundMessage, OutboundMessage, Message, Publication, Publish, RpcRequest, RpcReply };
-export type { Payload, Metadata };
+export type { InboundMessage, OutboundMessage, Message as ProtoMessage, Publication, Publish, RpcRequest, RpcReply } from "../proto/v1/service_pb";
+export type { Payload, Metadata } from "../proto/shared/v1/types_pb";

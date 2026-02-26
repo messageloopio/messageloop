@@ -1,6 +1,5 @@
-import { CloudEvent, type CloudEvent as CloudEventType } from "cloudevents";
 import type { OutboundMessage } from "../proto/v1/service_pb";
-import type { ReceivedMessage } from "../event/converters";
+import type { ReceivedMessage, Message } from "../message";
 import type { Transport } from "../transport/transport";
 import type { Codec } from "../transport/codec/codec";
 import type { ClientOptions, ClientOption } from "./options";
@@ -19,9 +18,9 @@ import {
   createRPCRequestMessage,
   createPingMessage,
   parseOutboundMessage,
-  payloadToCloudEvent,
-  extractRpcReply,
-} from "../event/converters";
+  payloadToMessage,
+  createMessage,
+} from "../message";
 
 /**
  * MessageLoop client for connecting to the messaging server.
@@ -40,13 +39,13 @@ export class MessageLoopClient {
   private autoReconnectEnabled = true;
 
   // Multi-handler support using Sets
-  private messageHandlers: Set<(events: ReceivedMessage[]) => void> =
+  private messageHandlers: Set<(messages: ReceivedMessage[]) => void> =
     new Set();
   private stateChangeHandlers: Set<(event: ConnectionStateChangeEvent) => void> =
     new Set();
 
   // Legacy handlers (for backward compatibility)
-  private messageHandler: ((events: ReceivedMessage[]) => void) | null = null;
+  private messageHandler: ((messages: ReceivedMessage[]) => void) | null = null;
   private errorHandler: ((error: Error) => void) | null = null;
   private connectedHandler: ((sessionId: string) => void) | null = null;
   private closedHandler: (() => void) | null = null;
@@ -57,7 +56,7 @@ export class MessageLoopClient {
   // RPC pending requests
   private pendingRPC: Map<
     string,
-    { resolve: (event: CloudEvent) => void; reject: (err: Error) => void }
+    { resolve: (msg: Message) => void; reject: (err: Error) => void }
   > = new Map();
 
   // Ping/Pong
@@ -218,12 +217,12 @@ export class MessageLoopClient {
         // Convert messages to ReceivedMessage format
         const messages: ReceivedMessage[] = [];
         const msgs = parsed.data.messages || [];
-        for (const msg of msgs) {
+        for (const m of msgs) {
           messages.push({
-            id: msg.id,
-            channel: msg.channel,
-            offset: msg.offset,
-            event: msg.payload ? payloadToCloudEvent(msg.payload, msg.channel) : new CloudEvent({ id: msg.id, source: msg.channel, type: "messageloop.message" }),
+            id: m.id,
+            channel: m.channel,
+            offset: m.offset,
+            message: m.payload ? payloadToMessage(m.payload, m.id) : createMessage("messageloop.message", { contentType: "", type: "binary" }),
           });
         }
 
@@ -255,8 +254,8 @@ export class MessageLoopClient {
             (err as any).code = reply.error.code;
             pending.reject(err);
           } else {
-            const event = reply.payload ? payloadToCloudEvent(reply.payload) : new CloudEvent({ id, source: "rpc", type: "messageloop.rpc.reply" });
-            pending.resolve(event);
+            const respMsg = reply.payload ? payloadToMessage(reply.payload, id) : createMessage("rpc.reply", { contentType: "", type: "binary" });
+            pending.resolve(respMsg);
           }
         }
         break;
@@ -573,11 +572,11 @@ export class MessageLoopClient {
   }
 
   /**
-   * Publish an event to a channel.
+   * Publish a message to a channel.
    */
-  async publish(channel: string, event: CloudEvent): Promise<void> {
-    const msg = createPublishMessage(channel, event);
-    await this.send(msg);
+  async publish(channel: string, msg: Message): Promise<void> {
+    const pbMsg = createPublishMessage(channel, msg);
+    await this.send(pbMsg);
   }
 
   /**
@@ -586,9 +585,9 @@ export class MessageLoopClient {
   async rpc(
     channel: string,
     method: string,
-    request: CloudEvent,
+    request: Message,
     options?: { timeout?: number }
-  ): Promise<CloudEvent> {
+  ): Promise<Message> {
     const msg = createRPCRequestMessage(channel, method, request);
     const id = msg.id;
 
@@ -602,9 +601,9 @@ export class MessageLoopClient {
 
       // Store pending request
       this.pendingRPC.set(id, {
-        resolve: (event: CloudEvent) => {
+        resolve: (respMsg: Message) => {
           clearTimeout(timeoutId);
-          resolve(event);
+          resolve(respMsg);
         },
         reject: (err: Error) => {
           clearTimeout(timeoutId);
@@ -624,7 +623,7 @@ export class MessageLoopClient {
   /**
    * Set the message handler.
    */
-  onMessage(handler: (events: ReceivedMessage[]) => void): void {
+  onMessage(handler: (messages: ReceivedMessage[]) => void): void {
     this.messageHandler = handler;
   }
 
@@ -676,7 +675,7 @@ export class MessageLoopClient {
    * Add a message handler. Returns a function to remove the handler.
    */
   addMessageHandler(
-    handler: (events: ReceivedMessage[]) => void
+    handler: (messages: ReceivedMessage[]) => void
   ): () => void {
     this.messageHandlers.add(handler);
     return () => this.removeMessageHandler(handler);
@@ -685,7 +684,7 @@ export class MessageLoopClient {
   /**
    * Remove a message handler.
    */
-  removeMessageHandler(handler: (events: ReceivedMessage[]) => void): void {
+  removeMessageHandler(handler: (messages: ReceivedMessage[]) => void): void {
     this.messageHandlers.delete(handler);
   }
 

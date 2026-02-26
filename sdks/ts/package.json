@@ -32,14 +32,12 @@
     "messageloop",
     "messaging",
     "websocket",
-    "grpc",
-    "cloudevents"
+    "grpc"
   ],
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@bufbuild/protobuf": "^2.0.0",
-    "cloudevents": "^8.0.0"
+    "@bufbuild/protobuf": "^2.0.0"
   },
   "peerDependencies": {
     "@grpc/grpc-js": "^1.9.0"

@@ -23,14 +23,14 @@ export interface IClient {
   close(): Promise<void>;
   subscribe(...channels: string[]): Promise<void>;
   unsubscribe(...channels: string[]): Promise<void>;
-  publish(channel: string, event: import("cloudevents").CloudEvent): Promise<void>;
+  publish(channel: string, msg: import("../message").Message): Promise<void>;
   rpc(
     channel: string,
     method: string,
-    request: import("cloudevents").CloudEvent,
+    request: import("../message").Message,
     options?: { timeout?: number }
-  ): Promise<import("cloudevents").CloudEvent>;
-  onMessage(handler: (events: import("../event/converters").ReceivedMessage[]) => void): void;
+  ): Promise<import("../message").Message>;
+  onMessage(handler: (messages: import("../message").ReceivedMessage[]) => void): void;
   onError(handler: (error: Error) => void): void;
   onConnected(handler: (sessionId: string) => void): void;
   onClosed(handler: () => void): void;
@@ -40,10 +40,10 @@ export interface IClient {
 
   // Multi-handler support
   addMessageHandler(
-    handler: (events: import("../event/converters").ReceivedMessage[]) => void
+    handler: (messages: import("../message").ReceivedMessage[]) => void
   ): () => void;
   removeMessageHandler(
-    handler: (events: import("../event/converters").ReceivedMessage[]) => void
+    handler: (messages: import("../message").ReceivedMessage[]) => void
   ): void;
   addStateChangeHandler(
     handler: (event: ConnectionStateChangeEvent) => void

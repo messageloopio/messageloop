@@ -10,8 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	cloudevents "github.com/cloudevents/sdk-go/v2"
-	"github.com/messageloopio/messageloop/sdks/go"
+	messageloopgo "github.com/messageloopio/messageloop/sdks/go"
 	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v1"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	"google.golang.org/grpc"
@@ -44,14 +43,9 @@ func (h *MyRPCHandler) HandleRPC(ctx context.Context, req *messageloopgo.RPCRequ
 		if req.Payload != nil {
 			_ = req.Payload.DataAs(&userID)
 		}
-		responseEvent := messageloopgo.NewTextCloudEvent(
-			req.ID,
-			"/proxy/echo",
-			"getUser.response",
-			"User: "+userID,
-		)
+		respMsg := messageloopgo.NewMessageWithData("getUser.response", messageloopgo.NewTextData("User: "+userID))
 		return &messageloopgo.RPCResponse{
-			Payload: responseEvent,
+			Payload: respMsg,
 		}, nil
 
 	case "sum":
@@ -63,14 +57,9 @@ func (h *MyRPCHandler) HandleRPC(ctx context.Context, req *messageloopgo.RPCRequ
 		var a, b int
 		if _, err := fmt.Sscanf(data, "%d,%d", &a, &b); err == nil {
 			result := fmt.Sprintf("%d", a+b)
-			responseEvent := messageloopgo.NewTextCloudEvent(
-				req.ID,
-				"/proxy/sum",
-				"sum.response",
-				result,
-			)
+			respMsg := messageloopgo.NewMessageWithData("sum.response", messageloopgo.NewTextData(result))
 			return &messageloopgo.RPCResponse{
-				Payload: responseEvent,
+				Payload: respMsg,
 			}, nil
 		}
 		return &messageloopgo.RPCResponse{
@@ -165,14 +154,9 @@ func handleGetUser(ctx context.Context, req *messageloopgo.RPCRequest) (*message
 	if req.Payload != nil {
 		_ = req.Payload.DataAs(&userID)
 	}
-	responseEvent := messageloopgo.NewTextCloudEvent(
-		req.ID,
-		"/proxy/getUser",
-		"getUser.response",
-		"User: "+userID,
-	)
+	respMsg := messageloopgo.NewMessageWithData("getUser.response", messageloopgo.NewTextData("User: "+userID))
 	return &messageloopgo.RPCResponse{
-		Payload: responseEvent,
+		Payload: respMsg,
 	}, nil
 }
 
@@ -194,14 +178,9 @@ func handleSum(ctx context.Context, req *messageloopgo.RPCRequest) (*messageloop
 	}
 
 	result := fmt.Sprintf("%d", a+b)
-	responseEvent := messageloopgo.NewTextCloudEvent(
-		req.ID,
-		"/proxy/sum",
-		"sum.response",
-		result,
-	)
+	respMsg := messageloopgo.NewMessageWithData("sum.response", messageloopgo.NewTextData(result))
 	return &messageloopgo.RPCResponse{
-		Payload: responseEvent,
+		Payload: respMsg,
 	}, nil
 }
 
@@ -285,12 +264,10 @@ type MyProxyService struct {
 func (s *MyProxyService) RPC(ctx context.Context, req *proxypb.RPCRequest) (*proxypb.RPCResponse, error) {
 	log.Printf("[RPC Request] id=%s channel=%s method=%s", req.Id, req.Channel, req.Method)
 
-	// Convert Payload to cloudevents.Event
-	var payload *cloudevents.Event
+	// Convert Payload to Message
+	var payload *messageloopgo.Message
 	if pbPayload := req.GetPayload(); pbPayload != nil {
-		if ce, err := messageloopgo.PayloadToCloudEvent(pbPayload, req.Channel); err == nil {
-			payload = ce
-		}
+		payload = messageloopgo.PayloadToMessage(pbPayload, "")
 	}
 
 	rpcReq := &messageloopgo.RPCRequest{
@@ -313,10 +290,10 @@ func (s *MyProxyService) RPC(ctx context.Context, req *proxypb.RPCRequest) (*pro
 		}, nil
 	}
 
-	// Convert cloudevents.Event to Payload
+	// Convert Message to Payload
 	var respPayload *sharedpb.Payload
 	if resp.Payload != nil {
-		if p, err := messageloopgo.CloudEventToPayload(resp.Payload); err == nil {
+		if p, err := resp.Payload.ToPayload(); err == nil {
 			respPayload = p
 		}
 	}

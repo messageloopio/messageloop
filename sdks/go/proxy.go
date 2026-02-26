@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net"
 
-	cloudevents "github.com/cloudevents/sdk-go/v2"
 	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v1"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	"google.golang.org/grpc"
@@ -27,12 +26,12 @@ type RPCRequest struct {
 	ID      string
 	Channel string
 	Method  string
-	Payload *cloudevents.Event
+	Payload *Message
 }
 
 // RPCResponse represents the response to an RPC request.
 type RPCResponse struct {
-	Payload *cloudevents.Event
+	Payload *Message
 	Error   *sharedpb.Error
 }
 
@@ -161,12 +160,10 @@ func (h *HandlerImpl) RPC(ctx context.Context, req *proxypb.RPCRequest) (*proxyp
 		"method", req.Method,
 	)
 
-	// Convert Payload to cloudevents.Event
-	var payload *cloudevents.Event
+	// Convert Payload to Message
+	var payload *Message
 	if pbPayload := req.GetPayload(); pbPayload != nil {
-		if ce, err := PayloadToCloudEvent(pbPayload, req.Channel); err == nil {
-			payload = ce
-		}
+		payload = PayloadToMessage(pbPayload, "")
 	}
 
 	rpcReq := &RPCRequest{
@@ -196,10 +193,10 @@ func (h *HandlerImpl) RPC(ctx context.Context, req *proxypb.RPCRequest) (*proxyp
 		)
 	}
 
-	// Convert cloudevents.Event to Payload
+	// Convert Message to Payload
 	var respPayload *sharedpb.Payload
 	if resp.Payload != nil {
-		if p, err := CloudEventToPayload(resp.Payload); err == nil {
+		if p, err := resp.Payload.ToPayload(); err == nil {
 			respPayload = p
 		}
 	}

@@ -15,11 +15,27 @@ export { WebSocketTransport } from "./transport/websocket";
 export type { Codec } from "./transport/codec/codec";
 export { JSONCodec, jsonCodec, ProtobufCodec, protobufCodec } from "./transport/codec";
 
-// Event exports
+// Message exports
 export {
-  createCloudEvent,
-  toProtoCloudEvent,
-  fromProtoCloudEvent,
+  createMessage,
+  createJSONMessage,
+  createBinaryMessage,
+  createTextMessage,
+  createData,
+  messageToPayload,
+  payloadToMessage,
+  dataAs,
+  isJSONData,
+  isBinaryData,
+  isTextData,
+  type Message,
+  type Data,
+  type DataType,
+  type ReceivedMessage,
+} from "./message";
+
+// Converter exports
+export {
   createConnectMessage,
   createSubscribeMessage,
   createUnsubscribeMessage,
@@ -28,14 +44,11 @@ export {
   createPingMessage,
   createSubRefreshMessage,
   generateMessageId,
-  cloudEventToPayload,
-  payloadToCloudEvent,
   parseOutboundMessage,
   extractRpcReply,
-  type ReceivedMessage,
   type Payload,
   type Metadata,
-} from "./event";
+} from "./message";
 
 // Option builders
 export {
@@ -54,6 +67,3 @@ export {
   setReconnectDelay,
   setReconnectMaxAttempts,
 } from "./client/options";
-
-// Re-export CloudEvent from cloudevents
-export type { CloudEvent } from "cloudevents";

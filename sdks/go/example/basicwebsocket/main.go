@@ -6,7 +6,6 @@ import (
 	"log"
 	"time"
 
-	cloudevents "github.com/cloudevents/sdk-go/v2"
 	messageloopgo "github.com/messageloopio/messageloop/sdks/go"
 )
 
@@ -35,10 +34,10 @@ func basicWebSocketExample() error {
 		log.Printf("Connected! Session ID: %s", sessionID)
 	})
 
-	client.OnMessage(func(events []*cloudevents.Event) {
-		for _, event := range events {
-			log.Printf("Received event - ID: %s, Type: %s, Source: %s",
-				event.ID(), event.Type(), event.Source())
+	client.OnMessage(func(msgs []*messageloopgo.Message) {
+		for _, msg := range msgs {
+			log.Printf("Received message - ID: %s, Type: %s, ContentType: %s",
+				msg.ID, msg.Type, msg.Data.ContentType())
 		}
 	})
 
@@ -58,13 +57,8 @@ func basicWebSocketExample() error {
 	}
 
 	// Publish a message
-	event := messageloopgo.NewCloudEvent(
-		"msg-123",
-		"/client/example",
-		"chat.message",
-		[]byte("Hello, MessageLoop!"),
-	)
-	if err := client.Publish("chat.messages", event); err != nil {
+	msg := messageloopgo.NewMessageWithData("chat.message", messageloopgo.NewBinaryData([]byte("Hello, MessageLoop!")))
+	if err := client.Publish("chat.messages", msg); err != nil {
 		return fmt.Errorf("publish failed: %w", err)
 	}
 

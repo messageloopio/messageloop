@@ -35,13 +35,8 @@ func protobufEncodingExample() error {
 	}
 
 	// Publish messages with protobuf encoding
-	event := messageloopgo.NewCloudEvent(
-		"msg-789",
-		"/client/example",
-		"chat.message",
-		[]byte("Protobuf encoded message"),
-	)
-	if err := client.Publish("chat.messages", event); err != nil {
+	msg := messageloopgo.NewMessageWithData("chat.message", messageloopgo.NewBinaryData([]byte("Protobuf encoded message")))
+	if err := client.Publish("chat.messages", msg); err != nil {
 		return fmt.Errorf("publish failed: %w", err)
 	}
 

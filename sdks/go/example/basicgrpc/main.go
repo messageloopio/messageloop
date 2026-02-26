@@ -7,7 +7,6 @@ import (
 	"os"
 	"time"
 
-	cloudevents "github.com/cloudevents/sdk-go/v2"
 	messageloopgo "github.com/messageloopio/messageloop/sdks/go"
 )
 
@@ -38,10 +37,10 @@ func BasicGRPCExample() error {
 		log.Printf("Connected via gRPC! Session ID: %s", sessionID)
 	})
 
-	client.OnMessage(func(events []*cloudevents.Event) {
-		for _, event := range events {
-			log.Printf("Received event - ID: %s, Type: %s, Data: %s",
-				event.ID(), event.Type(), string(event.Data()))
+	client.OnMessage(func(msgs []*messageloopgo.Message) {
+		for _, msg := range msgs {
+			log.Printf("Received message - ID: %s, Type: %s, Data: %s",
+				msg.ID, msg.Type, msg.String())
 		}
 	})
 
@@ -56,28 +55,22 @@ func BasicGRPCExample() error {
 	}
 
 	// Publish a message
-	event := messageloopgo.NewTextCloudEvent(
-		"msg-456",
-		"/client/example",
-		"chat.message",
-		"Hello via gRPC!",
-	)
-	if err := client.Publish("chat.messages", event); err != nil {
+	msg := messageloopgo.NewMessageWithData("chat.message", messageloopgo.NewTextData("Hello via gRPC!"))
+	if err := client.Publish("chat.messages", msg); err != nil {
 		return fmt.Errorf("publish failed: %w", err)
 	}
 
 	// Make an RPC call
-	req, _ := messageloopgo.NewJSONMessage(
-		"getUser",
-		map[string]any{
-			"message": "hello world",
-		},
-	)
-	resp := cloudevents.NewEvent()
-	err = client.RPC(ctx, "user.service", "getUser", req, &resp)
+	req := messageloopgo.NewMessageWithData("getUser", messageloopgo.NewJSONData(map[string]any{
+		"message": "hello world",
+	}))
+	resp := messageloopgo.NewMessage("")
+	err = client.RPC(ctx, "user.service", "getUser", req, resp)
 	if err != nil {
 		return fmt.Errorf("rpc failed: %w", err)
 	}
+
+	log.Printf("RPC response: %s", resp.String())
 
 	// Keep running
 	select {

@@ -6,7 +6,6 @@ import (
 	"log"
 	"time"
 
-	cloudevents "github.com/cloudevents/sdk-go/v2"
 	messageloopgo "github.com/messageloopio/messageloop/sdks/go"
 )
 
@@ -30,9 +29,9 @@ func dynamicSubscriptionExample() error {
 	// Track received messages
 	messageCount := 0
 
-	client.OnMessage(func(events []*cloudevents.Event) {
-		messageCount += len(events)
-		log.Printf("Received %d events (total: %d)", len(events), messageCount)
+	client.OnMessage(func(msgs []*messageloopgo.Message) {
+		messageCount += len(msgs)
+		log.Printf("Received %d messages (total: %d)", len(msgs), messageCount)
 	})
 
 	// Connect

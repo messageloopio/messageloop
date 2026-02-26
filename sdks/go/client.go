@@ -7,7 +7,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	cloudevents "github.com/cloudevents/sdk-go/v2"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/v1"
 )
@@ -30,11 +29,11 @@ type Client interface {
 	// Unsubscribe unsubscribes from channels
 	Unsubscribe(channels ...string) error
 	// Publish publishes a message to a channel
-	Publish(channel string, event *cloudevents.Event) error
+	Publish(channel string, msg *Message) error
 	// RPC sends an RPC request and waits for a response
-	RPC(ctx context.Context, channel, method string, req, resp *cloudevents.Event) error
+	RPC(ctx context.Context, channel, method string, req, resp *Message) error
 	// OnMessage sets the message handler
-	OnMessage(fn func([]*cloudevents.Event))
+	OnMessage(fn func([]*Message))
 	// OnError sets the error handler
 	OnError(fn func(error))
 	// OnConnected sets the connected handler
@@ -57,7 +56,7 @@ type client struct {
 	closed           atomic.Bool
 	connectedCh      chan struct{} // Closed when connection is established
 	connectErrCh     chan error    // For connection errors
-	msgHandler       func([]*cloudevents.Event)
+	msgHandler       func([]*Message)
 	errorHandler     func(error)
 	connectedHandler func(string)
 	pendingRPC       map[string]chan *clientpb.OutboundMessage
@@ -251,9 +250,9 @@ func (c *client) handleConnected(connected *clientpb.Connected) {
 
 	// Handle initial publications
 	for _, pub := range connected.GetPublications() {
-		events := wrapPublicationToEvents(pub)
-		if c.msgHandler != nil && len(events) > 0 {
-			c.msgHandler(events)
+		msgs := wrapPublicationToMessages(pub)
+		if c.msgHandler != nil && len(msgs) > 0 {
+			c.msgHandler(msgs)
 		}
 	}
 
@@ -285,9 +284,9 @@ func (c *client) handleUnsubscribeAck(ack *clientpb.UnsubscribeAck) {
 
 // handlePublication handles the Publication message.
 func (c *client) handlePublication(pub *clientpb.Publication) {
-	events := wrapPublicationToEvents(pub)
-	if c.msgHandler != nil && len(events) > 0 {
-		c.msgHandler(events)
+	msgs := wrapPublicationToMessages(pub)
+	if c.msgHandler != nil && len(msgs) > 0 {
+		c.msgHandler(msgs)
 	}
 }
 
@@ -387,18 +386,18 @@ func (c *client) Unsubscribe(channels ...string) error {
 }
 
 // Publish publishes a message to a channel.
-func (c *client) Publish(channel string, event *cloudevents.Event) error {
+func (c *client) Publish(channel string, msg *Message) error {
 	if !c.connected.Load() {
 		return fmt.Errorf("not connected")
 	}
 
-	// Convert cloudevents.Event to Payload
-	payload, err := CloudEventToPayload(event)
+	// Convert Message to Payload
+	payload, err := msg.ToPayload()
 	if err != nil {
-		return fmt.Errorf("failed to convert event: %w", err)
+		return fmt.Errorf("failed to convert message: %w", err)
 	}
 
-	msg := &clientpb.InboundMessage{
+	pbMsg := &clientpb.InboundMessage{
 		Id: c.generateID(),
 		Envelope: &clientpb.InboundMessage_Publish{
 			Publish: &clientpb.Publish{
@@ -408,7 +407,7 @@ func (c *client) Publish(channel string, event *cloudevents.Event) error {
 		},
 	}
 
-	if err := c.transport.Send(c.ctx, msg); err != nil {
+	if err := c.transport.Send(c.ctx, pbMsg); err != nil {
 		return fmt.Errorf("publish failed: %w", err)
 	}
 
@@ -416,15 +415,15 @@ func (c *client) Publish(channel string, event *cloudevents.Event) error {
 }
 
 // RPC sends an RPC request and waits for a response.
-func (c *client) RPC(ctx context.Context, channel, method string, req, resp *cloudevents.Event) error {
+func (c *client) RPC(ctx context.Context, channel, method string, req, resp *Message) error {
 	if !c.connected.Load() {
 		return fmt.Errorf("not connected")
 	}
 
-	// Convert request cloudevents.Event to Payload
-	reqPayload, err := CloudEventToPayload(req)
+	// Convert request Message to Payload
+	reqPayload, err := req.ToPayload()
 	if err != nil {
-		return fmt.Errorf("failed to convert request event: %w", err)
+		return fmt.Errorf("failed to convert request message: %w", err)
 	}
 
 	id := c.generateID()
@@ -478,14 +477,11 @@ func (c *client) RPC(ctx context.Context, channel, method string, req, resp *clo
 			return fmt.Errorf("rpc error: %s (code: %s)", pbReply.GetError().GetMessage(), pbReply.GetError().GetCode())
 		}
 
-		// Convert Payload reply to cloudevents.Event
+		// Convert Payload reply to Message
 		if resp != nil && pbReply.GetPayload() != nil {
-			ceReply, err := PayloadToCloudEvent(pbReply.GetPayload(), channel)
-			if err != nil {
-				return fmt.Errorf("failed to convert reply event: %w", err)
-			}
-			// Copy the reply event to resp
-			*resp = *ceReply
+			replyMsg := PayloadToMessage(pbReply.GetPayload(), "")
+			// Copy the reply message to resp
+			*resp = *replyMsg
 		}
 
 		return nil
@@ -493,7 +489,7 @@ func (c *client) RPC(ctx context.Context, channel, method string, req, resp *clo
 }
 
 // OnMessage sets the message handler.
-func (c *client) OnMessage(fn func([]*cloudevents.Event)) {
+func (c *client) OnMessage(fn func([]*Message)) {
 	c.msgHandler = fn
 }
 
@@ -632,8 +628,8 @@ func BuildUnsubscribeMessage(channels ...string) *clientpb.InboundMessage {
 }
 
 // BuildPublishMessage builds a Publish message.
-func BuildPublishMessage(channel string, event *cloudevents.Event) *clientpb.InboundMessage {
-	payload, _ := CloudEventToPayload(event) // Ignore error for backward compatibility
+func BuildPublishMessage(channel string, msg *Message) *clientpb.InboundMessage {
+	payload, _ := msg.ToPayload() // Ignore error for backward compatibility
 	return &clientpb.InboundMessage{
 		Envelope: &clientpb.InboundMessage_Publish{
 			Publish: &clientpb.Publish{
@@ -645,8 +641,8 @@ func BuildPublishMessage(channel string, event *cloudevents.Event) *clientpb.Inb
 }
 
 // BuildRPCMessage builds an RPC request message.
-func BuildRPCMessage(channel, method string, event *cloudevents.Event) *clientpb.InboundMessage {
-	payload, _ := CloudEventToPayload(event) // Ignore error for backward compatibility
+func BuildRPCMessage(channel, method string, msg *Message) *clientpb.InboundMessage {
+	payload, _ := msg.ToPayload() // Ignore error for backward compatibility
 	return &clientpb.InboundMessage{
 		Envelope: &clientpb.InboundMessage_RpcRequest{
 			RpcRequest: &clientpb.RpcRequest{
@@ -706,8 +702,8 @@ func BuildPublicationMessage(messages []*clientpb.Message) *clientpb.OutboundMes
 }
 
 // BuildRPCReplyMessage builds an RPC reply message.
-func BuildRPCReplyMessage(id string, event *cloudevents.Event) *clientpb.OutboundMessage {
-	payload, _ := CloudEventToPayload(event) // Ignore error for backward compatibility
+func BuildRPCReplyMessage(id string, msg *Message) *clientpb.OutboundMessage {
+	payload, _ := msg.ToPayload() // Ignore error for backward compatibility
 	return &clientpb.OutboundMessage{
 		Id: id,
 		Envelope: &clientpb.OutboundMessage_RpcReply{

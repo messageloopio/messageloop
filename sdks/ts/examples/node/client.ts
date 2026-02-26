@@ -6,7 +6,7 @@
 
 import {
   MessageLoopClient,
-  createCloudEvent,
+  createJSONMessage,
   setClientId,
   setAutoSubscribe,
   setToken,
@@ -25,13 +25,9 @@ async function main() {
   console.log(`Connected with session: ${client.getSessionId()}`);
 
   // Set up handlers
-  client.onConnected((sessionId) => {
-    console.log(`Connected! Session ID: ${sessionId}`);
-  });
-
-  client.onMessage((events) => {
-    for (const msg of events) {
-      console.log(`[${msg.channel}] ${msg.event.type}:`, msg.event.data);
+  client.onMessage((messages) => {
+    for (const msg of messages) {
+      console.log(`[${msg.channel}] ${msg.message.type}:`, msg.message.data);
     }
   });
 
@@ -47,23 +43,17 @@ async function main() {
   await client.subscribe("chat.dev", "chat.random");
 
   // Publish a message
-  const messageEvent = createCloudEvent({
-    source: "/node-client",
-    type: "chat.message",
-    data: {
-      text: "Hello from Node.js SDK!",
-      timestamp: new Date().toISOString(),
-    },
+  const message = createJSONMessage("chat.message", {
+    text: "Hello from Node.js SDK!",
+    timestamp: new Date().toISOString(),
   });
 
-  await client.publish("chat.general", messageEvent);
+  await client.publish("chat.general", message);
 
   // Make an RPC call (if server supports it)
   try {
-    const rpcRequest = createCloudEvent({
-      source: "/node-client",
-      type: "user.get",
-      data: { userId: "12345" },
+    const rpcRequest = createJSONMessage("user.get", {
+      userId: "12345",
     });
 
     const response = await client.rpc("user.service", "GetUser", rpcRequest, {

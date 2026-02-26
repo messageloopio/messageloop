@@ -94,7 +94,7 @@
     // Import from the built SDK
     import {
       MessageLoopClient,
-      createCloudEvent,
+      createJSONMessage,
       setClientId,
       setAutoSubscribe,
     } from '../dist/esm/index.js';
@@ -118,7 +118,7 @@
       subBtn.disabled = !connected;
     }
 
-    function addMessage(channel, event) {
+    function addMessage(channel, msg) {
       // Remove "no messages" text if present
       if (messagesEl.children[0]?.textContent === 'No messages yet...') {
         messagesEl.innerHTML = '';
@@ -128,11 +128,21 @@
       div.className = 'message';
       const time = new Date().toLocaleTimeString();
 
+      // Extract data based on type
+      let dataDisplay;
+      if (msg.data.type === 'json') {
+        dataDisplay = JSON.stringify(msg.data.json, null, 2);
+      } else if (msg.data.type === 'text') {
+        dataDisplay = msg.data.text;
+      } else {
+        dataDisplay = '[binary data]';
+      }
+
       div.innerHTML = `
         <span class="channel">${channel}</span>
-        <span class="type">${event.type}</span>
+        <span class="type">${msg.type}</span>
         <span class="time">${time}</span>
-        <pre>${JSON.stringify(event.data, null, 2)}</pre>
+        <pre>${dataDisplay}</pre>
       `;
       messagesEl.appendChild(div);
       messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -164,9 +174,9 @@
           updateStatus(`Connected! Session: ${sessionId}`, true);
         });
 
-        client.onMessage((events) => {
-          for (const msg of events) {
-            addMessage(msg.channel, msg.event);
+        client.onMessage((messages) => {
+          for (const msg of messages) {
+            addMessage(msg.channel, msg.message);
           }
         });
 
@@ -198,19 +208,15 @@
       const channel = document.getElementById('channelInput').value;
       const text = document.getElementById('messageInput').value;
 
-      const event = createCloudEvent({
-        source: '/browser',
-        type: 'chat.message',
-        data: {
-          text,
-          timestamp: new Date().toISOString(),
-        },
+      const msg = createJSONMessage('chat.message', {
+        text,
+        timestamp: new Date().toISOString(),
       });
 
       try {
-        await client.publish(channel, event);
+        await client.publish(channel, msg);
         // Add our own message to the list
-        addMessage(channel, event);
+        addMessage(channel, msg);
         document.getElementById('messageInput').value = '';
       } catch (err) {
         showError('Publish failed: ' + err.message);

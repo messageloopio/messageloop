@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 
-	cloudevents "github.com/cloudevents/sdk-go/v2"
 	messageloopgo "github.com/messageloopio/messageloop/sdks/go"
 )
 
@@ -34,19 +33,16 @@ func RPCExample() error {
 	}
 
 	// Make an RPC call
-	req, _ := messageloopgo.NewJSONMessage(
-		"getUser",
-		map[string]any{
-			"message": "hello world",
-		},
-	)
-	resp := cloudevents.NewEvent()
-	err = client.RPC(ctx, "user.service", "GetUser", req, &resp)
+	req := messageloopgo.NewMessageWithData("getUser", messageloopgo.NewJSONData(map[string]any{
+		"message": "hello world",
+	}))
+	resp := messageloopgo.NewMessage("")
+	err = client.RPC(ctx, "user.service", "GetUser", req, resp)
 	if err != nil {
 		return fmt.Errorf("rpc failed: %w", err)
 	}
 
-	log.Printf("RPC response: %s", resp.Data())
+	log.Printf("RPC response: %s", resp.String())
 
 	return nil
 }
