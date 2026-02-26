@@ -17,7 +17,7 @@ type redisMessage struct {
 	Type      string                  `json:"t"`
 	Channel   string                  `json:"ch"`
 	Payload   []byte                  `json:"p"`
-	Info      *messageloop.ClientDesc `json:"i,omitempty"`
+	Info      *messageloop.ClientInfo `json:"i,omitempty"`
 	IsText    bool                    `json:"isText,omitempty"`
 	EventType string                  `json:"eventType,omitempty"`
 }
@@ -44,7 +44,7 @@ func newPublicationMessage(ch string, payload []byte, isText bool, eventType str
 	}
 }
 
-func newJoinMessage(ch string, info *messageloop.ClientDesc) *redisMessage {
+func newJoinMessage(ch string, info *messageloop.ClientInfo) *redisMessage {
 	return &redisMessage{
 		Type:    messageTypeJoin,
 		Channel: ch,
@@ -52,7 +52,7 @@ func newJoinMessage(ch string, info *messageloop.ClientDesc) *redisMessage {
 	}
 }
 
-func newLeaveMessage(ch string, info *messageloop.ClientDesc) *redisMessage {
+func newLeaveMessage(ch string, info *messageloop.ClientInfo) *redisMessage {
 	return &redisMessage{
 		Type:    messageTypeLeave,
 		Channel: ch,

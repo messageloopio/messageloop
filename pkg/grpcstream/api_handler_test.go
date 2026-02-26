@@ -30,6 +30,10 @@ func (m *mockTransport) Close(disconnect messageloop.Disconnect) error {
 	return nil
 }
 
+func (m *mockTransport) RemoteAddr() string {
+	return "127.0.0.1:12345"
+}
+
 func TestAPIServiceHandler_PublishToSessions(t *testing.T) {
 	ctx := context.Background()
 	node := messageloop.NewNode(nil)

@@ -16,6 +16,10 @@ func newTransport(conn *websocket.Conn, marshaler messageloop.Marshaler) *Transp
 	return &Transport{conn: conn, marshaler: marshaler}
 }
 
+func (t *Transport) RemoteAddr() string {
+	return t.conn.RemoteAddr().String()
+}
+
 func (t *Transport) Write(msg []byte) error {
 	return t.WriteMany(msg)
 }

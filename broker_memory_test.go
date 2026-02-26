@@ -19,7 +19,7 @@ type mockBrokerEventHandler struct {
 
 type mockEventInfo struct {
 	channel string
-	info    *ClientDesc
+	info    *ClientInfo
 }
 
 func (m *mockBrokerEventHandler) HandlePublication(ch string, pub *Publication) error {
@@ -32,7 +32,7 @@ func (m *mockBrokerEventHandler) HandlePublication(ch string, pub *Publication) 
 	return nil
 }
 
-func (m *mockBrokerEventHandler) HandleJoin(ch string, info *ClientDesc) error {
+func (m *mockBrokerEventHandler) HandleJoin(ch string, info *ClientInfo) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.handleJoinError != nil {
@@ -42,7 +42,7 @@ func (m *mockBrokerEventHandler) HandleJoin(ch string, info *ClientDesc) error {
 	return nil
 }
 
-func (m *mockBrokerEventHandler) HandleLeave(ch string, info *ClientDesc) error {
+func (m *mockBrokerEventHandler) HandleLeave(ch string, info *ClientInfo) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.handleLeaveError != nil {
@@ -183,19 +183,19 @@ func TestMemoryBroker_Publish_WithoutAsBytes(t *testing.T) {
 	}
 }
 
-func TestMemoryBroker_Publish_WithClientDesc(t *testing.T) {
+func TestMemoryBroker_Publish_WithClientInfo(t *testing.T) {
 	broker := newMemoryBroker(nil)
 	handler := &mockBrokerEventHandler{}
 	broker.RegisterEventHandler(handler)
 
-	clientDesc := &ClientDesc{
+	clientDesc := &ClientInfo{
 		ClientID:  "client-1",
 		SessionID: "session-1",
 		UserID:    "user-1",
 	}
 
 	opts := PublishOptions{
-		ClientDesc: clientDesc,
+		ClientInfo: clientDesc,
 	}
 
 	_, _, err := broker.Publish("test-channel", []byte("payload"), opts)
@@ -203,7 +203,7 @@ func TestMemoryBroker_Publish_WithClientDesc(t *testing.T) {
 		t.Fatalf("Publish() error = %v", err)
 	}
 
-	// Note: memoryBroker doesn't set the ClientDesc in the Publication
+	// Note: memoryBroker doesn't set the ClientInfo in the Publication
 	// The option is stored but not used in memory broker
 }
 
@@ -239,7 +239,7 @@ func TestMemoryBroker_PublishJoin(t *testing.T) {
 	handler := &mockBrokerEventHandler{}
 	broker.RegisterEventHandler(handler)
 
-	info := &ClientDesc{
+	info := &ClientInfo{
 		ClientID:  "client-1",
 		SessionID: "session-1",
 		UserID:    "user-1",
@@ -261,7 +261,7 @@ func TestMemoryBroker_PublishLeave(t *testing.T) {
 	handler := &mockBrokerEventHandler{}
 	broker.RegisterEventHandler(handler)
 
-	info := &ClientDesc{
+	info := &ClientInfo{
 		ClientID:  "client-1",
 		SessionID: "session-1",
 		UserID:    "user-1",
@@ -454,18 +454,18 @@ var (
 	ErrBadRequest = DisconnectBadRequest
 )
 
-func TestPublishOptions_WithClientDesc(t *testing.T) {
-	info := &ClientDesc{
+func TestPublishOptions_WithClientInfo(t *testing.T) {
+	info := &ClientInfo{
 		ClientID:  "test-client",
 		SessionID: "test-session",
 		UserID:    "test-user",
 	}
 
 	opts := PublishOptions{}
-	WithClientDesc(info)(&opts)
+	WithClientInfo(info)(&opts)
 
-	if opts.ClientDesc != info {
-		t.Error("WithClientDesc() should set ClientDesc")
+	if opts.ClientInfo != info {
+		t.Error("WithClientInfo() should set ClientInfo")
 	}
 }
 
@@ -484,18 +484,18 @@ func TestPublishOptions_WithAsBytes(t *testing.T) {
 }
 
 func TestPublishOptions_Compose(t *testing.T) {
-	info := &ClientDesc{
+	info := &ClientInfo{
 		ClientID:  "test-client",
 		SessionID: "test-session",
 		UserID:    "test-user",
 	}
 
 	opts := PublishOptions{}
-	WithClientDesc(info)(&opts)
+	WithClientInfo(info)(&opts)
 	WithAsBytes(true)(&opts)
 
-	if opts.ClientDesc != info {
-		t.Error("WithClientDesc() should set ClientDesc")
+	if opts.ClientInfo != info {
+		t.Error("WithClientInfo() should set ClientInfo")
 	}
 	if !opts.AsBytes {
 		t.Error("WithAsBytes() should set AsBytes to true")

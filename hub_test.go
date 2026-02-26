@@ -50,6 +50,10 @@ func (m *mockTransport) Close(disconnect Disconnect) error {
 	return nil
 }
 
+func (m *mockTransport) RemoteAddr() string {
+	return "127.0.0.1:12345"
+}
+
 func (m *mockTransport) getMessageCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()

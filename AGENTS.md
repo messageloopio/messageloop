@@ -92,7 +92,7 @@ import (
 - Receiver methods grouped by type: `(c *ClientSession)`, `(h *Hub)`
 - Put related private helpers below their public counterparts
 - Keep functions focused and under ~100 lines when possible
-- Use options pattern for optional parameters (see `PublishOption`, `WithClientDesc`)
+- Use options pattern for optional parameters (see `PublishOption`, `WithClientInfo`)
 
 ### Comments
 

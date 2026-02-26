@@ -112,14 +112,14 @@ func (b *redisBroker) Publish(ch string, data []byte, opts messageloop.PublishOp
 }
 
 // PublishJoin publishes a join event to a channel.
-func (b *redisBroker) PublishJoin(ch string, info *messageloop.ClientDesc) error {
+func (b *redisBroker) PublishJoin(ch string, info *messageloop.ClientInfo) error {
 	msg := newJoinMessage(ch, info)
 	_, _, err := b.publishToRedis(ch, msg)
 	return err
 }
 
 // PublishLeave publishes a leave event to a channel.
-func (b *redisBroker) PublishLeave(ch string, info *messageloop.ClientDesc) error {
+func (b *redisBroker) PublishLeave(ch string, info *messageloop.ClientInfo) error {
 	msg := newLeaveMessage(ch, info)
 	_, _, err := b.publishToRedis(ch, msg)
 	return err

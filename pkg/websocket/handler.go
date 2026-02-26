@@ -46,7 +46,7 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	marshaler := h.marshaler(subProtocols)
 	transport := newTransport(conn, marshaler)
 	ctx := r.Context()
-	client, closeFn, err := messageloop.NewClientSession(ctx, h.node, transport, marshaler)
+	client, closeFn, err := messageloop.NewClientSession(ctx, h.node, transport, marshaler, messageloop.WithProtocol("ws"))
 	if err != nil {
 		log.ErrorContext(r.Context(), "create client error", err)
 		rw.WriteHeader(http.StatusInternalServerError)

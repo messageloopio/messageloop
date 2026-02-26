@@ -43,11 +43,11 @@ func (b *memoryBroker) Publish(ch string, payload []byte, opts PublishOptions) (
 	})
 }
 
-func (b *memoryBroker) PublishJoin(ch string, info *ClientDesc) error {
+func (b *memoryBroker) PublishJoin(ch string, info *ClientInfo) error {
 	return nil
 }
 
-func (b *memoryBroker) PublishLeave(ch string, info *ClientDesc) error {
+func (b *memoryBroker) PublishLeave(ch string, info *ClientInfo) error {
 	return nil
 }
 

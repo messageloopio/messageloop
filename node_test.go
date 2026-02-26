@@ -131,7 +131,7 @@ func TestNode_HandlePublication_NoSubscribers(t *testing.T) {
 
 func TestNode_HandleJoin(t *testing.T) {
 	node := NewNode(nil)
-	info := &ClientDesc{
+	info := &ClientInfo{
 		ClientID:  "client-1",
 		SessionID: "session-1",
 		UserID:    "user-1",
@@ -146,7 +146,7 @@ func TestNode_HandleJoin(t *testing.T) {
 
 func TestNode_HandleLeave(t *testing.T) {
 	node := NewNode(nil)
-	info := &ClientDesc{
+	info := &ClientInfo{
 		ClientID:  "client-1",
 		SessionID: "session-1",
 		UserID:    "user-1",
@@ -197,7 +197,7 @@ func TestNode_Publish_WithOptions(t *testing.T) {
 	_ = node.Run()
 
 	err := node.Publish("test-channel", []byte("test payload"),
-		WithClientDesc(&ClientDesc{
+		WithClientInfo(&ClientInfo{
 			ClientID:  "client-1",
 			SessionID: "session-1",
 			UserID:    "user-1",

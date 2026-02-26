@@ -7,6 +7,7 @@ import (
 	"github.com/messageloopio/messageloop"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/v1"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/peer"
 )
 
 type gRPCHandler struct {
@@ -15,8 +16,13 @@ type gRPCHandler struct {
 }
 
 func (h *gRPCHandler) MessageLoop(stream grpc.BidiStreamingServer[clientpb.InboundMessage, clientpb.OutboundMessage]) error {
-	transport := newGRPCTransport(stream)
-	client, closeFn, err := messageloop.NewClientSession(stream.Context(), h.node, transport, messageloop.ProtobufMarshaler{})
+	// Get peer info for remote address
+	var remoteAddr string
+	if p, ok := peer.FromContext(stream.Context()); ok {
+		remoteAddr = p.Addr.String()
+	}
+	transport := newGRPCTransport(stream, remoteAddr)
+	client, closeFn, err := messageloop.NewClientSession(stream.Context(), h.node, transport, messageloop.ProtobufMarshaler{}, messageloop.WithProtocol("grpc"))
 	if err != nil {
 		return err
 	}

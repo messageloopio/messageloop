@@ -11,11 +11,12 @@ import (
 )
 
 type Transport struct {
-	stream    grpc.BidiStreamingServer[clientpb.InboundMessage, clientpb.OutboundMessage]
-	mu        sync.RWMutex
-	closed    bool
-	closeCh   chan struct{}
-	closeOnce sync.Once
+	stream     grpc.BidiStreamingServer[clientpb.InboundMessage, clientpb.OutboundMessage]
+	remoteAddr string
+	mu         sync.RWMutex
+	closed     bool
+	closeCh    chan struct{}
+	closeOnce  sync.Once
 }
 
 func (t *Transport) Write(message []byte) error {
@@ -80,9 +81,15 @@ var _ messageloop.Transport = new(Transport)
 
 func newGRPCTransport(
 	stream grpc.BidiStreamingServer[clientpb.InboundMessage, clientpb.OutboundMessage],
+	remoteAddr string,
 ) *Transport {
 	return &Transport{
-		stream:  stream,
-		closeCh: make(chan struct{}),
+		stream:     stream,
+		remoteAddr: remoteAddr,
+		closeCh:    make(chan struct{}),
 	}
+}
+
+func (t *Transport) RemoteAddr() string {
+	return t.remoteAddr
 }

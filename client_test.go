@@ -43,6 +43,10 @@ func (c *capturingTransport) Write(data []byte) error {
 	return nil
 }
 
+func (c *capturingTransport) RemoteAddr() string {
+	return "127.0.0.1:12345"
+}
+
 func (c *capturingTransport) WriteMany(data ...[]byte) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -116,6 +120,10 @@ func (f *failTransport) Close(disconnect Disconnect) error {
 	defer f.mu.Unlock()
 	f.closeCalled = true
 	return f.closeErr
+}
+
+func (f *failTransport) RemoteAddr() string {
+	return "127.0.0.1:12345"
 }
 
 func (f *failTransport) wasCloseCalled() bool {

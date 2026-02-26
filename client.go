@@ -16,7 +16,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-func NewClientSession(ctx context.Context, node *Node, t Transport, marshaler Marshaler) (*ClientSession, ClientCloseFunc, error) {
+func NewClientSession(ctx context.Context, node *Node, t Transport, marshaler Marshaler, opts ...ClientSessionOption) (*ClientSession, ClientCloseFunc, error) {
 	client := &ClientSession{
 		ctx:          ctx,
 		node:         node,
@@ -24,6 +24,12 @@ func NewClientSession(ctx context.Context, node *Node, t Transport, marshaler Ma
 		session:      uuid.NewString(),
 		marshaler:    marshaler,
 		lastActivity: time.Now(),
+		connectedAt:  time.Now(),
+	}
+
+	// Apply options
+	for _, opt := range opts {
+		opt(client)
 	}
 
 	// Start heartbeat if configured
@@ -36,19 +42,25 @@ func NewClientSession(ctx context.Context, node *Node, t Transport, marshaler Ma
 	}, nil
 }
 
-type EncodingType int
+// ClientSessionOption is a functional option for ClientSession
+type ClientSessionOption func(*ClientSession)
 
-const (
-	EncodingTypeJSON     EncodingType = 1
-	EncodingTypeProtobuf EncodingType = 2
-)
+func WithProtocol(protocol string) ClientSessionOption {
+	return func(c *ClientSession) {
+		c.protocol = protocol
+	}
+}
 
 type ClientCloseFunc func() error
 
-type ClientDesc struct {
-	ClientID  string `json:"client_id"`
-	SessionID string `json:"session_id"`
-	UserID    string `json:"user_id"`
+type ClientInfo struct {
+	ClientID    string `json:"client_id"`
+	SessionID   string `json:"session_id"`
+	UserID      string `json:"user_id"`
+	RemoteAddr  string `json:"remote_addr,omitempty"`
+	Protocol    string `json:"protocol,omitempty"`
+	UserAgent   string `json:"user_agent,omitempty"`
+	ConnectedAt int64  `json:"connected_at,omitempty"`
 }
 
 type ClientSession struct {
@@ -64,6 +76,10 @@ type ClientSession struct {
 	node          *Node
 	marshaler     Marshaler
 	authenticated bool
+
+	// Connection metadata
+	protocol    string // ws or grpc
+	connectedAt time.Time
 
 	// Heartbeat fields
 	lastActivity    time.Time
@@ -311,11 +327,14 @@ func MakeOutboundMessage(in *clientpb.InboundMessage, bodyFunc func(out *clientp
 	return out
 }
 
-func (c *ClientSession) ClientInfo() *ClientDesc {
-	return &ClientDesc{
-		ClientID:  c.client,
-		SessionID: c.session,
-		UserID:    c.user,
+func (c *ClientSession) ClientInfo() *ClientInfo {
+	return &ClientInfo{
+		ClientID:    c.client,
+		SessionID:   c.session,
+		UserID:      c.user,
+		RemoteAddr:  c.transport.RemoteAddr(),
+		Protocol:    c.protocol,
+		ConnectedAt: c.connectedAt.UnixMilli(),
 	}
 }
 
@@ -469,7 +488,7 @@ func (c *ClientSession) handlePublish(ctx context.Context, in *clientpb.InboundM
 		}
 	}
 
-	if err := c.node.Publish(channel, data, WithClientDesc(c.ClientInfo()), WithAsBytes(true), WithIsText(isText), WithEventType(eventType)); err != nil {
+	if err := c.node.Publish(channel, data, WithClientInfo(c.ClientInfo()), WithAsBytes(true), WithIsText(isText), WithEventType(eventType)); err != nil {
 		return err
 	}
 	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {

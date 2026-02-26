@@ -87,6 +87,10 @@ func (m *MockTransport) Close(disconnect Disconnect) error {
 	return nil
 }
 
+func (m *MockTransport) RemoteAddr() string {
+	return "127.0.0.1:12345"
+}
+
 func TestRPCTimeout_FastResponse(t *testing.T) {
 	// Create node with 1 second timeout
 	cfg := &config.Server{
