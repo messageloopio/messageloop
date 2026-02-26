@@ -8,7 +8,7 @@ option go_package = "github.com/messageloopio/messageloop/shared/genproto/go/cli
 import "shared/v1/types.proto";
 import "shared/v1/errors.proto";
 
-service MessagingService {
+service MessageLoopService {
   // 核心双向数据流
   // buf:lint:ignore RPC_REQUEST_STANDARD_NAME
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME

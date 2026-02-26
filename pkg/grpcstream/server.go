@@ -24,7 +24,7 @@ func NewServer(opts Options, node *messageloop.Node) (*Server, error) {
 
 	// Register client streaming service
 	clientHandler := NewGRPCHandler(node)
-	clientpb.RegisterMessagingServiceServer(grpcServer, clientHandler)
+	clientpb.RegisterMessageLoopServiceServer(grpcServer, clientHandler)
 
 	// Register server-side API service
 	apiHandler := NewAPIServiceHandler(node)

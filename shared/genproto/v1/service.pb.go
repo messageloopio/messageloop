@@ -1606,8 +1606,8 @@ const file_v1_service_proto_rawDesc = "" +
 	"\bmetadata\x18\x03 \x01(\v2\x1f.messageloop.shared.v1.MetadataR\bmetadata\x122\n" +
 	"\x05error\x18\x04 \x01(\v2\x1c.messageloop.shared.v1.ErrorR\x05error\"\x06\n" +
 	"\x04Ping\"\x06\n" +
-	"\x04Pong2f\n" +
-	"\x10MessagingService\x12R\n" +
+	"\x04Pong2h\n" +
+	"\x12MessageLoopService\x12R\n" +
 	"\vMessageLoop\x12\x1e.messageloop.v1.InboundMessage\x1a\x1f.messageloop.v1.OutboundMessage(\x010\x01BLZJgithub.com/messageloopio/messageloop/shared/genproto/go/client/v1;clientpbb\x06proto3"
 
 var (
@@ -1692,8 +1692,8 @@ var file_v1_service_proto_depIdxs = []int32{
 	22, // 39: messageloop.v1.SurveyReply.payload:type_name -> messageloop.shared.v1.Payload
 	23, // 40: messageloop.v1.SurveyReply.metadata:type_name -> messageloop.shared.v1.Metadata
 	21, // 41: messageloop.v1.SurveyReply.error:type_name -> messageloop.shared.v1.Error
-	0,  // 42: messageloop.v1.MessagingService.MessageLoop:input_type -> messageloop.v1.InboundMessage
-	1,  // 43: messageloop.v1.MessagingService.MessageLoop:output_type -> messageloop.v1.OutboundMessage
+	0,  // 42: messageloop.v1.MessageLoopService.MessageLoop:input_type -> messageloop.v1.InboundMessage
+	1,  // 43: messageloop.v1.MessageLoopService.MessageLoop:output_type -> messageloop.v1.OutboundMessage
 	43, // [43:44] is the sub-list for method output_type
 	42, // [42:43] is the sub-list for method input_type
 	42, // [42:42] is the sub-list for extension type_name
