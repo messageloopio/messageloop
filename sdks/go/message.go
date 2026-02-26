@@ -11,21 +11,28 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-// dataType indicates the type of data stored in Data
-type dataType int
-
-const (
-	dataTypeNone dataType = iota
-	dataTypeJSON
-	dataTypeBinary
-	dataTypeText
-)
-
-// Data represents message payload data with content type.
+// Data represents message payload data with content type (MIME type).
 type Data struct {
 	contentType string
 	value       any
-	dType       dataType
+}
+
+// isJSON checks if contentType indicates JSON data.
+func (d *Data) isJSON() bool {
+	ct := strings.ToLower(d.contentType)
+	return strings.HasPrefix(ct, "application/json") || strings.Contains(ct, "json")
+}
+
+// isBinary checks if contentType indicates binary data.
+func (d *Data) isBinary() bool {
+	ct := strings.ToLower(d.contentType)
+	return !strings.HasPrefix(ct, "text/") && !d.isJSON()
+}
+
+// isText checks if contentType indicates text data.
+func (d *Data) isText() bool {
+	ct := strings.ToLower(d.contentType)
+	return strings.HasPrefix(ct, "text/")
 }
 
 // ContentType returns the MIME type of the data.
@@ -35,7 +42,7 @@ func (d *Data) ContentType() string {
 
 // AsJSON returns the data as a JSON map. Returns nil if data is not JSON.
 func (d *Data) AsJSON() map[string]any {
-	if d.dType == dataTypeJSON {
+	if d.isJSON() {
 		return d.value.(map[string]any)
 	}
 	return nil
@@ -43,7 +50,7 @@ func (d *Data) AsJSON() map[string]any {
 
 // AsBinary returns the data as bytes. Returns nil if data is not binary.
 func (d *Data) AsBinary() []byte {
-	if d.dType == dataTypeBinary {
+	if d.isBinary() {
 		return d.value.([]byte)
 	}
 	return nil
@@ -51,7 +58,7 @@ func (d *Data) AsBinary() []byte {
 
 // AsText returns the data as a string. Returns empty string if data is not text.
 func (d *Data) AsText() string {
-	if d.dType == dataTypeText {
+	if d.isText() {
 		return d.value.(string)
 	}
 	return ""
@@ -66,15 +73,15 @@ func (d *Data) As(out any) error {
 		return fmt.Errorf("target cannot be nil")
 	}
 
-	switch d.dType {
-	case dataTypeJSON:
+	if d.isJSON() {
 		jsonBytes, err := json.Marshal(d.value)
 		if err != nil {
 			return fmt.Errorf("failed to marshal JSON data: %w", err)
 		}
 		return json.Unmarshal(jsonBytes, out)
+	}
 
-	case dataTypeBinary:
+	if d.isBinary() {
 		// Try to unmarshal as JSON first
 		binary := d.value.([]byte)
 		if err := json.Unmarshal(binary, out); err != nil {
@@ -86,8 +93,9 @@ func (d *Data) As(out any) error {
 			return fmt.Errorf("failed to unmarshal binary data: %w", err)
 		}
 		return nil
+	}
 
-	case dataTypeText:
+	if d.isText() {
 		// Try to unmarshal as JSON first
 		text := d.value.(string)
 		if err := json.Unmarshal([]byte(text), out); err != nil {
@@ -99,10 +107,9 @@ func (d *Data) As(out any) error {
 			return fmt.Errorf("failed to unmarshal text data: %w", err)
 		}
 		return nil
-
-	default:
-		return fmt.Errorf("no data to decode")
 	}
+
+	return fmt.Errorf("no data to decode")
 }
 
 // NewJSONData creates a new Data with JSON content.
@@ -110,7 +117,6 @@ func NewJSONData(data map[string]any) Data {
 	return Data{
 		contentType: "application/json",
 		value:       data,
-		dType:       dataTypeJSON,
 	}
 }
 
@@ -119,7 +125,6 @@ func NewBinaryData(data []byte) Data {
 	return Data{
 		contentType: "application/octet-stream",
 		value:       data,
-		dType:       dataTypeBinary,
 	}
 }
 
@@ -128,7 +133,6 @@ func NewTextData(text string) Data {
 	return Data{
 		contentType: "text/plain",
 		value:       text,
-		dType:       dataTypeText,
 	}
 }
 
@@ -147,7 +151,6 @@ func NewData(contentType string, data any) (Data, error) {
 		switch v := data.(type) {
 		case map[string]any:
 			d.value = v
-			d.dType = dataTypeJSON
 		default:
 			// Try to marshal and unmarshal as JSON
 			jsonBytes, err := json.Marshal(data)
@@ -159,16 +162,13 @@ func NewData(contentType string, data any) (Data, error) {
 				return d, fmt.Errorf("failed to unmarshal data as JSON: %w", err)
 			}
 			d.value = jsonData
-			d.dType = dataTypeJSON
 		}
 	} else if strings.HasPrefix(ct, "text/") {
 		switch v := data.(type) {
 		case string:
 			d.value = v
-			d.dType = dataTypeText
 		case []byte:
 			d.value = string(v)
-			d.dType = dataTypeText
 		default:
 			return d, fmt.Errorf("text content type requires string or []byte data")
 		}
@@ -177,10 +177,8 @@ func NewData(contentType string, data any) (Data, error) {
 		switch v := data.(type) {
 		case []byte:
 			d.value = v
-			d.dType = dataTypeBinary
 		case string:
 			d.value = []byte(v)
-			d.dType = dataTypeBinary
 		default:
 			return d, fmt.Errorf("binary content type requires []byte or string data")
 		}
@@ -256,16 +254,15 @@ func (m *Message) ToPayload() (*sharedpb.Payload, error) {
 		ContentType: m.Data.contentType,
 	}
 
-	switch m.Data.dType {
-	case dataTypeJSON:
+	if m.Data.isJSON() {
 		s, err := structpb.NewStruct(m.Data.AsJSON())
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert JSON to struct: %w", err)
 		}
 		payload.Data = &sharedpb.Payload_Json{Json: s}
-	case dataTypeBinary:
+	} else if m.Data.isBinary() {
 		payload.Data = &sharedpb.Payload_Binary{Binary: m.Data.AsBinary()}
-	case dataTypeText:
+	} else if m.Data.isText() {
 		payload.Data = &sharedpb.Payload_Text{Text: m.Data.AsText()}
 	}
 
@@ -288,19 +285,16 @@ func PayloadToMessage(payload *sharedpb.Payload, id string) *Message {
 	switch d := payload.GetData().(type) {
 	case *sharedpb.Payload_Json:
 		msg.Data.value = d.Json.AsMap()
-		msg.Data.dType = dataTypeJSON
 		if msg.Data.contentType == "" {
 			msg.Data.contentType = "application/json"
 		}
 	case *sharedpb.Payload_Binary:
 		msg.Data.value = d.Binary
-		msg.Data.dType = dataTypeBinary
 		if msg.Data.contentType == "" {
 			msg.Data.contentType = "application/octet-stream"
 		}
 	case *sharedpb.Payload_Text:
 		msg.Data.value = d.Text
-		msg.Data.dType = dataTypeText
 		if msg.Data.contentType == "" {
 			msg.Data.contentType = "text/plain"
 		}
@@ -347,14 +341,13 @@ func (m *Message) String() string {
 		return ""
 	}
 
-	switch m.Data.dType {
-	case dataTypeJSON:
+	if m.Data.isJSON() {
 		if jsonBytes, err := json.Marshal(m.Data.AsJSON()); err == nil {
 			return string(jsonBytes)
 		}
-	case dataTypeBinary:
+	} else if m.Data.isBinary() {
 		return string(m.Data.AsBinary())
-	case dataTypeText:
+	} else if m.Data.isText() {
 		return m.Data.AsText()
 	}
 	return ""
