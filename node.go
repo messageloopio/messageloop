@@ -113,11 +113,11 @@ func (n *Node) Hub() *Hub {
 }
 
 // AddClient adds a client session to the node's hub.
-func (n *Node) AddClient(c *ClientSession) {
+func (n *Node) AddClient(c *Client) {
 	n.addClient(c)
 }
 
-func (n *Node) addClient(c *ClientSession) {
+func (n *Node) addClient(c *Client) {
 	n.hub.add(c)
 }
 
@@ -146,7 +146,7 @@ func (n *Node) AddSubscription(ctx context.Context, ch string, sub Subscriber) e
 
 // RemoveSubscription removes a subscription for a client from a channel.
 // This is an exported method for use by the server-side API.
-func (n *Node) RemoveSubscription(ch string, c *ClientSession) error {
+func (n *Node) RemoveSubscription(ch string, c *Client) error {
 	mu := n.subLock(ch)
 	mu.Lock()
 	defer mu.Unlock()
@@ -269,7 +269,7 @@ func (n *Node) Survey(ctx context.Context, channel string, payload []byte, timeo
 	var wg sync.WaitGroup
 	for _, sub := range subscribers {
 		wg.Add(1)
-		go func(session *ClientSession) {
+		go func(session *Client) {
 			defer wg.Done()
 			n.sendSurveyRequest(ctx, session, survey)
 		}(sub)
@@ -286,7 +286,7 @@ func (n *Node) Survey(ctx context.Context, channel string, payload []byte, timeo
 }
 
 // sendSurveyRequest sends a survey request to a single client session.
-func (n *Node) sendSurveyRequest(ctx context.Context, session *ClientSession, survey *Survey) {
+func (n *Node) sendSurveyRequest(ctx context.Context, session *Client, survey *Survey) {
 	// Create the Payload for the survey request
 	var payload *sharedpb.Payload
 	if len(survey.Payload()) > 0 {

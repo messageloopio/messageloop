@@ -132,21 +132,21 @@ func (f *failTransport) wasCloseCalled() bool {
 	return f.closeCalled
 }
 
-func TestNewClientSession(t *testing.T) {
+func TestNewClient(t *testing.T) {
 	ctx := context.Background()
 	node := NewNode(nil)
 	transport := &capturingTransport{}
 	marshaler := JSONMarshaler{}
 
-	client, closeFunc, err := NewClientSession(ctx, node, transport, marshaler)
+	client, closeFunc, err := NewClient(ctx, node, transport, marshaler)
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 	if client == nil {
-		t.Fatal("NewClientSession() should return a client")
+		t.Fatal("NewClient() should return a client")
 	}
 	if closeFunc == nil {
-		t.Fatal("NewClientSession() should return a close function")
+		t.Fatal("NewClient() should return a close function")
 	}
 	if client.ctx != ctx {
 		t.Error("client context should match provided context")
@@ -170,9 +170,9 @@ func TestClientSession_SessionID(t *testing.T) {
 	node := NewNode(nil)
 	transport := &capturingTransport{}
 
-	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 
 	sessionID := client.SessionID()
@@ -186,9 +186,9 @@ func TestClientSession_SessionID(t *testing.T) {
 	}
 
 	// Different clients should have different session IDs
-	client2, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
+	client2, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 	if client2.SessionID() == sessionID {
 		t.Error("Different clients should have different session IDs")
@@ -200,9 +200,9 @@ func TestClientSession_ClientID(t *testing.T) {
 	node := NewNode(nil)
 	transport := &capturingTransport{}
 
-	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 
 	// Initially, client ID should be empty (set by connect)
@@ -216,9 +216,9 @@ func TestClientSession_UserID(t *testing.T) {
 	node := NewNode(nil)
 	transport := &capturingTransport{}
 
-	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 
 	// Initially, user ID should be empty (set by connect)
@@ -232,9 +232,9 @@ func TestClientSession_Authenticated(t *testing.T) {
 	node := NewNode(nil)
 	transport := &capturingTransport{}
 
-	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 
 	// Initially, not authenticated
@@ -248,9 +248,9 @@ func TestClientSession_ClientInfo(t *testing.T) {
 	node := NewNode(nil)
 	transport := &capturingTransport{}
 
-	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 
 	info := client.ClientInfo()
@@ -267,9 +267,9 @@ func TestClientSession_Channels(t *testing.T) {
 	node := NewNode(nil)
 	transport := &capturingTransport{}
 
-	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 
 	channels := client.Channels()
@@ -286,9 +286,9 @@ func TestClientSession_HandleMessage_Connect(t *testing.T) {
 	node := NewNode(nil)
 	transport := &capturingTransport{}
 
-	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 
 	msg := &clientpb.InboundMessage{
@@ -319,9 +319,9 @@ func TestClientSession_HandleMessage_Connect_Twice(t *testing.T) {
 	node := NewNode(nil)
 	transport := &capturingTransport{}
 
-	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 
 	msg := &clientpb.InboundMessage{
@@ -363,9 +363,9 @@ func TestClientSession_HandleMessage_Ping(t *testing.T) {
 	node := NewNode(nil)
 	transport := &capturingTransport{}
 
-	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 
 	msg := &clientpb.InboundMessage{
@@ -391,9 +391,9 @@ func TestClientSession_HandleMessage_Publish_BeforeAuth(t *testing.T) {
 	node := NewNode(nil)
 	transport := &capturingTransport{}
 
-	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 
 	msg := &clientpb.InboundMessage{
@@ -433,9 +433,9 @@ func TestClientSession_HandleMessage_Publish_AfterAuth(t *testing.T) {
 	_ = node.Run() // Register event handler
 	transport := &capturingTransport{}
 
-	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 
 	// First authenticate
@@ -484,9 +484,9 @@ func TestClientSession_HandleMessage_Subscribe(t *testing.T) {
 	node := NewNode(nil)
 	transport := &capturingTransport{}
 
-	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 
 	// First authenticate
@@ -543,9 +543,9 @@ func TestClientSession_HandleMessage_RpcRequest_NoProxy(t *testing.T) {
 	node := NewNode(nil)
 	transport := &capturingTransport{}
 
-	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 
 	// First authenticate
@@ -595,9 +595,9 @@ func TestClientSession_HandleMessage_Closed(t *testing.T) {
 	node := NewNode(nil)
 	transport := &capturingTransport{}
 
-	client, closeFunc, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
+	client, closeFunc, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 
 	// Close the client
@@ -622,9 +622,9 @@ func TestClientSession_CloseFunc(t *testing.T) {
 	node := NewNode(nil)
 	transport := &capturingTransport{}
 
-	_, closeFunc, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
+	_, closeFunc, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 
 	err = closeFunc()
@@ -646,9 +646,9 @@ func TestClientSession_CloseFunc_WithDisconnect(t *testing.T) {
 	node := NewNode(nil)
 	transport := &capturingTransport{}
 
-	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 
 	// The closeFunc doesn't take parameters - it uses the Disconnect from creation
@@ -673,9 +673,9 @@ func TestClientSession_Send(t *testing.T) {
 	node := NewNode(nil)
 	transport := &capturingTransport{}
 
-	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 
 	msg := &clientpb.OutboundMessage{
@@ -700,9 +700,9 @@ func TestClientSession_Send_TransportError(t *testing.T) {
 	node := NewNode(nil)
 	transport := &failTransport{writeErr: errors.New("write failed")}
 
-	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 
 	msg := &clientpb.OutboundMessage{
@@ -723,9 +723,9 @@ func TestClientSession_HandleMessage_Unsupported(t *testing.T) {
 	node := NewNode(nil)
 	transport := &capturingTransport{}
 
-	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 
 	// First authenticate
@@ -771,9 +771,9 @@ func TestClientSession_HandleMessage_SubRefresh(t *testing.T) {
 	node := NewNode(nil)
 	transport := &capturingTransport{}
 
-	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 
 	// First authenticate
@@ -815,9 +815,9 @@ func TestClientSession_ConcurrentMessages(t *testing.T) {
 	node := NewNode(nil)
 	transport := &capturingTransport{}
 
-	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 
 	// First authenticate
@@ -903,9 +903,9 @@ func TestClientSession_Publish_WithChannelFromEvent(t *testing.T) {
 	_ = node.Run() // Register event handler
 	transport := &capturingTransport{}
 
-	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 
 	// First authenticate
@@ -954,9 +954,9 @@ func TestClientSession_Marshal(t *testing.T) {
 	node := NewNode(nil)
 	transport := &capturingTransport{}
 
-	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 
 	msg := &clientpb.OutboundMessage{
@@ -989,9 +989,9 @@ func TestClientSession_Marshal_Protobuf(t *testing.T) {
 	transport := &capturingTransport{}
 
 	// Create client with protobuf marshaler
-	client, _, err := NewClientSession(ctx, node, transport, ProtobufMarshaler{})
+	client, _, err := NewClient(ctx, node, transport, ProtobufMarshaler{})
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 
 	msg := &clientpb.OutboundMessage{
@@ -1024,9 +1024,9 @@ func TestClientSession_HandleMessage_WithBinaryData(t *testing.T) {
 	_ = node.Run() // Register event handler
 	transport := &capturingTransport{}
 
-	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 
 	// First authenticate
@@ -1108,9 +1108,9 @@ func BenchmarkClientSession_HandleMessage_Ping(b *testing.B) {
 	node := NewNode(nil)
 	transport := &capturingTransport{}
 
-	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
-		b.Fatalf("NewClientSession() error = %v", err)
+		b.Fatalf("NewClient() error = %v", err)
 	}
 
 	// Authenticate first
@@ -1140,9 +1140,9 @@ func BenchmarkClientSession_Marshal_JSON(b *testing.B) {
 	node := NewNode(nil)
 	transport := &capturingTransport{}
 
-	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
-		b.Fatalf("NewClientSession() error = %v", err)
+		b.Fatalf("NewClient() error = %v", err)
 	}
 
 	msg := &clientpb.OutboundMessage{
@@ -1163,9 +1163,9 @@ func BenchmarkClientSession_Marshal_Protobuf(b *testing.B) {
 	node := NewNode(nil)
 	transport := &capturingTransport{}
 
-	client, _, err := NewClientSession(ctx, node, transport, ProtobufMarshaler{})
+	client, _, err := NewClient(ctx, node, transport, ProtobufMarshaler{})
 	if err != nil {
-		b.Fatalf("NewClientSession() error = %v", err)
+		b.Fatalf("NewClient() error = %v", err)
 	}
 
 	msg := &clientpb.OutboundMessage{

@@ -110,7 +110,7 @@ func TestRPCTimeout_FastResponse(t *testing.T) {
 	// Create client session
 	ctx := context.Background()
 	transport := &MockTransport{}
-	client, _, err := NewClientSession(ctx, node, transport, &JSONMarshaler{})
+	client, _, err := NewClient(ctx, node, transport, &JSONMarshaler{})
 	assert.NoError(t, err)
 
 	// Simulate authenticated client
@@ -159,7 +159,7 @@ func TestRPCTimeout_SlowResponse(t *testing.T) {
 	// Create client session
 	ctx := context.Background()
 	transport := &MockTransport{}
-	client, _, err := NewClientSession(ctx, node, transport, &JSONMarshaler{})
+	client, _, err := NewClient(ctx, node, transport, &JSONMarshaler{})
 	assert.NoError(t, err)
 
 	// Simulate authenticated client

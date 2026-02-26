@@ -41,7 +41,7 @@ func TestAPIServiceHandler_PublishToSessions(t *testing.T) {
 
 	// Create a test client
 	transport := &mockTransport{}
-	client, closeFn, err := messageloop.NewClientSession(ctx, node, transport, messageloop.ProtobufMarshaler{})
+	client, closeFn, err := messageloop.NewClient(ctx, node, transport, messageloop.ProtobufMarshaler{})
 	require.NoError(t, err)
 	defer closeFn()
 
@@ -145,7 +145,7 @@ func TestAPIServiceHandler_Disconnect(t *testing.T) {
 
 	// Create a test client
 	transport := &mockTransport{}
-	client, _, err := messageloop.NewClientSession(ctx, node, transport, messageloop.ProtobufMarshaler{})
+	client, _, err := messageloop.NewClient(ctx, node, transport, messageloop.ProtobufMarshaler{})
 	require.NoError(t, err)
 
 	// Add the client to the hub
@@ -190,7 +190,7 @@ func TestAPIServiceHandler_Subscribe(t *testing.T) {
 
 	// Create a test client
 	transport := &mockTransport{}
-	client, closeFn, err := messageloop.NewClientSession(ctx, node, transport, messageloop.ProtobufMarshaler{})
+	client, closeFn, err := messageloop.NewClient(ctx, node, transport, messageloop.ProtobufMarshaler{})
 	require.NoError(t, err)
 	defer closeFn()
 
@@ -234,7 +234,7 @@ func TestAPIServiceHandler_Unsubscribe(t *testing.T) {
 
 	// Create a test client
 	transport := &mockTransport{}
-	client, closeFn, err := messageloop.NewClientSession(ctx, node, transport, messageloop.ProtobufMarshaler{})
+	client, closeFn, err := messageloop.NewClient(ctx, node, transport, messageloop.ProtobufMarshaler{})
 	require.NoError(t, err)
 	defer closeFn()
 

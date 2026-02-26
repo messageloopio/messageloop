@@ -170,15 +170,15 @@ func TestNode_Survey_Basic(t *testing.T) {
 
 	const numClients = 3
 	transports := make([]*capturingTransport, numClients)
-	clients := make([]*ClientSession, numClients)
+	clients := make([]*Client, numClients)
 
 	// Create clients and subscribe them to the channel
 	for i := 0; i < numClients; i++ {
 		transports[i] = &capturingTransport{}
 		var err error
-		clients[i], _, err = NewClientSession(ctx, node, transports[i], JSONMarshaler{})
+		clients[i], _, err = NewClient(ctx, node, transports[i], JSONMarshaler{})
 		if err != nil {
-			t.Fatalf("NewClientSession() error = %v", err)
+			t.Fatalf("NewClient() error = %v", err)
 		}
 
 		// Authenticate
@@ -318,15 +318,15 @@ func TestNode_Survey_AllClientsRespond(t *testing.T) {
 
 	const numClients = 3
 	transports := make([]*capturingTransport, numClients)
-	clients := make([]*ClientSession, numClients)
+	clients := make([]*Client, numClients)
 
 	// Create clients and subscribe them to the channel
 	for i := 0; i < numClients; i++ {
 		transports[i] = &capturingTransport{}
 		var err error
-		clients[i], _, err = NewClientSession(ctx, node, transports[i], JSONMarshaler{})
+		clients[i], _, err = NewClient(ctx, node, transports[i], JSONMarshaler{})
 		if err != nil {
-			t.Fatalf("NewClientSession() error = %v", err)
+			t.Fatalf("NewClient() error = %v", err)
 		}
 
 		// Authenticate
@@ -494,7 +494,7 @@ func TestNode_Survey_ConcurrentClients(t *testing.T) {
 	const numClients = 10
 	var wg sync.WaitGroup
 	transports := make([]*capturingTransport, numClients)
-	clients := make([]*ClientSession, numClients)
+	clients := make([]*Client, numClients)
 	errCh := make(chan error, numClients)
 
 	// Create clients concurrently
@@ -504,7 +504,7 @@ func TestNode_Survey_ConcurrentClients(t *testing.T) {
 			defer wg.Done()
 			transports[i] = &capturingTransport{}
 			var err error
-			clients[i], _, err = NewClientSession(ctx, node, transports[i], JSONMarshaler{})
+			clients[i], _, err = NewClient(ctx, node, transports[i], JSONMarshaler{})
 			if err != nil {
 				errCh <- err
 				return
@@ -643,15 +643,15 @@ func TestHub_GetSubscribers(t *testing.T) {
 	ctx := context.Background()
 
 	const numClients = 3
-	clients := make([]*ClientSession, numClients)
+	clients := make([]*Client, numClients)
 
 	// Create clients and subscribe them
 	for i := 0; i < numClients; i++ {
 		transport := &capturingTransport{}
 		var err error
-		clients[i], _, err = NewClientSession(ctx, node, transport, JSONMarshaler{})
+		clients[i], _, err = NewClient(ctx, node, transport, JSONMarshaler{})
 		if err != nil {
-			t.Fatalf("NewClientSession() error = %v", err)
+			t.Fatalf("NewClient() error = %v", err)
 		}
 
 		clients[i].mu.Lock()

@@ -22,7 +22,7 @@ func (h *gRPCHandler) MessageLoop(stream grpc.BidiStreamingServer[clientpb.Inbou
 		remoteAddr = p.Addr.String()
 	}
 	transport := newGRPCTransport(stream, remoteAddr)
-	client, closeFn, err := messageloop.NewClientSession(stream.Context(), h.node, transport, messageloop.ProtobufMarshaler{}, messageloop.WithProtocol("grpc"))
+	client, closeFn, err := messageloop.NewClient(stream.Context(), h.node, transport, messageloop.ProtobufMarshaler{}, messageloop.WithProtocol("grpc"))
 	if err != nil {
 		return err
 	}

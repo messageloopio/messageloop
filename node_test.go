@@ -84,9 +84,9 @@ func TestNode_HandlePublication(t *testing.T) {
 	ctx := context.Background()
 
 	// Add a client subscribed to the channel
-	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 	client.mu.Lock()
 	client.authenticated = true
@@ -167,9 +167,9 @@ func TestNode_Publish(t *testing.T) {
 	ctx := context.Background()
 
 	// Add a client subscribed to the channel
-	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 	client.mu.Lock()
 	client.authenticated = true
@@ -214,9 +214,9 @@ func TestNode_AddClient(t *testing.T) {
 	transport := &capturingTransport{}
 	ctx := context.Background()
 
-	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 
 	node.AddClient(client)
@@ -238,9 +238,9 @@ func TestNode_AddSubscription(t *testing.T) {
 	transport := &capturingTransport{}
 	ctx := context.Background()
 
-	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 
 	err = node.AddSubscription(ctx, "test-channel", Subscriber{Client:client, Ephemeral: false})
@@ -261,9 +261,9 @@ func TestNode_AddSubscription_FirstSubscriber(t *testing.T) {
 	transport := &capturingTransport{}
 	ctx := context.Background()
 
-	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 
 	// First subscriber should trigger broker.Subscribe
@@ -279,9 +279,9 @@ func TestNode_RemoveSubscription(t *testing.T) {
 	transport := &capturingTransport{}
 	ctx := context.Background()
 
-	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 
 	// Add subscription
@@ -535,9 +535,9 @@ func TestNode_ConcurrentPublish(t *testing.T) {
 	ctx := context.Background()
 
 	// Add a client subscribed to the channel
-	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 	client.mu.Lock()
 	client.authenticated = true
@@ -583,7 +583,7 @@ func TestNode_ConcurrentSubscriptions(t *testing.T) {
 		go func(n int) {
 			defer wg.Done()
 			transport := &capturingTransport{}
-			client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
+			client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 			if err != nil {
 				return
 			}
@@ -605,9 +605,9 @@ func TestNode_MultipleChannels(t *testing.T) {
 	transport := &capturingTransport{}
 	ctx := context.Background()
 
-	client, _, err := NewClientSession(ctx, node, transport, JSONMarshaler{})
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 
 	channels := []string{"channel-1", "channel-2", "channel-3"}
@@ -634,17 +634,17 @@ func TestNode_Publish_MultipleChannels(t *testing.T) {
 	transport2 := &capturingTransport{}
 	ctx := context.Background()
 
-	client1, _, err := NewClientSession(ctx, node, transport1, JSONMarshaler{})
+	client1, _, err := NewClient(ctx, node, transport1, JSONMarshaler{})
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 	client1.mu.Lock()
 	client1.authenticated = true
 	client1.mu.Unlock()
 
-	client2, _, err := NewClientSession(ctx, node, transport2, JSONMarshaler{})
+	client2, _, err := NewClient(ctx, node, transport2, JSONMarshaler{})
 	if err != nil {
-		t.Fatalf("NewClientSession() error = %v", err)
+		t.Fatalf("NewClient() error = %v", err)
 	}
 	client2.mu.Lock()
 	client2.authenticated = true
@@ -736,7 +736,7 @@ func BenchmarkNode_Publish(b *testing.B) {
 	transport := &capturingTransport{}
 	ctx := context.Background()
 
-	client, _, _ := NewClientSession(ctx, node, transport, JSONMarshaler{})
+	client, _, _ := NewClient(ctx, node, transport, JSONMarshaler{})
 	client.mu.Lock()
 	client.authenticated = true
 	client.mu.Unlock()
@@ -760,7 +760,7 @@ func BenchmarkNode_AddSubscription(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		transport := &capturingTransport{}
-		client, _, _ := NewClientSession(ctx, node, transport, JSONMarshaler{})
+		client, _, _ := NewClient(ctx, node, transport, JSONMarshaler{})
 		node.AddSubscription(ctx, "test-channel", Subscriber{Client:client, Ephemeral: false})
 	}
 }

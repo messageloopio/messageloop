@@ -23,7 +23,7 @@ func NewHeartbeatManager(cfg HeartbeatConfig) *HeartbeatManager {
 }
 
 // Start starts the heartbeat goroutine for a client session.
-func (hm *HeartbeatManager) Start(ctx context.Context, client *ClientSession) {
+func (hm *HeartbeatManager) Start(ctx context.Context, client *Client) {
 	if hm.config.IdleTimeout == 0 {
 		return
 	}
@@ -35,7 +35,7 @@ func (hm *HeartbeatManager) Start(ctx context.Context, client *ClientSession) {
 }
 
 // heartbeatLoop manages the heartbeat timers for a client.
-func (hm *HeartbeatManager) heartbeatLoop(ctx context.Context, client *ClientSession) {
+func (hm *HeartbeatManager) heartbeatLoop(ctx context.Context, client *Client) {
 	idleTicker := time.NewTicker(hm.config.IdleTimeout)
 	defer idleTicker.Stop()
 

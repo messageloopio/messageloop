@@ -16,8 +16,8 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-func NewClientSession(ctx context.Context, node *Node, t Transport, marshaler Marshaler, opts ...ClientSessionOption) (*ClientSession, ClientCloseFunc, error) {
-	client := &ClientSession{
+func NewClient(ctx context.Context, node *Node, t Transport, marshaler Marshaler, opts ...ClientOption) (*Client, ClientCloseFunc, error) {
+	client := &Client{
 		ctx:          ctx,
 		node:         node,
 		transport:    t,
@@ -42,11 +42,11 @@ func NewClientSession(ctx context.Context, node *Node, t Transport, marshaler Ma
 	}, nil
 }
 
-// ClientSessionOption is a functional option for ClientSession
-type ClientSessionOption func(*ClientSession)
+// ClientOption is a functional option for Client
+type ClientOption func(*Client)
 
-func WithProtocol(protocol string) ClientSessionOption {
-	return func(c *ClientSession) {
+func WithProtocol(protocol string) ClientOption {
+	return func(c *Client) {
 		c.protocol = protocol
 	}
 }
@@ -63,7 +63,7 @@ type ClientInfo struct {
 	ConnectedAt int64  `json:"connected_at,omitempty"`
 }
 
-type ClientSession struct {
+type Client struct {
 	mu            sync.RWMutex
 	connectMu     sync.Mutex // allows syncing connect with disconnect.
 	ctx           context.Context
@@ -94,7 +94,7 @@ func jsonLog(msg proto.Message) string {
 	return string(data)
 }
 
-func (c *ClientSession) marshal(msg any) ([]byte, error) {
+func (c *Client) marshal(msg any) ([]byte, error) {
 	return c.marshaler.Marshal(msg)
 }
 
@@ -106,7 +106,7 @@ const (
 	statusClosed     status = 3
 )
 
-func (c *ClientSession) close(disconnect Disconnect) error {
+func (c *Client) close(disconnect Disconnect) error {
 	c.mu.Lock()
 	if c.heartbeatCancel != nil {
 		c.heartbeatCancel()
@@ -135,27 +135,27 @@ func (c *ClientSession) close(disconnect Disconnect) error {
 
 // Close closes the client session with a disconnect reason.
 // This is an exported method for use by the server-side API.
-func (c *ClientSession) Close(disconnect Disconnect) error {
+func (c *Client) Close(disconnect Disconnect) error {
 	return c.close(disconnect)
 }
 
-func (c *ClientSession) ClientID() string {
+func (c *Client) ClientID() string {
 	return c.client
 }
 
-func (c *ClientSession) SessionID() string {
+func (c *Client) SessionID() string {
 	return c.session
 }
 
-func (c *ClientSession) UserID() string {
+func (c *Client) UserID() string {
 	return c.user
 }
 
-func (c *ClientSession) Send(ctx context.Context, msg *clientpb.OutboundMessage) error {
+func (c *Client) Send(ctx context.Context, msg *clientpb.OutboundMessage) error {
 	return c.write(ctx, msg)
 }
 
-func (c *ClientSession) HandleMessage(ctx context.Context, in *clientpb.InboundMessage) error {
+func (c *Client) HandleMessage(ctx context.Context, in *clientpb.InboundMessage) error {
 	c.mu.Lock()
 	if c.status == statusClosed {
 		c.mu.Unlock()
@@ -193,7 +193,7 @@ func (c *ClientSession) HandleMessage(ctx context.Context, in *clientpb.InboundM
 	return nil
 }
 
-func (c *ClientSession) handleMessage(ctx context.Context, in *clientpb.InboundMessage) error {
+func (c *Client) handleMessage(ctx context.Context, in *clientpb.InboundMessage) error {
 
 	switch msg := in.Envelope.(type) {
 	case *clientpb.InboundMessage_Connect:
@@ -218,7 +218,7 @@ func (c *ClientSession) handleMessage(ctx context.Context, in *clientpb.InboundM
 	return nil
 }
 
-func (c *ClientSession) Channels() []string {
+func (c *Client) Channels() []string {
 	return []string{}
 }
 
@@ -226,7 +226,7 @@ const (
 	SystemMethodAuthenticate = "$authenticate"
 )
 
-func (c *ClientSession) handleConnect(ctx context.Context, in *clientpb.InboundMessage, connect *clientpb.Connect) error {
+func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage, connect *clientpb.Connect) error {
 	c.mu.RLock()
 	authenticated := c.authenticated
 	closed := c.status == statusClosed
@@ -392,7 +392,7 @@ func MakeOutboundMessage(in *clientpb.InboundMessage, bodyFunc func(out *clientp
 	return out
 }
 
-func (c *ClientSession) ClientInfo() *ClientInfo {
+func (c *Client) ClientInfo() *ClientInfo {
 	return &ClientInfo{
 		ClientID:    c.client,
 		SessionID:   c.session,
@@ -403,13 +403,13 @@ func (c *ClientSession) ClientInfo() *ClientInfo {
 	}
 }
 
-func (c *ClientSession) Authenticated() bool {
+func (c *Client) Authenticated() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.authenticated
 }
 
-func (c *ClientSession) handleRPC(ctx context.Context, in *clientpb.InboundMessage, rpcReq *clientpb.RpcRequest) error {
+func (c *Client) handleRPC(ctx context.Context, in *clientpb.InboundMessage, rpcReq *clientpb.RpcRequest) error {
 	// Extract channel and method from RpcRequest
 	channel := rpcReq.Channel
 	method := rpcReq.Method
@@ -520,7 +520,7 @@ func (c *ClientSession) handleRPC(ctx context.Context, in *clientpb.InboundMessa
 	}))
 }
 
-func (c *ClientSession) handlePublish(ctx context.Context, in *clientpb.InboundMessage, publish *clientpb.Publish) error {
+func (c *Client) handlePublish(ctx context.Context, in *clientpb.InboundMessage, publish *clientpb.Publish) error {
 	if !c.Authenticated() {
 		return DisconnectStale
 	}
@@ -598,7 +598,7 @@ func (c *ClientSession) handlePublish(ctx context.Context, in *clientpb.InboundM
 	}))
 }
 
-func (c *ClientSession) handleSubscribe(ctx context.Context, in *clientpb.InboundMessage, sub *clientpb.Subscribe) error {
+func (c *Client) handleSubscribe(ctx context.Context, in *clientpb.InboundMessage, sub *clientpb.Subscribe) error {
 	subs := []*clientpb.Subscription{}
 	for _, ch := range sub.Subscriptions {
 		// Proxy ACL check - check if there's a proxy configured for subscription ACL
@@ -662,7 +662,7 @@ func (c *ClientSession) handleSubscribe(ctx context.Context, in *clientpb.Inboun
 	}))
 }
 
-func (c *ClientSession) write(ctx context.Context, msg proto.Message) error {
+func (c *Client) write(ctx context.Context, msg proto.Message) error {
 	log.DebugContext(ctx, "sending message", "message", jsonLog(msg))
 	bytes, err := c.marshal(msg)
 	if err != nil {
@@ -678,7 +678,7 @@ func (c *ClientSession) write(ctx context.Context, msg proto.Message) error {
 	return err
 }
 
-func (c *ClientSession) handleUnsubscribe(ctx context.Context, in *clientpb.InboundMessage, unsubscribe *clientpb.Unsubscribe) error {
+func (c *Client) handleUnsubscribe(ctx context.Context, in *clientpb.InboundMessage, unsubscribe *clientpb.Unsubscribe) error {
 	for _, sub := range unsubscribe.Subscriptions {
 		// Remove subscription
 		_ = c.node.RemoveSubscription(sub.Channel, c)
@@ -703,7 +703,7 @@ func (c *ClientSession) handleUnsubscribe(ctx context.Context, in *clientpb.Inbo
 	}))
 }
 
-func (c *ClientSession) handlePing(ctx context.Context, in *clientpb.InboundMessage, ping *clientpb.Ping) error {
+func (c *Client) handlePing(ctx context.Context, in *clientpb.InboundMessage, ping *clientpb.Ping) error {
 	c.ResetActivity()
 	log.DebugContext(ctx, "received ping, sending pong", "message_id", in.Id)
 	err := c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
@@ -719,7 +719,7 @@ func (c *ClientSession) handlePing(ctx context.Context, in *clientpb.InboundMess
 	return err
 }
 
-func (c *ClientSession) handleSubRefresh(ctx context.Context, in *clientpb.InboundMessage, refresh *clientpb.SubRefresh) error {
+func (c *Client) handleSubRefresh(ctx context.Context, in *clientpb.InboundMessage, refresh *clientpb.SubRefresh) error {
 	// SubRefresh is used to refresh subscriptions, currently just acknowledges the refresh
 	// The proxy is notified through OnSubscribed/OnUnsubscribed, so no additional action needed here
 	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
@@ -731,7 +731,7 @@ func (c *ClientSession) handleSubRefresh(ctx context.Context, in *clientpb.Inbou
 
 // handleSurvey handles incoming survey requests from the server.
 // The client should process the survey request and send a response back.
-func (c *ClientSession) handleSurvey(ctx context.Context, in *clientpb.InboundMessage, req *clientpb.SurveyRequest) error {
+func (c *Client) handleSurvey(ctx context.Context, in *clientpb.InboundMessage, req *clientpb.SurveyRequest) error {
 	c.ResetActivity()
 
 	// Store the request ID for response routing
@@ -768,7 +768,7 @@ func (c *ClientSession) handleSurvey(ctx context.Context, in *clientpb.InboundMe
 
 // LastSurveyRequestID returns the last received survey request ID.
 // This is useful for testing purposes.
-func (c *ClientSession) LastSurveyRequestID() string {
+func (c *Client) LastSurveyRequestID() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.lastSurveyRequestID
@@ -776,7 +776,7 @@ func (c *ClientSession) LastSurveyRequestID() string {
 
 // handleSurveyReply handles incoming survey replies from clients.
 // This is called when a client sends a SurveyReply back to the server.
-func (c *ClientSession) handleSurveyReply(ctx context.Context, in *clientpb.InboundMessage, reply *clientpb.SurveyReply) error {
+func (c *Client) handleSurveyReply(ctx context.Context, in *clientpb.InboundMessage, reply *clientpb.SurveyReply) error {
 	c.ResetActivity()
 
 	// Extract payload from the survey reply
@@ -813,14 +813,14 @@ func (c *ClientSession) handleSurveyReply(ctx context.Context, in *clientpb.Inbo
 // Heartbeat-related methods
 
 // setHeartbeatCancel sets the heartbeat cancel function.
-func (c *ClientSession) setHeartbeatCancel(cancel context.CancelFunc) {
+func (c *Client) setHeartbeatCancel(cancel context.CancelFunc) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.heartbeatCancel = cancel
 }
 
 // ResetActivity resets the last activity timestamp to now.
-func (c *ClientSession) ResetActivity() {
+func (c *Client) ResetActivity() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.lastActivity = time.Now()
