@@ -15,7 +15,6 @@ import (
 )
 
 type Node struct {
-	dispatcher       *eventDispatcher
 	hub              *Hub
 	broker           Broker
 	presence         PresenceStore
@@ -117,10 +116,6 @@ func (n *Node) AddClient(c *Client) {
 	n.hub.add(c)
 }
 
-func (n *Node) addClient(c *Client) {
-	n.hub.add(c)
-}
-
 // AddSubscription adds a subscription for a client to a channel.
 func (n *Node) AddSubscription(ctx context.Context, ch string, sub Subscriber) error {
 	mu := n.subLock(ch)
@@ -151,9 +146,6 @@ func (n *Node) RemoveSubscription(ch string, c *Client) error {
 		_ = n.broker.Unsubscribe(ch)
 	}
 	return nil
-}
-
-type eventDispatcher struct {
 }
 
 // Publish sends payload to ch via the broker.

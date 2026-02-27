@@ -606,8 +606,8 @@ func TestNode_Publish_MultipleChannels(t *testing.T) {
 	client2.authenticated = true
 	client2.mu.Unlock()
 
-	node.addClient(client1)
-	node.addClient(client2)
+	node.AddClient(client1)
+	node.AddClient(client2)
 	node.AddSubscription(ctx, "channel-1", Subscriber{Client:client1, Ephemeral: false})
 	node.AddSubscription(ctx, "channel-2", Subscriber{Client:client2, Ephemeral: false})
 

@@ -150,7 +150,7 @@ func (c *Client) close(disconnect Disconnect) error {
 }
 
 // Close closes the client session with a disconnect reason.
-// This is an exported method for use by the server-side API.
+// This is an exported method for use by external code.
 func (c *Client) Close(disconnect Disconnect) error {
 	return c.close(disconnect)
 }
@@ -234,10 +234,6 @@ func (c *Client) handleMessage(ctx context.Context, in *clientpb.InboundMessage)
 	return nil
 }
 
-func (c *Client) Channels() []string {
-	return []string{}
-}
-
 const (
 	SystemMethodAuthenticate = "$authenticate"
 )
@@ -309,7 +305,7 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 	c.mu.Lock()
 	c.authenticated = true
 	c.client = connect.ClientId
-	c.node.addClient(c)
+	c.node.AddClient(c)
 	c.mu.Unlock()
 
 	// Notify proxy about client connection
@@ -626,8 +622,8 @@ func (c *Client) handleSubscribe(ctx context.Context, in *clientpb.InboundMessag
 
 		if err := c.node.AddSubscription(ctx, ch.Channel, Subscriber{Client: c, Ephemeral: ch.Ephemeral}); err != nil {
 			for _, s := range subs {
-				if rmErr := c.node.RemoveSubscription(s.Channel, c); rmErr != nil {
-					log.WarnContext(ctx, "failed to rollback subscription", "channel", s.Channel, "error", rmErr)
+				if err := c.node.RemoveSubscription(s.Channel, c); err != nil {
+					log.WarnContext(ctx, "failed to rollback subscription", "channel", s.Channel, "error", err)
 				}
 			}
 			return err
@@ -788,9 +784,9 @@ func (c *Client) handleSurveyReply(ctx context.Context, in *clientpb.InboundMess
 
 	// Extract payload from the survey reply
 	var payload []byte
-	var respErr error
+	var err error
 	if reply.Error != nil {
-		respErr = fmt.Errorf("%s: %s", reply.Error.Code, reply.Error.Message)
+		err = fmt.Errorf("%s: %s", reply.Error.Code, reply.Error.Message)
 	}
 	if reply.Payload != nil {
 		switch p := reply.Payload.Data.(type) {
@@ -811,7 +807,7 @@ func (c *Client) handleSurveyReply(ctx context.Context, in *clientpb.InboundMess
 
 	// Add the response to the survey (if the survey is still active)
 	if requestID != "" {
-		c.node.AddSurveyResponse(ctx, c.session, requestID, payload, respErr)
+		c.node.AddSurveyResponse(ctx, c.session, requestID, payload, err)
 	}
 
 	return nil

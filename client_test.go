@@ -262,25 +262,6 @@ func TestClientSession_ClientInfo(t *testing.T) {
 	}
 }
 
-func TestClientSession_Channels(t *testing.T) {
-	ctx := context.Background()
-	node := NewNode(nil)
-	transport := &capturingTransport{}
-
-	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
-	if err != nil {
-		t.Fatalf("NewClient() error = %v", err)
-	}
-
-	channels := client.Channels()
-	if channels == nil {
-		t.Error("Channels() should not return nil")
-	}
-	if len(channels) != 0 {
-		t.Errorf("Channels() should return empty slice, got %d channels", len(channels))
-	}
-}
-
 func TestClientSession_HandleMessage_Connect(t *testing.T) {
 	ctx := context.Background()
 	node := NewNode(nil)
