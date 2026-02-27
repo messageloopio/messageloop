@@ -4,21 +4,14 @@ import (
 	"encoding/json"
 	"testing"
 
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 )
 
 func TestJSONMarshaler_Name(t *testing.T) {
 	m := JSONMarshaler{}
 	if got := m.Name(); got != "json" {
 		t.Errorf("JSONMarshaler.Name() = %v, want %v", got, "json")
-	}
-}
-
-func TestJSONMarshaler_UseBytes(t *testing.T) {
-	m := JSONMarshaler{}
-	if got := m.UseBytes(); got != false {
-		t.Errorf("JSONMarshaler.UseBytes() = %v, want %v", got, false)
 	}
 }
 
@@ -101,13 +94,6 @@ func TestProtobufMarshaler_Name(t *testing.T) {
 	m := ProtobufMarshaler{}
 	if got := m.Name(); got != "proto" {
 		t.Errorf("ProtobufMarshaler.Name() = %v, want %v", got, "proto")
-	}
-}
-
-func TestProtobufMarshaler_UseBytes(t *testing.T) {
-	m := ProtobufMarshaler{}
-	if got := m.UseBytes(); got != true {
-		t.Errorf("ProtobufMarshaler.UseBytes() = %v, want %v", got, true)
 	}
 }
 
@@ -197,12 +183,6 @@ func TestProtoJSONMarshaler_Name(t *testing.T) {
 	}
 }
 
-func TestProtoJSONMarshaler_UseBytes(t *testing.T) {
-	if got := ProtoJSONMarshaler.UseBytes(); got != false {
-		t.Errorf("ProtoJSONMarshaler.UseBytes() = %v, want %v", got, false)
-	}
-}
-
 func TestProtoJSONMarshaler_Marshal_Unmarshal(t *testing.T) {
 	original := &clientpb.OutboundMessage{
 		Id: "test-id-456",
@@ -267,8 +247,6 @@ func TestMarshalers(t *testing.T) {
 		if m.Name() == "" {
 			t.Errorf("Marshaler %d has empty name", i)
 		}
-		// Just verify it doesn't panic
-		_ = m.UseBytes()
 	}
 }
 

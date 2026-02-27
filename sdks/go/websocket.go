@@ -8,14 +8,15 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
 	"github.com/messageloopio/messageloop/shared"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
 )
 
 // wsTransport is a WebSocket-based transport implementation.
 type wsTransport struct {
 	conn      *websocket.Conn
 	marshaler Marshaler
+	msgType   int
 	sendMu    sync.Mutex
 	recvMu    sync.Mutex
 }
@@ -48,9 +49,11 @@ func newWSTransport(url string, encoding EncodingType, timeout time.Duration) (*
 	}
 
 	var marshaler Marshaler
+	msgType := websocket.TextMessage
 	switch encoding {
 	case EncodingProtobuf:
 		marshaler = ProtobufMarshaler
+		msgType = websocket.BinaryMessage
 	default:
 		marshaler = JSONMarshaler
 	}
@@ -58,6 +61,7 @@ func newWSTransport(url string, encoding EncodingType, timeout time.Duration) (*
 	return &wsTransport{
 		conn:      conn,
 		marshaler: marshaler,
+		msgType:   msgType,
 	}, nil
 }
 
@@ -71,12 +75,7 @@ func (t *wsTransport) Send(ctx context.Context, msg *clientpb.InboundMessage) er
 		return fmt.Errorf("marshal error: %w", err)
 	}
 
-	messageType := websocket.TextMessage
-	if t.marshaler.UseBytes() {
-		messageType = websocket.BinaryMessage
-	}
-
-	if err := t.conn.WriteMessage(messageType, data); err != nil {
+	if err := t.conn.WriteMessage(t.msgType, data); err != nil {
 		return fmt.Errorf("write error: %w", err)
 	}
 

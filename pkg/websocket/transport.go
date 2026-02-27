@@ -7,13 +7,22 @@ import (
 	"github.com/messageloopio/messageloop"
 )
 
-type Transport struct {
-	conn      *websocket.Conn
-	marshaler messageloop.Marshaler
+// msgTypeFromSubprotocol returns the WebSocket message type for the given negotiated subprotocol.
+// "messageloop+proto" uses binary frames; all others use text frames.
+func msgTypeFromSubprotocol(subprotocol string) int {
+	if subprotocol == "messageloop+proto" {
+		return websocket.BinaryMessage
+	}
+	return websocket.TextMessage
 }
 
-func newTransport(conn *websocket.Conn, marshaler messageloop.Marshaler) *Transport {
-	return &Transport{conn: conn, marshaler: marshaler}
+type Transport struct {
+	conn    *websocket.Conn
+	msgType int
+}
+
+func newTransport(conn *websocket.Conn, msgType int) *Transport {
+	return &Transport{conn: conn, msgType: msgType}
 }
 
 func (t *Transport) RemoteAddr() string {
@@ -25,12 +34,8 @@ func (t *Transport) Write(msg []byte) error {
 }
 
 func (t *Transport) WriteMany(msgs ...[]byte) error {
-	msgType := websocket.TextMessage
-	if t.marshaler.UseBytes() {
-		msgType = websocket.BinaryMessage
-	}
 	for _, msg := range msgs {
-		if err := t.conn.WriteMessage(msgType, msg); err != nil {
+		if err := t.conn.WriteMessage(t.msgType, msg); err != nil {
 			return err
 		}
 	}

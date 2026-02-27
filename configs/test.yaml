@@ -1,0 +1,25 @@
+# E2E Test Configuration
+# Copy this file to test.yaml and adjust values as needed
+
+server:
+  http:
+    addr: ":8080"
+  heartbeat:
+    idle_timeout: "300s"
+  rpc:
+    timeout: "30s"
+
+transport:
+  websocket:
+    addr: ":9080"
+    path: "/ws"
+  grpc:
+    addr: ":9090"
+
+broker:
+  type: redis
+  redis:
+    addr: "localhost:6379"
+    password: "123456"
+
+proxy: {}

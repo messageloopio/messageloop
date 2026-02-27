@@ -15,8 +15,6 @@ type Marshaler interface {
 	Unmarshal(data []byte, msg any) error
 	// Name returns the marshaler name.
 	Name() string
-	// UseBytes returns true if this marshaler uses binary encoding.
-	UseBytes() bool
 }
 
 // JSONMarshaler implements JSON marshaling for protocol messages.
@@ -40,10 +38,6 @@ func (JSONMarshaler) Name() string {
 	return "json"
 }
 
-func (JSONMarshaler) UseBytes() bool {
-	return false
-}
-
 // ProtobufMarshaler implements protobuf marshaling for protocol messages.
 type ProtobufMarshaler struct{}
 
@@ -65,10 +59,6 @@ func (ProtobufMarshaler) Unmarshal(data []byte, msg any) error {
 
 func (ProtobufMarshaler) Name() string {
 	return "proto"
-}
-
-func (ProtobufMarshaler) UseBytes() bool {
-	return true
 }
 
 // ProtoJSONMarshaler is a JSON marshaler that uses protobuf JSON encoding.
@@ -105,10 +95,6 @@ func (p *protoJSONMarshaler) Unmarshal(data []byte, msg any) error {
 
 func (p *protoJSONMarshaler) Name() string {
 	return "json"
-}
-
-func (p *protoJSONMarshaler) UseBytes() bool {
-	return false
 }
 
 // Marshalers is a list of available marshalers.
