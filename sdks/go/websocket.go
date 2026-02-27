@@ -9,8 +9,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
-	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/proto"
+	"github.com/messageloopio/messageloop/shared"
 )
 
 // wsTransport is a WebSocket-based transport implementation.
@@ -22,50 +21,14 @@ type wsTransport struct {
 }
 
 // Marshaler defines the interface for marshaling protocol messages.
-type Marshaler interface {
-	Marshal(msg proto.Message) ([]byte, error)
-	Unmarshal(data []byte, msg proto.Message) error
-	Name() string
-	UseBytes() bool
-}
+// This is a type alias for SDK usage, backed by shared.Marshaler implementations.
+type Marshaler = shared.Marshaler
 
-// JSONMarshaler implements JSON marshaling for protocol messages.
-type JSONMarshaler struct{}
-
-func (JSONMarshaler) Marshal(msg proto.Message) ([]byte, error) {
-	return protojson.Marshal(msg)
-}
-
-func (JSONMarshaler) Unmarshal(data []byte, msg proto.Message) error {
-	return protojson.Unmarshal(data, msg)
-}
-
-func (JSONMarshaler) Name() string {
-	return "json"
-}
-
-func (JSONMarshaler) UseBytes() bool {
-	return false
-}
-
-// ProtobufMarshaler implements protobuf marshaling for protocol messages.
-type ProtobufMarshaler struct{}
-
-func (ProtobufMarshaler) Marshal(msg proto.Message) ([]byte, error) {
-	return proto.Marshal(msg)
-}
-
-func (ProtobufMarshaler) Unmarshal(data []byte, msg proto.Message) error {
-	return proto.Unmarshal(data, msg)
-}
-
-func (ProtobufMarshaler) Name() string {
-	return "proto"
-}
-
-func (ProtobufMarshaler) UseBytes() bool {
-	return true
-}
+// Re-export shared marshaler implementations for SDK usage.
+var (
+	JSONMarshaler     = shared.JSONMarshaler{}
+	ProtobufMarshaler = shared.ProtobufMarshaler{}
+)
 
 // newWSTransport creates a new WebSocket transport.
 func newWSTransport(url string, encoding EncodingType, timeout time.Duration) (*wsTransport, error) {
@@ -87,9 +50,9 @@ func newWSTransport(url string, encoding EncodingType, timeout time.Duration) (*
 	var marshaler Marshaler
 	switch encoding {
 	case EncodingProtobuf:
-		marshaler = ProtobufMarshaler{}
+		marshaler = ProtobufMarshaler
 	default:
-		marshaler = JSONMarshaler{}
+		marshaler = JSONMarshaler
 	}
 
 	return &wsTransport{
