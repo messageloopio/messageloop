@@ -430,7 +430,7 @@ func TestClientSession_HandleMessage_Publish_BeforeAuth(t *testing.T) {
 func TestClientSession_HandleMessage_Publish_AfterAuth(t *testing.T) {
 	ctx := context.Background()
 	node := NewNode(nil)
-	_ = node.Run() // Register event handler
+	_ = node.Run(ctx) // Register event handler
 	transport := &capturingTransport{}
 
 	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
@@ -900,7 +900,7 @@ func TestMakeOutboundMessage_WithoutInbound(t *testing.T) {
 func TestClientSession_Publish_WithChannelFromEvent(t *testing.T) {
 	ctx := context.Background()
 	node := NewNode(nil)
-	_ = node.Run() // Register event handler
+	_ = node.Run(ctx) // Register event handler
 	transport := &capturingTransport{}
 
 	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
@@ -1021,7 +1021,7 @@ func TestClientSession_Marshal_Protobuf(t *testing.T) {
 func TestClientSession_HandleMessage_WithBinaryData(t *testing.T) {
 	ctx := context.Background()
 	node := NewNode(nil)
-	_ = node.Run() // Register event handler
+	_ = node.Run(ctx) // Register event handler
 	transport := &capturingTransport{}
 
 	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})

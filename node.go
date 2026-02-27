@@ -10,41 +10,21 @@ import (
 	"github.com/lynx-go/x/log"
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/proxy"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 )
 
 type Node struct {
 	dispatcher       *eventDispatcher
 	hub              *Hub
 	broker           Broker
+	presence         PresenceStore
 	subLocks         map[int]*sync.Mutex
 	proxy            *proxy.Router
 	heartbeatManager *HeartbeatManager
 	rpcTimeout       time.Duration
 	surveys          map[string]*Survey
 	surveyMu         sync.RWMutex
-}
-
-func (n *Node) HandlePublication(ch string, pub *Publication) error {
-	return n.handlePublication(ch, pub)
-}
-
-func (n *Node) handlePublication(ch string, pub *Publication) error {
-
-	numSubscribers := n.hub.NumSubscribers(ch)
-	if numSubscribers == 0 {
-		return nil
-	}
-	return n.hub.broadcastPublication(ch, pub)
-}
-
-func (n *Node) HandleJoin(ch string, info *ClientInfo) error {
-	return nil
-}
-
-func (n *Node) HandleLeave(ch string, info *ClientInfo) error {
-	return nil
 }
 
 const (
@@ -60,11 +40,11 @@ func NewNode(cfg *config.Server) *Node {
 	node := &Node{
 		subLocks:   subLocks,
 		hub:        newHub(0),
-		rpcTimeout: proxy.DefaultRPCTimeout, // Default 30s
+		rpcTimeout: proxy.DefaultRPCTimeout,
 		surveys:    make(map[string]*Survey),
+		presence:   NewMemoryPresenceStore(),
 	}
 
-	// Initialize RPC timeout if config is provided
 	if cfg != nil && cfg.RPCTimeout != "" {
 		rpcTimeout, err := time.ParseDuration(cfg.RPCTimeout)
 		if err != nil {
@@ -73,35 +53,55 @@ func NewNode(cfg *config.Server) *Node {
 		node.rpcTimeout = rpcTimeout
 	}
 
-	// Initialize heartbeat manager if config is provided
 	if cfg != nil && cfg.Heartbeat.IdleTimeout != "" {
 		idleTimeout, err := time.ParseDuration(cfg.Heartbeat.IdleTimeout)
 		if err != nil {
 			idleTimeout = 300 * time.Second
 		}
-
 		node.heartbeatManager = NewHeartbeatManager(HeartbeatConfig{
 			IdleTimeout: idleTimeout,
 		})
 	}
 
-	broker := newMemoryBroker(node)
-	node.SetBroker(broker)
-
+	node.broker = NewMemoryBroker(MemoryBrokerOptions{})
 	return node
 }
 
-func (n *Node) Run() error {
-	if err := n.Broker().RegisterEventHandler(n); err != nil {
-		return err
+// Run starts the broker in the background, bound to ctx.
+// Waits until the broker's handler is registered before returning.
+func (n *Node) Run(ctx context.Context) error {
+	go func() {
+		if err := n.broker.Start(ctx, func(ch string, pub *Publication) error {
+			return n.hub.broadcastPublication(ch, pub)
+		}); err != nil {
+			log.ErrorContext(ctx, "broker stopped with error", err)
+		}
+	}()
+	type readyBroker interface{ Ready() <-chan struct{} }
+	if r, ok := n.broker.(readyBroker); ok {
+		select {
+		case <-r.Ready():
+		case <-ctx.Done():
+		}
 	}
 	return nil
 }
 
-var _ BrokerEventHandler = new(Node)
-
 func (n *Node) SetBroker(broker Broker) {
 	n.broker = broker
+}
+
+func (n *Node) Broker() Broker {
+	return n.broker
+}
+
+func (n *Node) SetPresenceStore(ps PresenceStore) {
+	n.presence = ps
+}
+
+// Presence returns all clients currently present in ch.
+func (n *Node) Presence(ctx context.Context, ch string) (map[string]*PresenceInfo, error) {
+	return n.presence.Get(ctx, ch)
 }
 
 func (n *Node) subLock(ch string) *sync.Mutex {
@@ -114,7 +114,7 @@ func (n *Node) Hub() *Hub {
 
 // AddClient adds a client session to the node's hub.
 func (n *Node) AddClient(c *Client) {
-	n.addClient(c)
+	n.hub.add(c)
 }
 
 func (n *Node) addClient(c *Client) {
@@ -122,7 +122,6 @@ func (n *Node) addClient(c *Client) {
 }
 
 // AddSubscription adds a subscription for a client to a channel.
-// This is an exported method for use by the server-side API.
 func (n *Node) AddSubscription(ctx context.Context, ch string, sub Subscriber) error {
 	mu := n.subLock(ch)
 	mu.Lock()
@@ -134,24 +133,21 @@ func (n *Node) AddSubscription(ctx context.Context, ch string, sub Subscriber) e
 	}
 	log.InfoContext(ctx, "added subscriber", "channel", ch, "sub", sub)
 	if first {
-		if n.broker != nil {
-			if err := n.broker.Subscribe(ch); err != nil {
-				n.hub.removeSub(ch, sub.Client)
-				return err
-			}
+		if err := n.broker.Subscribe(ch); err != nil {
+			n.hub.removeSub(ch, sub.Client)
+			return err
 		}
 	}
 	return nil
 }
 
 // RemoveSubscription removes a subscription for a client from a channel.
-// This is an exported method for use by the server-side API.
 func (n *Node) RemoveSubscription(ch string, c *Client) error {
 	mu := n.subLock(ch)
 	mu.Lock()
 	defer mu.Unlock()
 	last, removed := n.hub.removeSub(ch, c)
-	if removed && last && n.broker != nil {
+	if removed && last {
 		_ = n.broker.Unsubscribe(ch)
 	}
 	return nil
@@ -160,17 +156,10 @@ func (n *Node) RemoveSubscription(ch string, c *Client) error {
 type eventDispatcher struct {
 }
 
-func (n *Node) Publish(channel string, data []byte, opts ...PublishOption) error {
-	pubOpts := PublishOptions{}
-	for _, opt := range opts {
-		opt(&pubOpts)
-	}
-	_, _, err := n.Broker().Publish(channel, data, pubOpts)
+// Publish sends payload to ch via the broker.
+func (n *Node) Publish(ch string, payload []byte, isText bool) error {
+	_, err := n.broker.Publish(ch, payload, isText)
 	return err
-}
-
-func (n *Node) Broker() Broker {
-	return n.broker
 }
 
 // SetupProxy configures the proxy router with the given proxy configurations.
@@ -188,7 +177,6 @@ func (n *Node) SetupProxy(cfgs []*proxy.ProxyConfig) error {
 	return nil
 }
 
-// createProxy creates a Proxy instance based on the configuration.
 func (n *Node) createProxy(cfg *proxy.ProxyConfig) (proxy.Proxy, error) {
 	if cfg.GRPC != nil {
 		return proxy.NewGRPCProxy(cfg)
@@ -196,8 +184,6 @@ func (n *Node) createProxy(cfg *proxy.ProxyConfig) (proxy.Proxy, error) {
 	if cfg.HTTP != nil {
 		return proxy.NewHTTPProxy(cfg)
 	}
-	// Auto-detect: if endpoint starts with http:// or https://, use HTTP
-	// Otherwise, assume gRPC
 	if (len(cfg.Endpoint) >= 7 && cfg.Endpoint[:7] == "http://") ||
 		(len(cfg.Endpoint) >= 8 && cfg.Endpoint[:8] == "https://") {
 		return proxy.NewHTTPProxy(cfg)
@@ -206,7 +192,6 @@ func (n *Node) createProxy(cfg *proxy.ProxyConfig) (proxy.Proxy, error) {
 }
 
 // FindProxy finds a proxy for the given channel and method.
-// Returns nil if no matching proxy is found.
 func (n *Node) FindProxy(channel, method string) proxy.Proxy {
 	if n.proxy == nil {
 		return nil
@@ -240,7 +225,6 @@ func (n *Node) GetRPCTimeout() time.Duration {
 }
 
 // GetHeartbeatIdleTimeout returns the configured heartbeat idle timeout.
-// Returns 0 if heartbeat manager is not configured.
 func (n *Node) GetHeartbeatIdleTimeout() time.Duration {
 	if n.heartbeatManager != nil {
 		return n.heartbeatManager.Config().IdleTimeout
@@ -249,23 +233,18 @@ func (n *Node) GetHeartbeatIdleTimeout() time.Duration {
 }
 
 // Survey sends a request to all subscribers of a channel and collects responses.
-// Returns collected results or error if the channel has no subscribers.
 func (n *Node) Survey(ctx context.Context, channel string, payload []byte, timeout time.Duration) ([]*SurveyResult, error) {
-	// Get subscribers for the channel
 	subscribers := n.hub.GetSubscribers(channel)
 	if len(subscribers) == 0 {
 		return []*SurveyResult{}, nil
 	}
 
-	// Create survey instance
 	surveyID := uuid.NewString()
 	survey := NewSurvey(surveyID, channel, payload, timeout)
 
-	// Register survey for response collection
 	n.registerSurvey(survey)
 	defer n.unregisterSurvey(surveyID)
 
-	// Send survey request to all subscribers concurrently
 	var wg sync.WaitGroup
 	for _, sub := range subscribers {
 		wg.Add(1)
@@ -274,20 +253,15 @@ func (n *Node) Survey(ctx context.Context, channel string, payload []byte, timeo
 			n.sendSurveyRequest(ctx, session, survey)
 		}(sub)
 	}
-
-	// Wait for all sends to complete
 	wg.Wait()
 
-	// Wait for responses or timeout
 	results := survey.Wait(ctx)
 	survey.Close()
 
 	return results, nil
 }
 
-// sendSurveyRequest sends a survey request to a single client session.
 func (n *Node) sendSurveyRequest(ctx context.Context, session *Client, survey *Survey) {
-	// Create the Payload for the survey request
 	var payload *sharedpb.Payload
 	if len(survey.Payload()) > 0 {
 		payload = &sharedpb.Payload{
@@ -297,7 +271,6 @@ func (n *Node) sendSurveyRequest(ctx context.Context, session *Client, survey *S
 		}
 	}
 
-	// Create outbound message with survey request
 	msg := MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_SurveyRequest{
 			SurveyRequest: &clientpb.SurveyRequest{
@@ -307,28 +280,24 @@ func (n *Node) sendSurveyRequest(ctx context.Context, session *Client, survey *S
 		}
 	})
 
-	// Send to client (fire and forget, responses come through handleMessage)
 	if err := session.Send(ctx, msg); err != nil {
 		log.WarnContext(ctx, "failed to send survey request", "session", session.SessionID(), "error", err)
 		survey.AddResponse(session.SessionID(), nil, err)
 	}
 }
 
-// registerSurvey registers a survey in the registry.
 func (n *Node) registerSurvey(survey *Survey) {
 	n.surveyMu.Lock()
 	defer n.surveyMu.Unlock()
 	n.surveys[survey.ID()] = survey
 }
 
-// unregisterSurvey removes a survey from the registry.
 func (n *Node) unregisterSurvey(surveyID string) {
 	n.surveyMu.Lock()
 	defer n.surveyMu.Unlock()
 	delete(n.surveys, surveyID)
 }
 
-// getSurvey retrieves a survey by ID.
 func (n *Node) getSurvey(surveyID string) *Survey {
 	n.surveyMu.RLock()
 	defer n.surveyMu.RUnlock()

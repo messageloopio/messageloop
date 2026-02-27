@@ -1,633 +1,381 @@
 package messageloop
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
 )
 
-// mockBrokerEventHandler is a mock implementation of BrokerEventHandler for testing
-type mockBrokerEventHandler struct {
-	mu              sync.Mutex
-	publications    []*Publication
-	joins           []*mockEventInfo
-	leaves          []*mockEventInfo
-	handlePubError  error
-	handleJoinError error
-	handleLeaveError error
+// newTestBroker creates a started broker with a handler that collects publications.
+func newTestBroker(t *testing.T, opts MemoryBrokerOptions) (Broker, *collectedPubs, context.CancelFunc) {
+	t.Helper()
+	b := NewMemoryBroker(opts)
+	cp := &collectedPubs{}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { _ = b.Start(ctx, cp.handle) }()
+	time.Sleep(time.Millisecond)
+	return b, cp, cancel
 }
 
-type mockEventInfo struct {
-	channel string
-	info    *ClientInfo
+type collectedPubs struct {
+	mu   sync.Mutex
+	pubs []*Publication
+	err  error
 }
 
-func (m *mockBrokerEventHandler) HandlePublication(ch string, pub *Publication) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.handlePubError != nil {
-		return m.handlePubError
+func (c *collectedPubs) handle(_ string, pub *Publication) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.err != nil {
+		return c.err
 	}
-	m.publications = append(m.publications, pub)
+	c.pubs = append(c.pubs, pub)
 	return nil
 }
 
-func (m *mockBrokerEventHandler) HandleJoin(ch string, info *ClientInfo) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.handleJoinError != nil {
-		return m.handleJoinError
-	}
-	m.joins = append(m.joins, &mockEventInfo{channel: ch, info: info})
-	return nil
+func (c *collectedPubs) count() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.pubs)
 }
 
-func (m *mockBrokerEventHandler) HandleLeave(ch string, info *ClientInfo) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.handleLeaveError != nil {
-		return m.handleLeaveError
-	}
-	m.leaves = append(m.leaves, &mockEventInfo{channel: ch, info: info})
-	return nil
-}
-
-func (m *mockBrokerEventHandler) getPublicationCount() int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return len(m.publications)
-}
-
-func (m *mockBrokerEventHandler) getJoinCount() int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return len(m.joins)
-}
-
-func (m *mockBrokerEventHandler) getLeaveCount() int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return len(m.leaves)
-}
-
-func (m *mockBrokerEventHandler) getLastPublication() *Publication {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if len(m.publications) == 0 {
+func (c *collectedPubs) last() *Publication {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.pubs) == 0 {
 		return nil
 	}
-	return m.publications[len(m.publications)-1]
+	return c.pubs[len(c.pubs)-1]
 }
+
+// --- interface / lifecycle ---
 
 func TestNewMemoryBroker(t *testing.T) {
-	broker := NewMemoryBroker()
-	if broker == nil {
-		t.Fatal("NewMemoryBroker() should not return nil")
+	b := NewMemoryBroker(MemoryBrokerOptions{})
+	if b == nil {
+		t.Fatal("NewMemoryBroker() returned nil")
 	}
-
-	_, ok := broker.(*memoryBroker)
-	if !ok {
-		t.Error("NewMemoryBroker() should return *memoryBroker type")
-	}
-}
-
-func TestMemoryBroker_RegisterEventHandler(t *testing.T) {
-	broker := newMemoryBroker(nil)
-	handler := &mockBrokerEventHandler{}
-
-	err := broker.RegisterEventHandler(handler)
-	if err != nil {
-		t.Fatalf("RegisterEventHandler() error = %v", err)
-	}
-
-	if broker.eventHandler != handler {
-		t.Error("eventHandler should be set to the registered handler")
-	}
-}
-
-func TestMemoryBroker_Subscribe(t *testing.T) {
-	broker := newMemoryBroker(nil)
-	err := broker.Subscribe("test-channel")
-	if err != nil {
-		t.Fatalf("Subscribe() error = %v", err)
-	}
-}
-
-func TestMemoryBroker_Unsubscribe(t *testing.T) {
-	broker := newMemoryBroker(nil)
-	err := broker.Unsubscribe("test-channel")
-	if err != nil {
-		t.Fatalf("Unsubscribe() error = %v", err)
-	}
-}
-
-func TestMemoryBroker_Publish(t *testing.T) {
-	broker := newMemoryBroker(nil)
-	handler := &mockBrokerEventHandler{}
-	broker.RegisterEventHandler(handler)
-
-	payload := []byte("test payload")
-	opts := PublishOptions{
-		AsBytes: true,
-	}
-
-	pos, suppressed, err := broker.Publish("test-channel", payload, opts)
-	if err != nil {
-		t.Fatalf("Publish() error = %v", err)
-	}
-
-	if suppressed {
-		t.Error("Publish() should not be suppressed")
-	}
-
-	// Check StreamPosition
-	if pos.Offset != 0 {
-		t.Errorf("Offset = %d, want 0", pos.Offset)
-	}
-	if pos.Epoch != "" {
-		t.Errorf("Epoch = %s, want empty string", pos.Epoch)
-	}
-
-	if handler.getPublicationCount() != 1 {
-		t.Errorf("handler received %d publications, want 1", handler.getPublicationCount())
-	}
-
-	pub := handler.getLastPublication()
-	if pub.Channel != "test-channel" {
-		t.Errorf("Channel = %s, want test-channel", pub.Channel)
-	}
-	if string(pub.Payload) != string(payload) {
-		t.Errorf("Payload = %s, want %s", string(pub.Payload), string(payload))
-	}
-	if !pub.IsBlob {
-		t.Error("IsBlob should be true when AsBytes option is set")
-	}
-}
-
-func TestMemoryBroker_Publish_WithoutAsBytes(t *testing.T) {
-	broker := newMemoryBroker(nil)
-	handler := &mockBrokerEventHandler{}
-	broker.RegisterEventHandler(handler)
-
-	payload := []byte("test payload")
-	opts := PublishOptions{} // AsBytes not set
-
-	_, _, err := broker.Publish("test-channel", payload, opts)
-	if err != nil {
-		t.Fatalf("Publish() error = %v", err)
-	}
-
-	pub := handler.getLastPublication()
-	if pub.IsBlob {
-		t.Error("IsBlob should be false when AsBytes option is not set")
-	}
-}
-
-func TestMemoryBroker_Publish_WithClientInfo(t *testing.T) {
-	broker := newMemoryBroker(nil)
-	handler := &mockBrokerEventHandler{}
-	broker.RegisterEventHandler(handler)
-
-	clientDesc := &ClientInfo{
-		ClientID:  "client-1",
-		SessionID: "session-1",
-		UserID:    "user-1",
-	}
-
-	opts := PublishOptions{
-		ClientInfo: clientDesc,
-	}
-
-	_, _, err := broker.Publish("test-channel", []byte("payload"), opts)
-	if err != nil {
-		t.Fatalf("Publish() error = %v", err)
-	}
-
-	// Note: memoryBroker doesn't set the ClientInfo in the Publication
-	// The option is stored but not used in memory broker
-}
-
-func TestMemoryBroker_Publish_NoEventHandler(t *testing.T) {
-	broker := newMemoryBroker(nil)
-	// Don't register an event handler
-
-	// The memory broker will panic if Publish is called without an event handler
-	// This is a documented behavior - always register an event handler before using
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Publish() should panic when no event handler registered")
-		}
-	}()
-	_, _, _ = broker.Publish("test-channel", []byte("payload"), PublishOptions{})
-}
-
-func TestMemoryBroker_Publish_HandlerError(t *testing.T) {
-	broker := newMemoryBroker(nil)
-	handler := &mockBrokerEventHandler{
-		handlePubError: ErrBadRequest,
-	}
-	broker.RegisterEventHandler(handler)
-
-	_, _, err := broker.Publish("test-channel", []byte("payload"), PublishOptions{})
-	if err != ErrBadRequest {
-		t.Errorf("Publish() error = %v, want %v", err, ErrBadRequest)
-	}
-}
-
-func TestMemoryBroker_PublishJoin(t *testing.T) {
-	broker := newMemoryBroker(nil)
-	handler := &mockBrokerEventHandler{}
-	broker.RegisterEventHandler(handler)
-
-	info := &ClientInfo{
-		ClientID:  "client-1",
-		SessionID: "session-1",
-		UserID:    "user-1",
-	}
-
-	err := broker.PublishJoin("test-channel", info)
-	if err != nil {
-		t.Fatalf("PublishJoin() error = %v", err)
-	}
-
-	// Memory broker no-ops on PublishJoin
-	if handler.getJoinCount() != 0 {
-		t.Errorf("Memory broker should not trigger joins, got %d", handler.getJoinCount())
-	}
-}
-
-func TestMemoryBroker_PublishLeave(t *testing.T) {
-	broker := newMemoryBroker(nil)
-	handler := &mockBrokerEventHandler{}
-	broker.RegisterEventHandler(handler)
-
-	info := &ClientInfo{
-		ClientID:  "client-1",
-		SessionID: "session-1",
-		UserID:    "user-1",
-	}
-
-	err := broker.PublishLeave("test-channel", info)
-	if err != nil {
-		t.Fatalf("PublishLeave() error = %v", err)
-	}
-
-	// Memory broker no-ops on PublishLeave
-	if handler.getLeaveCount() != 0 {
-		t.Errorf("Memory broker should not trigger leaves, got %d", handler.getLeaveCount())
-	}
-}
-
-func TestMemoryBroker_History(t *testing.T) {
-	broker := newMemoryBroker(nil)
-
-	opts := HistoryOptions{}
-
-	pubs, pos, err := broker.History("test-channel", opts)
-	if err != nil {
-		t.Fatalf("History() error = %v", err)
-	}
-
-	if pubs != nil {
-		t.Error("History() should return nil publications for memory broker")
-	}
-
-	if pos.Offset != 0 {
-		t.Errorf("Offset = %d, want 0", pos.Offset)
-	}
-}
-
-func TestMemoryBroker_RemoveHistory(t *testing.T) {
-	broker := newMemoryBroker(nil)
-
-	err := broker.RemoveHistory("test-channel")
-	if err != nil {
-		t.Fatalf("RemoveHistory() error = %v", err)
-	}
-}
-
-func TestMemoryBroker_Publish_TimeSet(t *testing.T) {
-	broker := newMemoryBroker(nil)
-	handler := &mockBrokerEventHandler{}
-	broker.RegisterEventHandler(handler)
-
-	before := time.Now().UnixMilli()
-
-	_, _, err := broker.Publish("test-channel", []byte("payload"), PublishOptions{})
-	if err != nil {
-		t.Fatalf("Publish() error = %v", err)
-	}
-
-	after := time.Now().UnixMilli()
-
-	pub := handler.getLastPublication()
-	if pub.Time < before || pub.Time > after {
-		t.Errorf("Time = %d, want between %d and %d", pub.Time, before, after)
+	if _, ok := b.(*memoryBroker); !ok {
+		t.Error("NewMemoryBroker() should return *memoryBroker")
 	}
 }
 
 func TestMemoryBroker_BrokerInterface(t *testing.T) {
-	// Verify that memoryBroker implements the Broker interface
-	var _ Broker = new(memoryBroker)
+	var _ Broker = (*memoryBroker)(nil)
 }
 
-func TestNewMemoryBroker_WithNode(t *testing.T) {
-	node := NewNode(nil)
-	broker := newMemoryBroker(node)
-
-	if broker.node != node {
-		t.Error("broker.node should be set to the provided node")
+func TestMemoryBroker_Subscribe_Unsubscribe(t *testing.T) {
+	b := NewMemoryBroker(MemoryBrokerOptions{})
+	if err := b.Subscribe("ch"); err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	if err := b.Unsubscribe("ch"); err != nil {
+		t.Fatalf("Unsubscribe: %v", err)
 	}
 }
 
-func TestMemoryBroker_MultiplePublish(t *testing.T) {
-	broker := newMemoryBroker(nil)
-	handler := &mockBrokerEventHandler{}
-	broker.RegisterEventHandler(handler)
-
-	const numPubs = 10
-	for i := 0; i < numPubs; i++ {
-		payload := []byte(string(rune('a' + i)))
-		_, _, err := broker.Publish("test-channel", payload, PublishOptions{})
+func TestMemoryBroker_Start_BlocksUntilCtxDone(t *testing.T) {
+	b := NewMemoryBroker(MemoryBrokerOptions{})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- b.Start(ctx, func(_ string, _ *Publication) error { return nil }) }()
+	cancel()
+	select {
+	case err := <-done:
 		if err != nil {
-			t.Fatalf("Publish() error = %v", err)
+			t.Errorf("Start returned error: %v", err)
 		}
-	}
-
-	if handler.getPublicationCount() != numPubs {
-		t.Errorf("handler received %d publications, want %d", handler.getPublicationCount(), numPubs)
+	case <-time.After(time.Second):
+		t.Error("Start did not return after context cancel")
 	}
 }
 
-func TestMemoryBroker_ConcurrentPublish(t *testing.T) {
-	broker := newMemoryBroker(nil)
-	handler := &mockBrokerEventHandler{}
-	broker.RegisterEventHandler(handler)
+// --- publish / handler ---
 
-	const numPubs = 100
-	var wg sync.WaitGroup
+func TestMemoryBroker_Publish_CallsHandler(t *testing.T) {
+	b, cp, cancel := newTestBroker(t, MemoryBrokerOptions{})
+	defer cancel()
 
-	for i := 0; i < numPubs; i++ {
-		wg.Add(1)
-		go func(n int) {
-			defer wg.Done()
-			payload := []byte(string(rune('a' + (n % 26))))
-			_, _, _ = broker.Publish("test-channel", payload, PublishOptions{})
-		}(i)
+	offset, err := b.Publish("ch", []byte("hello"), false)
+	if err != nil {
+		t.Fatalf("Publish: %v", err)
 	}
+	if offset == 0 {
+		t.Error("expected non-zero offset")
+	}
+	if cp.count() != 1 {
+		t.Fatalf("handler called %d times, want 1", cp.count())
+	}
+	pub := cp.last()
+	if pub.Channel != "ch" {
+		t.Errorf("Channel = %q, want \"ch\"", pub.Channel)
+	}
+	if string(pub.Payload) != "hello" {
+		t.Errorf("Payload = %q", pub.Payload)
+	}
+	if pub.Offset != offset {
+		t.Errorf("pub.Offset = %d, want %d", pub.Offset, offset)
+	}
+}
 
+func TestMemoryBroker_Publish_IsText(t *testing.T) {
+	b, cp, cancel := newTestBroker(t, MemoryBrokerOptions{})
+	defer cancel()
+
+	_, _ = b.Publish("ch", []byte("text"), true)
+	if pub := cp.last(); !pub.IsText {
+		t.Error("IsText should be true")
+	}
+	_, _ = b.Publish("ch", []byte("bin"), false)
+	if pub := cp.last(); pub.IsText {
+		t.Error("IsText should be false")
+	}
+}
+
+func TestMemoryBroker_Publish_TimeSet(t *testing.T) {
+	b, cp, cancel := newTestBroker(t, MemoryBrokerOptions{})
+	defer cancel()
+
+	before := time.Now().UnixMilli()
+	_, _ = b.Publish("ch", []byte("x"), false)
+	after := time.Now().UnixMilli()
+
+	pub := cp.last()
+	if pub.Time < before || pub.Time > after {
+		t.Errorf("Time %d not in [%d, %d]", pub.Time, before, after)
+	}
+}
+
+func TestMemoryBroker_Publish_NoHandler(t *testing.T) {
+	b := NewMemoryBroker(MemoryBrokerOptions{})
+	offset, err := b.Publish("ch", []byte("x"), false)
+	if err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if offset == 0 {
+		t.Error("expected non-zero offset even without handler")
+	}
+}
+
+func TestMemoryBroker_Publish_HandlerError(t *testing.T) {
+	b, cp, cancel := newTestBroker(t, MemoryBrokerOptions{})
+	defer cancel()
+
+	cp.err = DisconnectBadRequest
+	_, err := b.Publish("ch", []byte("x"), false)
+	if err != DisconnectBadRequest {
+		t.Errorf("expected DisconnectBadRequest, got %v", err)
+	}
+}
+
+func TestMemoryBroker_Publish_MultipleChannels(t *testing.T) {
+	b, cp, cancel := newTestBroker(t, MemoryBrokerOptions{})
+	defer cancel()
+
+	for _, ch := range []string{"a", "b", "c"} {
+		_, _ = b.Publish(ch, []byte(ch), false)
+	}
+	if cp.count() != 3 {
+		t.Errorf("got %d publications, want 3", cp.count())
+	}
+}
+
+func TestMemoryBroker_Publish_ConcurrentSafe(t *testing.T) {
+	b, cp, cancel := newTestBroker(t, MemoryBrokerOptions{})
+	defer cancel()
+
+	const n = 100
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = b.Publish("ch", []byte("x"), false)
+		}()
+	}
 	wg.Wait()
 
-	count := handler.getPublicationCount()
-	if count != numPubs {
-		t.Errorf("handler received %d publications, want %d", count, numPubs)
+	if cp.count() != n {
+		t.Errorf("got %d publications, want %d", cp.count(), n)
 	}
 }
 
-func TestMemoryBroker_Publish_EmptyPayload(t *testing.T) {
-	broker := newMemoryBroker(nil)
-	handler := &mockBrokerEventHandler{}
-	broker.RegisterEventHandler(handler)
+// --- offset monotonicity ---
 
-	_, _, err := broker.Publish("test-channel", []byte{}, PublishOptions{})
+func TestMemoryBroker_Offset_Monotonic(t *testing.T) {
+	b := NewMemoryBroker(MemoryBrokerOptions{})
+	var prev uint64
+	for i := 0; i < 10; i++ {
+		off, _ := b.Publish("ch", []byte("x"), false)
+		if off <= prev {
+			t.Errorf("offset[%d]=%d is not > prev=%d", i, off, prev)
+		}
+		prev = off
+	}
+}
+
+func TestMemoryBroker_Offset_PerChannel(t *testing.T) {
+	b := NewMemoryBroker(MemoryBrokerOptions{})
+	offA, _ := b.Publish("a", []byte("x"), false)
+	offB, _ := b.Publish("b", []byte("x"), false)
+	if offA != 1 {
+		t.Errorf("channel a: offset = %d, want 1", offA)
+	}
+	if offB != 1 {
+		t.Errorf("channel b: offset = %d, want 1", offB)
+	}
+}
+
+// --- history ---
+
+func TestMemoryBroker_History_Empty(t *testing.T) {
+	b := NewMemoryBroker(MemoryBrokerOptions{})
+	pubs, err := b.History("ch", 0, 0)
 	if err != nil {
-		t.Fatalf("Publish() error = %v", err)
+		t.Fatalf("History: %v", err)
 	}
-
-	pub := handler.getLastPublication()
-	if len(pub.Payload) != 0 {
-		t.Errorf("Payload = %v, want empty", pub.Payload)
+	if len(pubs) != 0 {
+		t.Errorf("expected 0 pubs, got %d", len(pubs))
 	}
 }
 
-func TestMemoryBroker_Publish_NilPayload(t *testing.T) {
-	broker := newMemoryBroker(nil)
-	handler := &mockBrokerEventHandler{}
-	broker.RegisterEventHandler(handler)
-
-	_, _, err := broker.Publish("test-channel", nil, PublishOptions{})
+func TestMemoryBroker_History_All(t *testing.T) {
+	b := NewMemoryBroker(MemoryBrokerOptions{})
+	for i := 0; i < 5; i++ {
+		_, _ = b.Publish("ch", []byte{byte(i)}, false)
+	}
+	pubs, err := b.History("ch", 0, 0)
 	if err != nil {
-		t.Fatalf("Publish() error = %v", err)
+		t.Fatalf("History: %v", err)
 	}
-
-	pub := handler.getLastPublication()
-	if len(pub.Payload) != 0 {
-		t.Errorf("Payload = %v, want empty/nil", pub.Payload)
+	if len(pubs) != 5 {
+		t.Fatalf("expected 5 pubs, got %d", len(pubs))
 	}
-}
-
-func TestMemoryBroker_MultipleChannels(t *testing.T) {
-	broker := newMemoryBroker(nil)
-	handler := &mockBrokerEventHandler{}
-	broker.RegisterEventHandler(handler)
-
-	channels := []string{"channel-1", "channel-2", "channel-3"}
-	for _, ch := range channels {
-		_, _, err := broker.Publish(ch, []byte("payload for "+ch), PublishOptions{})
-		if err != nil {
-			t.Fatalf("Publish() error for %s: %v", ch, err)
+	for i, p := range pubs {
+		if p.Offset != uint64(i+1) {
+			t.Errorf("pubs[%d].Offset = %d, want %d", i, p.Offset, i+1)
 		}
 	}
+}
 
-	if handler.getPublicationCount() != len(channels) {
-		t.Errorf("handler received %d publications, want %d", handler.getPublicationCount(), len(channels))
+func TestMemoryBroker_History_SinceOffset(t *testing.T) {
+	b := NewMemoryBroker(MemoryBrokerOptions{})
+	for i := 0; i < 6; i++ {
+		_, _ = b.Publish("ch", []byte{byte(i)}, false)
+	}
+	// offsets 1-6; since=4 returns 4,5,6
+	pubs, err := b.History("ch", 4, 0)
+	if err != nil {
+		t.Fatalf("History: %v", err)
+	}
+	if len(pubs) != 3 {
+		t.Fatalf("expected 3 pubs since offset 4, got %d", len(pubs))
+	}
+	if pubs[0].Offset != 4 {
+		t.Errorf("first offset = %d, want 4", pubs[0].Offset)
 	}
 }
 
-func TestMemoryBroker_StreamPosition_Default(t *testing.T) {
-	broker := newMemoryBroker(nil)
-	handler := &mockBrokerEventHandler{}
-	broker.RegisterEventHandler(handler)
-
-	pos, _, _ := broker.Publish("test-channel", []byte("payload"), PublishOptions{})
-
-	if pos.Offset != 0 {
-		t.Errorf("Offset = %d, want 0 (memory broker doesn't track offset)", pos.Offset)
+func TestMemoryBroker_History_Limit(t *testing.T) {
+	b := NewMemoryBroker(MemoryBrokerOptions{})
+	for i := 0; i < 10; i++ {
+		_, _ = b.Publish("ch", []byte{byte(i)}, false)
 	}
-	if pos.Epoch != "" {
-		t.Errorf("Epoch = %s, want empty string", pos.Epoch)
+	pubs, err := b.History("ch", 0, 3)
+	if err != nil {
+		t.Fatalf("History: %v", err)
 	}
-}
-
-// Export error for testing
-var (
-	ErrBadRequest = DisconnectBadRequest
-)
-
-func TestPublishOptions_WithClientInfo(t *testing.T) {
-	info := &ClientInfo{
-		ClientID:  "test-client",
-		SessionID: "test-session",
-		UserID:    "test-user",
-	}
-
-	opts := PublishOptions{}
-	WithClientInfo(info)(&opts)
-
-	if opts.ClientInfo != info {
-		t.Error("WithClientInfo() should set ClientInfo")
+	if len(pubs) != 3 {
+		t.Fatalf("expected 3 pubs with limit=3, got %d", len(pubs))
 	}
 }
 
-func TestPublishOptions_WithAsBytes(t *testing.T) {
-	opts := PublishOptions{}
-	WithAsBytes(true)(&opts)
-
-	if !opts.AsBytes {
-		t.Error("WithAsBytes() should set AsBytes to true")
+func TestMemoryBroker_History_RingBuffer(t *testing.T) {
+	const size = 4
+	b := NewMemoryBroker(MemoryBrokerOptions{HistorySize: size})
+	for i := 0; i < 7; i++ {
+		_, _ = b.Publish("ch", []byte{byte(i)}, false)
 	}
-
-	WithAsBytes(false)(&opts)
-	if opts.AsBytes {
-		t.Error("WithAsBytes(false) should set AsBytes to false")
+	// offsets 1-7; ring of 4 retains 4,5,6,7
+	pubs, err := b.History("ch", 0, 0)
+	if err != nil {
+		t.Fatalf("History: %v", err)
 	}
-}
-
-func TestPublishOptions_Compose(t *testing.T) {
-	info := &ClientInfo{
-		ClientID:  "test-client",
-		SessionID: "test-session",
-		UserID:    "test-user",
+	if len(pubs) != size {
+		t.Fatalf("expected %d pubs (ring size), got %d", size, len(pubs))
 	}
-
-	opts := PublishOptions{}
-	WithClientInfo(info)(&opts)
-	WithAsBytes(true)(&opts)
-
-	if opts.ClientInfo != info {
-		t.Error("WithClientInfo() should set ClientInfo")
+	if pubs[0].Offset != 4 {
+		t.Errorf("oldest retained offset = %d, want 4", pubs[0].Offset)
 	}
-	if !opts.AsBytes {
-		t.Error("WithAsBytes() should set AsBytes to true")
+	if pubs[size-1].Offset != 7 {
+		t.Errorf("newest offset = %d, want 7", pubs[size-1].Offset)
 	}
 }
 
-func TestHistoryOptions_Default(t *testing.T) {
-	opts := HistoryOptions{}
+func TestMemoryBroker_History_MultiChannel_Isolated(t *testing.T) {
+	b := NewMemoryBroker(MemoryBrokerOptions{})
+	_, _ = b.Publish("a", []byte("a1"), false)
+	_, _ = b.Publish("b", []byte("b1"), false)
+	_, _ = b.Publish("a", []byte("a2"), false)
 
-	if opts.Filter.Limit != 0 {
-		t.Errorf("Filter.Limit = %d, want 0", opts.Filter.Limit)
+	pufsA, _ := b.History("a", 0, 0)
+	pufsB, _ := b.History("b", 0, 0)
+	if len(pufsA) != 2 {
+		t.Errorf("channel a: expected 2 pubs, got %d", len(pufsA))
 	}
-	if opts.Filter.Reverse {
-		t.Error("Filter.Reverse should be false by default")
-	}
-	if opts.MetaTTL != 0 {
-		t.Errorf("MetaTTL = %v, want 0", opts.MetaTTL)
+	if len(pufsB) != 1 {
+		t.Errorf("channel b: expected 1 pub, got %d", len(pufsB))
 	}
 }
 
-func TestHistoryFilter_Since(t *testing.T) {
-	pos := StreamPosition{
-		Offset: 100,
-		Epoch:  "test-epoch",
-	}
-
-	filter := HistoryFilter{
-		Since:  &pos,
-		Limit:  10,
-		Reverse: false,
-	}
-
-	if filter.Since == nil {
-		t.Error("Since should be set")
-	}
-	if filter.Since.Offset != 100 {
-		t.Errorf("Since.Offset = %d, want 100", filter.Since.Offset)
-	}
-	if filter.Limit != 10 {
-		t.Errorf("Limit = %d, want 10", filter.Limit)
-	}
-}
-
-func TestStreamPosition_Default(t *testing.T) {
-	var pos StreamPosition
-
-	if pos.Offset != 0 {
-		t.Errorf("Offset = %d, want 0", pos.Offset)
-	}
-	if pos.Epoch != "" {
-		t.Errorf("Epoch = %s, want empty string", pos.Epoch)
-	}
-}
-
-func TestPublication_Default(t *testing.T) {
-	pub := &Publication{}
-
-	if pub.Channel != "" {
-		t.Errorf("Channel = %s, want empty", pub.Channel)
-	}
-	if pub.Offset != 0 {
-		t.Errorf("Offset = %d, want 0", pub.Offset)
-	}
-	if pub.Metadata != nil {
-		t.Error("Metadata should be nil by default")
-	}
-	if pub.IsBlob {
-		t.Error("IsBlob should be false by default")
-	}
-	if pub.Payload != nil {
-		t.Error("Payload should be nil by default")
-	}
-	if pub.Time != 0 {
-		t.Error("Time should be 0 by default (not set)")
-	}
-}
+// --- node integration ---
 
 func TestMemoryBroker_IntegrationWithNode(t *testing.T) {
 	node := NewNode(nil)
-	broker := node.Broker()
-
-	if broker == nil {
-		t.Fatal("Node should have a broker")
+	if node.Broker() == nil {
+		t.Fatal("Node should have a default broker")
 	}
-
-	// The default broker should be a memoryBroker
-	_, ok := broker.(*memoryBroker)
-	if !ok {
-		t.Error("Node's default broker should be memoryBroker")
+	if _, ok := node.Broker().(*memoryBroker); !ok {
+		t.Error("Node default broker should be *memoryBroker")
 	}
 }
 
-func TestMemoryBroker_Run(t *testing.T) {
+func TestMemoryBroker_Node_Run(t *testing.T) {
 	node := NewNode(nil)
-	err := node.Run()
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-
-	// After run, the broker should have an event handler
-	broker := node.Broker().(*memoryBroker)
-	if broker.eventHandler == nil {
-		t.Error("Broker should have an event handler after Run()")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := node.Run(ctx); err != nil {
+		t.Fatalf("node.Run: %v", err)
 	}
 }
+
+// --- benchmarks ---
 
 func BenchmarkMemoryBroker_Publish(b *testing.B) {
-	broker := newMemoryBroker(nil)
-	handler := &mockBrokerEventHandler{}
-	broker.RegisterEventHandler(handler)
-
-	payload := []byte("test payload")
-
+	broker := NewMemoryBroker(MemoryBrokerOptions{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = broker.Start(ctx, func(_ string, _ *Publication) error { return nil }) }()
+	time.Sleep(time.Millisecond)
+	payload := []byte("bench payload")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		broker.Publish("test-channel", payload, PublishOptions{})
+		_, _ = broker.Publish("ch", payload, false)
 	}
 }
 
 func BenchmarkMemoryBroker_ConcurrentPublish(b *testing.B) {
-	broker := newMemoryBroker(nil)
-	handler := &mockBrokerEventHandler{}
-	broker.RegisterEventHandler(handler)
-
-	payload := []byte("test payload")
-
+	broker := NewMemoryBroker(MemoryBrokerOptions{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = broker.Start(ctx, func(_ string, _ *Publication) error { return nil }) }()
+	time.Sleep(time.Millisecond)
+	payload := []byte("bench payload")
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
-		i := 0
 		for pb.Next() {
-			broker.Publish("test-channel", payload, PublishOptions{})
-			i++
+			_, _ = broker.Publish("ch", payload, false)
 		}
 	})
 }

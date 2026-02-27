@@ -1,24 +1,15 @@
 package redisbroker
 
-import (
-	"encoding/json"
+import "encoding/json"
 
-	"github.com/messageloopio/messageloop"
-)
+const messageTypePublication = "pub"
 
-const (
-	messageTypePublication = "pub"
-	messageTypeJoin        = "join"
-	messageTypeLeave       = "leave"
-)
-
-// redisMessage is the envelope format for messages stored in Redis.
+// redisMessage is the envelope format for publication messages stored in Redis.
 type redisMessage struct {
-	Type    string                  `json:"t"`
-	Channel string                  `json:"ch"`
-	Payload []byte                  `json:"p"`
-	Info    *messageloop.ClientInfo `json:"i,omitempty"`
-	IsText  bool                    `json:"isText,omitempty"`
+	Type    string `json:"t"`
+	Channel string `json:"ch"`
+	Payload []byte `json:"p"`
+	IsText  bool   `json:"isText,omitempty"`
 }
 
 func serializeMessage(msg *redisMessage) ([]byte, error) {
@@ -31,29 +22,4 @@ func deserializeMessage(data []byte) (*redisMessage, error) {
 		return nil, err
 	}
 	return &msg, nil
-}
-
-func newPublicationMessage(ch string, payload []byte, isText bool) *redisMessage {
-	return &redisMessage{
-		Type:    messageTypePublication,
-		Channel: ch,
-		Payload: payload,
-		IsText:  isText,
-	}
-}
-
-func newJoinMessage(ch string, info *messageloop.ClientInfo) *redisMessage {
-	return &redisMessage{
-		Type:    messageTypeJoin,
-		Channel: ch,
-		Info:    info,
-	}
-}
-
-func newLeaveMessage(ch string, info *messageloop.ClientInfo) *redisMessage {
-	return &redisMessage{
-		Type:    messageTypeLeave,
-		Channel: ch,
-		Info:    info,
-	}
 }

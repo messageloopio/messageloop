@@ -50,11 +50,9 @@ func main() {
 		var broker messageloop.Broker
 		switch brokerType {
 		case "redis":
-			// Generate a unique node ID for this instance
-			nodeID := fmt.Sprintf("node-%d", time.Now().UnixNano())
-			broker = redisbroker.New(cfg.Broker.Redis, nodeID)
+			broker = redisbroker.New(cfg.Broker.Redis)
 		case "memory":
-			broker = messageloop.NewMemoryBroker()
+			broker = messageloop.NewMemoryBroker(messageloop.MemoryBrokerOptions{})
 		default:
 			return fmt.Errorf("unknown broker type: %s", brokerType)
 		}
@@ -83,7 +81,7 @@ func main() {
 			}
 		}
 
-		if err := node.Run(); err != nil {
+		if err := node.Run(ctx); err != nil {
 			return err
 		}
 		grpcServer, err := grpcstream.NewServer(grpcstream.Options{

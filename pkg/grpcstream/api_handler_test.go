@@ -108,7 +108,7 @@ func TestAPIServiceHandler_PublishToNonExistentSession(t *testing.T) {
 func TestAPIServiceHandler_PublishToChannels(t *testing.T) {
 	ctx := context.Background()
 	node := messageloop.NewNode(nil)
-	_ = node.Run() // Register event handler
+	_ = node.Run(ctx) // Start broker
 	handler := NewAPIServiceHandler(node)
 
 	// Create payload with binary data

@@ -9,9 +9,10 @@ import (
 const (
 	defaultStreamPrefix    = "ml:stream:"
 	defaultPubSubPrefix    = "ml:pubsub:"
-	defaultConsumerGroup   = "messageloop"
+	defaultPresencePrefix  = "ml:presence:"
 	defaultStreamMaxLength = 10000
 	defaultHistoryTTL      = 24 * time.Hour
+	defaultPresenceTTL     = 60 * time.Second
 	defaultPoolSize        = 10
 	defaultMinIdleConns    = 5
 	defaultMaxRetries      = 3
@@ -22,36 +23,22 @@ const (
 
 // Options contains the configuration for the Redis broker.
 type Options struct {
-	// Addr is the Redis server address (e.g., "localhost:6379")
-	Addr string
-	// Password for Redis authentication
-	Password string
-	// DB is the Redis database number to use
-	DB int
-	// PoolSize is the maximum number of socket connections
-	PoolSize int
-	// MinIdleConns is the minimum number of idle connections
-	MinIdleConns int
-	// MaxRetries is the maximum number of retries before giving up
-	MaxRetries int
-	// DialTimeout is the timeout for connecting to Redis
-	DialTimeout time.Duration
-	// ReadTimeout is the timeout for reading operations
-	ReadTimeout time.Duration
-	// WriteTimeout is the timeout for write operations
-	WriteTimeout time.Duration
-	// StreamMaxLength is the maximum length of Redis streams
-	StreamMaxLength int64
-	// StreamApproximate enables approximate stream trimming
+	Addr             string
+	Password         string
+	DB               int
+	PoolSize         int
+	MinIdleConns     int
+	MaxRetries       int
+	DialTimeout      time.Duration
+	ReadTimeout      time.Duration
+	WriteTimeout     time.Duration
+	StreamMaxLength  int64
 	StreamApproximate bool
-	// HistoryTTL is the time-to-live for stream history
-	HistoryTTL time.Duration
-	// ConsumerGroup is the name of the Redis consumer group
-	ConsumerGroup string
-	// StreamPrefix is the prefix for stream keys
-	StreamPrefix string
-	// PubSubPrefix is the prefix for pub/sub channels
-	PubSubPrefix string
+	HistoryTTL       time.Duration
+	PresenceTTL      time.Duration
+	StreamPrefix     string
+	PubSubPrefix     string
+	PresencePrefix   string
 }
 
 // NewOptions creates Options from config.RedisConfig.
@@ -69,9 +56,10 @@ func NewOptions(cfg config.RedisConfig) *Options {
 		StreamMaxLength:   defaultStreamMaxLength,
 		StreamApproximate: true,
 		HistoryTTL:        defaultHistoryTTL,
-		ConsumerGroup:     defaultConsumerGroup,
+		PresenceTTL:       defaultPresenceTTL,
 		StreamPrefix:      defaultStreamPrefix,
 		PubSubPrefix:      defaultPubSubPrefix,
+		PresencePrefix:    defaultPresencePrefix,
 	}
 
 	if cfg.PoolSize > 0 {
@@ -108,9 +96,6 @@ func NewOptions(cfg config.RedisConfig) *Options {
 		if d, err := time.ParseDuration(cfg.HistoryTTL); err == nil {
 			opts.HistoryTTL = d
 		}
-	}
-	if cfg.ConsumerGroup != "" {
-		opts.ConsumerGroup = cfg.ConsumerGroup
 	}
 
 	return opts

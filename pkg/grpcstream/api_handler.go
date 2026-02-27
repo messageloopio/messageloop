@@ -80,12 +80,10 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverpb.PublishRe
 		// Channel-based publication
 		if len(dest.Channels) > 0 {
 			for _, channel := range dest.Channels {
-				var publishOpts []messageloop.PublishOption
-				// TODO: add_history option not yet implemented in broker
 				if addHistory {
 					log.DebugContext(ctx, "add_history option set but not yet implemented", "channel", channel)
 				}
-				if err := h.node.Publish(channel, data, publishOpts...); err != nil {
+				if err := h.node.Publish(channel, data, false); err != nil {
 					log.ErrorContext(ctx, "failed to publish to channel", err)
 				}
 			}

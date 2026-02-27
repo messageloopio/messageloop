@@ -165,7 +165,7 @@ func TestSurvey_EmptyChannel(t *testing.T) {
 
 func TestNode_Survey_Basic(t *testing.T) {
 	node := NewNode(nil)
-	_ = node.Run()
+	_ = node.Run(context.Background())
 	ctx := context.Background()
 
 	const numClients = 3
@@ -313,7 +313,7 @@ func TestNode_Survey_Basic(t *testing.T) {
 
 func TestNode_Survey_AllClientsRespond(t *testing.T) {
 	node := NewNode(nil)
-	_ = node.Run()
+	_ = node.Run(context.Background())
 	ctx := context.Background()
 
 	const numClients = 3
@@ -471,7 +471,7 @@ func TestNode_Survey_AllClientsRespond(t *testing.T) {
 
 func TestNode_Survey_NoSubscribers(t *testing.T) {
 	node := NewNode(nil)
-	_ = node.Run()
+	_ = node.Run(context.Background())
 	ctx := context.Background()
 
 	// Survey on a channel with no subscribers
@@ -488,7 +488,7 @@ func TestNode_Survey_NoSubscribers(t *testing.T) {
 
 func TestNode_Survey_ConcurrentClients(t *testing.T) {
 	node := NewNode(nil)
-	_ = node.Run()
+	_ = node.Run(context.Background())
 	ctx := context.Background()
 
 	const numClients = 10
@@ -639,7 +639,7 @@ func TestNode_Survey_ConcurrentClients(t *testing.T) {
 
 func TestHub_GetSubscribers(t *testing.T) {
 	node := NewNode(nil)
-	_ = node.Run()
+	_ = node.Run(context.Background())
 	ctx := context.Background()
 
 	const numClients = 3

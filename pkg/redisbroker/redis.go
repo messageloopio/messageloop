@@ -11,150 +11,103 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// redisBroker implements the Broker interface using Redis Streams and Pub/Sub.
+// redisBroker implements messageloop.Broker using Redis Streams (history)
+// and Redis Pub/Sub (real-time fan-out).
 type redisBroker struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
-
 	client  *redis.Client
-	nodeID  string
-	handler messageloop.BrokerEventHandler
-	options *Options
+	opts    *Options
+	handler messageloop.PublicationHandler
 
-	subMu        sync.RWMutex
-	subscribed   map[string]struct{}
-	subNotifyCh  chan struct{} // Notification channel for subscription changes
+	subMu      sync.RWMutex
+	subscribed map[string]struct{}
 }
 
-// New creates a new Redis broker.
-func New(cfg config.RedisConfig, nodeID string) messageloop.Broker {
+// New creates a new Redis-backed Broker.
+// Call go broker.Start(ctx, handler) to start processing events.
+func New(cfg config.RedisConfig) messageloop.Broker {
+	opts := NewOptions(cfg)
 	return &redisBroker{
-		nodeID:      nodeID,
-		options:     NewOptions(cfg),
-		subscribed:  make(map[string]struct{}),
-		subNotifyCh: make(chan struct{}, 1), // Buffered channel for subscription notifications
+		client: redis.NewClient(&redis.Options{
+			Addr:         opts.Addr,
+			Password:     opts.Password,
+			DB:           opts.DB,
+			PoolSize:     opts.PoolSize,
+			MinIdleConns: opts.MinIdleConns,
+			MaxRetries:   opts.MaxRetries,
+			DialTimeout:  opts.DialTimeout,
+			ReadTimeout:  opts.ReadTimeout,
+			WriteTimeout: opts.WriteTimeout,
+		}),
+		opts:       opts,
+		subscribed: make(map[string]struct{}),
 	}
 }
 
-// RegisterEventHandler registers the handler for broker events.
-func (b *redisBroker) RegisterEventHandler(handler messageloop.BrokerEventHandler) error {
+// Start verifies the Redis connection and then runs the Pub/Sub consumer loop
+// until ctx is cancelled. Intended to be called as: go broker.Start(ctx, handler).
+func (b *redisBroker) Start(ctx context.Context, handler messageloop.PublicationHandler) error {
 	b.handler = handler
 
-	// Initialize Redis client
-	b.client = redis.NewClient(&redis.Options{
-		Addr:         b.options.Addr,
-		Password:     b.options.Password,
-		DB:           b.options.DB,
-		PoolSize:     b.options.PoolSize,
-		MinIdleConns: b.options.MinIdleConns,
-		MaxRetries:   b.options.MaxRetries,
-		DialTimeout:  b.options.DialTimeout,
-		ReadTimeout:  b.options.ReadTimeout,
-		WriteTimeout: b.options.WriteTimeout,
-	})
-
-	// Test connection
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	if err := b.client.Ping(ctx).Err(); err != nil {
-		return fmt.Errorf("failed to connect to Redis: %w", err)
+	if err := b.client.Ping(pingCtx).Err(); err != nil {
+		return fmt.Errorf("redis broker: connect: %w", err)
 	}
 
-	// Start consumer goroutine
-	b.ctx, b.cancel = context.WithCancel(context.Background())
-	b.wg.Add(1)
-	go b.consume()
-
-	return nil
+	defer b.client.Close()
+	return b.runPubSub(ctx)
 }
 
-// Subscribe subscribes the node to a channel.
+// Subscribe registers interest in ch on this node.
 func (b *redisBroker) Subscribe(ch string) error {
 	b.subMu.Lock()
-	defer b.subMu.Unlock()
-
-	// Create consumer group for this stream if it doesn't exist
-	ctx, cancel := context.WithTimeout(b.ctx, 5*time.Second)
-	defer cancel()
-
-	stream := b.options.StreamPrefix + ch
-	group := b.options.ConsumerGroup
-
-	// Try to create consumer group - ignore error if it already exists
-	_ = b.client.XGroupCreate(ctx, stream, group, "0").Err()
-
 	b.subscribed[ch] = struct{}{}
-
-	// Notify consumer about subscription change
-	b.notifySubscriptionChanged()
-
+	b.subMu.Unlock()
 	return nil
 }
 
-// Unsubscribe unsubscribes the node from a channel.
+// Unsubscribe removes interest in ch on this node.
 func (b *redisBroker) Unsubscribe(ch string) error {
 	b.subMu.Lock()
-	defer b.subMu.Unlock()
-
 	delete(b.subscribed, ch)
-
-	// Notify consumer about subscription change
-	b.notifySubscriptionChanged()
-
+	b.subMu.Unlock()
 	return nil
 }
 
-// Publish publishes data to a channel.
-func (b *redisBroker) Publish(ch string, data []byte, opts messageloop.PublishOptions) (messageloop.StreamPosition, bool, error) {
-	msg := newPublicationMessage(ch, data, opts.IsText)
-	return b.publishToRedis(ch, msg)
-}
-
-// PublishJoin publishes a join event to a channel.
-func (b *redisBroker) PublishJoin(ch string, info *messageloop.ClientInfo) error {
-	msg := newJoinMessage(ch, info)
-	_, _, err := b.publishToRedis(ch, msg)
-	return err
-}
-
-// PublishLeave publishes a leave event to a channel.
-func (b *redisBroker) PublishLeave(ch string, info *messageloop.ClientInfo) error {
-	msg := newLeaveMessage(ch, info)
-	_, _, err := b.publishToRedis(ch, msg)
-	return err
-}
-
-// History retrieves publications from the history stream.
-func (b *redisBroker) History(ch string, opts messageloop.HistoryOptions) ([]*messageloop.Publication, messageloop.StreamPosition, error) {
-	return b.getHistory(ch, opts)
-}
-
-// RemoveHistory removes history for a channel.
-func (b *redisBroker) RemoveHistory(ch string) error {
-	ctx, cancel := context.WithTimeout(b.ctx, 5*time.Second)
+// Publish writes payload to the Redis Stream (for history) and broadcasts via
+// Pub/Sub (for real-time delivery). Returns the stream offset assigned.
+func (b *redisBroker) Publish(ch string, payload []byte, isText bool) (uint64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	stream := b.options.StreamPrefix + ch
-	return b.client.Del(ctx, stream).Err()
+	msg := &redisMessage{Type: messageTypePublication, Channel: ch, Payload: payload, IsText: isText}
+	data, err := serializeMessage(msg)
+	if err != nil {
+		return 0, err
+	}
+
+	stream := b.opts.StreamPrefix + ch
+	id, err := b.client.XAdd(ctx, &redis.XAddArgs{
+		Stream: stream,
+		MaxLen: b.opts.StreamMaxLength,
+		Approx: b.opts.StreamApproximate,
+		Values: map[string]interface{}{"data": data},
+	}).Result()
+	if err != nil {
+		return 0, err
+	}
+	_ = b.client.Expire(ctx, stream, b.opts.HistoryTTL)
+
+	if err := b.client.Publish(ctx, b.opts.PubSubPrefix+ch, data).Err(); err != nil {
+		return 0, err
+	}
+
+	return parseStreamOffset(id), nil
 }
 
-// Close shuts down the broker.
-func (b *redisBroker) Close() error {
-	b.cancel()
-	b.wg.Wait()
-	if b.client != nil {
-		return b.client.Close()
-	}
-	return nil
+// History returns publications stored for ch with offset >= sinceOffset.
+func (b *redisBroker) History(ch string, sinceOffset uint64, limit int) ([]*messageloop.Publication, error) {
+	return b.getHistory(ch, sinceOffset, limit)
 }
 
-// notifySubscriptionChanged sends a notification about subscription changes.
-// Uses non-blocking send to avoid blocking the caller.
-func (b *redisBroker) notifySubscriptionChanged() {
-	select {
-	case b.subNotifyCh <- struct{}{}:
-	default:
-		// Channel already has a pending notification, no need to send again
-	}
-}
+var _ messageloop.Broker = (*redisBroker)(nil)

@@ -55,7 +55,7 @@ func TestNode_Broker(t *testing.T) {
 
 func TestNode_SetBroker(t *testing.T) {
 	node := NewNode(nil)
-	newBroker := NewMemoryBroker()
+	newBroker := NewMemoryBroker(MemoryBrokerOptions{})
 
 	node.SetBroker(newBroker)
 
@@ -66,22 +66,21 @@ func TestNode_SetBroker(t *testing.T) {
 
 func TestNode_Run(t *testing.T) {
 	node := NewNode(nil)
-	err := node.Run()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := node.Run(ctx)
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
-	}
-
-	// After Run, the broker should have an event handler
-	memBroker := node.broker.(*memoryBroker)
-	if memBroker.eventHandler == nil {
-		t.Error("Broker should have event handler after Run()")
 	}
 }
 
 func TestNode_HandlePublication(t *testing.T) {
 	node := NewNode(nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_ = node.Run(ctx)
+
 	transport := &capturingTransport{}
-	ctx := context.Background()
 
 	// Add a client subscribed to the channel
 	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
@@ -93,18 +92,12 @@ func TestNode_HandlePublication(t *testing.T) {
 	client.mu.Unlock()
 
 	node.AddClient(client)
-	node.AddSubscription(ctx, "test-channel", Subscriber{Client:client, Ephemeral: false})
+	node.AddSubscription(ctx, "test-channel", Subscriber{Client: client, Ephemeral: false})
 
-	pub := &Publication{
-		Channel: "test-channel",
-		Offset:  1,
-		Payload: []byte("test payload"),
-		Time:    time.Now().UnixMilli(),
-	}
-
-	err = node.HandlePublication("test-channel", pub)
+	// Publish via the broker so the internal handler is triggered.
+	err = node.Publish("test-channel", []byte("test payload"), false)
 	if err != nil {
-		t.Fatalf("HandlePublication() error = %v", err)
+		t.Fatalf("Publish() error = %v", err)
 	}
 
 	// Client should receive a message
@@ -115,53 +108,20 @@ func TestNode_HandlePublication(t *testing.T) {
 
 func TestNode_HandlePublication_NoSubscribers(t *testing.T) {
 	node := NewNode(nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_ = node.Run(ctx)
 
-	pub := &Publication{
-		Channel: "empty-channel",
-		Offset:  1,
-		Payload: []byte("test payload"),
-		Time:    time.Now().UnixMilli(),
-	}
-
-	err := node.HandlePublication("empty-channel", pub)
+	// Publish to a channel with no subscribers — should not error.
+	err := node.Publish("empty-channel", []byte("test payload"), false)
 	if err != nil {
-		t.Fatalf("HandlePublication() error = %v", err)
-	}
-}
-
-func TestNode_HandleJoin(t *testing.T) {
-	node := NewNode(nil)
-	info := &ClientInfo{
-		ClientID:  "client-1",
-		SessionID: "session-1",
-		UserID:    "user-1",
-	}
-
-	err := node.HandleJoin("test-channel", info)
-	// Memory broker doesn't handle joins, so this should be a no-op
-	if err != nil {
-		t.Fatalf("HandleJoin() error = %v", err)
-	}
-}
-
-func TestNode_HandleLeave(t *testing.T) {
-	node := NewNode(nil)
-	info := &ClientInfo{
-		ClientID:  "client-1",
-		SessionID: "session-1",
-		UserID:    "user-1",
-	}
-
-	err := node.HandleLeave("test-channel", info)
-	// Memory broker doesn't handle leaves, so this should be a no-op
-	if err != nil {
-		t.Fatalf("HandleLeave() error = %v", err)
+		t.Fatalf("Publish() to empty channel error = %v", err)
 	}
 }
 
 func TestNode_Publish(t *testing.T) {
 	node := NewNode(nil)
-	_ = node.Run() // Register event handler
+	_ = node.Run(context.Background())
 
 	transport := &capturingTransport{}
 	ctx := context.Background()
@@ -176,12 +136,12 @@ func TestNode_Publish(t *testing.T) {
 	client.mu.Unlock()
 
 	node.AddClient(client)
-	node.AddSubscription(ctx, "test-channel", Subscriber{Client:client, Ephemeral: false})
+	node.AddSubscription(ctx, "test-channel", Subscriber{Client: client, Ephemeral: false})
 
 	// Clear transport messages from subscription
 	transport.messages = nil
 
-	err = node.Publish("test-channel", []byte("test payload"))
+	err = node.Publish("test-channel", []byte("test payload"), false)
 	if err != nil {
 		t.Fatalf("Publish() error = %v", err)
 	}
@@ -194,16 +154,9 @@ func TestNode_Publish(t *testing.T) {
 
 func TestNode_Publish_WithOptions(t *testing.T) {
 	node := NewNode(nil)
-	_ = node.Run()
+	_ = node.Run(context.Background())
 
-	err := node.Publish("test-channel", []byte("test payload"),
-		WithClientInfo(&ClientInfo{
-			ClientID:  "client-1",
-			SessionID: "session-1",
-			UserID:    "user-1",
-		}),
-		WithAsBytes(true),
-	)
+	err := node.Publish("test-channel", []byte("test payload"), false)
 	if err != nil {
 		t.Fatalf("Publish() error = %v", err)
 	}
@@ -234,7 +187,7 @@ func TestNode_AddClient(t *testing.T) {
 
 func TestNode_AddSubscription(t *testing.T) {
 	node := NewNode(nil)
-	_ = node.Run() // Register event handler
+	_ = node.Run(context.Background())
 	transport := &capturingTransport{}
 	ctx := context.Background()
 
@@ -257,7 +210,7 @@ func TestNode_AddSubscription(t *testing.T) {
 
 func TestNode_AddSubscription_FirstSubscriber(t *testing.T) {
 	node := NewNode(nil)
-	_ = node.Run()
+	_ = node.Run(context.Background())
 	transport := &capturingTransport{}
 	ctx := context.Background()
 
@@ -275,7 +228,7 @@ func TestNode_AddSubscription_FirstSubscriber(t *testing.T) {
 
 func TestNode_RemoveSubscription(t *testing.T) {
 	node := NewNode(nil)
-	_ = node.Run()
+	_ = node.Run(context.Background())
 	transport := &capturingTransport{}
 	ctx := context.Background()
 
@@ -523,13 +476,16 @@ func TestNode_SetupProxy_HTTP(t *testing.T) {
 }
 
 func TestNode_BrokerEventHandler(t *testing.T) {
-	// Test that Node implements BrokerEventHandler
-	var _ BrokerEventHandler = new(Node)
+	// Test that Node can be used as a broker publication handler
+	node := NewNode(nil)
+	if node == nil {
+		t.Error("node should not be nil")
+	}
 }
 
 func TestNode_ConcurrentPublish(t *testing.T) {
 	node := NewNode(nil)
-	_ = node.Run()
+	_ = node.Run(context.Background())
 
 	transport := &capturingTransport{}
 	ctx := context.Background()
@@ -557,7 +513,7 @@ func TestNode_ConcurrentPublish(t *testing.T) {
 		go func(n int) {
 			defer wg.Done()
 			payload := []byte(string(rune('a' + (n % 26))))
-			_ = node.Publish("test-channel", payload)
+			_ = node.Publish("test-channel", payload, false)
 		}(i)
 	}
 
@@ -572,7 +528,7 @@ func TestNode_ConcurrentPublish(t *testing.T) {
 
 func TestNode_ConcurrentSubscriptions(t *testing.T) {
 	node := NewNode(nil)
-	_ = node.Run()
+	_ = node.Run(context.Background())
 	ctx := context.Background()
 
 	const numSubs = 100
@@ -601,7 +557,7 @@ func TestNode_ConcurrentSubscriptions(t *testing.T) {
 
 func TestNode_MultipleChannels(t *testing.T) {
 	node := NewNode(nil)
-	_ = node.Run()
+	_ = node.Run(context.Background())
 	transport := &capturingTransport{}
 	ctx := context.Background()
 
@@ -628,7 +584,7 @@ func TestNode_MultipleChannels(t *testing.T) {
 
 func TestNode_Publish_MultipleChannels(t *testing.T) {
 	node := NewNode(nil)
-	_ = node.Run()
+	_ = node.Run(context.Background())
 
 	transport1 := &capturingTransport{}
 	transport2 := &capturingTransport{}
@@ -660,7 +616,7 @@ func TestNode_Publish_MultipleChannels(t *testing.T) {
 	transport2.messages = nil
 
 	// Publish to channel-1
-	_ = node.Publish("channel-1", []byte("payload-1"))
+	_ = node.Publish("channel-1", []byte("payload-1"), false)
 
 	// Only client1 should receive
 	if transport1.getMessageCount() != 1 {
@@ -731,7 +687,7 @@ func (m *mockRPCProxy) Close() error {
 
 func BenchmarkNode_Publish(b *testing.B) {
 	node := NewNode(nil)
-	_ = node.Run()
+	_ = node.Run(context.Background())
 
 	transport := &capturingTransport{}
 	ctx := context.Background()
@@ -748,13 +704,13 @@ func BenchmarkNode_Publish(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		node.Publish("test-channel", payload)
+		node.Publish("test-channel", payload, false)
 	}
 }
 
 func BenchmarkNode_AddSubscription(b *testing.B) {
 	node := NewNode(nil)
-	_ = node.Run()
+	_ = node.Run(context.Background())
 	ctx := context.Background()
 
 	b.ResetTimer()

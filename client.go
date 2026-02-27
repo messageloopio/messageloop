@@ -18,13 +18,14 @@ import (
 
 func NewClient(ctx context.Context, node *Node, t Transport, marshaler Marshaler, opts ...ClientOption) (*Client, ClientCloseFunc, error) {
 	client := &Client{
-		ctx:          ctx,
-		node:         node,
-		transport:    t,
-		session:      uuid.NewString(),
-		marshaler:    marshaler,
-		lastActivity: time.Now(),
-		connectedAt:  time.Now(),
+		ctx:                ctx,
+		node:               node,
+		transport:          t,
+		session:            uuid.NewString(),
+		marshaler:          marshaler,
+		lastActivity:       time.Now(),
+		connectedAt:        time.Now(),
+		subscribedChannels: make(map[string]struct{}),
 	}
 
 	// Apply options
@@ -85,6 +86,9 @@ type Client struct {
 	lastActivity    time.Time
 	heartbeatCancel context.CancelFunc
 
+	// Tracks channels this client is subscribed to, for presence cleanup.
+	subscribedChannels map[string]struct{}
+
 	// Survey field - stores the last received survey request ID
 	lastSurveyRequestID string
 }
@@ -112,7 +116,19 @@ func (c *Client) close(disconnect Disconnect) error {
 		c.heartbeatCancel()
 		c.heartbeatCancel = nil
 	}
+	channels := make([]string, 0, len(c.subscribedChannels))
+	for ch := range c.subscribedChannels {
+		channels = append(channels, ch)
+	}
 	c.mu.Unlock()
+
+	// Remove presence for all subscribed channels.
+	if len(channels) > 0 {
+		presCtx := context.Background()
+		for _, ch := range channels {
+			_ = c.node.presence.Remove(presCtx, ch, c.session)
+		}
+	}
 
 	// Clean up session from hub
 	if c.session != "" {
@@ -315,14 +331,7 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 
 		// Handle message recovery if requested
 		if sub.Recover && sub.Offset > 0 {
-			historyPubs, _, err := c.node.broker.History(sub.Channel, HistoryOptions{
-				Filter: HistoryFilter{
-					Since: &StreamPosition{
-						Offset: sub.Offset + 1, // Start from next message after last received
-					},
-					Limit: -1, // No limit
-				},
-			})
+			historyPubs, err := c.node.broker.History(sub.Channel, sub.Offset+1, 0)
 			if err != nil {
 				log.WarnContext(ctx, "failed to recover messages", "channel", sub.Channel, "error", err)
 				continue
@@ -567,7 +576,7 @@ func (c *Client) handlePublish(ctx context.Context, in *clientpb.InboundMessage,
 		}
 	}
 
-	if err := c.node.Publish(channel, data, WithClientInfo(c.ClientInfo()), WithAsBytes(true), WithIsText(isText)); err != nil {
+	if err := c.node.Publish(channel, data, isText); err != nil {
 		return err
 	}
 	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
@@ -625,6 +634,16 @@ func (c *Client) handleSubscribe(ctx context.Context, in *clientpb.InboundMessag
 		}
 		subs = append(subs, ch)
 
+		// Track presence and subscribed channel.
+		_ = c.node.presence.Add(ctx, ch.Channel, &PresenceInfo{
+			ClientID:    c.session,
+			UserID:      c.user,
+			ConnectedAt: c.connectedAt.UnixMilli(),
+		})
+		c.mu.Lock()
+		c.subscribedChannels[ch.Channel] = struct{}{}
+		c.mu.Unlock()
+
 		// Notify proxy about subscription
 		if p != nil {
 			subscribedReq := &proxy.OnSubscribedProxyRequest{
@@ -664,6 +683,12 @@ func (c *Client) handleUnsubscribe(ctx context.Context, in *clientpb.InboundMess
 	for _, sub := range unsubscribe.Subscriptions {
 		// Remove subscription
 		_ = c.node.RemoveSubscription(sub.Channel, c)
+
+		// Remove presence and untrack channel.
+		_ = c.node.presence.Remove(ctx, sub.Channel, c.session)
+		c.mu.Lock()
+		delete(c.subscribedChannels, sub.Channel)
+		c.mu.Unlock()
 
 		// Notify proxy about unsubscription
 		p := c.node.FindProxy(sub.Channel, "unsubscribe")
