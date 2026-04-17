@@ -6,7 +6,15 @@ type Config struct {
 	Server    Server        `yaml:"server" json:"server"`
 	Transport Transport     `yaml:"transport" json:"transport"`
 	Broker    BrokerConfig  `yaml:"broker" json:"broker"`
+	Cluster   ClusterConfig `yaml:"cluster" json:"cluster"`
 	Proxy     []ProxyConfig `yaml:"proxy" json:"proxy"`
+}
+
+// ClusterConfig configures distributed control-plane wiring.
+type ClusterConfig struct {
+	Enabled bool   `yaml:"enabled" json:"enabled"`
+	NodeID  string `yaml:"node_id" json:"node_id"`
+	Backend string `yaml:"backend" json:"backend"`
 }
 
 type Server struct {

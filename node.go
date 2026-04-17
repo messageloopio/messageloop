@@ -19,6 +19,7 @@ type Node struct {
 	hub              *Hub
 	broker           Broker
 	presence         PresenceStore
+	cluster          *ClusterRuntime
 	subLocks         map[int]*sync.Mutex
 	proxy            *proxy.Router
 	heartbeatManager *HeartbeatManager
@@ -93,6 +94,12 @@ func NewNode(cfg *config.Server) *Node {
 // Run starts the broker in the background, bound to ctx.
 // Waits until the broker's handler is registered before returning.
 func (n *Node) Run(ctx context.Context) error {
+	if n.cluster != nil {
+		if err := n.cluster.Start(ctx); err != nil {
+			return fmt.Errorf("start cluster runtime: %w", err)
+		}
+	}
+
 	go func() {
 		if err := n.broker.Start(ctx, func(ch string, pub *Publication) error {
 			return n.hub.broadcastPublication(ch, pub)
@@ -113,6 +120,23 @@ func (n *Node) Run(ctx context.Context) error {
 // Shutdown gracefully drains all client connections.
 func (n *Node) Shutdown() {
 	n.hub.DrainAll(DisconnectForceNoReconnect)
+	if n.cluster != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := n.cluster.Shutdown(ctx); err != nil {
+			log.WarnContext(ctx, "cluster shutdown error", "error", err)
+		}
+	}
+}
+
+// SetClusterRuntime sets the cluster control-plane runtime for this node.
+func (n *Node) SetClusterRuntime(runtime *ClusterRuntime) {
+	n.cluster = runtime
+}
+
+// ClusterRuntime returns the configured cluster control-plane runtime.
+func (n *Node) ClusterRuntime() *ClusterRuntime {
+	return n.cluster
 }
 
 func (n *Node) SetBroker(broker Broker) {
@@ -130,6 +154,26 @@ func (n *Node) SetPresenceStore(ps PresenceStore) {
 // Presence returns all clients currently present in ch.
 func (n *Node) Presence(ctx context.Context, ch string) (map[string]*PresenceInfo, error) {
 	return n.presence.Get(ctx, ch)
+}
+
+// SetPresenceForSession records presence for one subscribed session.
+func (n *Node) SetPresenceForSession(ctx context.Context, ch string, c *Client) error {
+	if c == nil {
+		return nil
+	}
+	return n.presence.Add(ctx, ch, &PresenceInfo{
+		ClientID:    c.SessionID(),
+		UserID:      c.UserID(),
+		ConnectedAt: c.connectedAt.UnixMilli(),
+	})
+}
+
+// ClearPresenceForSession removes presence for one subscribed session.
+func (n *Node) ClearPresenceForSession(ctx context.Context, ch string, c *Client) error {
+	if c == nil {
+		return nil
+	}
+	return n.presence.Remove(ctx, ch, c.SessionID())
 }
 
 func (n *Node) subLock(ch string) *sync.Mutex {
@@ -151,6 +195,10 @@ func (n *Node) AddClient(c *Client) error {
 	if err := n.hub.add(c); err != nil {
 		return err
 	}
+	if err := n.syncClusterSessionState(context.Background(), c); err != nil {
+		n.hub.RemoveSession(c.SessionID())
+		return fmt.Errorf("sync cluster session: %w", err)
+	}
 	if n.metrics != nil {
 		n.metrics.ConnectionsTotal.Inc()
 	}
@@ -162,17 +210,47 @@ func (n *Node) AddSubscription(ctx context.Context, ch string, sub Subscriber) e
 	mu := n.subLock(ch)
 	mu.Lock()
 	defer mu.Unlock()
+	if _, exists := n.hub.LookupSubscriber(ch, sub.Client); exists {
+		return nil
+	}
 	log.InfoContext(ctx, "add subscriber", "channel", ch, "sub", sub)
 	first, err := n.hub.addSub(ch, sub)
 	if err != nil {
 		return err
 	}
 	log.InfoContext(ctx, "added subscriber", "channel", ch, "sub", sub)
+	sub.Client.mu.Lock()
+	sub.Client.subscribedChannels[ch] = struct{}{}
+	sub.Client.mu.Unlock()
 	if first {
 		if err := n.broker.Subscribe(ch); err != nil {
 			n.hub.removeSub(ch, sub.Client)
+			sub.Client.mu.Lock()
+			delete(sub.Client.subscribedChannels, ch)
+			sub.Client.mu.Unlock()
 			return err
 		}
+	}
+	if err := n.syncClusterSessionState(ctx, sub.Client); err != nil {
+		n.hub.removeSub(ch, sub.Client)
+		if first {
+			_ = n.broker.Unsubscribe(ch)
+		}
+		sub.Client.mu.Lock()
+		delete(sub.Client.subscribedChannels, ch)
+		sub.Client.mu.Unlock()
+		return fmt.Errorf("sync cluster session subscription: %w", err)
+	}
+	if err := n.adjustClusterChannelSubscriptions(ctx, ch, 1); err != nil {
+		n.hub.removeSub(ch, sub.Client)
+		if first {
+			_ = n.broker.Unsubscribe(ch)
+		}
+		sub.Client.mu.Lock()
+		delete(sub.Client.subscribedChannels, ch)
+		sub.Client.mu.Unlock()
+		_ = n.syncClusterSessionState(ctx, sub.Client)
+		return fmt.Errorf("sync cluster channel projection: %w", err)
 	}
 	if n.metrics != nil {
 		n.metrics.SubscriptionsTotal.Inc()
@@ -185,16 +263,74 @@ func (n *Node) RemoveSubscription(ch string, c *Client) error {
 	mu := n.subLock(ch)
 	mu.Lock()
 	defer mu.Unlock()
+	subscriber, exists := n.hub.LookupSubscriber(ch, c)
+	if !exists {
+		return nil
+	}
 	last, removed := n.hub.removeSub(ch, c)
+	if !removed {
+		return nil
+	}
+	c.mu.Lock()
+	delete(c.subscribedChannels, ch)
+	c.mu.Unlock()
 	if removed {
+		if last {
+			if err := n.broker.Unsubscribe(ch); err != nil {
+				n.hub.addSub(ch, subscriber)
+				c.mu.Lock()
+				c.subscribedChannels[ch] = struct{}{}
+				c.mu.Unlock()
+				return err
+			}
+		}
+		ctx := context.Background()
+		if err := n.syncClusterSessionState(ctx, c); err != nil {
+			n.hub.addSub(ch, subscriber)
+			if last {
+				_ = n.broker.Subscribe(ch)
+			}
+			c.mu.Lock()
+			c.subscribedChannels[ch] = struct{}{}
+			c.mu.Unlock()
+			return fmt.Errorf("sync cluster session unsubscription: %w", err)
+		}
+		if err := n.adjustClusterChannelSubscriptions(ctx, ch, -1); err != nil {
+			n.hub.addSub(ch, subscriber)
+			if last {
+				_ = n.broker.Subscribe(ch)
+			}
+			c.mu.Lock()
+			c.subscribedChannels[ch] = struct{}{}
+			c.mu.Unlock()
+			_ = n.syncClusterSessionState(ctx, c)
+			return fmt.Errorf("sync cluster channel projection: %w", err)
+		}
 		if n.metrics != nil {
 			n.metrics.SubscriptionsTotal.Dec()
 		}
-		if last {
-			_ = n.broker.Unsubscribe(ch)
-		}
 	}
 	return nil
+}
+
+// Channels returns active channels from either the local hub or the shared query store.
+func (n *Node) Channels(ctx context.Context) ([]ChannelInfo, error) {
+	if !n.ClusterEnabled() {
+		return n.hub.GetActiveChannels(), nil
+	}
+
+	channels, err := n.clusterQueryStore().ListChannels(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]ChannelInfo, 0, len(channels))
+	for _, ch := range channels {
+		result = append(result, ChannelInfo{
+			Name:        ch.Name,
+			Subscribers: int(ch.Subscribers),
+		})
+	}
+	return result, nil
 }
 
 // Publish sends payload to ch via the broker.

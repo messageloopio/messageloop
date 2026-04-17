@@ -24,9 +24,9 @@ type Hub struct {
 	maxConnsPerUser int
 
 	// Wildcard subscription support
-	matcher    topics.Matcher
-	wcSubsMu   sync.Mutex
-	wcSubs     map[string]*topics.Subscription // key: "sessionID:channel"
+	matcher  topics.Matcher
+	wcSubsMu sync.Mutex
+	wcSubs   map[string]*topics.Subscription // key: "sessionID:channel"
 }
 
 // newHub initializes Hub.
@@ -457,6 +457,31 @@ func (h *Hub) GetSubscribers(ch string) []*Client {
 		result = append(result, sub.Client)
 	}
 	return result
+}
+
+// LookupSubscriber returns the current subscriber record for a client/channel pair.
+func (h *Hub) LookupSubscriber(ch string, c *Client) (Subscriber, bool) {
+	if isWildcard(ch) {
+		h.wcSubsMu.Lock()
+		defer h.wcSubsMu.Unlock()
+		topicSub, ok := h.wcSubs[c.SessionID()+":"+ch]
+		if !ok {
+			return Subscriber{}, false
+		}
+		sub, ok := topicSub.Subscriber.(Subscriber)
+		return sub, ok
+	}
+
+	shard := h.subShards[index(ch, numHubShards)]
+	shard.mu.RLock()
+	defer shard.mu.RUnlock()
+
+	subscribers, ok := shard.subs[ch]
+	if !ok {
+		return Subscriber{}, false
+	}
+	sub, ok := subscribers[c.SessionID()]
+	return sub, ok
 }
 
 // LookupSession returns a client session by session ID.

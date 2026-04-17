@@ -55,12 +55,6 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverpb.PublishRe
 		// Session-based publication
 		if len(dest.Sessions) > 0 {
 			for _, sessionID := range dest.Sessions {
-				client := h.node.Hub().LookupSession(sessionID)
-				if client == nil {
-					log.DebugContext(ctx, "session not found, skipping", "session_id", sessionID)
-					continue
-				}
-
 				// Create OutboundMessage with Payload
 				msg := &clientpb.Message{
 					Channel: "", // Session-based, no channel
@@ -68,16 +62,11 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverpb.PublishRe
 					Payload: pub.Payload, // sharedpb.Payload is same type
 				}
 
-				out := messageloop.MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
-					out.Envelope = &clientpb.OutboundMessage_Publication{
-						Publication: &clientpb.Publication{
-							Messages: []*clientpb.Message{msg},
-						},
-					}
-				})
-
-				if err := client.Send(ctx, out); err != nil {
+				ok, err := h.node.PublishToSession(ctx, sessionID, msg)
+				if err != nil {
 					log.ErrorContext(ctx, "failed to send to session", err)
+				} else if !ok {
+					log.DebugContext(ctx, "session not found, skipping", "session_id", sessionID)
 				}
 			}
 		}
@@ -104,24 +93,18 @@ func (h *apiServiceHandler) Disconnect(ctx context.Context, req *serverpb.Discon
 	results := make(map[string]bool)
 
 	for _, sessionID := range req.Sessions {
-		client := h.node.Hub().LookupSession(sessionID)
-		if client == nil {
-			results[sessionID] = false
-			log.DebugContext(ctx, "session not found", "session_id", sessionID)
-			continue
-		}
-
 		// Close the client with disconnect reason
 		disconnect := messageloop.Disconnect{
 			Code:   req.Code,
 			Reason: req.Reason,
 		}
 
-		if err := client.Close(disconnect); err != nil {
+		ok, err := h.node.DisconnectSession(ctx, sessionID, disconnect)
+		if err != nil {
 			results[sessionID] = false
 			log.ErrorContext(ctx, "failed to disconnect session", err)
 		} else {
-			results[sessionID] = true
+			results[sessionID] = ok
 		}
 	}
 
@@ -133,24 +116,13 @@ func (h *apiServiceHandler) Subscribe(ctx context.Context, req *serverpb.Subscri
 
 	results := make(map[string]bool)
 
-	client := h.node.Hub().LookupSession(req.SessionId)
-	if client == nil {
-		// Session not found, all channels fail
-		for _, ch := range req.Channels {
-			results[ch] = false
-		}
-		return &serverpb.SubscribeResponse{Results: results}, nil
-	}
-
 	for _, ch := range req.Channels {
-		// Create subscriber (non-ephemeral for server-side subscriptions)
-		sub := messageloop.NewSubscriber(client, false)
-
-		if err := h.node.AddSubscription(ctx, ch, sub); err != nil {
+		ok, err := h.node.SubscribeSession(ctx, req.SessionId, ch)
+		if err != nil {
 			results[ch] = false
 			log.ErrorContext(ctx, "failed to subscribe to channel", err)
 		} else {
-			results[ch] = true
+			results[ch] = ok
 		}
 	}
 
@@ -162,21 +134,13 @@ func (h *apiServiceHandler) Unsubscribe(ctx context.Context, req *serverpb.Unsub
 
 	results := make(map[string]bool)
 
-	client := h.node.Hub().LookupSession(req.SessionId)
-	if client == nil {
-		// Session not found, all channels fail
-		for _, ch := range req.Channels {
-			results[ch] = false
-		}
-		return &serverpb.UnsubscribeResponse{Results: results}, nil
-	}
-
 	for _, ch := range req.Channels {
-		if err := h.node.RemoveSubscription(ch, client); err != nil {
+		ok, err := h.node.UnsubscribeSession(ctx, req.SessionId, ch)
+		if err != nil {
 			results[ch] = false
 			log.ErrorContext(ctx, "failed to unsubscribe from channel", err)
 		} else {
-			results[ch] = true
+			results[ch] = ok
 		}
 	}
 
@@ -235,7 +199,10 @@ func (h *apiServiceHandler) GetHistory(ctx context.Context, req *serverpb.GetHis
 func (h *apiServiceHandler) GetChannels(ctx context.Context, req *serverpb.GetChannelsRequest) (*serverpb.GetChannelsResponse, error) {
 	log.InfoContext(ctx, "server side API GetChannels")
 
-	activeChannels := h.node.Hub().GetActiveChannels()
+	activeChannels, err := h.node.Channels(ctx)
+	if err != nil {
+		return nil, err
+	}
 	channels := make([]*serverpb.ChannelInfo, 0, len(activeChannels))
 	for _, ch := range activeChannels {
 		channels = append(channels, &serverpb.ChannelInfo{

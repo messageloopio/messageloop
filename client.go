@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -88,7 +89,8 @@ type Client struct {
 	heartbeatCancel context.CancelFunc
 
 	// Tracks channels this client is subscribed to, for presence cleanup.
-	subscribedChannels map[string]struct{}
+	subscribedChannels  map[string]struct{}
+	clusterLeaseVersion uint64
 
 	// Rate limiter for publish operations.
 	publishLimiter *rate.Limiter
@@ -131,6 +133,15 @@ func (c *Client) close(disconnect Disconnect) error {
 	}
 	c.mu.Unlock()
 
+	// Remove local subscriptions before clearing presence and hub state.
+	if len(channels) > 0 {
+		for _, ch := range channels {
+			if err := c.node.RemoveSubscription(ch, c); err != nil {
+				log.WarnContext(context.Background(), "failed to remove subscription during close", "channel", ch, "session", c.session, "error", err)
+			}
+		}
+	}
+
 	// Remove presence for all subscribed channels.
 	if len(channels) > 0 {
 		presCtx := context.Background()
@@ -143,6 +154,9 @@ func (c *Client) close(disconnect Disconnect) error {
 	// Clean up session from hub
 	if c.session != "" {
 		c.node.hub.RemoveSession(c.session)
+		if err := c.node.deleteClusterSessionState(context.Background(), c.session); err != nil {
+			log.WarnContext(context.Background(), "failed to delete cluster session state", "session", c.session, "error", err)
+		}
 	}
 
 	if c.node.metrics != nil {
@@ -287,11 +301,14 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 
 	// Check if this is a resumption attempt
 	resumed := false
+	resumedLocal := false
+	var resumeSnapshot *ClusterSessionSnapshot
 	if connect.SessionId != "" {
 		// Try to find the old session
 		oldSession := c.node.hub.LookupSession(connect.SessionId)
 		if oldSession != nil {
 			resumed = true
+			resumedLocal = true
 
 			// 1. Inherit state from old session
 			oldSession.mu.Lock()
@@ -301,6 +318,7 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 			}
 			oldUser := oldSession.user
 			oldClient := oldSession.client
+			oldLeaseVersion := oldSession.clusterLeaseVersion
 			oldSession.mu.Unlock()
 
 			// 2. Silently close old session (no presence leave, no sub removal)
@@ -311,9 +329,18 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 			c.client = oldClient
 			c.session = connect.SessionId // Reuse old session ID
 			c.subscribedChannels = oldChannels
+			if oldLeaseVersion > 0 {
+				c.clusterLeaseVersion = oldLeaseVersion + 1
+			}
 
 			// 4. Replace session references in hub (sessions map + subShards)
 			c.node.hub.ReplaceSession(connect.SessionId, c)
+		} else {
+			var err error
+			resumeSnapshot, resumed, err = c.node.resumeRemoteSession(ctx, c, connect.SessionId)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
@@ -364,16 +391,26 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 	if !resumed {
 		c.client = connect.ClientId
 	}
-	if !resumed {
-		if err := c.node.AddClient(c); err != nil {
-			c.mu.Unlock()
-			return err
-		}
+	if c.clusterLeaseVersion == 0 {
+		c.clusterLeaseVersion = 1
 	}
 	if limit := c.node.limits.MaxPublishesPerSecond; limit > 0 {
 		c.publishLimiter = rate.NewLimiter(rate.Limit(limit), limit)
 	}
 	c.mu.Unlock()
+
+	if !resumed || !resumedLocal {
+		if err := c.node.AddClient(c); err != nil {
+			return err
+		}
+	} else if err := c.node.syncClusterSessionState(ctx, c); err != nil {
+		return err
+	}
+	if resumeSnapshot != nil {
+		if err := c.node.restoreSessionSubscriptions(ctx, c, resumeSnapshot.Subscriptions); err != nil {
+			return err
+		}
+	}
 
 	// Notify proxy about client connection
 	if p != nil {
@@ -387,6 +424,7 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 	// Process subscriptions and handle recovery
 	subs := connect.Subscriptions
 	var pubs []*clientpb.Publication
+	addedChannels := make([]string, 0, len(subs))
 
 	// Get current broker epoch for recovery validation
 	var currentEpoch string
@@ -395,8 +433,23 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 	}
 
 	for _, sub := range subs {
-		// Add subscription
-		c.node.hub.addSub(sub.Channel, NewSubscriber(c, sub.Ephemeral))
+		alreadySubscribed := c.hasSubscription(sub.Channel)
+		if err := c.node.AddSubscription(ctx, sub.Channel, NewSubscriber(c, sub.Ephemeral)); err != nil {
+			for _, channel := range addedChannels {
+				_ = c.node.RemoveSubscription(channel, c)
+				_ = c.node.presence.Remove(ctx, channel, c.session)
+			}
+			return err
+		}
+		if !alreadySubscribed {
+			addedChannels = append(addedChannels, sub.Channel)
+			_ = c.node.presence.Add(ctx, sub.Channel, &PresenceInfo{
+				ClientID:    c.session,
+				UserID:      c.user,
+				ConnectedAt: c.connectedAt.UnixMilli(),
+			})
+			go c.node.PublishPresenceJoin(sub.Channel, c.session, c.user)
+		}
 
 		// Handle message recovery if requested
 		if sub.Recover && sub.Offset > 0 {
@@ -436,15 +489,11 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_Connected{
 			Connected: &clientpb.Connected{
-				SessionId:    c.SessionID(),
-				Resumed:      resumed,
-				Epoch:        currentEpoch,
-				Publications: pubs,
-				Subscriptions: lo.Map(subs, func(it *clientpb.Subscription, i int) *clientpb.Subscription {
-					return &clientpb.Subscription{
-						Channel: it.Channel,
-					}
-				}),
+				SessionId:     c.SessionID(),
+				Resumed:       resumed,
+				Epoch:         currentEpoch,
+				Publications:  pubs,
+				Subscriptions: c.subscriptionList(),
 			},
 		}
 	}))
@@ -706,7 +755,9 @@ func (c *Client) handleSubscribe(ctx context.Context, in *clientpb.InboundMessag
 	}
 
 	subs := []*clientpb.Subscription{}
+	addedChannels := make([]string, 0, len(sub.Subscriptions))
 	for _, ch := range sub.Subscriptions {
+		alreadySubscribed := c.hasSubscription(ch.Channel)
 		// Proxy ACL check - check if there's a proxy configured for subscription ACL
 		p := c.node.FindProxy(ch.Channel, "subscribe")
 		if p != nil {
@@ -757,27 +808,32 @@ func (c *Client) handleSubscribe(ctx context.Context, in *clientpb.InboundMessag
 		}
 
 		if err := c.node.AddSubscription(ctx, ch.Channel, Subscriber{Client: c, Ephemeral: ch.Ephemeral}); err != nil {
-			for _, s := range subs {
-				if err := c.node.RemoveSubscription(s.Channel, c); err != nil {
-					log.WarnContext(ctx, "failed to rollback subscription", "channel", s.Channel, "error", err)
+			for _, channel := range addedChannels {
+				if err := c.node.RemoveSubscription(channel, c); err != nil {
+					log.WarnContext(ctx, "failed to rollback subscription", "channel", channel, "error", err)
 				}
+				_ = c.node.presence.Remove(ctx, channel, c.session)
 			}
 			return err
+		}
+		if !alreadySubscribed {
+			addedChannels = append(addedChannels, ch.Channel)
 		}
 		subs = append(subs, ch)
 
 		// Track presence and subscribed channel.
-		_ = c.node.presence.Add(ctx, ch.Channel, &PresenceInfo{
-			ClientID:    c.session,
-			UserID:      c.user,
-			ConnectedAt: c.connectedAt.UnixMilli(),
-		})
-		c.mu.Lock()
-		c.subscribedChannels[ch.Channel] = struct{}{}
-		c.mu.Unlock()
+		if !alreadySubscribed {
+			_ = c.node.presence.Add(ctx, ch.Channel, &PresenceInfo{
+				ClientID:    c.session,
+				UserID:      c.user,
+				ConnectedAt: c.connectedAt.UnixMilli(),
+			})
+		}
 
 		// Publish presence join event asynchronously
-		go c.node.PublishPresenceJoin(ch.Channel, c.session, c.user)
+		if !alreadySubscribed {
+			go c.node.PublishPresenceJoin(ch.Channel, c.session, c.user)
+		}
 
 		// Notify proxy about subscription
 		if p != nil {
@@ -820,17 +876,19 @@ func (c *Client) write(ctx context.Context, msg proto.Message) error {
 
 func (c *Client) handleUnsubscribe(ctx context.Context, in *clientpb.InboundMessage, unsubscribe *clientpb.Unsubscribe) error {
 	for _, sub := range unsubscribe.Subscriptions {
+		alreadySubscribed := c.hasSubscription(sub.Channel)
 		// Remove subscription
 		_ = c.node.RemoveSubscription(sub.Channel, c)
 
 		// Remove presence and untrack channel.
-		_ = c.node.presence.Remove(ctx, sub.Channel, c.session)
-		c.mu.Lock()
-		delete(c.subscribedChannels, sub.Channel)
-		c.mu.Unlock()
+		if alreadySubscribed {
+			_ = c.node.presence.Remove(ctx, sub.Channel, c.session)
+		}
 
 		// Publish presence leave event asynchronously
-		go c.node.PublishPresenceLeave(sub.Channel, c.session, c.user)
+		if alreadySubscribed {
+			go c.node.PublishPresenceLeave(sub.Channel, c.session, c.user)
+		}
 
 		// Notify proxy about unsubscription
 		p := c.node.FindProxy(sub.Channel, "unsubscribe")
@@ -855,6 +913,11 @@ func (c *Client) handleUnsubscribe(ctx context.Context, in *clientpb.InboundMess
 func (c *Client) handlePing(ctx context.Context, in *clientpb.InboundMessage, ping *clientpb.Ping) error {
 	c.ResetActivity()
 	go c.refreshPresence()
+	go func() {
+		if err := c.node.syncClusterSessionState(context.Background(), c); err != nil {
+			log.WarnContext(context.Background(), "failed to refresh cluster session state", "session", c.session, "error", err)
+		}
+	}()
 	log.DebugContext(ctx, "received ping, sending pong", "message_id", in.Id)
 	err := c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_Pong{
@@ -881,9 +944,6 @@ func (c *Client) handleSubRefresh(ctx context.Context, in *clientpb.InboundMessa
 			// ACL check failed — revoke subscription for this channel.
 			_ = c.node.RemoveSubscription(ch, c)
 			_ = c.node.presence.Remove(ctx, ch, c.session)
-			c.mu.Lock()
-			delete(c.subscribedChannels, ch)
-			c.mu.Unlock()
 			go c.node.PublishPresenceLeave(ch, c.session, c.user)
 		}
 	}
@@ -998,6 +1058,29 @@ func (c *Client) ForceTestIDs(sessionID, userID, clientID string) {
 	c.session = sessionID
 	c.user = userID
 	c.client = clientID
+	if c.clusterLeaseVersion == 0 {
+		c.clusterLeaseVersion = 1
+	}
+}
+
+func (c *Client) hasSubscription(channel string) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	_, ok := c.subscribedChannels[channel]
+	return ok
+}
+
+func (c *Client) subscriptionList() []*clientpb.Subscription {
+	c.mu.RLock()
+	channels := make([]string, 0, len(c.subscribedChannels))
+	for channel := range c.subscribedChannels {
+		channels = append(channels, channel)
+	}
+	c.mu.RUnlock()
+	slices.Sort(channels)
+	return lo.Map(channels, func(channel string, _ int) *clientpb.Subscription {
+		return &clientpb.Subscription{Channel: channel}
+	})
 }
 
 // refreshPresence re-adds presence entries for all subscribed channels to reset TTL.

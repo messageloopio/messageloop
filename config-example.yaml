@@ -20,6 +20,11 @@ broker:
     password: ""
     db: 10
 
+cluster:
+  enabled: false
+  node_id: node-a
+  backend: redis
+
 proxy:
   - name: example
     endpoint: 127.0.0.1:9091

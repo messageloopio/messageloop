@@ -30,17 +30,7 @@ type redisBroker struct {
 func New(cfg config.RedisConfig) messageloop.Broker {
 	opts := NewOptions(cfg)
 	return &redisBroker{
-		client: redis.NewClient(&redis.Options{
-			Addr:         opts.Addr,
-			Password:     opts.Password,
-			DB:           opts.DB,
-			PoolSize:     opts.PoolSize,
-			MinIdleConns: opts.MinIdleConns,
-			MaxRetries:   opts.MaxRetries,
-			DialTimeout:  opts.DialTimeout,
-			ReadTimeout:  opts.ReadTimeout,
-			WriteTimeout: opts.WriteTimeout,
-		}),
+		client:     newRedisClient(opts),
 		opts:       opts,
 		epoch:      uuid.NewString(),
 		subscribed: make(map[string]struct{}),

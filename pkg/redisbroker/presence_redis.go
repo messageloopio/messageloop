@@ -3,6 +3,7 @@ package redisbroker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -11,11 +12,8 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// redisPresenceStore implements messageloop.PresenceStore using Redis hashes.
-// Each channel's presence is stored as a HASH at ml:presence:{ch},
-// where each field is a clientID and the value is JSON-encoded PresenceInfo.
-// The hash key carries a TTL that is refreshed on every Add call, so stale
-// entries (from crashed clients) expire automatically.
+// redisPresenceStore implements messageloop.PresenceStore using one TTL key per
+// (channel, client) membership plus a Redis set index per channel.
 type redisPresenceStore struct {
 	client *redis.Client
 	opts   *Options
@@ -25,42 +23,40 @@ type redisPresenceStore struct {
 func NewPresenceStore(cfg config.RedisConfig) messageloop.PresenceStore {
 	opts := NewOptions(cfg)
 	return &redisPresenceStore{
-		client: redis.NewClient(&redis.Options{
-			Addr:         opts.Addr,
-			Password:     opts.Password,
-			DB:           opts.DB,
-			PoolSize:     opts.PoolSize,
-			MinIdleConns: opts.MinIdleConns,
-			MaxRetries:   opts.MaxRetries,
-			DialTimeout:  opts.DialTimeout,
-			ReadTimeout:  opts.ReadTimeout,
-			WriteTimeout: opts.WriteTimeout,
-		}),
-		opts: opts,
+		client: newRedisClient(opts),
+		opts:   opts,
 	}
 }
 
-func (s *redisPresenceStore) key(ch string) string {
-	return fmt.Sprintf("%s%s", s.opts.PresencePrefix, ch)
+func (s *redisPresenceStore) indexKey(ch string) string {
+	return fmt.Sprintf("%sidx:%s", s.opts.PresencePrefix, ch)
 }
 
-// Add records or refreshes the client's presence in ch and resets the key TTL.
+func (s *redisPresenceStore) memberKey(ch, clientID string) string {
+	return fmt.Sprintf("%smember:%s:%s", s.opts.PresencePrefix, ch, clientID)
+}
+
+// Add records or refreshes the client's presence with an independent TTL.
 func (s *redisPresenceStore) Add(ctx context.Context, ch string, info *messageloop.PresenceInfo) error {
 	data, err := json.Marshal(info)
 	if err != nil {
 		return err
 	}
-	key := s.key(ch)
 	pipe := s.client.Pipeline()
-	pipe.HSet(ctx, key, info.ClientID, data)
-	pipe.Expire(ctx, key, s.opts.PresenceTTL)
+	pipe.Set(ctx, s.memberKey(ch, info.ClientID), data, s.opts.PresenceTTL)
+	pipe.SAdd(ctx, s.indexKey(ch), info.ClientID)
+	pipe.Expire(ctx, s.indexKey(ch), s.opts.PresenceTTL*2)
 	_, err = pipe.Exec(ctx)
 	return err
 }
 
-// Remove deletes a client's entry from ch's presence hash.
+// Remove deletes a client's membership entry and channel index reference.
 func (s *redisPresenceStore) Remove(ctx context.Context, ch, clientID string) error {
-	return s.client.HDel(ctx, s.key(ch), clientID).Err()
+	pipe := s.client.Pipeline()
+	pipe.Del(ctx, s.memberKey(ch, clientID))
+	pipe.SRem(ctx, s.indexKey(ch), clientID)
+	_, err := pipe.Exec(ctx)
+	return err
 }
 
 // Get returns all currently present clients in ch.
@@ -68,18 +64,47 @@ func (s *redisPresenceStore) Get(ctx context.Context, ch string) (map[string]*me
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
-	raw, err := s.client.HGetAll(ctx, s.key(ch)).Result()
+	clientIDs, err := s.client.SMembers(ctx, s.indexKey(ch)).Result()
 	if err != nil {
 		return nil, err
 	}
-	result := make(map[string]*messageloop.PresenceInfo, len(raw))
-	for clientID, data := range raw {
+	result := make(map[string]*messageloop.PresenceInfo, len(clientIDs))
+	if len(clientIDs) == 0 {
+		return result, nil
+	}
+
+	pipe := s.client.Pipeline()
+	cmds := make(map[string]*redis.StringCmd, len(clientIDs))
+	for _, clientID := range clientIDs {
+		cmds[clientID] = pipe.Get(ctx, s.memberKey(ch, clientID))
+	}
+	_, err = pipe.Exec(ctx)
+	if err != nil && !errors.Is(err, redis.Nil) {
+		return nil, err
+	}
+
+	staleClientIDs := make([]string, 0)
+	for clientID, cmd := range cmds {
+		data, cmdErr := cmd.Result()
+		if errors.Is(cmdErr, redis.Nil) {
+			staleClientIDs = append(staleClientIDs, clientID)
+			continue
+		}
+		if cmdErr != nil {
+			return nil, cmdErr
+		}
 		var info messageloop.PresenceInfo
 		if err := json.Unmarshal([]byte(data), &info); err != nil {
+			staleClientIDs = append(staleClientIDs, clientID)
 			continue
 		}
 		result[clientID] = &info
 	}
+
+	if len(staleClientIDs) > 0 {
+		_ = s.client.SRem(ctx, s.indexKey(ch), staleClientIDs).Err()
+	}
+
 	return result, nil
 }
 

@@ -42,6 +42,41 @@ func main() {
 		}
 
 		node := messageloop.NewNode(&cfg.Server)
+		clusterRuntime, err := messageloop.NewClusterRuntime(messageloop.ClusterOptions{
+			Enabled: cfg.Cluster.Enabled,
+			NodeID:  cfg.Cluster.NodeID,
+			Backend: cfg.Cluster.Backend,
+		}, messageloop.ClusterDependencies{})
+		if err != nil {
+			return fmt.Errorf("invalid cluster config: %w", err)
+		}
+
+		clusterDeps := messageloop.ClusterDependencies{}
+		if clusterRuntime.Enabled() && clusterRuntime.Backend() == "redis" {
+			clusterDeps.SessionDirectory = redisbroker.NewSessionDirectory(cfg.Broker.Redis)
+			clusterDeps.CommandBus = redisbroker.NewClusterCommandBus(cfg.Broker.Redis, clusterRuntime.NodeID(), clusterRuntime.IncarnationID())
+			clusterDeps.QueryStore = redisbroker.NewClusterQueryStore(cfg.Broker.Redis)
+			clusterDeps.NodeLeaseManager = messageloop.NewClusterNodeLeaseManager(
+				clusterDeps.SessionDirectory,
+				messageloop.ClusterNodeLeaseManagerConfig{
+					NodeID:        clusterRuntime.NodeID(),
+					IncarnationID: clusterRuntime.IncarnationID(),
+				},
+			)
+			clusterDeps.CommandBus.SetHandler(node.ClusterCommandHandler())
+			node.SetPresenceStore(redisbroker.NewPresenceStore(cfg.Broker.Redis))
+
+			clusterRuntime, err = messageloop.NewClusterRuntime(messageloop.ClusterOptions{
+				Enabled:       true,
+				NodeID:        clusterRuntime.NodeID(),
+				Backend:       clusterRuntime.Backend(),
+				IncarnationID: clusterRuntime.IncarnationID(),
+			}, clusterDeps)
+			if err != nil {
+				return fmt.Errorf("wire cluster runtime: %w", err)
+			}
+		}
+		node.SetClusterRuntime(clusterRuntime)
 
 		// Configure broker based on config
 		brokerType := cfg.Broker.Type
