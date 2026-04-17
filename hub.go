@@ -313,6 +313,9 @@ func (h *subShard) broadcastPublication(channel string, pub *Publication) error 
 			}()
 			if err := sub.Client.Send(ctx, out); err != nil {
 				log.ErrorContext(ctx, "send publication error", err)
+				if sub.Client.node.metrics != nil {
+					sub.Client.node.metrics.DeliveryFailures.Inc()
+				}
 			} else if sub.Client.node.metrics != nil {
 				sub.Client.node.metrics.MessagesDelivered.Inc()
 			}
@@ -393,6 +396,9 @@ func (h *Hub) broadcastPublication(ch string, pub *Publication) error {
 			}()
 			if err := sub.Client.Send(ctx, out); err != nil {
 				log.ErrorContext(ctx, "wildcard send publication error", err)
+				if sub.Client.node.metrics != nil {
+					sub.Client.node.metrics.DeliveryFailures.Inc()
+				}
 			} else if sub.Client.node.metrics != nil {
 				sub.Client.node.metrics.MessagesDelivered.Inc()
 			}
@@ -463,4 +469,65 @@ func (h *Hub) DrainAll(disconnect Disconnect) {
 		}(c)
 	}
 	wg.Wait()
+}
+
+// ChannelInfo holds channel name and subscriber count for admin queries.
+type ChannelInfo struct {
+	Name        string
+	Subscribers int
+}
+
+// GetActiveChannels returns all channels with at least one subscriber, along with subscriber counts.
+func (h *Hub) GetActiveChannels() []ChannelInfo {
+	var result []ChannelInfo
+	for i := 0; i < numHubShards; i++ {
+		shard := h.subShards[i]
+		shard.mu.RLock()
+		for ch, subs := range shard.subs {
+			if len(subs) > 0 {
+				result = append(result, ChannelInfo{Name: ch, Subscribers: len(subs)})
+			}
+		}
+		shard.mu.RUnlock()
+	}
+	return result
+}
+
+// ReplaceSession atomically replaces a session's client reference in the sessions map
+// and all subscription shards. Used for session resumption.
+func (h *Hub) ReplaceSession(sessionID string, newClient *Client) {
+	h.mu.Lock()
+	oldClient, exists := h.sessions[sessionID]
+	if !exists {
+		h.mu.Unlock()
+		return
+	}
+	h.sessions[sessionID] = newClient
+	h.mu.Unlock()
+
+	// Replace in connShards: remove old, add new
+	oldUserID := oldClient.UserID()
+	h.connShards[index(oldUserID, numHubShards)].remove(sessionID)
+	newShard := h.connShards[index(newClient.UserID(), numHubShards)]
+	newShard.mu.Lock()
+	newShard.clients[sessionID] = newClient
+	uid := newClient.UserID()
+	if _, ok := newShard.users[uid]; !ok {
+		newShard.users[uid] = make(map[string]struct{})
+	}
+	newShard.users[uid][sessionID] = struct{}{}
+	newShard.mu.Unlock()
+
+	// Replace subscriber references in all subShards
+	for i := 0; i < numHubShards; i++ {
+		shard := h.subShards[i]
+		shard.mu.Lock()
+		for _, subs := range shard.subs {
+			if sub, ok := subs[sessionID]; ok {
+				sub.Client = newClient
+				subs[sessionID] = sub
+			}
+		}
+		shard.mu.Unlock()
+	}
 }

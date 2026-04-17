@@ -566,6 +566,7 @@ type Connected struct {
 	Subscriptions []*Subscription        `protobuf:"bytes,2,rep,name=subscriptions,proto3" json:"subscriptions,omitempty"`
 	Publications  []*Publication         `protobuf:"bytes,3,rep,name=publications,proto3" json:"publications,omitempty"`
 	Resumed       bool                   `protobuf:"varint,4,opt,name=resumed,proto3" json:"resumed,omitempty"` // 是否成功恢复会话
+	Epoch         string                 `protobuf:"bytes,5,opt,name=epoch,proto3" json:"epoch,omitempty"`      // broker 实例标识，用于防止重启后 offset 混淆
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -628,6 +629,13 @@ func (x *Connected) GetResumed() bool {
 	return false
 }
 
+func (x *Connected) GetEpoch() string {
+	if x != nil {
+		return x.Epoch
+	}
+	return ""
+}
+
 type Subscription struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Channel       string                 `protobuf:"bytes,1,opt,name=channel,proto3" json:"channel,omitempty"`
@@ -635,6 +643,7 @@ type Subscription struct {
 	Token         string                 `protobuf:"bytes,3,opt,name=token,proto3" json:"token,omitempty"`
 	Offset        uint64                 `protobuf:"varint,4,opt,name=offset,proto3" json:"offset,omitempty"`   // 恢复消息的起始 offset，0 表示从最新开始
 	Recover       bool                   `protobuf:"varint,5,opt,name=recover,proto3" json:"recover,omitempty"` // 是否需要恢复离线消息
+	Epoch         string                 `protobuf:"bytes,6,opt,name=epoch,proto3" json:"epoch,omitempty"`      // broker epoch，用于校验 offset 有效性
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -702,6 +711,13 @@ func (x *Subscription) GetRecover() bool {
 		return x.Recover
 	}
 	return false
+}
+
+func (x *Subscription) GetEpoch() string {
+	if x != nil {
+		return x.Epoch
+	}
+	return ""
 }
 
 type Subscribe struct {
@@ -1581,20 +1597,22 @@ const file_client_v1_service_proto_rawDesc = "" +
 	"\rsubscriptions\x18\x05 \x03(\v2#.messageloop.client.v1.SubscriptionR\rsubscriptions\x12\x1e\n" +
 	"\n" +
 	"session_id\x18\x06 \x01(\tR\n" +
-	"session_id\"\xd8\x01\n" +
+	"session_id\"\xee\x01\n" +
 	"\tConnected\x12\x1e\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\n" +
 	"session_id\x12I\n" +
 	"\rsubscriptions\x18\x02 \x03(\v2#.messageloop.client.v1.SubscriptionR\rsubscriptions\x12F\n" +
 	"\fpublications\x18\x03 \x03(\v2\".messageloop.client.v1.PublicationR\fpublications\x12\x18\n" +
-	"\aresumed\x18\x04 \x01(\bR\aresumed\"\x8e\x01\n" +
+	"\aresumed\x18\x04 \x01(\bR\aresumed\x12\x14\n" +
+	"\x05epoch\x18\x05 \x01(\tR\x05epoch\"\xa4\x01\n" +
 	"\fSubscription\x12\x18\n" +
 	"\achannel\x18\x01 \x01(\tR\achannel\x12\x1c\n" +
 	"\tephemeral\x18\x02 \x01(\bR\tephemeral\x12\x14\n" +
 	"\x05token\x18\x03 \x01(\tR\x05token\x12\x16\n" +
 	"\x06offset\x18\x04 \x01(\x04R\x06offset\x12\x18\n" +
-	"\arecover\x18\x05 \x01(\bR\arecover\"V\n" +
+	"\arecover\x18\x05 \x01(\bR\arecover\x12\x14\n" +
+	"\x05epoch\x18\x06 \x01(\tR\x05epoch\"V\n" +
 	"\tSubscribe\x12I\n" +
 	"\rsubscriptions\x18\x01 \x03(\v2#.messageloop.client.v1.SubscriptionR\rsubscriptions\"Y\n" +
 	"\fSubscribeAck\x12I\n" +

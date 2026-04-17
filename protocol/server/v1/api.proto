@@ -3,18 +3,21 @@ syntax = "proto3";
 // buf:lint:ignore PACKAGE_DIRECTORY_MATCH
 package messageloop.server.v1;
 
+import "shared/v1/errors.proto";
+import "shared/v1/types.proto";
+
 // buf:lint:ignore FILE_SAME_GO_PACKAGE
 option go_package = "github.com/messageloopio/messageloop/genproto/server/v1;serverpb";
 
-import "shared/v1/types.proto";
-import "shared/v1/errors.proto";
-
 service APIService {
-  rpc Publish(PublishRequest) returns(PublishResponse);
-  rpc Disconnect(DisconnectRequest) returns(DisconnectResponse);
-  rpc Subscribe(SubscribeRequest) returns(SubscribeResponse);
-  rpc Unsubscribe(UnsubscribeRequest) returns(UnsubscribeResponse);
-  rpc Survey(SurveyRequest) returns(SurveyResponse);
+  rpc Publish(PublishRequest) returns (PublishResponse);
+  rpc Disconnect(DisconnectRequest) returns (DisconnectResponse);
+  rpc Subscribe(SubscribeRequest) returns (SubscribeResponse);
+  rpc Unsubscribe(UnsubscribeRequest) returns (UnsubscribeResponse);
+  rpc Survey(SurveyRequest) returns (SurveyResponse);
+  rpc GetPresence(GetPresenceRequest) returns (GetPresenceResponse);
+  rpc GetHistory(GetHistoryRequest) returns (GetHistoryResponse);
+  rpc GetChannels(GetChannelsRequest) returns (GetChannelsResponse);
 }
 
 // --- Publish ---
@@ -94,4 +97,52 @@ message UnsubscribeRequest {
 
 message UnsubscribeResponse {
   map<string, bool> results = 1;
+}
+
+// --- GetPresence ---
+
+message GetPresenceRequest {
+  string channel = 1;
+}
+
+message GetPresenceResponse {
+  map<string, PresenceInfo> clients = 1;
+}
+
+message PresenceInfo {
+  string client_id = 1;
+  string user_id = 2;
+  int64 connected_at = 3;
+}
+
+// --- GetHistory ---
+
+message GetHistoryRequest {
+  string channel = 1;
+  uint64 since_offset = 2;
+  int32 limit = 3;
+}
+
+message GetHistoryResponse {
+  repeated HistoryPublication publications = 1;
+}
+
+message HistoryPublication {
+  uint64 offset = 1;
+  messageloop.shared.v1.Payload payload = 2;
+  bool is_text = 3;
+  int64 time = 4;
+}
+
+// --- GetChannels ---
+
+message GetChannelsRequest {}
+
+message GetChannelsResponse {
+  repeated ChannelInfo channels = 1;
+}
+
+message ChannelInfo {
+  string name = 1;
+  int32 subscribers = 2;
 }

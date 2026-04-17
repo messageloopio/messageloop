@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 const defaultMemoryHistorySize = 256
@@ -26,6 +28,7 @@ func NewMemoryBroker(opts MemoryBrokerOptions) Broker {
 		historySize: size,
 		history:     make(map[string]*channelHistory),
 		ready:       make(chan struct{}),
+		epoch:       uuid.NewString(),
 	}
 }
 
@@ -41,6 +44,7 @@ type channelHistory struct {
 type memoryBroker struct {
 	handler     PublicationHandler
 	historySize int
+	epoch       string
 
 	mu      sync.RWMutex
 	history map[string]*channelHistory
@@ -80,6 +84,7 @@ func (b *memoryBroker) Publish(ch string, payload []byte, isText bool) (uint64, 
 	pub := &Publication{
 		Channel: ch,
 		Offset:  offset,
+		Epoch:   b.epoch,
 		Payload: payload,
 		IsText:  isText,
 		Time:    time.Now().UnixMilli(),
@@ -127,3 +132,8 @@ func (b *memoryBroker) History(ch string, sinceOffset uint64, limit int) ([]*Pub
 }
 
 var _ Broker = (*memoryBroker)(nil)
+
+// Epoch returns the broker's epoch identifier.
+func (b *memoryBroker) Epoch() string {
+	return b.epoch
+}

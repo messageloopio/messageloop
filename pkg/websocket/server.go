@@ -23,6 +23,9 @@ type Options struct {
 	ReadTimeout  time.Duration
 	WriteTimeout time.Duration
 	CheckOrigin  func(r *http.Request) bool
+	TLSCertFile  string
+	TLSKeyFile   string
+	Compression  bool
 }
 
 func DefaultOptions() Options {
@@ -60,6 +63,10 @@ func (s *Server) Init(lx lynx.Lynx) error {
 }
 
 func (s *Server) Start(ctx context.Context) error {
+	if s.opts.TLSCertFile != "" && s.opts.TLSKeyFile != "" {
+		log.InfoContext(ctx, "starting websocket server with TLS", "addr", s.opts.Addr)
+		return s.s.ListenAndServeTLS(s.opts.TLSCertFile, s.opts.TLSKeyFile)
+	}
 	log.InfoContext(ctx, "starting websocket server", "addr", s.opts.Addr)
 	return s.s.ListenAndServe()
 }

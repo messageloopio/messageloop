@@ -16,7 +16,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file server/v1/api.proto.
  */
 export const file_server_v1_api: GenFile = /*@__PURE__*/
-  fileDesc("ChNzZXJ2ZXIvdjEvYXBpLnByb3RvEhVtZXNzYWdlbG9vcC5zZXJ2ZXIudjEi0gIKC1B1YmxpY2F0aW9uEgoKAmlkGAEgASgJEkMKC2Rlc3RpbmF0aW9uGAIgASgLMi4ubWVzc2FnZWxvb3Auc2VydmVyLnYxLlB1YmxpY2F0aW9uLkRlc3RpbmF0aW9uEjsKB29wdGlvbnMYAyABKAsyKi5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuUHVibGljYXRpb24uT3B0aW9ucxIvCgdwYXlsb2FkGAQgASgLMh4ubWVzc2FnZWxvb3Auc2hhcmVkLnYxLlBheWxvYWQSMQoIbWV0YWRhdGEYBSABKAsyHy5tZXNzYWdlbG9vcC5zaGFyZWQudjEuTWV0YWRhdGEaHgoHT3B0aW9ucxITCgthZGRfaGlzdG9yeRgBIAEoCBoxCgtEZXN0aW5hdGlvbhIQCghzZXNzaW9ucxgBIAMoCRIQCghjaGFubmVscxgCIAMoCSJeCg5QdWJsaXNoUmVxdWVzdBISCgpyZXF1ZXN0X2lkGAEgASgJEjgKDHB1YmxpY2F0aW9ucxgCIAMoCzIiLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5QdWJsaWNhdGlvbiIRCg9QdWJsaXNoUmVzcG9uc2UirAEKDVN1cnZleVJlcXVlc3QSEgoKcmVxdWVzdF9pZBgBIAEoCRIPCgdjaGFubmVsGAIgASgJEi8KB3BheWxvYWQYAyABKAsyHi5tZXNzYWdlbG9vcC5zaGFyZWQudjEuUGF5bG9hZBIxCghtZXRhZGF0YRgEIAEoCzIfLm1lc3NhZ2Vsb29wLnNoYXJlZC52MS5NZXRhZGF0YRISCgp0aW1lb3V0X21zGAUgASgFIloKDlN1cnZleVJlc3BvbnNlEhIKCnJlcXVlc3RfaWQYASABKAkSNAoHcmVzdWx0cxgCIAMoCzIjLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5TdXJ2ZXlSZXN1bHQiswEKDFN1cnZleVJlc3VsdBISCgpzZXNzaW9uX2lkGAEgASgJEi8KB3BheWxvYWQYAiABKAsyHi5tZXNzYWdlbG9vcC5zaGFyZWQudjEuUGF5bG9hZBIxCghtZXRhZGF0YRgDIAEoCzIfLm1lc3NhZ2Vsb29wLnNoYXJlZC52MS5NZXRhZGF0YRIrCgVlcnJvchgEIAEoCzIcLm1lc3NhZ2Vsb29wLnNoYXJlZC52MS5FcnJvciJDChFEaXNjb25uZWN0UmVxdWVzdBIQCghzZXNzaW9ucxgBIAMoCRIMCgRjb2RlGAIgASgNEg4KBnJlYXNvbhgDIAEoCSKNAQoSRGlzY29ubmVjdFJlc3BvbnNlEkcKB3Jlc3VsdHMYASADKAsyNi5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuRGlzY29ubmVjdFJlc3BvbnNlLlJlc3VsdHNFbnRyeRouCgxSZXN1bHRzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgIOgI4ASI4ChBTdWJzY3JpYmVSZXF1ZXN0EhIKCnNlc3Npb25faWQYASABKAkSEAoIY2hhbm5lbHMYAiADKAkiiwEKEVN1YnNjcmliZVJlc3BvbnNlEkYKB3Jlc3VsdHMYASADKAsyNS5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuU3Vic2NyaWJlUmVzcG9uc2UuUmVzdWx0c0VudHJ5Gi4KDFJlc3VsdHNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAg6AjgBIjoKElVuc3Vic2NyaWJlUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEhAKCGNoYW5uZWxzGAIgAygJIo8BChNVbnN1YnNjcmliZVJlc3BvbnNlEkgKB3Jlc3VsdHMYASADKAsyNy5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuVW5zdWJzY3JpYmVSZXNwb25zZS5SZXN1bHRzRW50cnkaLgoMUmVzdWx0c0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCDoCOAEy5gMKCkFQSVNlcnZpY2USWAoHUHVibGlzaBIlLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5QdWJsaXNoUmVxdWVzdBomLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5QdWJsaXNoUmVzcG9uc2USYQoKRGlzY29ubmVjdBIoLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5EaXNjb25uZWN0UmVxdWVzdBopLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5EaXNjb25uZWN0UmVzcG9uc2USXgoJU3Vic2NyaWJlEicubWVzc2FnZWxvb3Auc2VydmVyLnYxLlN1YnNjcmliZVJlcXVlc3QaKC5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuU3Vic2NyaWJlUmVzcG9uc2USZAoLVW5zdWJzY3JpYmUSKS5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuVW5zdWJzY3JpYmVSZXF1ZXN0GioubWVzc2FnZWxvb3Auc2VydmVyLnYxLlVuc3Vic2NyaWJlUmVzcG9uc2USVQoGU3VydmV5EiQubWVzc2FnZWxvb3Auc2VydmVyLnYxLlN1cnZleVJlcXVlc3QaJS5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuU3VydmV5UmVzcG9uc2VCQlpAZ2l0aHViLmNvbS9tZXNzYWdlbG9vcGlvL21lc3NhZ2Vsb29wL2dlbnByb3RvL3NlcnZlci92MTtzZXJ2ZXJwYmIGcHJvdG8z", [file_shared_v1_types, file_shared_v1_errors]);
+  fileDesc("ChNzZXJ2ZXIvdjEvYXBpLnByb3RvEhVtZXNzYWdlbG9vcC5zZXJ2ZXIudjEi0gIKC1B1YmxpY2F0aW9uEgoKAmlkGAEgASgJEkMKC2Rlc3RpbmF0aW9uGAIgASgLMi4ubWVzc2FnZWxvb3Auc2VydmVyLnYxLlB1YmxpY2F0aW9uLkRlc3RpbmF0aW9uEjsKB29wdGlvbnMYAyABKAsyKi5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuUHVibGljYXRpb24uT3B0aW9ucxIvCgdwYXlsb2FkGAQgASgLMh4ubWVzc2FnZWxvb3Auc2hhcmVkLnYxLlBheWxvYWQSMQoIbWV0YWRhdGEYBSABKAsyHy5tZXNzYWdlbG9vcC5zaGFyZWQudjEuTWV0YWRhdGEaHgoHT3B0aW9ucxITCgthZGRfaGlzdG9yeRgBIAEoCBoxCgtEZXN0aW5hdGlvbhIQCghzZXNzaW9ucxgBIAMoCRIQCghjaGFubmVscxgCIAMoCSJeCg5QdWJsaXNoUmVxdWVzdBISCgpyZXF1ZXN0X2lkGAEgASgJEjgKDHB1YmxpY2F0aW9ucxgCIAMoCzIiLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5QdWJsaWNhdGlvbiIRCg9QdWJsaXNoUmVzcG9uc2UirAEKDVN1cnZleVJlcXVlc3QSEgoKcmVxdWVzdF9pZBgBIAEoCRIPCgdjaGFubmVsGAIgASgJEi8KB3BheWxvYWQYAyABKAsyHi5tZXNzYWdlbG9vcC5zaGFyZWQudjEuUGF5bG9hZBIxCghtZXRhZGF0YRgEIAEoCzIfLm1lc3NhZ2Vsb29wLnNoYXJlZC52MS5NZXRhZGF0YRISCgp0aW1lb3V0X21zGAUgASgFIloKDlN1cnZleVJlc3BvbnNlEhIKCnJlcXVlc3RfaWQYASABKAkSNAoHcmVzdWx0cxgCIAMoCzIjLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5TdXJ2ZXlSZXN1bHQiswEKDFN1cnZleVJlc3VsdBISCgpzZXNzaW9uX2lkGAEgASgJEi8KB3BheWxvYWQYAiABKAsyHi5tZXNzYWdlbG9vcC5zaGFyZWQudjEuUGF5bG9hZBIxCghtZXRhZGF0YRgDIAEoCzIfLm1lc3NhZ2Vsb29wLnNoYXJlZC52MS5NZXRhZGF0YRIrCgVlcnJvchgEIAEoCzIcLm1lc3NhZ2Vsb29wLnNoYXJlZC52MS5FcnJvciJDChFEaXNjb25uZWN0UmVxdWVzdBIQCghzZXNzaW9ucxgBIAMoCRIMCgRjb2RlGAIgASgNEg4KBnJlYXNvbhgDIAEoCSKNAQoSRGlzY29ubmVjdFJlc3BvbnNlEkcKB3Jlc3VsdHMYASADKAsyNi5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuRGlzY29ubmVjdFJlc3BvbnNlLlJlc3VsdHNFbnRyeRouCgxSZXN1bHRzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgIOgI4ASI4ChBTdWJzY3JpYmVSZXF1ZXN0EhIKCnNlc3Npb25faWQYASABKAkSEAoIY2hhbm5lbHMYAiADKAkiiwEKEVN1YnNjcmliZVJlc3BvbnNlEkYKB3Jlc3VsdHMYASADKAsyNS5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuU3Vic2NyaWJlUmVzcG9uc2UuUmVzdWx0c0VudHJ5Gi4KDFJlc3VsdHNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAg6AjgBIjoKElVuc3Vic2NyaWJlUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEhAKCGNoYW5uZWxzGAIgAygJIo8BChNVbnN1YnNjcmliZVJlc3BvbnNlEkgKB3Jlc3VsdHMYASADKAsyNy5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuVW5zdWJzY3JpYmVSZXNwb25zZS5SZXN1bHRzRW50cnkaLgoMUmVzdWx0c0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCDoCOAEiJQoSR2V0UHJlc2VuY2VSZXF1ZXN0Eg8KB2NoYW5uZWwYASABKAkitAEKE0dldFByZXNlbmNlUmVzcG9uc2USSAoHY2xpZW50cxgBIAMoCzI3Lm1lc3NhZ2Vsb29wLnNlcnZlci52MS5HZXRQcmVzZW5jZVJlc3BvbnNlLkNsaWVudHNFbnRyeRpTCgxDbGllbnRzRW50cnkSCwoDa2V5GAEgASgJEjIKBXZhbHVlGAIgASgLMiMubWVzc2FnZWxvb3Auc2VydmVyLnYxLlByZXNlbmNlSW5mbzoCOAEiSAoMUHJlc2VuY2VJbmZvEhEKCWNsaWVudF9pZBgBIAEoCRIPCgd1c2VyX2lkGAIgASgJEhQKDGNvbm5lY3RlZF9hdBgDIAEoAyJJChFHZXRIaXN0b3J5UmVxdWVzdBIPCgdjaGFubmVsGAEgASgJEhQKDHNpbmNlX29mZnNldBgCIAEoBBINCgVsaW1pdBgDIAEoBSJVChJHZXRIaXN0b3J5UmVzcG9uc2USPwoMcHVibGljYXRpb25zGAEgAygLMikubWVzc2FnZWxvb3Auc2VydmVyLnYxLkhpc3RvcnlQdWJsaWNhdGlvbiJ0ChJIaXN0b3J5UHVibGljYXRpb24SDgoGb2Zmc2V0GAEgASgEEi8KB3BheWxvYWQYAiABKAsyHi5tZXNzYWdlbG9vcC5zaGFyZWQudjEuUGF5bG9hZBIPCgdpc190ZXh0GAMgASgIEgwKBHRpbWUYBCABKAMiFAoSR2V0Q2hhbm5lbHNSZXF1ZXN0IksKE0dldENoYW5uZWxzUmVzcG9uc2USNAoIY2hhbm5lbHMYASADKAsyIi5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuQ2hhbm5lbEluZm8iMAoLQ2hhbm5lbEluZm8SDAoEbmFtZRgBIAEoCRITCgtzdWJzY3JpYmVycxgCIAEoBTKVBgoKQVBJU2VydmljZRJYCgdQdWJsaXNoEiUubWVzc2FnZWxvb3Auc2VydmVyLnYxLlB1Ymxpc2hSZXF1ZXN0GiYubWVzc2FnZWxvb3Auc2VydmVyLnYxLlB1Ymxpc2hSZXNwb25zZRJhCgpEaXNjb25uZWN0EigubWVzc2FnZWxvb3Auc2VydmVyLnYxLkRpc2Nvbm5lY3RSZXF1ZXN0GikubWVzc2FnZWxvb3Auc2VydmVyLnYxLkRpc2Nvbm5lY3RSZXNwb25zZRJeCglTdWJzY3JpYmUSJy5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuU3Vic2NyaWJlUmVxdWVzdBooLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5TdWJzY3JpYmVSZXNwb25zZRJkCgtVbnN1YnNjcmliZRIpLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5VbnN1YnNjcmliZVJlcXVlc3QaKi5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuVW5zdWJzY3JpYmVSZXNwb25zZRJVCgZTdXJ2ZXkSJC5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuU3VydmV5UmVxdWVzdBolLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5TdXJ2ZXlSZXNwb25zZRJkCgtHZXRQcmVzZW5jZRIpLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5HZXRQcmVzZW5jZVJlcXVlc3QaKi5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuR2V0UHJlc2VuY2VSZXNwb25zZRJhCgpHZXRIaXN0b3J5EigubWVzc2FnZWxvb3Auc2VydmVyLnYxLkdldEhpc3RvcnlSZXF1ZXN0GikubWVzc2FnZWxvb3Auc2VydmVyLnYxLkdldEhpc3RvcnlSZXNwb25zZRJkCgtHZXRDaGFubmVscxIpLm1lc3NhZ2Vsb29wLnNlcnZlci52MS5HZXRDaGFubmVsc1JlcXVlc3QaKi5tZXNzYWdlbG9vcC5zZXJ2ZXIudjEuR2V0Q2hhbm5lbHNSZXNwb25zZUJCWkBnaXRodWIuY29tL21lc3NhZ2Vsb29waW8vbWVzc2FnZWxvb3AvZ2VucHJvdG8vc2VydmVyL3YxO3NlcnZlcnBiYgZwcm90bzM", [file_shared_v1_types, file_shared_v1_errors]);
 
 /**
  * @generated from message messageloop.server.v1.Publication
@@ -343,6 +343,195 @@ export const UnsubscribeResponseSchema: GenMessage<UnsubscribeResponse> = /*@__P
   messageDesc(file_server_v1_api, 11);
 
 /**
+ * @generated from message messageloop.server.v1.GetPresenceRequest
+ */
+export type GetPresenceRequest = Message<"messageloop.server.v1.GetPresenceRequest"> & {
+  /**
+   * @generated from field: string channel = 1;
+   */
+  channel: string;
+};
+
+/**
+ * Describes the message messageloop.server.v1.GetPresenceRequest.
+ * Use `create(GetPresenceRequestSchema)` to create a new message.
+ */
+export const GetPresenceRequestSchema: GenMessage<GetPresenceRequest> = /*@__PURE__*/
+  messageDesc(file_server_v1_api, 12);
+
+/**
+ * @generated from message messageloop.server.v1.GetPresenceResponse
+ */
+export type GetPresenceResponse = Message<"messageloop.server.v1.GetPresenceResponse"> & {
+  /**
+   * @generated from field: map<string, messageloop.server.v1.PresenceInfo> clients = 1;
+   */
+  clients: { [key: string]: PresenceInfo };
+};
+
+/**
+ * Describes the message messageloop.server.v1.GetPresenceResponse.
+ * Use `create(GetPresenceResponseSchema)` to create a new message.
+ */
+export const GetPresenceResponseSchema: GenMessage<GetPresenceResponse> = /*@__PURE__*/
+  messageDesc(file_server_v1_api, 13);
+
+/**
+ * @generated from message messageloop.server.v1.PresenceInfo
+ */
+export type PresenceInfo = Message<"messageloop.server.v1.PresenceInfo"> & {
+  /**
+   * @generated from field: string client_id = 1;
+   */
+  clientId: string;
+
+  /**
+   * @generated from field: string user_id = 2;
+   */
+  userId: string;
+
+  /**
+   * @generated from field: int64 connected_at = 3;
+   */
+  connectedAt: bigint;
+};
+
+/**
+ * Describes the message messageloop.server.v1.PresenceInfo.
+ * Use `create(PresenceInfoSchema)` to create a new message.
+ */
+export const PresenceInfoSchema: GenMessage<PresenceInfo> = /*@__PURE__*/
+  messageDesc(file_server_v1_api, 14);
+
+/**
+ * @generated from message messageloop.server.v1.GetHistoryRequest
+ */
+export type GetHistoryRequest = Message<"messageloop.server.v1.GetHistoryRequest"> & {
+  /**
+   * @generated from field: string channel = 1;
+   */
+  channel: string;
+
+  /**
+   * @generated from field: uint64 since_offset = 2;
+   */
+  sinceOffset: bigint;
+
+  /**
+   * @generated from field: int32 limit = 3;
+   */
+  limit: number;
+};
+
+/**
+ * Describes the message messageloop.server.v1.GetHistoryRequest.
+ * Use `create(GetHistoryRequestSchema)` to create a new message.
+ */
+export const GetHistoryRequestSchema: GenMessage<GetHistoryRequest> = /*@__PURE__*/
+  messageDesc(file_server_v1_api, 15);
+
+/**
+ * @generated from message messageloop.server.v1.GetHistoryResponse
+ */
+export type GetHistoryResponse = Message<"messageloop.server.v1.GetHistoryResponse"> & {
+  /**
+   * @generated from field: repeated messageloop.server.v1.HistoryPublication publications = 1;
+   */
+  publications: HistoryPublication[];
+};
+
+/**
+ * Describes the message messageloop.server.v1.GetHistoryResponse.
+ * Use `create(GetHistoryResponseSchema)` to create a new message.
+ */
+export const GetHistoryResponseSchema: GenMessage<GetHistoryResponse> = /*@__PURE__*/
+  messageDesc(file_server_v1_api, 16);
+
+/**
+ * @generated from message messageloop.server.v1.HistoryPublication
+ */
+export type HistoryPublication = Message<"messageloop.server.v1.HistoryPublication"> & {
+  /**
+   * @generated from field: uint64 offset = 1;
+   */
+  offset: bigint;
+
+  /**
+   * @generated from field: messageloop.shared.v1.Payload payload = 2;
+   */
+  payload?: Payload;
+
+  /**
+   * @generated from field: bool is_text = 3;
+   */
+  isText: boolean;
+
+  /**
+   * @generated from field: int64 time = 4;
+   */
+  time: bigint;
+};
+
+/**
+ * Describes the message messageloop.server.v1.HistoryPublication.
+ * Use `create(HistoryPublicationSchema)` to create a new message.
+ */
+export const HistoryPublicationSchema: GenMessage<HistoryPublication> = /*@__PURE__*/
+  messageDesc(file_server_v1_api, 17);
+
+/**
+ * @generated from message messageloop.server.v1.GetChannelsRequest
+ */
+export type GetChannelsRequest = Message<"messageloop.server.v1.GetChannelsRequest"> & {
+};
+
+/**
+ * Describes the message messageloop.server.v1.GetChannelsRequest.
+ * Use `create(GetChannelsRequestSchema)` to create a new message.
+ */
+export const GetChannelsRequestSchema: GenMessage<GetChannelsRequest> = /*@__PURE__*/
+  messageDesc(file_server_v1_api, 18);
+
+/**
+ * @generated from message messageloop.server.v1.GetChannelsResponse
+ */
+export type GetChannelsResponse = Message<"messageloop.server.v1.GetChannelsResponse"> & {
+  /**
+   * @generated from field: repeated messageloop.server.v1.ChannelInfo channels = 1;
+   */
+  channels: ChannelInfo[];
+};
+
+/**
+ * Describes the message messageloop.server.v1.GetChannelsResponse.
+ * Use `create(GetChannelsResponseSchema)` to create a new message.
+ */
+export const GetChannelsResponseSchema: GenMessage<GetChannelsResponse> = /*@__PURE__*/
+  messageDesc(file_server_v1_api, 19);
+
+/**
+ * @generated from message messageloop.server.v1.ChannelInfo
+ */
+export type ChannelInfo = Message<"messageloop.server.v1.ChannelInfo"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * @generated from field: int32 subscribers = 2;
+   */
+  subscribers: number;
+};
+
+/**
+ * Describes the message messageloop.server.v1.ChannelInfo.
+ * Use `create(ChannelInfoSchema)` to create a new message.
+ */
+export const ChannelInfoSchema: GenMessage<ChannelInfo> = /*@__PURE__*/
+  messageDesc(file_server_v1_api, 20);
+
+/**
  * @generated from service messageloop.server.v1.APIService
  */
 export const APIService: GenService<{
@@ -385,6 +574,30 @@ export const APIService: GenService<{
     methodKind: "unary";
     input: typeof SurveyRequestSchema;
     output: typeof SurveyResponseSchema;
+  },
+  /**
+   * @generated from rpc messageloop.server.v1.APIService.GetPresence
+   */
+  getPresence: {
+    methodKind: "unary";
+    input: typeof GetPresenceRequestSchema;
+    output: typeof GetPresenceResponseSchema;
+  },
+  /**
+   * @generated from rpc messageloop.server.v1.APIService.GetHistory
+   */
+  getHistory: {
+    methodKind: "unary";
+    input: typeof GetHistoryRequestSchema;
+    output: typeof GetHistoryResponseSchema;
+  },
+  /**
+   * @generated from rpc messageloop.server.v1.APIService.GetChannels
+   */
+  getChannels: {
+    methodKind: "unary";
+    input: typeof GetChannelsRequestSchema;
+    output: typeof GetChannelsResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_server_v1_api, 0);

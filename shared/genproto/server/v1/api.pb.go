@@ -680,6 +680,458 @@ func (x *UnsubscribeResponse) GetResults() map[string]bool {
 	return nil
 }
 
+type GetPresenceRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Channel       string                 `protobuf:"bytes,1,opt,name=channel,proto3" json:"channel,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetPresenceRequest) Reset() {
+	*x = GetPresenceRequest{}
+	mi := &file_server_v1_api_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetPresenceRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetPresenceRequest) ProtoMessage() {}
+
+func (x *GetPresenceRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_server_v1_api_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetPresenceRequest.ProtoReflect.Descriptor instead.
+func (*GetPresenceRequest) Descriptor() ([]byte, []int) {
+	return file_server_v1_api_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *GetPresenceRequest) GetChannel() string {
+	if x != nil {
+		return x.Channel
+	}
+	return ""
+}
+
+type GetPresenceResponse struct {
+	state         protoimpl.MessageState   `protogen:"open.v1"`
+	Clients       map[string]*PresenceInfo `protobuf:"bytes,1,rep,name=clients,proto3" json:"clients,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetPresenceResponse) Reset() {
+	*x = GetPresenceResponse{}
+	mi := &file_server_v1_api_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetPresenceResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetPresenceResponse) ProtoMessage() {}
+
+func (x *GetPresenceResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_server_v1_api_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetPresenceResponse.ProtoReflect.Descriptor instead.
+func (*GetPresenceResponse) Descriptor() ([]byte, []int) {
+	return file_server_v1_api_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *GetPresenceResponse) GetClients() map[string]*PresenceInfo {
+	if x != nil {
+		return x.Clients
+	}
+	return nil
+}
+
+type PresenceInfo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ClientId      string                 `protobuf:"bytes,1,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	ConnectedAt   int64                  `protobuf:"varint,3,opt,name=connected_at,json=connectedAt,proto3" json:"connected_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PresenceInfo) Reset() {
+	*x = PresenceInfo{}
+	mi := &file_server_v1_api_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PresenceInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PresenceInfo) ProtoMessage() {}
+
+func (x *PresenceInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_server_v1_api_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PresenceInfo.ProtoReflect.Descriptor instead.
+func (*PresenceInfo) Descriptor() ([]byte, []int) {
+	return file_server_v1_api_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *PresenceInfo) GetClientId() string {
+	if x != nil {
+		return x.ClientId
+	}
+	return ""
+}
+
+func (x *PresenceInfo) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *PresenceInfo) GetConnectedAt() int64 {
+	if x != nil {
+		return x.ConnectedAt
+	}
+	return 0
+}
+
+type GetHistoryRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Channel       string                 `protobuf:"bytes,1,opt,name=channel,proto3" json:"channel,omitempty"`
+	SinceOffset   uint64                 `protobuf:"varint,2,opt,name=since_offset,json=sinceOffset,proto3" json:"since_offset,omitempty"`
+	Limit         int32                  `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetHistoryRequest) Reset() {
+	*x = GetHistoryRequest{}
+	mi := &file_server_v1_api_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetHistoryRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetHistoryRequest) ProtoMessage() {}
+
+func (x *GetHistoryRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_server_v1_api_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetHistoryRequest.ProtoReflect.Descriptor instead.
+func (*GetHistoryRequest) Descriptor() ([]byte, []int) {
+	return file_server_v1_api_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *GetHistoryRequest) GetChannel() string {
+	if x != nil {
+		return x.Channel
+	}
+	return ""
+}
+
+func (x *GetHistoryRequest) GetSinceOffset() uint64 {
+	if x != nil {
+		return x.SinceOffset
+	}
+	return 0
+}
+
+func (x *GetHistoryRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+type GetHistoryResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Publications  []*HistoryPublication  `protobuf:"bytes,1,rep,name=publications,proto3" json:"publications,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetHistoryResponse) Reset() {
+	*x = GetHistoryResponse{}
+	mi := &file_server_v1_api_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetHistoryResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetHistoryResponse) ProtoMessage() {}
+
+func (x *GetHistoryResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_server_v1_api_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetHistoryResponse.ProtoReflect.Descriptor instead.
+func (*GetHistoryResponse) Descriptor() ([]byte, []int) {
+	return file_server_v1_api_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *GetHistoryResponse) GetPublications() []*HistoryPublication {
+	if x != nil {
+		return x.Publications
+	}
+	return nil
+}
+
+type HistoryPublication struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Offset        uint64                 `protobuf:"varint,1,opt,name=offset,proto3" json:"offset,omitempty"`
+	Payload       *v1.Payload            `protobuf:"bytes,2,opt,name=payload,proto3" json:"payload,omitempty"`
+	IsText        bool                   `protobuf:"varint,3,opt,name=is_text,json=isText,proto3" json:"is_text,omitempty"`
+	Time          int64                  `protobuf:"varint,4,opt,name=time,proto3" json:"time,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HistoryPublication) Reset() {
+	*x = HistoryPublication{}
+	mi := &file_server_v1_api_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HistoryPublication) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HistoryPublication) ProtoMessage() {}
+
+func (x *HistoryPublication) ProtoReflect() protoreflect.Message {
+	mi := &file_server_v1_api_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HistoryPublication.ProtoReflect.Descriptor instead.
+func (*HistoryPublication) Descriptor() ([]byte, []int) {
+	return file_server_v1_api_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *HistoryPublication) GetOffset() uint64 {
+	if x != nil {
+		return x.Offset
+	}
+	return 0
+}
+
+func (x *HistoryPublication) GetPayload() *v1.Payload {
+	if x != nil {
+		return x.Payload
+	}
+	return nil
+}
+
+func (x *HistoryPublication) GetIsText() bool {
+	if x != nil {
+		return x.IsText
+	}
+	return false
+}
+
+func (x *HistoryPublication) GetTime() int64 {
+	if x != nil {
+		return x.Time
+	}
+	return 0
+}
+
+type GetChannelsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetChannelsRequest) Reset() {
+	*x = GetChannelsRequest{}
+	mi := &file_server_v1_api_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetChannelsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetChannelsRequest) ProtoMessage() {}
+
+func (x *GetChannelsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_server_v1_api_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetChannelsRequest.ProtoReflect.Descriptor instead.
+func (*GetChannelsRequest) Descriptor() ([]byte, []int) {
+	return file_server_v1_api_proto_rawDescGZIP(), []int{18}
+}
+
+type GetChannelsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Channels      []*ChannelInfo         `protobuf:"bytes,1,rep,name=channels,proto3" json:"channels,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetChannelsResponse) Reset() {
+	*x = GetChannelsResponse{}
+	mi := &file_server_v1_api_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetChannelsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetChannelsResponse) ProtoMessage() {}
+
+func (x *GetChannelsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_server_v1_api_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetChannelsResponse.ProtoReflect.Descriptor instead.
+func (*GetChannelsResponse) Descriptor() ([]byte, []int) {
+	return file_server_v1_api_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *GetChannelsResponse) GetChannels() []*ChannelInfo {
+	if x != nil {
+		return x.Channels
+	}
+	return nil
+}
+
+type ChannelInfo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Subscribers   int32                  `protobuf:"varint,2,opt,name=subscribers,proto3" json:"subscribers,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ChannelInfo) Reset() {
+	*x = ChannelInfo{}
+	mi := &file_server_v1_api_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ChannelInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ChannelInfo) ProtoMessage() {}
+
+func (x *ChannelInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_server_v1_api_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ChannelInfo.ProtoReflect.Descriptor instead.
+func (*ChannelInfo) Descriptor() ([]byte, []int) {
+	return file_server_v1_api_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *ChannelInfo) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ChannelInfo) GetSubscribers() int32 {
+	if x != nil {
+		return x.Subscribers
+	}
+	return 0
+}
+
 type Publication_Options struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	AddHistory    bool                   `protobuf:"varint,1,opt,name=add_history,json=addHistory,proto3" json:"add_history,omitempty"`
@@ -689,7 +1141,7 @@ type Publication_Options struct {
 
 func (x *Publication_Options) Reset() {
 	*x = Publication_Options{}
-	mi := &file_server_v1_api_proto_msgTypes[12]
+	mi := &file_server_v1_api_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -701,7 +1153,7 @@ func (x *Publication_Options) String() string {
 func (*Publication_Options) ProtoMessage() {}
 
 func (x *Publication_Options) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_api_proto_msgTypes[12]
+	mi := &file_server_v1_api_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -734,7 +1186,7 @@ type Publication_Destination struct {
 
 func (x *Publication_Destination) Reset() {
 	*x = Publication_Destination{}
-	mi := &file_server_v1_api_proto_msgTypes[13]
+	mi := &file_server_v1_api_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -746,7 +1198,7 @@ func (x *Publication_Destination) String() string {
 func (*Publication_Destination) ProtoMessage() {}
 
 func (x *Publication_Destination) ProtoReflect() protoreflect.Message {
-	mi := &file_server_v1_api_proto_msgTypes[13]
+	mi := &file_server_v1_api_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -842,7 +1294,35 @@ const file_server_v1_api_proto_rawDesc = "" +
 	"\aresults\x18\x01 \x03(\v27.messageloop.server.v1.UnsubscribeResponse.ResultsEntryR\aresults\x1a:\n" +
 	"\fResultsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\bR\x05value:\x028\x012\xe6\x03\n" +
+	"\x05value\x18\x02 \x01(\bR\x05value:\x028\x01\".\n" +
+	"\x12GetPresenceRequest\x12\x18\n" +
+	"\achannel\x18\x01 \x01(\tR\achannel\"\xc9\x01\n" +
+	"\x13GetPresenceResponse\x12Q\n" +
+	"\aclients\x18\x01 \x03(\v27.messageloop.server.v1.GetPresenceResponse.ClientsEntryR\aclients\x1a_\n" +
+	"\fClientsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x129\n" +
+	"\x05value\x18\x02 \x01(\v2#.messageloop.server.v1.PresenceInfoR\x05value:\x028\x01\"g\n" +
+	"\fPresenceInfo\x12\x1b\n" +
+	"\tclient_id\x18\x01 \x01(\tR\bclientId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12!\n" +
+	"\fconnected_at\x18\x03 \x01(\x03R\vconnectedAt\"f\n" +
+	"\x11GetHistoryRequest\x12\x18\n" +
+	"\achannel\x18\x01 \x01(\tR\achannel\x12!\n" +
+	"\fsince_offset\x18\x02 \x01(\x04R\vsinceOffset\x12\x14\n" +
+	"\x05limit\x18\x03 \x01(\x05R\x05limit\"c\n" +
+	"\x12GetHistoryResponse\x12M\n" +
+	"\fpublications\x18\x01 \x03(\v2).messageloop.server.v1.HistoryPublicationR\fpublications\"\x93\x01\n" +
+	"\x12HistoryPublication\x12\x16\n" +
+	"\x06offset\x18\x01 \x01(\x04R\x06offset\x128\n" +
+	"\apayload\x18\x02 \x01(\v2\x1e.messageloop.shared.v1.PayloadR\apayload\x12\x17\n" +
+	"\ais_text\x18\x03 \x01(\bR\x06isText\x12\x12\n" +
+	"\x04time\x18\x04 \x01(\x03R\x04time\"\x14\n" +
+	"\x12GetChannelsRequest\"U\n" +
+	"\x13GetChannelsResponse\x12>\n" +
+	"\bchannels\x18\x01 \x03(\v2\".messageloop.server.v1.ChannelInfoR\bchannels\"C\n" +
+	"\vChannelInfo\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
+	"\vsubscribers\x18\x02 \x01(\x05R\vsubscribers2\x95\x06\n" +
 	"\n" +
 	"APIService\x12X\n" +
 	"\aPublish\x12%.messageloop.server.v1.PublishRequest\x1a&.messageloop.server.v1.PublishResponse\x12a\n" +
@@ -850,7 +1330,11 @@ const file_server_v1_api_proto_rawDesc = "" +
 	"Disconnect\x12(.messageloop.server.v1.DisconnectRequest\x1a).messageloop.server.v1.DisconnectResponse\x12^\n" +
 	"\tSubscribe\x12'.messageloop.server.v1.SubscribeRequest\x1a(.messageloop.server.v1.SubscribeResponse\x12d\n" +
 	"\vUnsubscribe\x12).messageloop.server.v1.UnsubscribeRequest\x1a*.messageloop.server.v1.UnsubscribeResponse\x12U\n" +
-	"\x06Survey\x12$.messageloop.server.v1.SurveyRequest\x1a%.messageloop.server.v1.SurveyResponseBBZ@github.com/messageloopio/messageloop/genproto/server/v1;serverpbb\x06proto3"
+	"\x06Survey\x12$.messageloop.server.v1.SurveyRequest\x1a%.messageloop.server.v1.SurveyResponse\x12d\n" +
+	"\vGetPresence\x12).messageloop.server.v1.GetPresenceRequest\x1a*.messageloop.server.v1.GetPresenceResponse\x12a\n" +
+	"\n" +
+	"GetHistory\x12(.messageloop.server.v1.GetHistoryRequest\x1a).messageloop.server.v1.GetHistoryResponse\x12d\n" +
+	"\vGetChannels\x12).messageloop.server.v1.GetChannelsRequest\x1a*.messageloop.server.v1.GetChannelsResponseBBZ@github.com/messageloopio/messageloop/genproto/server/v1;serverpbb\x06proto3"
 
 var (
 	file_server_v1_api_proto_rawDescOnce sync.Once
@@ -864,7 +1348,7 @@ func file_server_v1_api_proto_rawDescGZIP() []byte {
 	return file_server_v1_api_proto_rawDescData
 }
 
-var file_server_v1_api_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
+var file_server_v1_api_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
 var file_server_v1_api_proto_goTypes = []any{
 	(*Publication)(nil),             // 0: messageloop.server.v1.Publication
 	(*PublishRequest)(nil),          // 1: messageloop.server.v1.PublishRequest
@@ -878,45 +1362,66 @@ var file_server_v1_api_proto_goTypes = []any{
 	(*SubscribeResponse)(nil),       // 9: messageloop.server.v1.SubscribeResponse
 	(*UnsubscribeRequest)(nil),      // 10: messageloop.server.v1.UnsubscribeRequest
 	(*UnsubscribeResponse)(nil),     // 11: messageloop.server.v1.UnsubscribeResponse
-	(*Publication_Options)(nil),     // 12: messageloop.server.v1.Publication.Options
-	(*Publication_Destination)(nil), // 13: messageloop.server.v1.Publication.Destination
-	nil,                             // 14: messageloop.server.v1.DisconnectResponse.ResultsEntry
-	nil,                             // 15: messageloop.server.v1.SubscribeResponse.ResultsEntry
-	nil,                             // 16: messageloop.server.v1.UnsubscribeResponse.ResultsEntry
-	(*v1.Payload)(nil),              // 17: messageloop.shared.v1.Payload
-	(*v1.Metadata)(nil),             // 18: messageloop.shared.v1.Metadata
-	(*v1.Error)(nil),                // 19: messageloop.shared.v1.Error
+	(*GetPresenceRequest)(nil),      // 12: messageloop.server.v1.GetPresenceRequest
+	(*GetPresenceResponse)(nil),     // 13: messageloop.server.v1.GetPresenceResponse
+	(*PresenceInfo)(nil),            // 14: messageloop.server.v1.PresenceInfo
+	(*GetHistoryRequest)(nil),       // 15: messageloop.server.v1.GetHistoryRequest
+	(*GetHistoryResponse)(nil),      // 16: messageloop.server.v1.GetHistoryResponse
+	(*HistoryPublication)(nil),      // 17: messageloop.server.v1.HistoryPublication
+	(*GetChannelsRequest)(nil),      // 18: messageloop.server.v1.GetChannelsRequest
+	(*GetChannelsResponse)(nil),     // 19: messageloop.server.v1.GetChannelsResponse
+	(*ChannelInfo)(nil),             // 20: messageloop.server.v1.ChannelInfo
+	(*Publication_Options)(nil),     // 21: messageloop.server.v1.Publication.Options
+	(*Publication_Destination)(nil), // 22: messageloop.server.v1.Publication.Destination
+	nil,                             // 23: messageloop.server.v1.DisconnectResponse.ResultsEntry
+	nil,                             // 24: messageloop.server.v1.SubscribeResponse.ResultsEntry
+	nil,                             // 25: messageloop.server.v1.UnsubscribeResponse.ResultsEntry
+	nil,                             // 26: messageloop.server.v1.GetPresenceResponse.ClientsEntry
+	(*v1.Payload)(nil),              // 27: messageloop.shared.v1.Payload
+	(*v1.Metadata)(nil),             // 28: messageloop.shared.v1.Metadata
+	(*v1.Error)(nil),                // 29: messageloop.shared.v1.Error
 }
 var file_server_v1_api_proto_depIdxs = []int32{
-	13, // 0: messageloop.server.v1.Publication.destination:type_name -> messageloop.server.v1.Publication.Destination
-	12, // 1: messageloop.server.v1.Publication.options:type_name -> messageloop.server.v1.Publication.Options
-	17, // 2: messageloop.server.v1.Publication.payload:type_name -> messageloop.shared.v1.Payload
-	18, // 3: messageloop.server.v1.Publication.metadata:type_name -> messageloop.shared.v1.Metadata
+	22, // 0: messageloop.server.v1.Publication.destination:type_name -> messageloop.server.v1.Publication.Destination
+	21, // 1: messageloop.server.v1.Publication.options:type_name -> messageloop.server.v1.Publication.Options
+	27, // 2: messageloop.server.v1.Publication.payload:type_name -> messageloop.shared.v1.Payload
+	28, // 3: messageloop.server.v1.Publication.metadata:type_name -> messageloop.shared.v1.Metadata
 	0,  // 4: messageloop.server.v1.PublishRequest.publications:type_name -> messageloop.server.v1.Publication
-	17, // 5: messageloop.server.v1.SurveyRequest.payload:type_name -> messageloop.shared.v1.Payload
-	18, // 6: messageloop.server.v1.SurveyRequest.metadata:type_name -> messageloop.shared.v1.Metadata
+	27, // 5: messageloop.server.v1.SurveyRequest.payload:type_name -> messageloop.shared.v1.Payload
+	28, // 6: messageloop.server.v1.SurveyRequest.metadata:type_name -> messageloop.shared.v1.Metadata
 	5,  // 7: messageloop.server.v1.SurveyResponse.results:type_name -> messageloop.server.v1.SurveyResult
-	17, // 8: messageloop.server.v1.SurveyResult.payload:type_name -> messageloop.shared.v1.Payload
-	18, // 9: messageloop.server.v1.SurveyResult.metadata:type_name -> messageloop.shared.v1.Metadata
-	19, // 10: messageloop.server.v1.SurveyResult.error:type_name -> messageloop.shared.v1.Error
-	14, // 11: messageloop.server.v1.DisconnectResponse.results:type_name -> messageloop.server.v1.DisconnectResponse.ResultsEntry
-	15, // 12: messageloop.server.v1.SubscribeResponse.results:type_name -> messageloop.server.v1.SubscribeResponse.ResultsEntry
-	16, // 13: messageloop.server.v1.UnsubscribeResponse.results:type_name -> messageloop.server.v1.UnsubscribeResponse.ResultsEntry
-	1,  // 14: messageloop.server.v1.APIService.Publish:input_type -> messageloop.server.v1.PublishRequest
-	6,  // 15: messageloop.server.v1.APIService.Disconnect:input_type -> messageloop.server.v1.DisconnectRequest
-	8,  // 16: messageloop.server.v1.APIService.Subscribe:input_type -> messageloop.server.v1.SubscribeRequest
-	10, // 17: messageloop.server.v1.APIService.Unsubscribe:input_type -> messageloop.server.v1.UnsubscribeRequest
-	3,  // 18: messageloop.server.v1.APIService.Survey:input_type -> messageloop.server.v1.SurveyRequest
-	2,  // 19: messageloop.server.v1.APIService.Publish:output_type -> messageloop.server.v1.PublishResponse
-	7,  // 20: messageloop.server.v1.APIService.Disconnect:output_type -> messageloop.server.v1.DisconnectResponse
-	9,  // 21: messageloop.server.v1.APIService.Subscribe:output_type -> messageloop.server.v1.SubscribeResponse
-	11, // 22: messageloop.server.v1.APIService.Unsubscribe:output_type -> messageloop.server.v1.UnsubscribeResponse
-	4,  // 23: messageloop.server.v1.APIService.Survey:output_type -> messageloop.server.v1.SurveyResponse
-	19, // [19:24] is the sub-list for method output_type
-	14, // [14:19] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	27, // 8: messageloop.server.v1.SurveyResult.payload:type_name -> messageloop.shared.v1.Payload
+	28, // 9: messageloop.server.v1.SurveyResult.metadata:type_name -> messageloop.shared.v1.Metadata
+	29, // 10: messageloop.server.v1.SurveyResult.error:type_name -> messageloop.shared.v1.Error
+	23, // 11: messageloop.server.v1.DisconnectResponse.results:type_name -> messageloop.server.v1.DisconnectResponse.ResultsEntry
+	24, // 12: messageloop.server.v1.SubscribeResponse.results:type_name -> messageloop.server.v1.SubscribeResponse.ResultsEntry
+	25, // 13: messageloop.server.v1.UnsubscribeResponse.results:type_name -> messageloop.server.v1.UnsubscribeResponse.ResultsEntry
+	26, // 14: messageloop.server.v1.GetPresenceResponse.clients:type_name -> messageloop.server.v1.GetPresenceResponse.ClientsEntry
+	17, // 15: messageloop.server.v1.GetHistoryResponse.publications:type_name -> messageloop.server.v1.HistoryPublication
+	27, // 16: messageloop.server.v1.HistoryPublication.payload:type_name -> messageloop.shared.v1.Payload
+	20, // 17: messageloop.server.v1.GetChannelsResponse.channels:type_name -> messageloop.server.v1.ChannelInfo
+	14, // 18: messageloop.server.v1.GetPresenceResponse.ClientsEntry.value:type_name -> messageloop.server.v1.PresenceInfo
+	1,  // 19: messageloop.server.v1.APIService.Publish:input_type -> messageloop.server.v1.PublishRequest
+	6,  // 20: messageloop.server.v1.APIService.Disconnect:input_type -> messageloop.server.v1.DisconnectRequest
+	8,  // 21: messageloop.server.v1.APIService.Subscribe:input_type -> messageloop.server.v1.SubscribeRequest
+	10, // 22: messageloop.server.v1.APIService.Unsubscribe:input_type -> messageloop.server.v1.UnsubscribeRequest
+	3,  // 23: messageloop.server.v1.APIService.Survey:input_type -> messageloop.server.v1.SurveyRequest
+	12, // 24: messageloop.server.v1.APIService.GetPresence:input_type -> messageloop.server.v1.GetPresenceRequest
+	15, // 25: messageloop.server.v1.APIService.GetHistory:input_type -> messageloop.server.v1.GetHistoryRequest
+	18, // 26: messageloop.server.v1.APIService.GetChannels:input_type -> messageloop.server.v1.GetChannelsRequest
+	2,  // 27: messageloop.server.v1.APIService.Publish:output_type -> messageloop.server.v1.PublishResponse
+	7,  // 28: messageloop.server.v1.APIService.Disconnect:output_type -> messageloop.server.v1.DisconnectResponse
+	9,  // 29: messageloop.server.v1.APIService.Subscribe:output_type -> messageloop.server.v1.SubscribeResponse
+	11, // 30: messageloop.server.v1.APIService.Unsubscribe:output_type -> messageloop.server.v1.UnsubscribeResponse
+	4,  // 31: messageloop.server.v1.APIService.Survey:output_type -> messageloop.server.v1.SurveyResponse
+	13, // 32: messageloop.server.v1.APIService.GetPresence:output_type -> messageloop.server.v1.GetPresenceResponse
+	16, // 33: messageloop.server.v1.APIService.GetHistory:output_type -> messageloop.server.v1.GetHistoryResponse
+	19, // 34: messageloop.server.v1.APIService.GetChannels:output_type -> messageloop.server.v1.GetChannelsResponse
+	27, // [27:35] is the sub-list for method output_type
+	19, // [19:27] is the sub-list for method input_type
+	19, // [19:19] is the sub-list for extension type_name
+	19, // [19:19] is the sub-list for extension extendee
+	0,  // [0:19] is the sub-list for field type_name
 }
 
 func init() { file_server_v1_api_proto_init() }
@@ -930,7 +1435,7 @@ func file_server_v1_api_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_server_v1_api_proto_rawDesc), len(file_server_v1_api_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   17,
+			NumMessages:   27,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

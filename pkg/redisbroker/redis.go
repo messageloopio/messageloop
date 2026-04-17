@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
 	"github.com/messageloopio/messageloop"
 	"github.com/messageloopio/messageloop/config"
@@ -18,6 +19,7 @@ type redisBroker struct {
 	client  *redis.Client
 	opts    *Options
 	handler messageloop.PublicationHandler
+	epoch   string
 
 	subMu      sync.RWMutex
 	subscribed map[string]struct{}
@@ -40,6 +42,7 @@ func New(cfg config.RedisConfig) messageloop.Broker {
 			WriteTimeout: opts.WriteTimeout,
 		}),
 		opts:       opts,
+		epoch:      uuid.NewString(),
 		subscribed: make(map[string]struct{}),
 	}
 }
@@ -81,7 +84,7 @@ func (b *redisBroker) Publish(ch string, payload []byte, isText bool) (uint64, e
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	msg := &redisMessage{Type: messageTypePublication, Channel: ch, Payload: payload, IsText: isText}
+	msg := &redisMessage{Type: messageTypePublication, Channel: ch, Payload: payload, IsText: isText, Epoch: b.epoch}
 
 	// First, write to stream to get the offset.
 	streamData, err := serializeMessage(msg)
@@ -123,3 +126,8 @@ func (b *redisBroker) History(ch string, sinceOffset uint64, limit int) ([]*mess
 }
 
 var _ messageloop.Broker = (*redisBroker)(nil)
+
+// Epoch returns the broker's epoch identifier.
+func (b *redisBroker) Epoch() string {
+	return b.epoch
+}

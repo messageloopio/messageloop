@@ -182,3 +182,67 @@ func (h *apiServiceHandler) Unsubscribe(ctx context.Context, req *serverpb.Unsub
 
 	return &serverpb.UnsubscribeResponse{Results: results}, nil
 }
+
+func (h *apiServiceHandler) GetPresence(ctx context.Context, req *serverpb.GetPresenceRequest) (*serverpb.GetPresenceResponse, error) {
+	log.InfoContext(ctx, "server side API GetPresence", "channel", req.Channel)
+
+	presenceMap, err := h.node.Presence(ctx, req.Channel)
+	if err != nil {
+		return nil, err
+	}
+
+	clients := make(map[string]*serverpb.PresenceInfo, len(presenceMap))
+	for id, info := range presenceMap {
+		clients[id] = &serverpb.PresenceInfo{
+			ClientId:    info.ClientID,
+			UserId:      info.UserID,
+			ConnectedAt: info.ConnectedAt,
+		}
+	}
+
+	return &serverpb.GetPresenceResponse{Clients: clients}, nil
+}
+
+func (h *apiServiceHandler) GetHistory(ctx context.Context, req *serverpb.GetHistoryRequest) (*serverpb.GetHistoryResponse, error) {
+	log.InfoContext(ctx, "server side API GetHistory", "channel", req.Channel, "since_offset", req.SinceOffset, "limit", req.Limit)
+
+	pubs, err := h.node.Broker().History(req.Channel, req.SinceOffset, int(req.Limit))
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]*serverpb.HistoryPublication, 0, len(pubs))
+	for _, pub := range pubs {
+		var payload *sharedpb.Payload
+		if len(pub.Payload) > 0 {
+			if pub.IsText {
+				payload = &sharedpb.Payload{Data: &sharedpb.Payload_Text{Text: string(pub.Payload)}}
+			} else {
+				payload = &sharedpb.Payload{Data: &sharedpb.Payload_Binary{Binary: pub.Payload}}
+			}
+		}
+		result = append(result, &serverpb.HistoryPublication{
+			Offset:  pub.Offset,
+			Payload: payload,
+			IsText:  pub.IsText,
+			Time:    pub.Time,
+		})
+	}
+
+	return &serverpb.GetHistoryResponse{Publications: result}, nil
+}
+
+func (h *apiServiceHandler) GetChannels(ctx context.Context, req *serverpb.GetChannelsRequest) (*serverpb.GetChannelsResponse, error) {
+	log.InfoContext(ctx, "server side API GetChannels")
+
+	activeChannels := h.node.Hub().GetActiveChannels()
+	channels := make([]*serverpb.ChannelInfo, 0, len(activeChannels))
+	for _, ch := range activeChannels {
+		channels = append(channels, &serverpb.ChannelInfo{
+			Name:        ch.Name,
+			Subscribers: int32(ch.Subscribers),
+		})
+	}
+
+	return &serverpb.GetChannelsResponse{Channels: channels}, nil
+}

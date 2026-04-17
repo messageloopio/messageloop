@@ -9,6 +9,7 @@ type Metrics struct {
 	MessagesPublished  prometheus.Counter
 	MessagesDelivered  prometheus.Counter
 	PublishDuration    prometheus.Histogram
+	DeliveryFailures   prometheus.Counter
 }
 
 // NewMetrics creates and registers all Prometheus metrics.
@@ -40,6 +41,11 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Help:      "Time taken to publish a message.",
 			Buckets:   prometheus.DefBuckets,
 		}),
+		DeliveryFailures: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "messageloop",
+			Name:      "delivery_failures_total",
+			Help:      "Total number of message delivery failures (dead letters).",
+		}),
 	}
 	reg.MustRegister(
 		m.ConnectionsTotal,
@@ -47,6 +53,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.MessagesPublished,
 		m.MessagesDelivered,
 		m.PublishDuration,
+		m.DeliveryFailures,
 	)
 	return m
 }

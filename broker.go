@@ -7,6 +7,7 @@ import "context"
 type Publication struct {
 	Channel string
 	Offset  uint64
+	Epoch   string
 	Payload []byte
 	IsText  bool
 	Time    int64

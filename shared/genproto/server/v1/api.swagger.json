@@ -98,6 +98,18 @@
         }
       }
     },
+    "v1ChannelInfo": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "subscribers": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    },
     "v1DisconnectResponse": {
       "type": "object",
       "properties": {
@@ -123,6 +135,60 @@
         },
         "metadata": {
           "type": "object"
+        }
+      }
+    },
+    "v1GetChannelsResponse": {
+      "type": "object",
+      "properties": {
+        "channels": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1ChannelInfo"
+          }
+        }
+      }
+    },
+    "v1GetHistoryResponse": {
+      "type": "object",
+      "properties": {
+        "publications": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1HistoryPublication"
+          }
+        }
+      }
+    },
+    "v1GetPresenceResponse": {
+      "type": "object",
+      "properties": {
+        "clients": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/v1PresenceInfo"
+          }
+        }
+      }
+    },
+    "v1HistoryPublication": {
+      "type": "object",
+      "properties": {
+        "offset": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "payload": {
+          "$ref": "#/definitions/v1Payload"
+        },
+        "isText": {
+          "type": "boolean"
+        },
+        "time": {
+          "type": "string",
+          "format": "int64"
         }
       }
     },
@@ -160,6 +226,21 @@
         }
       },
       "title": "统一的数据载荷类型"
+    },
+    "v1PresenceInfo": {
+      "type": "object",
+      "properties": {
+        "clientId": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "connectedAt": {
+          "type": "string",
+          "format": "int64"
+        }
+      }
     },
     "v1PublishResponse": {
       "type": "object"

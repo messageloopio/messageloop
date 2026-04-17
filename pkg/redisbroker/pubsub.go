@@ -67,6 +67,7 @@ func (b *redisBroker) runPubSub(ctx context.Context) error {
 			pub := &messageloop.Publication{
 				Channel: channelName,
 				Offset:  redisMsg.Offset,
+				Epoch:   redisMsg.Epoch,
 				Payload: redisMsg.Payload,
 				IsText:  redisMsg.IsText,
 				Time:    time.Now().UnixMilli(),

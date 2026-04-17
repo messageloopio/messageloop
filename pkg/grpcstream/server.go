@@ -2,6 +2,7 @@ package grpcstream
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"time"
 
@@ -11,17 +12,30 @@ import (
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
 	serverpb "github.com/messageloopio/messageloop/shared/genproto/server/v1"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/encoding"
+	_ "google.golang.org/grpc/encoding/gzip"
 )
 
 type Options struct {
 	Addr         string        `yaml:"addr" json:"addr"`
 	WriteTimeout time.Duration `yaml:"write_timeout" json:"write_timeout"`
+	TLSCertFile  string
+	TLSKeyFile   string
 }
 
 func NewServer(opts Options, node *messageloop.Node) (*Server, error) {
 	encoding.RegisterCodec(&RawCodec{})
 	grpcOpts := []grpc.ServerOption{}
+
+	if opts.TLSCertFile != "" && opts.TLSKeyFile != "" {
+		creds, err := credentials.NewServerTLSFromFile(opts.TLSCertFile, opts.TLSKeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load TLS credentials: %w", err)
+		}
+		grpcOpts = append(grpcOpts, grpc.Creds(creds))
+	}
+
 	grpcServer := grpc.NewServer(grpcOpts...)
 
 	// Register client streaming service

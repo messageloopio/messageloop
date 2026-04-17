@@ -11,6 +11,7 @@ type redisMessage struct {
 	Payload []byte `json:"p"`
 	IsText  bool   `json:"isText,omitempty"`
 	Offset  uint64 `json:"off,omitempty"`
+	Epoch   string `json:"epoch,omitempty"`
 }
 
 func serializeMessage(msg *redisMessage) ([]byte, error) {

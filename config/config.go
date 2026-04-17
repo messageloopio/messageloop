@@ -35,17 +35,25 @@ type Transport struct {
 	GRPC      GRPCTransport      `yaml:"grpc" json:"grpc"`
 }
 
+type TLSConfig struct {
+	CertFile string `yaml:"cert_file" json:"cert_file"`
+	KeyFile  string `yaml:"key_file" json:"key_file"`
+}
+
 type WebSocketTransport struct {
-	Addr         string `yaml:"addr" json:"addr"`
-	Path         string `yaml:"path" json:"path"`
-	ReadTimeout  string `yaml:"read_timeout" json:"read_timeout"`   // duration string
-	WriteTimeout string `yaml:"write_timeout" json:"write_timeout"` // duration string, e.g. "10s"
-	CheckOrigin  bool   `yaml:"check_origin" json:"check_origin"`   // Allow any origin when true
+	Addr         string    `yaml:"addr" json:"addr"`
+	Path         string    `yaml:"path" json:"path"`
+	ReadTimeout  string    `yaml:"read_timeout" json:"read_timeout"`   // duration string
+	WriteTimeout string    `yaml:"write_timeout" json:"write_timeout"` // duration string, e.g. "10s"
+	CheckOrigin  bool      `yaml:"check_origin" json:"check_origin"`   // Allow any origin when true
+	TLS          TLSConfig `yaml:"tls" json:"tls"`
+	Compression  bool      `yaml:"compression" json:"compression"` // Enable permessage-deflate
 }
 
 type GRPCTransport struct {
-	Addr         string `yaml:"addr" json:"addr"`
-	WriteTimeout string `yaml:"write_timeout" json:"write_timeout"` // duration string, e.g. "10s"
+	Addr         string    `yaml:"addr" json:"addr"`
+	WriteTimeout string    `yaml:"write_timeout" json:"write_timeout"` // duration string, e.g. "10s"
+	TLS          TLSConfig `yaml:"tls" json:"tls"`
 }
 
 // ProxyConfig wraps the proxy.ProxyConfig for YAML unmarshaling.

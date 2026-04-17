@@ -169,6 +169,25 @@ func (c *Client) Close(disconnect Disconnect) error {
 	return c.close(disconnect)
 }
 
+// closeQuiet silently closes the transport without removing subscriptions or publishing
+// presence leave events. Used during session resumption where a new session takes over.
+func (c *Client) closeQuiet() {
+	c.mu.Lock()
+	if c.status == statusClosed {
+		c.mu.Unlock()
+		return
+	}
+	c.status = statusClosed
+	if c.heartbeatCancel != nil {
+		c.heartbeatCancel()
+		c.heartbeatCancel = nil
+	}
+	c.mu.Unlock()
+
+	// Close transport silently — no presence cleanup, no hub removal
+	_ = c.transport.Close(Disconnect{})
+}
+
 func (c *Client) ClientID() string {
 	return c.client
 }
@@ -273,6 +292,28 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 		oldSession := c.node.hub.LookupSession(connect.SessionId)
 		if oldSession != nil {
 			resumed = true
+
+			// 1. Inherit state from old session
+			oldSession.mu.Lock()
+			oldChannels := make(map[string]struct{}, len(oldSession.subscribedChannels))
+			for ch := range oldSession.subscribedChannels {
+				oldChannels[ch] = struct{}{}
+			}
+			oldUser := oldSession.user
+			oldClient := oldSession.client
+			oldSession.mu.Unlock()
+
+			// 2. Silently close old session (no presence leave, no sub removal)
+			oldSession.closeQuiet()
+
+			// 3. Set inherited state on new session
+			c.user = oldUser
+			c.client = oldClient
+			c.session = connect.SessionId // Reuse old session ID
+			c.subscribedChannels = oldChannels
+
+			// 4. Replace session references in hub (sessions map + subShards)
+			c.node.hub.ReplaceSession(connect.SessionId, c)
 		}
 	}
 
@@ -318,10 +359,14 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 
 	c.mu.Lock()
 	c.authenticated = true
-	c.client = connect.ClientId
-	if err := c.node.AddClient(c); err != nil {
-		c.mu.Unlock()
-		return err
+	if !resumed {
+		c.client = connect.ClientId
+	}
+	if !resumed {
+		if err := c.node.AddClient(c); err != nil {
+			c.mu.Unlock()
+			return err
+		}
 	}
 	if limit := c.node.limits.MaxPublishesPerSecond; limit > 0 {
 		c.publishLimiter = rate.NewLimiter(rate.Limit(limit), limit)
@@ -341,13 +386,25 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 	subs := connect.Subscriptions
 	var pubs []*clientpb.Publication
 
+	// Get current broker epoch for recovery validation
+	var currentEpoch string
+	if epocher, ok := c.node.broker.(interface{ Epoch() string }); ok {
+		currentEpoch = epocher.Epoch()
+	}
+
 	for _, sub := range subs {
 		// Add subscription
 		c.node.hub.addSub(sub.Channel, NewSubscriber(c, sub.Ephemeral))
 
 		// Handle message recovery if requested
 		if sub.Recover && sub.Offset > 0 {
-			historyPubs, err := c.node.broker.History(sub.Channel, sub.Offset+1, 0)
+			// Epoch validation: if the broker has restarted, the client's offset is invalid
+			sinceOffset := sub.Offset + 1
+			if currentEpoch != "" && sub.Epoch != "" && sub.Epoch != currentEpoch {
+				// Epoch mismatch — broker restarted, recover from beginning
+				sinceOffset = 0
+			}
+			historyPubs, err := c.node.broker.History(sub.Channel, sinceOffset, 0)
 			if err != nil {
 				log.WarnContext(ctx, "failed to recover messages", "channel", sub.Channel, "error", err)
 				continue
@@ -379,6 +436,7 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 			Connected: &clientpb.Connected{
 				SessionId:    c.SessionID(),
 				Resumed:      resumed,
+				Epoch:        currentEpoch,
 				Publications: pubs,
 				Subscriptions: lo.Map(subs, func(it *clientpb.Subscription, i int) *clientpb.Subscription {
 					return &clientpb.Subscription{
@@ -892,6 +950,15 @@ func (c *Client) ResetActivity() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.lastActivity = time.Now()
+}
+
+// ForceTestIDs overrides the session, user, and client IDs for testing purposes.
+func (c *Client) ForceTestIDs(sessionID, userID, clientID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.session = sessionID
+	c.user = userID
+	c.client = clientID
 }
 
 // refreshPresence re-adds presence entries for all subscribed channels to reset TTL.

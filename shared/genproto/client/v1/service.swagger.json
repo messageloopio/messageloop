@@ -171,6 +171,10 @@
         "resumed": {
           "type": "boolean",
           "title": "是否成功恢复会话"
+        },
+        "epoch": {
+          "type": "string",
+          "title": "broker 实例标识，用于防止重启后 offset 混淆"
         }
       }
     },
@@ -393,6 +397,10 @@
         "recover": {
           "type": "boolean",
           "title": "是否需要恢复离线消息"
+        },
+        "epoch": {
+          "type": "string",
+          "title": "broker epoch，用于校验 offset 有效性"
         }
       }
     },

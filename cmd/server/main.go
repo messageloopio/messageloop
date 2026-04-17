@@ -115,7 +115,9 @@ func main() {
 		}()
 
 		grpcOpts := grpcstream.Options{
-			Addr: cfg.Transport.GRPC.Addr,
+			Addr:        cfg.Transport.GRPC.Addr,
+			TLSCertFile: cfg.Transport.GRPC.TLS.CertFile,
+			TLSKeyFile:  cfg.Transport.GRPC.TLS.KeyFile,
 		}
 		if cfg.Transport.GRPC.WriteTimeout != "" {
 			if d, err := time.ParseDuration(cfg.Transport.GRPC.WriteTimeout); err == nil {
@@ -128,8 +130,11 @@ func main() {
 		}
 
 		wsOpts := websocket.Options{
-			Addr:   cfg.Transport.WebSocket.Addr,
-			WsPath: cfg.Transport.WebSocket.Path,
+			Addr:        cfg.Transport.WebSocket.Addr,
+			WsPath:      cfg.Transport.WebSocket.Path,
+			TLSCertFile: cfg.Transport.WebSocket.TLS.CertFile,
+			TLSKeyFile:  cfg.Transport.WebSocket.TLS.KeyFile,
+			Compression: cfg.Transport.WebSocket.Compression,
 		}
 		if cfg.Transport.WebSocket.WriteTimeout != "" {
 			if d, err := time.ParseDuration(cfg.Transport.WebSocket.WriteTimeout); err == nil {

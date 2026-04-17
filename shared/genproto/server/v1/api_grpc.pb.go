@@ -26,6 +26,9 @@ const (
 	APIService_Subscribe_FullMethodName   = "/messageloop.server.v1.APIService/Subscribe"
 	APIService_Unsubscribe_FullMethodName = "/messageloop.server.v1.APIService/Unsubscribe"
 	APIService_Survey_FullMethodName      = "/messageloop.server.v1.APIService/Survey"
+	APIService_GetPresence_FullMethodName = "/messageloop.server.v1.APIService/GetPresence"
+	APIService_GetHistory_FullMethodName  = "/messageloop.server.v1.APIService/GetHistory"
+	APIService_GetChannels_FullMethodName = "/messageloop.server.v1.APIService/GetChannels"
 )
 
 // APIServiceClient is the client API for APIService service.
@@ -37,6 +40,9 @@ type APIServiceClient interface {
 	Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (*SubscribeResponse, error)
 	Unsubscribe(ctx context.Context, in *UnsubscribeRequest, opts ...grpc.CallOption) (*UnsubscribeResponse, error)
 	Survey(ctx context.Context, in *SurveyRequest, opts ...grpc.CallOption) (*SurveyResponse, error)
+	GetPresence(ctx context.Context, in *GetPresenceRequest, opts ...grpc.CallOption) (*GetPresenceResponse, error)
+	GetHistory(ctx context.Context, in *GetHistoryRequest, opts ...grpc.CallOption) (*GetHistoryResponse, error)
+	GetChannels(ctx context.Context, in *GetChannelsRequest, opts ...grpc.CallOption) (*GetChannelsResponse, error)
 }
 
 type aPIServiceClient struct {
@@ -97,6 +103,36 @@ func (c *aPIServiceClient) Survey(ctx context.Context, in *SurveyRequest, opts .
 	return out, nil
 }
 
+func (c *aPIServiceClient) GetPresence(ctx context.Context, in *GetPresenceRequest, opts ...grpc.CallOption) (*GetPresenceResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetPresenceResponse)
+	err := c.cc.Invoke(ctx, APIService_GetPresence_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *aPIServiceClient) GetHistory(ctx context.Context, in *GetHistoryRequest, opts ...grpc.CallOption) (*GetHistoryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetHistoryResponse)
+	err := c.cc.Invoke(ctx, APIService_GetHistory_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *aPIServiceClient) GetChannels(ctx context.Context, in *GetChannelsRequest, opts ...grpc.CallOption) (*GetChannelsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetChannelsResponse)
+	err := c.cc.Invoke(ctx, APIService_GetChannels_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // APIServiceServer is the server API for APIService service.
 // All implementations must embed UnimplementedAPIServiceServer
 // for forward compatibility.
@@ -106,6 +142,9 @@ type APIServiceServer interface {
 	Subscribe(context.Context, *SubscribeRequest) (*SubscribeResponse, error)
 	Unsubscribe(context.Context, *UnsubscribeRequest) (*UnsubscribeResponse, error)
 	Survey(context.Context, *SurveyRequest) (*SurveyResponse, error)
+	GetPresence(context.Context, *GetPresenceRequest) (*GetPresenceResponse, error)
+	GetHistory(context.Context, *GetHistoryRequest) (*GetHistoryResponse, error)
+	GetChannels(context.Context, *GetChannelsRequest) (*GetChannelsResponse, error)
 	mustEmbedUnimplementedAPIServiceServer()
 }
 
@@ -130,6 +169,15 @@ func (UnimplementedAPIServiceServer) Unsubscribe(context.Context, *UnsubscribeRe
 }
 func (UnimplementedAPIServiceServer) Survey(context.Context, *SurveyRequest) (*SurveyResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Survey not implemented")
+}
+func (UnimplementedAPIServiceServer) GetPresence(context.Context, *GetPresenceRequest) (*GetPresenceResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetPresence not implemented")
+}
+func (UnimplementedAPIServiceServer) GetHistory(context.Context, *GetHistoryRequest) (*GetHistoryResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetHistory not implemented")
+}
+func (UnimplementedAPIServiceServer) GetChannels(context.Context, *GetChannelsRequest) (*GetChannelsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetChannels not implemented")
 }
 func (UnimplementedAPIServiceServer) mustEmbedUnimplementedAPIServiceServer() {}
 func (UnimplementedAPIServiceServer) testEmbeddedByValue()                    {}
@@ -242,6 +290,60 @@ func _APIService_Survey_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
+func _APIService_GetPresence_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetPresenceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(APIServiceServer).GetPresence(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: APIService_GetPresence_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(APIServiceServer).GetPresence(ctx, req.(*GetPresenceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _APIService_GetHistory_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetHistoryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(APIServiceServer).GetHistory(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: APIService_GetHistory_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(APIServiceServer).GetHistory(ctx, req.(*GetHistoryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _APIService_GetChannels_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetChannelsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(APIServiceServer).GetChannels(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: APIService_GetChannels_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(APIServiceServer).GetChannels(ctx, req.(*GetChannelsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // APIService_ServiceDesc is the grpc.ServiceDesc for APIService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -268,6 +370,18 @@ var APIService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Survey",
 			Handler:    _APIService_Survey_Handler,
+		},
+		{
+			MethodName: "GetPresence",
+			Handler:    _APIService_GetPresence_Handler,
+		},
+		{
+			MethodName: "GetHistory",
+			Handler:    _APIService_GetHistory_Handler,
+		},
+		{
+			MethodName: "GetChannels",
+			Handler:    _APIService_GetChannels_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
