@@ -128,6 +128,8 @@ const (
 	ClusterCommandStatusFailed ClusterCommandStatus = "failed"
 	// ClusterCommandStatusInProgress indicates another owner is already processing the command.
 	ClusterCommandStatusInProgress ClusterCommandStatus = "in_progress"
+	// ClusterCommandStatusUnknownFinalState indicates the side effect may have happened but no terminal result was observed.
+	ClusterCommandStatusUnknownFinalState ClusterCommandStatus = "unknown_final_state"
 )
 
 // ClusterCommand is the transport model for cluster-scoped control-plane operations.
