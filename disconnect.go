@@ -14,8 +14,8 @@ func (d Disconnect) String() string {
 	return fmt.Sprintf("code: %d, reason: %s", d.Code, d.Reason)
 }
 
-// Error to use Disconnect as a callback handler error to signal Centrifuge
-// that client must be disconnected with corresponding Code and Reason.
+// Error implements the error interface so Disconnect can be used as an error
+// to signal that a client must be disconnected with the corresponding Code and Reason.
 func (d Disconnect) Error() string {
 	return d.String()
 }

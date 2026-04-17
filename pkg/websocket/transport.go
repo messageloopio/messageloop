@@ -1,6 +1,7 @@
 package websocket
 
 import (
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -19,6 +20,7 @@ func msgTypeFromSubprotocol(subprotocol string) int {
 type Transport struct {
 	conn    *websocket.Conn
 	msgType int
+	writeMu sync.Mutex
 }
 
 func newTransport(conn *websocket.Conn, msgType int) *Transport {
@@ -34,6 +36,8 @@ func (t *Transport) Write(msg []byte) error {
 }
 
 func (t *Transport) WriteMany(msgs ...[]byte) error {
+	t.writeMu.Lock()
+	defer t.writeMu.Unlock()
 	for _, msg := range msgs {
 		if err := t.conn.WriteMessage(t.msgType, msg); err != nil {
 			return err
@@ -43,8 +47,7 @@ func (t *Transport) WriteMany(msgs ...[]byte) error {
 }
 
 func (t *Transport) Close(disconnect messageloop.Disconnect) error {
-	// 正确的关闭 WebSocket 连接: https://medium.com/@blackhorseya/properly-closing-websocket-connections-in-golang-a902f97716c1
-
+	t.writeMu.Lock()
 	// Send a WebSocket close message
 	deadline := time.Now().Add(5 * time.Second)
 	err := t.conn.WriteControl(
@@ -52,6 +55,7 @@ func (t *Transport) Close(disconnect messageloop.Disconnect) error {
 		websocket.FormatCloseMessage(int(disconnect.Code), disconnect.Reason),
 		deadline,
 	)
+	t.writeMu.Unlock()
 	if err != nil {
 		return err
 	}

@@ -67,7 +67,8 @@ func NewHTTPProxy(cfg *ProxyConfig) (*HTTPProxy, error) {
 
 // RPC implements Proxy.RPC.
 func (p *HTTPProxy) RPC(ctx context.Context, req *RPCProxyRequest) (*RPCProxyResponse, error) {
-	ctx = p.withTimeout(ctx)
+	ctx, cancel := p.withTimeout(ctx)
+	defer cancel()
 
 	// Build the HTTP request
 	protoReq, err := req.ToProtoRequest()
@@ -106,7 +107,8 @@ func (p *HTTPProxy) RPC(ctx context.Context, req *RPCProxyRequest) (*RPCProxyRes
 
 // Authenticate implements Proxy.Authenticate.
 func (p *HTTPProxy) Authenticate(ctx context.Context, req *AuthenticateProxyRequest) (*AuthenticateProxyResponse, error) {
-	ctx = p.withTimeout(ctx)
+	ctx, cancel := p.withTimeout(ctx)
+	defer cancel()
 
 	protoReq := req.ToProtoRequest()
 	body, err := json.Marshal(map[string]any{
@@ -140,7 +142,8 @@ func (p *HTTPProxy) Authenticate(ctx context.Context, req *AuthenticateProxyRequ
 
 // SubscribeAcl implements Proxy.SubscribeAcl.
 func (p *HTTPProxy) SubscribeAcl(ctx context.Context, req *SubscribeAclProxyRequest) (*SubscribeAclProxyResponse, error) {
-	ctx = p.withTimeout(ctx)
+	ctx, cancel := p.withTimeout(ctx)
+	defer cancel()
 
 	protoReq := req.ToProtoRequest()
 	body, err := json.Marshal(map[string]any{
@@ -173,7 +176,8 @@ func (p *HTTPProxy) SubscribeAcl(ctx context.Context, req *SubscribeAclProxyRequ
 
 // PublishAcl implements Proxy.PublishAcl.
 func (p *HTTPProxy) PublishAcl(ctx context.Context, req *PublishAclProxyRequest) (*PublishAclProxyResponse, error) {
-	ctx = p.withTimeout(ctx)
+	ctx, cancel := p.withTimeout(ctx)
+	defer cancel()
 
 	protoReq := req.ToProtoRequest()
 	body, err := json.Marshal(map[string]any{
@@ -206,7 +210,8 @@ func (p *HTTPProxy) PublishAcl(ctx context.Context, req *PublishAclProxyRequest)
 
 // OnConnected implements Proxy.OnConnected.
 func (p *HTTPProxy) OnConnected(ctx context.Context, req *OnConnectedProxyRequest) (*OnConnectedProxyResponse, error) {
-	ctx = p.withTimeout(ctx)
+	ctx, cancel := p.withTimeout(ctx)
+	defer cancel()
 
 	protoReq := req.ToProtoRequest()
 	body, err := json.Marshal(map[string]any{
@@ -239,7 +244,8 @@ func (p *HTTPProxy) OnConnected(ctx context.Context, req *OnConnectedProxyReques
 
 // OnSubscribed implements Proxy.OnSubscribed.
 func (p *HTTPProxy) OnSubscribed(ctx context.Context, req *OnSubscribedProxyRequest) (*OnSubscribedProxyResponse, error) {
-	ctx = p.withTimeout(ctx)
+	ctx, cancel := p.withTimeout(ctx)
+	defer cancel()
 
 	protoReq := req.ToProtoRequest()
 	body, err := json.Marshal(map[string]any{
@@ -273,7 +279,8 @@ func (p *HTTPProxy) OnSubscribed(ctx context.Context, req *OnSubscribedProxyRequ
 
 // OnUnsubscribed implements Proxy.OnUnsubscribed.
 func (p *HTTPProxy) OnUnsubscribed(ctx context.Context, req *OnUnsubscribedProxyRequest) (*OnUnsubscribedProxyResponse, error) {
-	ctx = p.withTimeout(ctx)
+	ctx, cancel := p.withTimeout(ctx)
+	defer cancel()
 
 	protoReq := req.ToProtoRequest()
 	body, err := json.Marshal(map[string]any{
@@ -307,7 +314,8 @@ func (p *HTTPProxy) OnUnsubscribed(ctx context.Context, req *OnUnsubscribedProxy
 
 // OnDisconnected implements Proxy.OnDisconnected.
 func (p *HTTPProxy) OnDisconnected(ctx context.Context, req *OnDisconnectedProxyRequest) (*OnDisconnectedProxyResponse, error) {
-	ctx = p.withTimeout(ctx)
+	ctx, cancel := p.withTimeout(ctx)
+	defer cancel()
 
 	protoReq := req.ToProtoRequest()
 	body, err := json.Marshal(map[string]any{
@@ -375,13 +383,12 @@ func (p *HTTPProxy) doRequest(ctx context.Context, httpReq *http.Request, method
 }
 
 // withTimeout applies the proxy timeout if not already set in context.
-func (p *HTTPProxy) withTimeout(ctx context.Context) context.Context {
+// The caller must defer the returned CancelFunc.
+func (p *HTTPProxy) withTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
-		ctx, cancel := context.WithTimeout(ctx, p.timeout)
-		_ = cancel // Cancel is intentionally not called; context deadline handles cleanup
-		return ctx
+		return context.WithTimeout(ctx, p.timeout)
 	}
-	return ctx
+	return ctx, func() {}
 }
 
 // Name implements Proxy.Name.

@@ -2,6 +2,7 @@ package messageloop
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -15,14 +16,15 @@ type SurveyResult struct {
 
 // Survey manages the lifecycle of a survey request and response collection.
 type Survey struct {
-	id          string
-	channel     string
-	payload     []byte
-	timeout     time.Duration
-	responses   map[string]*SurveyResult
-	responseCh  chan *SurveyResult
-	done        chan struct{}
-	mu          sync.Mutex
+	id         string
+	channel    string
+	payload    []byte
+	timeout    time.Duration
+	responses  map[string]*SurveyResult
+	responseCh chan *SurveyResult
+	done       chan struct{}
+	closeOnce  sync.Once
+	mu         sync.Mutex
 }
 
 // NewSurvey creates a new Survey instance.
@@ -77,7 +79,9 @@ func (s *Survey) AddResponse(sessionID string, payload []byte, err error) {
 	case <-s.done:
 		// Survey is closed, don't block
 	default:
-		// Channel full, try non-blocking
+		// Channel full, log and try non-blocking
+		slog.Warn("survey response channel full, response may be dropped",
+			"survey_id", s.id, "session_id", sessionID)
 		select {
 		case s.responseCh <- result:
 		default:
@@ -95,9 +99,9 @@ func (s *Survey) Wait(ctx context.Context) []*SurveyResult {
 	go func() {
 		select {
 		case <-timeoutCtx.Done():
-			close(s.done)
+			s.closeDone()
 		case <-ctx.Done():
-			close(s.done)
+			s.closeDone()
 		}
 	}()
 
@@ -125,14 +129,14 @@ func (s *Survey) Wait(ctx context.Context) []*SurveyResult {
 	}
 }
 
+// closeDone safely closes the done channel exactly once.
+func (s *Survey) closeDone() {
+	s.closeOnce.Do(func() { close(s.done) })
+}
+
 // Close cleans up survey resources.
 func (s *Survey) Close() {
-	select {
-	case <-s.done:
-		// Already closed
-	default:
-		close(s.done)
-	}
+	s.closeDone()
 	// Drain response channel
 	select {
 	case <-s.responseCh:

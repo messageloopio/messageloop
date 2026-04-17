@@ -2,10 +2,12 @@ package proxy
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/lynx-go/x/log"
@@ -39,8 +41,8 @@ func NewGRPCProxy(cfg *ProxyConfig) (*GRPCProxy, error) {
 	if cfg.GRPC.Insecure {
 		dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	} else {
-		// For secure connections, use the system's default TLS credentials
-		dialOpts = append(dialOpts, grpc.WithTransportCredentials(nil))
+		// For secure connections, use TLS with system CA pool
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{})))
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -62,7 +64,8 @@ func NewGRPCProxy(cfg *ProxyConfig) (*GRPCProxy, error) {
 
 // RPC implements Proxy.RPC.
 func (p *GRPCProxy) RPC(ctx context.Context, req *RPCProxyRequest) (*RPCProxyResponse, error) {
-	ctx = p.withTimeout(ctx)
+	ctx, cancel := p.withTimeout(ctx)
+	defer cancel()
 
 	protoReq, err := req.ToProtoRequest()
 	if err != nil {
@@ -86,7 +89,8 @@ func (p *GRPCProxy) RPC(ctx context.Context, req *RPCProxyRequest) (*RPCProxyRes
 
 // Authenticate implements Proxy.Authenticate.
 func (p *GRPCProxy) Authenticate(ctx context.Context, req *AuthenticateProxyRequest) (*AuthenticateProxyResponse, error) {
-	ctx = p.withTimeout(ctx)
+	ctx, cancel := p.withTimeout(ctx)
+	defer cancel()
 
 	protoReq := req.ToProtoRequest()
 
@@ -106,7 +110,8 @@ func (p *GRPCProxy) Authenticate(ctx context.Context, req *AuthenticateProxyRequ
 
 // SubscribeAcl implements Proxy.SubscribeAcl.
 func (p *GRPCProxy) SubscribeAcl(ctx context.Context, req *SubscribeAclProxyRequest) (*SubscribeAclProxyResponse, error) {
-	ctx = p.withTimeout(ctx)
+	ctx, cancel := p.withTimeout(ctx)
+	defer cancel()
 
 	protoReq := req.ToProtoRequest()
 
@@ -126,7 +131,8 @@ func (p *GRPCProxy) SubscribeAcl(ctx context.Context, req *SubscribeAclProxyRequ
 
 // PublishAcl implements Proxy.PublishAcl.
 func (p *GRPCProxy) PublishAcl(ctx context.Context, req *PublishAclProxyRequest) (*PublishAclProxyResponse, error) {
-	ctx = p.withTimeout(ctx)
+	ctx, cancel := p.withTimeout(ctx)
+	defer cancel()
 
 	protoReq := req.ToProtoRequest()
 
@@ -146,7 +152,8 @@ func (p *GRPCProxy) PublishAcl(ctx context.Context, req *PublishAclProxyRequest)
 
 // OnConnected implements Proxy.OnConnected.
 func (p *GRPCProxy) OnConnected(ctx context.Context, req *OnConnectedProxyRequest) (*OnConnectedProxyResponse, error) {
-	ctx = p.withTimeout(ctx)
+	ctx, cancel := p.withTimeout(ctx)
+	defer cancel()
 
 	protoReq := req.ToProtoRequest()
 
@@ -166,7 +173,8 @@ func (p *GRPCProxy) OnConnected(ctx context.Context, req *OnConnectedProxyReques
 
 // OnSubscribed implements Proxy.OnSubscribed.
 func (p *GRPCProxy) OnSubscribed(ctx context.Context, req *OnSubscribedProxyRequest) (*OnSubscribedProxyResponse, error) {
-	ctx = p.withTimeout(ctx)
+	ctx, cancel := p.withTimeout(ctx)
+	defer cancel()
 
 	protoReq := req.ToProtoRequest()
 
@@ -187,7 +195,8 @@ func (p *GRPCProxy) OnSubscribed(ctx context.Context, req *OnSubscribedProxyRequ
 
 // OnUnsubscribed implements Proxy.OnUnsubscribed.
 func (p *GRPCProxy) OnUnsubscribed(ctx context.Context, req *OnUnsubscribedProxyRequest) (*OnUnsubscribedProxyResponse, error) {
-	ctx = p.withTimeout(ctx)
+	ctx, cancel := p.withTimeout(ctx)
+	defer cancel()
 
 	protoReq := req.ToProtoRequest()
 
@@ -208,7 +217,8 @@ func (p *GRPCProxy) OnUnsubscribed(ctx context.Context, req *OnUnsubscribedProxy
 
 // OnDisconnected implements Proxy.OnDisconnected.
 func (p *GRPCProxy) OnDisconnected(ctx context.Context, req *OnDisconnectedProxyRequest) (*OnDisconnectedProxyResponse, error) {
-	ctx = p.withTimeout(ctx)
+	ctx, cancel := p.withTimeout(ctx)
+	defer cancel()
 
 	protoReq := req.ToProtoRequest()
 
@@ -227,13 +237,12 @@ func (p *GRPCProxy) OnDisconnected(ctx context.Context, req *OnDisconnectedProxy
 }
 
 // withTimeout applies the proxy timeout if not already set in context.
-func (p *GRPCProxy) withTimeout(ctx context.Context) context.Context {
+// The caller must defer the returned CancelFunc.
+func (p *GRPCProxy) withTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, p.timeout)
-		_ = cancel // Caller is responsible for using the context
+		return context.WithTimeout(ctx, p.timeout)
 	}
-	return ctx
+	return ctx, func() {}
 }
 
 // Name implements Proxy.Name.

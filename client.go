@@ -10,8 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
 	"github.com/messageloopio/messageloop/proxy"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
 )
@@ -112,6 +112,11 @@ const (
 
 func (c *Client) close(disconnect Disconnect) error {
 	c.mu.Lock()
+	if c.status == statusClosed {
+		c.mu.Unlock()
+		return nil
+	}
+	c.status = statusClosed
 	if c.heartbeatCancel != nil {
 		c.heartbeatCancel()
 		c.heartbeatCancel = nil
@@ -357,8 +362,8 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_Connected{
 			Connected: &clientpb.Connected{
-				SessionId:   c.SessionID(),
-				Resumed:     resumed,
+				SessionId:    c.SessionID(),
+				Resumed:      resumed,
 				Publications: pubs,
 				Subscriptions: lo.Map(subs, func(it *clientpb.Subscription, i int) *clientpb.Subscription {
 					return &clientpb.Subscription{

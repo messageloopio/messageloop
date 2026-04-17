@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lynx-go/x/log"
 	"github.com/messageloopio/messageloop"
 	"github.com/messageloopio/messageloop/config"
 	"github.com/redis/go-redis/v9"
@@ -96,7 +97,9 @@ func (b *redisBroker) Publish(ch string, payload []byte, isText bool) (uint64, e
 	if err != nil {
 		return 0, err
 	}
-	_ = b.client.Expire(ctx, stream, b.opts.HistoryTTL)
+	if err := b.client.Expire(ctx, stream, b.opts.HistoryTTL).Err(); err != nil {
+		log.WarnContext(ctx, "failed to set stream TTL", "stream", stream, "error", err)
+	}
 
 	if err := b.client.Publish(ctx, b.opts.PubSubPrefix+ch, data).Err(); err != nil {
 		return 0, err

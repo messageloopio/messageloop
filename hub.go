@@ -2,13 +2,14 @@ package messageloop
 
 import (
 	"context"
+	"fmt"
 	"hash/fnv"
 	"sync"
 
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 )
 
 const numHubShards = 64
@@ -206,7 +207,7 @@ func (h *subShard) broadcastPublication(channel string, pub *Publication) error 
 		return nil
 	}
 
-	ctx := context.TODO()
+	ctx := context.Background()
 
 	// Create Payload from publication data
 	var payload *sharedpb.Payload
@@ -236,7 +237,12 @@ func (h *subShard) broadcastPublication(channel string, pub *Publication) error 
 	for _, sub := range subscribers {
 		wg.Add(1)
 		go func(sub Subscriber) {
-			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					log.ErrorContext(ctx, "panic in send publication", fmt.Errorf("panic: %v, channel: %s", r, channel))
+				}
+				wg.Done()
+			}()
 			if err := sub.Client.Send(ctx, out); err != nil {
 				log.ErrorContext(ctx, "send publication error", err)
 			}
