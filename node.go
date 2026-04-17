@@ -2,7 +2,10 @@ package messageloop
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -418,7 +421,42 @@ func (n *Node) GetHeartbeatIdleTimeout() time.Duration {
 
 // Survey sends a request to all subscribers of a channel and collects responses.
 func (n *Node) Survey(ctx context.Context, channel string, payload []byte, timeout time.Duration) ([]*SurveyResult, error) {
-	subscribers := n.hub.GetSubscribers(channel)
+	if !n.ClusterEnabled() {
+		return n.localSurvey(ctx, channel, payload, timeout)
+	}
+
+	localResults, err := n.localSurvey(ctx, channel, payload, timeout)
+	if err != nil {
+		return nil, err
+	}
+	annotateSurveyResults(localResults, n.ClusterNodeID(), n.ClusterIncarnationID())
+
+	metadata := map[string]string{}
+	if timeout > 0 {
+		metadata[clusterCommandMetaSurveyTimeoutMS] = strconv.FormatInt(timeout.Milliseconds(), 10)
+	}
+	metadata["exclude_self"] = "true"
+
+	results, err := n.clusterCommandBus().BroadcastCommand(ctx, &ClusterCommand{
+		Type:     ClusterCommandSurvey,
+		Channel:  channel,
+		Payload:  payload,
+		Metadata: metadata,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	aggregated := append(make([]*SurveyResult, 0, len(localResults)), localResults...)
+	for _, result := range results {
+		aggregated = append(aggregated, expandClusterSurveyResults(result)...)
+	}
+	sortSurveyResults(aggregated)
+	return aggregated, nil
+}
+
+func (n *Node) localSurvey(ctx context.Context, channel string, payload []byte, timeout time.Duration) ([]*SurveyResult, error) {
+	subscribers := n.hub.GetMatchingSubscribers(channel)
 	if len(subscribers) == 0 {
 		return []*SurveyResult{}, nil
 	}
@@ -441,8 +479,107 @@ func (n *Node) Survey(ctx context.Context, channel string, payload []byte, timeo
 
 	results := survey.Wait(ctx)
 	survey.Close()
+	sortSurveyResults(results)
 
 	return results, nil
+}
+
+func sortSurveyResults(results []*SurveyResult) {
+	sort.Slice(results, func(i, j int) bool {
+		left := results[i]
+		right := results[j]
+		if left.NodeID != right.NodeID {
+			return left.NodeID < right.NodeID
+		}
+		if left.IncarnationID != right.IncarnationID {
+			return left.IncarnationID < right.IncarnationID
+		}
+		return left.SessionID < right.SessionID
+	})
+}
+
+func annotateSurveyResults(results []*SurveyResult, nodeID, incarnationID string) {
+	for _, result := range results {
+		if result == nil {
+			continue
+		}
+		result.NodeID = nodeID
+		result.IncarnationID = incarnationID
+	}
+}
+
+func expandClusterSurveyResults(result *ClusterCommandResult) []*SurveyResult {
+	if result == nil {
+		return nil
+	}
+	if result.Status != ClusterCommandStatusSucceeded {
+		return []*SurveyResult{{
+			NodeID:        result.NodeID,
+			IncarnationID: result.IncarnationID,
+			Error:         fmt.Errorf("%s: %s", result.ErrorCode, result.ErrorMessage),
+		}}
+	}
+	records, err := decodeClusterSurveyResults(result.Metadata[clusterCommandMetaSurveyResults])
+	if err != nil {
+		return []*SurveyResult{{
+			NodeID:        result.NodeID,
+			IncarnationID: result.IncarnationID,
+			Error:         fmt.Errorf("decode cluster survey results: %w", err),
+		}}
+	}
+	expanded := make([]*SurveyResult, 0, len(records))
+	for _, record := range records {
+		entry := &SurveyResult{
+			SessionID:     record.SessionID,
+			NodeID:        result.NodeID,
+			IncarnationID: result.IncarnationID,
+			Payload:       append([]byte(nil), record.Payload...),
+		}
+		if record.ErrorMessage != "" {
+			entry.Error = fmt.Errorf("%s", record.ErrorMessage)
+		}
+		expanded = append(expanded, entry)
+	}
+	return expanded
+}
+
+type clusterSurveyResultRecord struct {
+	SessionID    string `json:"session_id"`
+	Payload      []byte `json:"payload,omitempty"`
+	ErrorMessage string `json:"error_message,omitempty"`
+}
+
+func encodeClusterSurveyResults(results []*SurveyResult) (string, error) {
+	records := make([]clusterSurveyResultRecord, 0, len(results))
+	for _, result := range results {
+		if result == nil {
+			continue
+		}
+		record := clusterSurveyResultRecord{
+			SessionID: result.SessionID,
+			Payload:   append([]byte(nil), result.Payload...),
+		}
+		if result.Error != nil {
+			record.ErrorMessage = result.Error.Error()
+		}
+		records = append(records, record)
+	}
+	encoded, err := json.Marshal(records)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
+}
+
+func decodeClusterSurveyResults(encoded string) ([]clusterSurveyResultRecord, error) {
+	if encoded == "" {
+		return nil, nil
+	}
+	var records []clusterSurveyResultRecord
+	if err := json.Unmarshal([]byte(encoded), &records); err != nil {
+		return nil, err
+	}
+	return records, nil
 }
 
 func (n *Node) sendSurveyRequest(ctx context.Context, session *Client, survey *Survey) {

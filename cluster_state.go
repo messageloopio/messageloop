@@ -125,6 +125,10 @@ func (noopClusterQueryStore) AdjustChannelSubscriptions(context.Context, string,
 	return nil
 }
 
+func (noopClusterQueryStore) ReplaceNodeChannels(context.Context, map[string]int64, time.Duration) error {
+	return nil
+}
+
 func (noopClusterQueryStore) ListChannels(context.Context) ([]ClusterChannelInfo, error) {
 	return nil, nil
 }

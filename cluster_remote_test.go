@@ -68,6 +68,9 @@ func (fakeQueryStore) Shutdown(context.Context) error { return nil }
 func (fakeQueryStore) AdjustChannelSubscriptions(context.Context, string, int64, time.Duration) error {
 	return nil
 }
+func (fakeQueryStore) ReplaceNodeChannels(context.Context, map[string]int64, time.Duration) error {
+	return nil
+}
 func (fakeQueryStore) ListChannels(context.Context) ([]ClusterChannelInfo, error) { return nil, nil }
 
 type noopTransport struct{}

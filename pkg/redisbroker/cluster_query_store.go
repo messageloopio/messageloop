@@ -5,7 +5,6 @@ import (
 	"math"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/messageloopio/messageloop"
@@ -14,29 +13,38 @@ import (
 )
 
 type redisClusterQueryStore struct {
-	client *redis.Client
-	opts   *Options
+	client        *redis.Client
+	opts          *Options
+	nodeID        string
+	incarnationID string
 }
 
 var adjustChannelSubscriptionsScript = redis.NewScript(`
-local delta = tonumber(ARGV[1])
-local ttl = tonumber(ARGV[2])
-local current = tonumber(redis.call('GET', KEYS[1]) or '0')
+local channel = ARGV[1]
+local delta = tonumber(ARGV[2])
+local ttl = tonumber(ARGV[3])
+local current = tonumber(redis.call('HGET', KEYS[1], channel) or '0')
 local next = current + delta
 if next <= 0 then
-  redis.call('DEL', KEYS[1])
+  redis.call('HDEL', KEYS[1], channel)
+  if redis.call('HLEN', KEYS[1]) == 0 then
+    redis.call('DEL', KEYS[1])
+  end
   return 0
 end
-redis.call('SET', KEYS[1], tostring(next), 'EX', ttl)
+redis.call('HSET', KEYS[1], channel, tostring(next))
+redis.call('EXPIRE', KEYS[1], ttl)
 return next
 `)
 
 // NewClusterQueryStore returns a Redis-backed ClusterQueryStore.
-func NewClusterQueryStore(cfg config.RedisConfig) messageloop.ClusterQueryStore {
+func NewClusterQueryStore(cfg config.RedisConfig, nodeID, incarnationID string) messageloop.ClusterQueryStore {
 	opts := NewOptions(cfg)
 	return &redisClusterQueryStore{
-		client: newRedisClient(opts),
-		opts:   opts,
+		client:        newRedisClient(opts),
+		opts:          opts,
+		nodeID:        nodeID,
+		incarnationID: incarnationID,
 	}
 }
 
@@ -50,8 +58,8 @@ func (s *redisClusterQueryStore) Shutdown(context.Context) error {
 	return s.client.Close()
 }
 
-func (s *redisClusterQueryStore) channelKey(channel string) string {
-	return s.opts.ClusterChannelPrefix + channel
+func (s *redisClusterQueryStore) ownerProjectionKey() string {
+	return s.opts.ClusterChannelPrefix + "owner:" + s.nodeID + ":" + s.incarnationID
 }
 
 func (s *redisClusterQueryStore) AdjustChannelSubscriptions(ctx context.Context, channel string, delta int64, ttl time.Duration) error {
@@ -65,14 +73,39 @@ func (s *redisClusterQueryStore) AdjustChannelSubscriptions(ctx context.Context,
 	return adjustChannelSubscriptionsScript.Run(
 		ctx,
 		s.client,
-		[]string{s.channelKey(channel)},
+		[]string{s.ownerProjectionKey()},
+		channel,
 		strconv.FormatInt(delta, 10),
 		strconv.FormatInt(ttlSeconds, 10),
 	).Err()
 }
 
+func (s *redisClusterQueryStore) ReplaceNodeChannels(ctx context.Context, channels map[string]int64, ttl time.Duration) error {
+	key := s.ownerProjectionKey()
+	if key == "" {
+		return nil
+	}
+	pipe := s.client.TxPipeline()
+	pipe.Del(ctx, key)
+	if len(channels) > 0 {
+		fields := make(map[string]interface{}, len(channels))
+		for channel, count := range channels {
+			if channel == "" || count <= 0 {
+				continue
+			}
+			fields[channel] = count
+		}
+		if len(fields) > 0 {
+			pipe.HSet(ctx, key, fields)
+			pipe.Expire(ctx, key, ttl)
+		}
+	}
+	_, err := pipe.Exec(ctx)
+	return err
+}
+
 func (s *redisClusterQueryStore) ListChannels(ctx context.Context) ([]messageloop.ClusterChannelInfo, error) {
-	keys, err := scanKeys(ctx, s.client, s.opts.ClusterChannelPrefix+"*")
+	keys, err := scanKeys(ctx, s.client, s.opts.ClusterChannelPrefix+"owner:*")
 	if err != nil {
 		return nil, err
 	}
@@ -81,29 +114,36 @@ func (s *redisClusterQueryStore) ListChannels(ctx context.Context) ([]messageloo
 	}
 
 	pipe := s.client.Pipeline()
-	cmds := make(map[string]*redis.StringCmd, len(keys))
+	cmds := make(map[string]*redis.MapStringStringCmd, len(keys))
 	for _, key := range keys {
-		cmds[key] = pipe.Get(ctx, key)
+		cmds[key] = pipe.HGetAll(ctx, key)
 	}
 	_, err = pipe.Exec(ctx)
 	if err != nil && err != redis.Nil {
 		return nil, err
 	}
 
-	channels := make([]messageloop.ClusterChannelInfo, 0, len(cmds))
-	for key, cmd := range cmds {
-		value, cmdErr := cmd.Result()
+	aggregated := make(map[string]int64)
+	for _, cmd := range cmds {
+		values, cmdErr := cmd.Result()
 		if cmdErr != nil {
 			continue
 		}
-		count, parseErr := strconv.ParseInt(value, 10, 64)
-		if parseErr != nil || count <= 0 {
+		for channel, value := range values {
+			count, parseErr := strconv.ParseInt(value, 10, 64)
+			if parseErr != nil || count <= 0 {
+				continue
+			}
+			aggregated[channel] += count
+		}
+	}
+
+	channels := make([]messageloop.ClusterChannelInfo, 0, len(aggregated))
+	for channel, count := range aggregated {
+		if count <= 0 {
 			continue
 		}
-		channels = append(channels, messageloop.ClusterChannelInfo{
-			Name:        strings.TrimPrefix(key, s.opts.ClusterChannelPrefix),
-			Subscribers: count,
-		})
+		channels = append(channels, messageloop.ClusterChannelInfo{Name: channel, Subscribers: count})
 	}
 
 	sort.Slice(channels, func(i, j int) bool {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/pkg/redisbroker"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )
@@ -76,6 +78,12 @@ func (c *integrationCapturingTransport) getLastMessage() []byte {
 		return nil
 	}
 	return c.messages[len(c.messages)-1]
+}
+
+func (c *integrationCapturingTransport) clearMessages() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.messages = nil
 }
 
 func TestClusterRedis_RemoteSessionAdminAndQueries(t *testing.T) {
@@ -233,6 +241,151 @@ func TestClusterRedis_RemoteResumeTakeover(t *testing.T) {
 	require.Equal(t, channel, channels[0].Channel)
 }
 
+func TestClusterRedis_ProjectionRepairRestoresChannels(t *testing.T) {
+	redisCfg := requireClusterRedis(t, clusterRedisIntegrationDB)
+	ctx := context.Background()
+
+	node := newClusterRedisTestNode(t, ctx, redisCfg, "node-a")
+	transport := &integrationCapturingTransport{}
+	client, _, err := messageloop.NewClient(ctx, node, transport, messageloop.JSONMarshaler{})
+	require.NoError(t, err)
+	client.ForceTestIDs("sess-repair", "user-repair", "client-repair")
+	require.NoError(t, node.AddClient(client))
+
+	channel := "cluster-repair-" + uuid.NewString()
+	require.NoError(t, node.AddSubscription(ctx, channel, messageloop.NewSubscriber(client, false)))
+
+	require.Eventually(t, func() bool {
+		channels, err := node.Channels(ctx)
+		if err != nil {
+			return false
+		}
+		for _, ch := range channels {
+			if ch.Name == channel && ch.Subscribers == 1 {
+				return true
+			}
+		}
+		return false
+	}, 5*time.Second, 50*time.Millisecond)
+
+	redisClient := redis.NewClient(&redis.Options{Addr: redisCfg.Addr, Password: redisCfg.Password, DB: redisCfg.DB})
+	t.Cleanup(func() { _ = redisClient.Close() })
+	projectionKey := redisbroker.NewOptions(redisCfg).ClusterChannelPrefix + "owner:" + node.ClusterNodeID() + ":" + node.ClusterIncarnationID()
+	require.NoError(t, redisClient.Del(ctx, projectionKey).Err())
+
+	require.Eventually(t, func() bool {
+		exists, err := redisClient.Exists(ctx, projectionKey).Result()
+		if err != nil || exists == 0 {
+			return false
+		}
+		channels, err := node.Channels(ctx)
+		if err != nil {
+			return false
+		}
+		for _, ch := range channels {
+			if ch.Name == channel && ch.Subscribers == 1 {
+				return true
+			}
+		}
+		return false
+	}, 5*time.Second, 50*time.Millisecond)
+}
+
+func TestClusterRedis_SurveyAggregatesAcrossNodes(t *testing.T) {
+	redisCfg := requireClusterRedis(t, clusterRedisIntegrationDB)
+	ctx := context.Background()
+
+	nodeA := newClusterRedisTestNode(t, ctx, redisCfg, "node-a")
+	nodeB := newClusterRedisTestNode(t, ctx, redisCfg, "node-b")
+
+	transportA := &integrationCapturingTransport{}
+	clientA, _, err := messageloop.NewClient(ctx, nodeA, transportA, messageloop.JSONMarshaler{})
+	require.NoError(t, err)
+	clientA.ForceTestIDs("sess-survey-a", "user-survey-a", "client-survey-a")
+	require.NoError(t, nodeA.AddClient(clientA))
+
+	transportB := &integrationCapturingTransport{}
+	clientB, _, err := messageloop.NewClient(ctx, nodeB, transportB, messageloop.JSONMarshaler{})
+	require.NoError(t, err)
+	clientB.ForceTestIDs("sess-survey-b", "user-survey-b", "client-survey-b")
+	require.NoError(t, nodeB.AddClient(clientB))
+
+	channel := "cluster-survey-" + uuid.NewString()
+	require.NoError(t, nodeA.AddSubscription(ctx, channel, messageloop.NewSubscriber(clientA, false)))
+	require.NoError(t, nodeB.AddSubscription(ctx, channel, messageloop.NewSubscriber(clientB, false)))
+	transportA.clearMessages()
+	transportB.clearMessages()
+
+	var (
+		surveyResults []*messageloop.SurveyResult
+		surveyErr     error
+	)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		surveyResults, surveyErr = nodeA.Survey(ctx, channel, []byte("cluster survey"), 2*time.Second)
+	}()
+
+	respondToSurvey(t, ctx, clientA, transportA, []byte("reply-a"))
+	respondToSurvey(t, ctx, clientB, transportB, []byte("reply-b"))
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for cluster survey results")
+	}
+
+	require.NoError(t, surveyErr)
+	require.Len(t, surveyResults, 2)
+	resultsBySession := make(map[string]*messageloop.SurveyResult, len(surveyResults))
+	for _, result := range surveyResults {
+		resultsBySession[result.SessionID] = result
+	}
+	require.Contains(t, resultsBySession, "sess-survey-a")
+	require.Equal(t, "node-a", resultsBySession["sess-survey-a"].NodeID)
+	require.Equal(t, []byte("reply-a"), resultsBySession["sess-survey-a"].Payload)
+	require.Contains(t, resultsBySession, "sess-survey-b")
+	require.Equal(t, "node-b", resultsBySession["sess-survey-b"].NodeID)
+	require.Equal(t, []byte("reply-b"), resultsBySession["sess-survey-b"].Payload)
+}
+
+func respondToSurvey(t *testing.T, ctx context.Context, client *messageloop.Client, transport *integrationCapturingTransport, payload []byte) {
+	t.Helper()
+
+	var surveyRequest *clientpb.SurveyRequest
+	require.Eventually(t, func() bool {
+		message := transport.getLastMessage()
+		if len(message) == 0 {
+			return false
+		}
+		outbound := &clientpb.OutboundMessage{}
+		if err := (messageloop.JSONMarshaler{}).Unmarshal(message, outbound); err != nil {
+			return false
+		}
+		surveyRequest = outbound.GetSurveyRequest()
+		return surveyRequest != nil
+	}, 5*time.Second, 25*time.Millisecond)
+
+	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
+		Id: surveyRequest.RequestId,
+		Envelope: &clientpb.InboundMessage_SurveyRequest{
+			SurveyRequest: surveyRequest,
+		},
+	}))
+	transport.clearMessages()
+	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
+		Id: "reply-" + client.SessionID(),
+		Envelope: &clientpb.InboundMessage_SurveyReply{
+			SurveyReply: &clientpb.SurveyReply{
+				RequestId: client.LastSurveyRequestID(),
+				Payload: &sharedpb.Payload{
+					Data: &sharedpb.Payload_Binary{Binary: payload},
+				},
+			},
+		},
+	}))
+}
+
 func requireClusterRedis(t *testing.T, db int) config.RedisConfig {
 	t.Helper()
 
@@ -283,11 +436,12 @@ func newClusterRedisTestNode(t *testing.T, parent context.Context, redisCfg conf
 	clusterDeps := messageloop.ClusterDependencies{}
 	clusterDeps.SessionDirectory = redisbroker.NewSessionDirectory(redisCfg)
 	clusterDeps.CommandBus = redisbroker.NewClusterCommandBus(redisCfg, clusterRuntime.NodeID(), clusterRuntime.IncarnationID())
-	clusterDeps.QueryStore = redisbroker.NewClusterQueryStore(redisCfg)
+	clusterDeps.QueryStore = redisbroker.NewClusterQueryStore(redisCfg, clusterRuntime.NodeID(), clusterRuntime.IncarnationID())
 	clusterDeps.NodeLeaseManager = messageloop.NewClusterNodeLeaseManager(clusterDeps.SessionDirectory, messageloop.ClusterNodeLeaseManagerConfig{
 		NodeID:        clusterRuntime.NodeID(),
 		IncarnationID: clusterRuntime.IncarnationID(),
 	})
+	clusterDeps.ProjectionRepairer = messageloop.NewClusterProjectionRepairer(node, clusterDeps.QueryStore, messageloop.ClusterProjectionRepairerConfig{Interval: 200 * time.Millisecond})
 	clusterDeps.CommandBus.SetHandler(node.ClusterCommandHandler())
 
 	clusterRuntime, err = messageloop.NewClusterRuntime(messageloop.ClusterOptions{

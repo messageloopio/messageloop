@@ -14,6 +14,8 @@ import (
 const (
 	clusterCommandMetaDisconnectCode   = "disconnect_code"
 	clusterCommandMetaDisconnectReason = "disconnect_reason"
+	clusterCommandMetaSurveyTimeoutMS  = "survey_timeout_ms"
+	clusterCommandMetaSurveyResults    = "survey_results"
 )
 
 // ClusterCommandHandler returns the node-local cluster command handler.
@@ -139,6 +141,8 @@ func (n *Node) handleClusterCommand(ctx context.Context, cmd *ClusterCommand) (*
 		return n.handleClusterSubscribeCommand(ctx, cmd, result), nil
 	case ClusterCommandUnsubscribe:
 		return n.handleClusterUnsubscribeCommand(ctx, cmd, result), nil
+	case ClusterCommandSurvey:
+		return n.handleClusterSurveyCommand(ctx, cmd, result), nil
 	case ClusterCommandTakeover:
 		return n.handleClusterTakeoverCommand(ctx, cmd, result), nil
 	default:
@@ -259,6 +263,32 @@ func (n *Node) handleClusterTakeoverCommand(ctx context.Context, cmd *ClusterCom
 		result.ErrorCode = "SESSION_TAKEOVER_FAILED"
 		result.ErrorMessage = err.Error()
 	}
+	return result
+}
+
+func (n *Node) handleClusterSurveyCommand(ctx context.Context, cmd *ClusterCommand, result *ClusterCommandResult) *ClusterCommandResult {
+	timeout := 5 * time.Second
+	if rawTimeout, ok := cmd.Metadata[clusterCommandMetaSurveyTimeoutMS]; ok && rawTimeout != "" {
+		if timeoutMS, err := strconv.ParseInt(rawTimeout, 10, 64); err == nil && timeoutMS > 0 {
+			timeout = time.Duration(timeoutMS) * time.Millisecond
+		}
+	}
+
+	surveyResults, err := n.localSurvey(ctx, cmd.Channel, cmd.Payload, timeout)
+	if err != nil {
+		result.Status = ClusterCommandStatusFailed
+		result.ErrorCode = "SURVEY_EXECUTION_FAILED"
+		result.ErrorMessage = err.Error()
+		return result
+	}
+	encodedResults, err := encodeClusterSurveyResults(surveyResults)
+	if err != nil {
+		result.Status = ClusterCommandStatusFailed
+		result.ErrorCode = "SURVEY_RESULT_ENCODING_FAILED"
+		result.ErrorMessage = err.Error()
+		return result
+	}
+	result.Metadata[clusterCommandMetaSurveyResults] = encodedResults
 	return result
 }
 

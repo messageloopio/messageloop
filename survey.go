@@ -9,9 +9,11 @@ import (
 
 // SurveyResult represents a response from a client to a survey request.
 type SurveyResult struct {
-	SessionID string
-	Payload   []byte
-	Error     error
+	SessionID     string
+	NodeID        string
+	IncarnationID string
+	Payload       []byte
+	Error         error
 }
 
 // Survey manages the lifecycle of a survey request and response collection.

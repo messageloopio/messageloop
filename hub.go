@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"hash/fnv"
+	"sort"
 	"strings"
 	"sync"
 
@@ -459,6 +460,31 @@ func (h *Hub) GetSubscribers(ch string) []*Client {
 	return result
 }
 
+// GetMatchingSubscribers returns exact and wildcard subscribers that match the given channel.
+func (h *Hub) GetMatchingSubscribers(ch string) []*Client {
+	matched := make(map[string]*Client)
+	for _, client := range h.GetSubscribers(ch) {
+		matched[client.SessionID()] = client
+	}
+
+	for _, candidate := range h.matcher.Lookup(ch) {
+		sub, ok := candidate.(Subscriber)
+		if !ok || sub.Client == nil {
+			continue
+		}
+		matched[sub.Client.SessionID()] = sub.Client
+	}
+
+	result := make([]*Client, 0, len(matched))
+	for _, client := range matched {
+		result = append(result, client)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].SessionID() < result[j].SessionID()
+	})
+	return result
+}
+
 // LookupSubscriber returns the current subscriber record for a client/channel pair.
 func (h *Hub) LookupSubscriber(ch string, c *Client) (Subscriber, bool) {
 	if isWildcard(ch) {
@@ -520,17 +546,37 @@ type ChannelInfo struct {
 
 // GetActiveChannels returns all channels with at least one subscriber, along with subscriber counts.
 func (h *Hub) GetActiveChannels() []ChannelInfo {
-	var result []ChannelInfo
+	counts := make(map[string]int)
 	for i := 0; i < numHubShards; i++ {
 		shard := h.subShards[i]
 		shard.mu.RLock()
 		for ch, subs := range shard.subs {
 			if len(subs) > 0 {
-				result = append(result, ChannelInfo{Name: ch, Subscribers: len(subs)})
+				counts[ch] += len(subs)
 			}
 		}
 		shard.mu.RUnlock()
 	}
+
+	h.wcSubsMu.Lock()
+	for _, sub := range h.wcSubs {
+		if sub == nil || sub.Topic == "" {
+			continue
+		}
+		counts[sub.Topic]++
+	}
+	h.wcSubsMu.Unlock()
+
+	result := make([]ChannelInfo, 0, len(counts))
+	for ch, count := range counts {
+		if count <= 0 {
+			continue
+		}
+		result = append(result, ChannelInfo{Name: ch, Subscribers: count})
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Name < result[j].Name
+	})
 	return result
 }
 

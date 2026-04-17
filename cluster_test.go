@@ -73,6 +73,10 @@ func (c *trackingClusterComponent) AdjustChannelSubscriptions(context.Context, s
 	return nil
 }
 
+func (c *trackingClusterComponent) ReplaceNodeChannels(context.Context, map[string]int64, time.Duration) error {
+	return nil
+}
+
 func (c *trackingClusterComponent) ListChannels(context.Context) ([]ClusterChannelInfo, error) {
 	return nil, nil
 }

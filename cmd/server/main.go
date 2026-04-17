@@ -55,7 +55,7 @@ func main() {
 		if clusterRuntime.Enabled() && clusterRuntime.Backend() == "redis" {
 			clusterDeps.SessionDirectory = redisbroker.NewSessionDirectory(cfg.Broker.Redis)
 			clusterDeps.CommandBus = redisbroker.NewClusterCommandBus(cfg.Broker.Redis, clusterRuntime.NodeID(), clusterRuntime.IncarnationID())
-			clusterDeps.QueryStore = redisbroker.NewClusterQueryStore(cfg.Broker.Redis)
+			clusterDeps.QueryStore = redisbroker.NewClusterQueryStore(cfg.Broker.Redis, clusterRuntime.NodeID(), clusterRuntime.IncarnationID())
 			clusterDeps.NodeLeaseManager = messageloop.NewClusterNodeLeaseManager(
 				clusterDeps.SessionDirectory,
 				messageloop.ClusterNodeLeaseManagerConfig{
@@ -63,6 +63,7 @@ func main() {
 					IncarnationID: clusterRuntime.IncarnationID(),
 				},
 			)
+			clusterDeps.ProjectionRepairer = messageloop.NewClusterProjectionRepairer(node, clusterDeps.QueryStore, messageloop.ClusterProjectionRepairerConfig{})
 			clusterDeps.CommandBus.SetHandler(node.ClusterCommandHandler())
 			node.SetPresenceStore(redisbroker.NewPresenceStore(cfg.Broker.Redis))
 

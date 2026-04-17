@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -29,13 +30,14 @@ type redisClusterCommandBus struct {
 	nodeID        string
 	incarnationID string
 
-	mu      sync.RWMutex
-	handler messageloop.ClusterCommandHandler
-	pubsub  *redis.PubSub
-	cancel  context.CancelFunc
-	wg      sync.WaitGroup
-	start   bool
-	stop    bool
+	mu        sync.RWMutex
+	handler   messageloop.ClusterCommandHandler
+	pubsub    *redis.PubSub
+	cancel    context.CancelFunc
+	readerWG  sync.WaitGroup
+	handlerWG sync.WaitGroup
+	start     bool
+	stop      bool
 }
 
 // NewClusterCommandBus returns a Redis-backed request/reply ClusterCommandBus.
@@ -78,13 +80,13 @@ func (b *redisClusterCommandBus) Start(ctx context.Context) error {
 	b.cancel = busCancel
 	b.pubsub = pubsub
 	b.start = true
-	b.wg.Add(1)
+	b.readerWG.Add(1)
 	go func() {
-		defer b.wg.Done()
+		defer b.readerWG.Done()
 		for message := range pubsub.Channel() {
-			b.wg.Add(1)
+			b.handlerWG.Add(1)
 			go func(payload string) {
-				defer b.wg.Done()
+				defer b.handlerWG.Done()
 				b.handleMessage(busCtx, payload)
 			}(message.Payload)
 		}
@@ -93,7 +95,7 @@ func (b *redisClusterCommandBus) Start(ctx context.Context) error {
 	return nil
 }
 
-func (b *redisClusterCommandBus) Shutdown(context.Context) error {
+func (b *redisClusterCommandBus) Shutdown(ctx context.Context) error {
 	b.mu.Lock()
 	if b.stop {
 		b.mu.Unlock()
@@ -109,7 +111,26 @@ func (b *redisClusterCommandBus) Shutdown(context.Context) error {
 	if pubsub != nil {
 		_ = pubsub.Close()
 	}
-	b.wg.Wait()
+	readerDone := make(chan struct{})
+	go func() {
+		defer close(readerDone)
+		b.readerWG.Wait()
+	}()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-readerDone:
+	}
+	handlersDone := make(chan struct{})
+	go func() {
+		defer close(handlersDone)
+		b.handlerWG.Wait()
+	}()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-handlersDone:
+	}
 	return b.client.Close()
 }
 
@@ -127,6 +148,11 @@ func (b *redisClusterCommandBus) SendCommand(ctx context.Context, cmd *messagelo
 	cmd.IssuedAt = time.Now()
 	if cmd.Metadata == nil {
 		cmd.Metadata = make(map[string]string)
+	}
+	if resolvedResult, err := b.resolveExistingCommand(commandCtx, cmd.CommandID); err != nil {
+		return nil, err
+	} else if resolvedResult != nil {
+		return resolvedResult, nil
 	}
 	replyChannel := b.replyChannel(uuid.NewString())
 	cmd.Metadata[clusterCommandReplyKey] = replyChannel
@@ -178,6 +204,11 @@ func (b *redisClusterCommandBus) BroadcastCommand(ctx context.Context, cmd *mess
 	}
 
 	results := make([]*messageloop.ClusterCommandResult, 0, len(keys))
+	type broadcastOutcome struct {
+		result *messageloop.ClusterCommandResult
+	}
+	outcomes := make(chan broadcastOutcome, len(keys))
+	var wg sync.WaitGroup
 	for _, key := range keys {
 		payload, getErr := b.client.Get(ctx, key).Result()
 		if getErr != nil {
@@ -187,18 +218,47 @@ func (b *redisClusterCommandBus) BroadcastCommand(ctx context.Context, cmd *mess
 		if err := json.Unmarshal([]byte(payload), lease); err != nil {
 			continue
 		}
-		copyCommand := *cmd
-		copyCommand.CommandID = uuid.NewString()
-		copyCommand.TargetNodeID = lease.NodeID
-		copyCommand.TargetIncarnationID = lease.IncarnationID
-		result, sendErr := b.SendCommand(ctx, &copyCommand)
-		if sendErr != nil {
-			return results, sendErr
+		if cmd.Metadata["exclude_self"] == "true" && lease.NodeID == b.nodeID && lease.IncarnationID == b.incarnationID {
+			continue
 		}
-		if result != nil {
-			results = append(results, result)
+		wg.Add(1)
+		go func(lease *messageloop.ClusterNodeLease) {
+			defer wg.Done()
+			copyCommand := *cmd
+			copyCommand.CommandID = uuid.NewString()
+			copyCommand.TargetNodeID = lease.NodeID
+			copyCommand.TargetIncarnationID = lease.IncarnationID
+			result, sendErr := b.SendCommand(ctx, &copyCommand)
+			if sendErr != nil {
+				outcomes <- broadcastOutcome{result: &messageloop.ClusterCommandResult{
+					CommandID:     copyCommand.CommandID,
+					SessionID:     copyCommand.SessionID,
+					NodeID:        lease.NodeID,
+					IncarnationID: lease.IncarnationID,
+					Status:        messageloop.ClusterCommandStatusFailed,
+					ErrorCode:     "CLUSTER_COMMAND_SEND_FAILED",
+					ErrorMessage:  sendErr.Error(),
+				}}
+				return
+			}
+			outcomes <- broadcastOutcome{result: result}
+		}(lease)
+	}
+	go func() {
+		wg.Wait()
+		close(outcomes)
+	}()
+	for outcome := range outcomes {
+		if outcome.result != nil {
+			results = append(results, outcome.result)
 		}
 	}
+	sort.Slice(results, func(i, j int) bool {
+		if results[i].NodeID != results[j].NodeID {
+			return results[i].NodeID < results[j].NodeID
+		}
+		return results[i].IncarnationID < results[j].IncarnationID
+	})
 	return results, nil
 }
 
@@ -305,6 +365,24 @@ func ensureCommandTimeout(ctx context.Context) (context.Context, context.CancelF
 		return context.WithCancel(ctx)
 	}
 	return context.WithTimeout(ctx, defaultCommandTimeout)
+}
+
+func (b *redisClusterCommandBus) resolveExistingCommand(ctx context.Context, commandID string) (*messageloop.ClusterCommandResult, error) {
+	if commandID == "" {
+		return nil, nil
+	}
+	storedResult, err := b.loadCommandResult(ctx, commandID)
+	if err != nil || storedResult == nil {
+		return storedResult, err
+	}
+	if storedResult.Status != messageloop.ClusterCommandStatusPending {
+		return storedResult, nil
+	}
+	resolved := cloneClusterCommandResult(storedResult)
+	resolved.Status = messageloop.ClusterCommandStatusInProgress
+	resolved.ErrorCode = "COMMAND_IN_PROGRESS"
+	resolved.ErrorMessage = "cluster command is already in progress"
+	return resolved, nil
 }
 
 func (b *redisClusterCommandBus) claimCommandExecution(ctx context.Context, command *messageloop.ClusterCommand) (bool, *messageloop.ClusterCommandResult, error) {

@@ -2,6 +2,7 @@ package grpcstream
 
 import (
 	"context"
+	"time"
 
 	"github.com/lynx-go/x/log"
 	"github.com/messageloopio/messageloop"
@@ -85,6 +86,43 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverpb.PublishRe
 	}
 
 	return &serverpb.PublishResponse{}, nil
+}
+
+func (h *apiServiceHandler) Survey(ctx context.Context, req *serverpb.SurveyRequest) (*serverpb.SurveyResponse, error) {
+	log.InfoContext(ctx, "server side API Survey", "channel", req.Channel, "request_id", req.RequestId)
+
+	timeout := time.Duration(req.TimeoutMs) * time.Millisecond
+	results, err := h.node.Survey(ctx, req.Channel, payloadBytes(req.Payload), timeout)
+	if err != nil {
+		return nil, err
+	}
+
+	response := &serverpb.SurveyResponse{
+		RequestId: req.RequestId,
+		Results:   make([]*serverpb.SurveyResult, 0, len(results)),
+	}
+	for _, result := range results {
+		item := &serverpb.SurveyResult{SessionId: result.SessionID}
+		if len(result.Payload) > 0 {
+			item.Payload = &sharedpb.Payload{Data: &sharedpb.Payload_Binary{Binary: result.Payload}}
+		}
+		metadata := make(map[string]string)
+		if result.NodeID != "" {
+			metadata["node_id"] = result.NodeID
+		}
+		if result.IncarnationID != "" {
+			metadata["incarnation_id"] = result.IncarnationID
+		}
+		if len(metadata) > 0 {
+			item.Metadata = &sharedpb.Metadata{Entries: metadata}
+		}
+		if result.Error != nil {
+			item.Error = &sharedpb.Error{Code: "SURVEY_FAILED", Message: result.Error.Error()}
+		}
+		response.Results = append(response.Results, item)
+	}
+
+	return response, nil
 }
 
 func (h *apiServiceHandler) Disconnect(ctx context.Context, req *serverpb.DisconnectRequest) (*serverpb.DisconnectResponse, error) {
@@ -212,4 +250,20 @@ func (h *apiServiceHandler) GetChannels(ctx context.Context, req *serverpb.GetCh
 	}
 
 	return &serverpb.GetChannelsResponse{Channels: channels}, nil
+}
+
+func payloadBytes(payload *sharedpb.Payload) []byte {
+	if payload == nil {
+		return nil
+	}
+	switch data := payload.Data.(type) {
+	case *sharedpb.Payload_Binary:
+		return data.Binary
+	case *sharedpb.Payload_Json:
+		return []byte(data.Json.String())
+	case *sharedpb.Payload_Text:
+		return []byte(data.Text)
+	default:
+		return nil
+	}
 }

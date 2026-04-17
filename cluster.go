@@ -85,6 +85,7 @@ type ClusterCommandBus interface {
 type ClusterQueryStore interface {
 	ClusterLifecycle
 	AdjustChannelSubscriptions(ctx context.Context, channel string, delta int64, ttl time.Duration) error
+	ReplaceNodeChannels(ctx context.Context, channels map[string]int64, ttl time.Duration) error
 	ListChannels(ctx context.Context) ([]ClusterChannelInfo, error)
 }
 

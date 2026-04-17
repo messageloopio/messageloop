@@ -972,6 +972,8 @@ func (c *Client) handleSurvey(ctx context.Context, in *clientpb.InboundMessage, 
 			payload = []byte(p.Json.String())
 		case *sharedpb.Payload_Binary:
 			payload = p.Binary
+		case *sharedpb.Payload_Text:
+			payload = []byte(p.Text)
 		}
 	}
 
@@ -1016,6 +1018,8 @@ func (c *Client) handleSurveyReply(ctx context.Context, in *clientpb.InboundMess
 			payload = []byte(p.Json.String())
 		case *sharedpb.Payload_Binary:
 			payload = p.Binary
+		case *sharedpb.Payload_Text:
+			payload = []byte(p.Text)
 		}
 	}
 
