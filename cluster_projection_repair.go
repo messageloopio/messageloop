@@ -114,5 +114,15 @@ func (r *clusterProjectionRepairer) repairOnce(ctx context.Context) error {
 		}
 		counts[channel.Name] = int64(channel.Subscribers)
 	}
-	return r.store.ReplaceNodeChannels(ctx, counts, defaultClusterQueryProjectionTTL)
+	if err := r.store.ReplaceNodeChannels(ctx, counts, defaultClusterQueryProjectionTTL); err != nil {
+		if r.node.metrics != nil {
+			r.node.metrics.ClusterProjectionRepairFailures.Inc()
+		}
+		return err
+	}
+	if r.node.metrics != nil {
+		r.node.metrics.ClusterProjectionRepairs.Inc()
+	}
+	log.DebugContext(ctx, "cluster projection repair applied", "channels", len(counts))
+	return nil
 }

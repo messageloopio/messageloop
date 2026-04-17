@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lynx-go/x/log"
 	"github.com/messageloopio/messageloop"
 	"github.com/messageloopio/messageloop/config"
 	"github.com/redis/go-redis/v9"
@@ -36,6 +37,7 @@ type redisClusterCommandBus struct {
 	cancel    context.CancelFunc
 	readerWG  sync.WaitGroup
 	handlerWG sync.WaitGroup
+	metrics   *messageloop.Metrics
 	start     bool
 	stop      bool
 }
@@ -55,6 +57,12 @@ func (b *redisClusterCommandBus) SetHandler(handler messageloop.ClusterCommandHa
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.handler = handler
+}
+
+func (b *redisClusterCommandBus) SetMetrics(metrics *messageloop.Metrics) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.metrics = metrics
 }
 
 func (b *redisClusterCommandBus) Start(ctx context.Context) error {
@@ -152,6 +160,7 @@ func (b *redisClusterCommandBus) SendCommand(ctx context.Context, cmd *messagelo
 	if resolvedResult, err := b.resolveExistingCommand(commandCtx, cmd.CommandID); err != nil {
 		return nil, err
 	} else if resolvedResult != nil {
+		b.recordDedupeHit(commandCtx, cmd, "send")
 		return resolvedResult, nil
 	}
 	replyChannel := b.replyChannel(uuid.NewString())
@@ -173,6 +182,9 @@ func (b *redisClusterCommandBus) SendCommand(ctx context.Context, cmd *messagelo
 
 	select {
 	case <-commandCtx.Done():
+		if errors.Is(commandCtx.Err(), context.DeadlineExceeded) {
+			b.recordCommandTimeout(commandCtx, cmd)
+		}
 		return b.resolveTimedOutCommand(commandCtx, cmd)
 	case reply, ok := <-pubsub.Channel():
 		if !ok {
@@ -301,6 +313,7 @@ func (b *redisClusterCommandBus) handleMessage(ctx context.Context, payload stri
 		return
 	}
 	if !claimed {
+		b.recordDedupeHit(ctx, command, "owner")
 		result = storedResult
 		if result == nil {
 			result = &messageloop.ClusterCommandResult{
@@ -356,6 +369,7 @@ func (b *redisClusterCommandBus) handleMessage(ctx context.Context, payload stri
 		result.Status = messageloop.ClusterCommandStatusUnknownFinalState
 		result.ErrorCode = "UNKNOWN_FINAL_STATE"
 		result.ErrorMessage = fmt.Sprintf("cluster command completed but terminal result could not be persisted: %v", storeErr)
+		b.recordUnknownFinalState(ctx, command, result.ErrorMessage)
 	}
 	b.publishCommandResult(ctx, command, result)
 }
@@ -490,6 +504,7 @@ func (b *redisClusterCommandBus) resolveTimedOutCommand(ctx context.Context, com
 	if storedResult != nil && storedResult.Status != messageloop.ClusterCommandStatusPending {
 		return storedResult, nil
 	}
+	b.recordUnknownFinalState(ctx, command, "cluster command timed out before a terminal result was observed")
 	return &messageloop.ClusterCommandResult{
 		CommandID:     command.CommandID,
 		SessionID:     command.SessionID,
@@ -499,6 +514,59 @@ func (b *redisClusterCommandBus) resolveTimedOutCommand(ctx context.Context, com
 		ErrorCode:     "UNKNOWN_FINAL_STATE",
 		ErrorMessage:  "cluster command timed out before a terminal result was observed",
 	}, nil
+}
+
+func (b *redisClusterCommandBus) getMetrics() *messageloop.Metrics {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.metrics
+}
+
+func (b *redisClusterCommandBus) recordDedupeHit(ctx context.Context, cmd *messageloop.ClusterCommand, stage string) {
+	if metrics := b.getMetrics(); metrics != nil {
+		metrics.ClusterCommandDedupeHits.Inc()
+	}
+	if cmd == nil {
+		return
+	}
+	log.DebugContext(ctx, "cluster command dedupe hit",
+		"command_id", cmd.CommandID,
+		"command_type", cmd.Type,
+		"stage", stage,
+		"target_node_id", cmd.TargetNodeID,
+		"target_incarnation_id", cmd.TargetIncarnationID,
+	)
+}
+
+func (b *redisClusterCommandBus) recordCommandTimeout(ctx context.Context, cmd *messageloop.ClusterCommand) {
+	if metrics := b.getMetrics(); metrics != nil {
+		metrics.ClusterCommandTimeouts.Inc()
+	}
+	if cmd == nil {
+		return
+	}
+	log.WarnContext(ctx, "cluster command timed out waiting for reply",
+		"command_id", cmd.CommandID,
+		"command_type", cmd.Type,
+		"target_node_id", cmd.TargetNodeID,
+		"target_incarnation_id", cmd.TargetIncarnationID,
+	)
+}
+
+func (b *redisClusterCommandBus) recordUnknownFinalState(ctx context.Context, cmd *messageloop.ClusterCommand, reason string) {
+	if metrics := b.getMetrics(); metrics != nil {
+		metrics.ClusterCommandUnknownFinalState.Inc()
+	}
+	if cmd == nil {
+		return
+	}
+	log.WarnContext(ctx, "cluster command entered unknown final state",
+		"command_id", cmd.CommandID,
+		"command_type", cmd.Type,
+		"target_node_id", cmd.TargetNodeID,
+		"target_incarnation_id", cmd.TargetIncarnationID,
+		"reason", reason,
+	)
 }
 
 func cloneClusterCommandResult(result *messageloop.ClusterCommandResult) *messageloop.ClusterCommandResult {

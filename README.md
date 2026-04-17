@@ -10,6 +10,7 @@ A realtime messaging platform server written in Go, providing pub/sub messaging 
 - **Pub/Sub Messaging** - Channel-based publish/subscribe with wildcard support
 - **RPC Integration** - Request/response messaging with backend proxy support
 - **Distributed Broker** - Pluggable broker backend (in-memory or Redis Streams)
+- **Distributed Control Plane** - Redis-backed session ownership, shared query projections, command dedupe, projection repair, and cluster-wide Survey
 - **Sharded Architecture** - High-performance connection and subscription management
 - **Client SDKs** - Go and TypeScript/JavaScript SDKs available
 
@@ -49,6 +50,31 @@ broker:
   redis:
     addr: "localhost:6379"
 ```
+
+### Distributed Deployment
+
+To run MessageLoop as a multi-node cluster, enable the Redis-backed cluster control plane and give each process a unique `cluster.node_id`.
+
+```yaml
+broker:
+  type: "redis"
+  redis:
+    addr: "127.0.0.1:6379"
+    password: "${REDIS_PASSWORD}"
+    db: 10
+
+cluster:
+  enabled: true
+  node_id: "node-a"
+  backend: "redis"
+```
+
+Operational notes:
+
+- All nodes in the same cluster must share the same Redis namespace and broker configuration.
+- `node_id` identifies a logical node; each process start also gets a generated `incarnation_id` used for fencing and routing.
+- Session-targeted admin commands, shared channel queries, projection repair, and cluster-wide Survey all require `cluster.enabled: true`.
+- The admin metrics endpoint exposes cluster control-plane counters such as command dedupe hits, command timeouts, unknown-final-state outcomes, and projection repair activity.
 
 ## Client SDKs
 
@@ -159,6 +185,8 @@ All messaging uses CloudEvents format:
 ## Documentation
 
 - [CLAUDE.md](CLAUDE.md) - Detailed architecture and development guide
+- [docs/superpowers/specs/2026-04-17-distributed-deployment-design.md](docs/superpowers/specs/2026-04-17-distributed-deployment-design.md) - Distributed deployment design baseline
+- [docs/superpowers/plans/2026-04-17-distributed-deployment-implementation-plan.md](docs/superpowers/plans/2026-04-17-distributed-deployment-implementation-plan.md) - Implementation plan and rollout order
 - [sdks/go/](sdks/go/) - Go SDK documentation
 - [sdks/ts/](sdks/ts/) - TypeScript SDK documentation
 

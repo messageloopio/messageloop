@@ -9,6 +9,8 @@ import (
 
 	"github.com/messageloopio/messageloop"
 	"github.com/messageloopio/messageloop/config"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )
@@ -209,4 +211,55 @@ func TestClusterCommandBus_ResolveTimedOutCommandPrefersTerminalResult(t *testin
 	result, err := bus.resolveTimedOutCommand(context.Background(), testClusterCommand("resolve-terminal", "node-a", "inc-a"))
 	require.NoError(t, err)
 	require.Equal(t, storedResult, result)
+}
+
+func TestClusterCommandBus_RecordsMetricsForDedupeHits(t *testing.T) {
+	redisCfg := requireCommandBusRedis(t)
+	ctx := context.Background()
+
+	receiver := newTestClusterCommandBus(t, redisCfg, "node-a", "inc-a")
+	sender := newTestClusterCommandBus(t, redisCfg, "node-b", "inc-b")
+	registry := prometheus.NewRegistry()
+	metrics := messageloop.NewMetrics(registry)
+	sender.SetMetrics(metrics)
+
+	receiver.SetHandler(func(context.Context, *messageloop.ClusterCommand) (*messageloop.ClusterCommandResult, error) {
+		return &messageloop.ClusterCommandResult{Status: messageloop.ClusterCommandStatusSucceeded}, nil
+	})
+	receiver.start(t, ctx)
+
+	_, err := sender.SendCommand(ctx, testClusterCommand("metrics-dedupe", "node-a", "inc-a"))
+	require.NoError(t, err)
+	_, err = sender.SendCommand(ctx, testClusterCommand("metrics-dedupe", "node-a", "inc-a"))
+	require.NoError(t, err)
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.ClusterCommandDedupeHits))
+}
+
+func TestClusterCommandBus_RecordsMetricsForTimeoutAndUnknownFinalState(t *testing.T) {
+	redisCfg := requireCommandBusRedis(t)
+	ctx := context.Background()
+
+	receiver := newTestClusterCommandBus(t, redisCfg, "node-a", "inc-a")
+	sender := newTestClusterCommandBus(t, redisCfg, "node-b", "inc-b")
+	registry := prometheus.NewRegistry()
+	metrics := messageloop.NewMetrics(registry)
+	sender.SetMetrics(metrics)
+
+	releaseHandler := make(chan struct{})
+	receiver.SetHandler(func(context.Context, *messageloop.ClusterCommand) (*messageloop.ClusterCommandResult, error) {
+		<-releaseHandler
+		return &messageloop.ClusterCommandResult{Status: messageloop.ClusterCommandStatusSucceeded}, nil
+	})
+	receiver.start(t, ctx)
+
+	timeoutCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel()
+
+	result, err := sender.SendCommand(timeoutCtx, testClusterCommand("metrics-timeout", "node-a", "inc-a"))
+	close(releaseHandler)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, messageloop.ClusterCommandStatusUnknownFinalState, result.Status)
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.ClusterCommandTimeouts))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.ClusterCommandUnknownFinalState))
 }

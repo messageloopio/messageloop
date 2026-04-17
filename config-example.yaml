@@ -21,9 +21,9 @@ broker:
     db: 10
 
 cluster:
-  enabled: false
-  node_id: node-a
-  backend: redis
+  enabled: false       # Set to true to enable the Redis-backed distributed control plane.
+  node_id: node-a      # Must be unique per logical node in the cluster.
+  backend: redis       # Current distributed control-plane backend.
 
 proxy:
   - name: example

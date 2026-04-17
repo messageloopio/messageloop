@@ -42,9 +42,11 @@ func (f *fakeSessionDirectory) GetSessionSnapshot(context.Context, string) (*Clu
 func (f *fakeSessionDirectory) DeleteSessionSnapshot(context.Context, string) error { return nil }
 
 type fakeClusterCommandBus struct {
-	result   *ClusterCommandResult
-	commands []*ClusterCommand
-	handler  ClusterCommandHandler
+	result           *ClusterCommandResult
+	broadcastResults []*ClusterCommandResult
+	broadcastErr     error
+	commands         []*ClusterCommand
+	handler          ClusterCommandHandler
 }
 
 func (f *fakeClusterCommandBus) Start(context.Context) error              { return nil }
@@ -58,7 +60,7 @@ func (f *fakeClusterCommandBus) SendCommand(_ context.Context, cmd *ClusterComma
 	return &ClusterCommandResult{CommandID: cmd.CommandID, SessionID: cmd.SessionID, Status: ClusterCommandStatusSucceeded}, nil
 }
 func (f *fakeClusterCommandBus) BroadcastCommand(context.Context, *ClusterCommand) ([]*ClusterCommandResult, error) {
-	return nil, nil
+	return f.broadcastResults, f.broadcastErr
 }
 
 type fakeQueryStore struct{}
@@ -156,4 +158,34 @@ func TestNode_ResumeRemoteSession_UsesSnapshotAndTakeover(t *testing.T) {
 	assert.Equal(t, uint64(7), bus.commands[0].LeaseVersion)
 	assert.Equal(t, "node-a", bus.commands[0].Metadata[clusterCommandMetaNewNodeID])
 	assert.Equal(t, "inc-a", bus.commands[0].Metadata[clusterCommandMetaNewIncarnationID])
+}
+
+func TestNode_Survey_ClusterReturnsPartialFailures(t *testing.T) {
+	t.Parallel()
+
+	bus := &fakeClusterCommandBus{broadcastResults: []*ClusterCommandResult{{
+		CommandID:     "survey-cmd-1",
+		NodeID:        "node-b",
+		IncarnationID: "inc-b",
+		Status:        ClusterCommandStatusFailed,
+		ErrorCode:     "CLUSTER_COMMAND_SEND_FAILED",
+		ErrorMessage:  "remote node timed out",
+	}}}
+	runtime, err := NewClusterRuntime(ClusterOptions{Enabled: true, NodeID: "node-a", IncarnationID: "inc-a", Backend: "memory"}, ClusterDependencies{
+		SessionDirectory: &fakeSessionDirectory{},
+		CommandBus:       bus,
+		QueryStore:       fakeQueryStore{},
+	})
+	require.NoError(t, err)
+
+	node := NewNode(nil)
+	node.SetClusterRuntime(runtime)
+
+	results, err := node.Survey(context.Background(), "chat.room", []byte("ping"), 200*time.Millisecond)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "node-b", results[0].NodeID)
+	assert.Equal(t, "inc-b", results[0].IncarnationID)
+	require.Error(t, results[0].Error)
+	assert.Contains(t, results[0].Error.Error(), "CLUSTER_COMMAND_SEND_FAILED")
 }

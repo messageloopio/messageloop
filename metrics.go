@@ -4,12 +4,17 @@ import "github.com/prometheus/client_golang/prometheus"
 
 // Metrics holds Prometheus metrics for the MessageLoop server.
 type Metrics struct {
-	ConnectionsTotal   prometheus.Gauge
-	SubscriptionsTotal prometheus.Gauge
-	MessagesPublished  prometheus.Counter
-	MessagesDelivered  prometheus.Counter
-	PublishDuration    prometheus.Histogram
-	DeliveryFailures   prometheus.Counter
+	ConnectionsTotal                prometheus.Gauge
+	SubscriptionsTotal              prometheus.Gauge
+	MessagesPublished               prometheus.Counter
+	MessagesDelivered               prometheus.Counter
+	PublishDuration                 prometheus.Histogram
+	DeliveryFailures                prometheus.Counter
+	ClusterCommandDedupeHits        prometheus.Counter
+	ClusterCommandTimeouts          prometheus.Counter
+	ClusterCommandUnknownFinalState prometheus.Counter
+	ClusterProjectionRepairs        prometheus.Counter
+	ClusterProjectionRepairFailures prometheus.Counter
 }
 
 // NewMetrics creates and registers all Prometheus metrics.
@@ -46,6 +51,31 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name:      "delivery_failures_total",
 			Help:      "Total number of message delivery failures (dead letters).",
 		}),
+		ClusterCommandDedupeHits: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "messageloop",
+			Name:      "cluster_command_dedupe_hits_total",
+			Help:      "Total number of cluster command dedupe hits.",
+		}),
+		ClusterCommandTimeouts: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "messageloop",
+			Name:      "cluster_command_timeouts_total",
+			Help:      "Total number of cluster command reply timeouts.",
+		}),
+		ClusterCommandUnknownFinalState: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "messageloop",
+			Name:      "cluster_command_unknown_final_state_total",
+			Help:      "Total number of cluster commands that ended in unknown_final_state.",
+		}),
+		ClusterProjectionRepairs: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "messageloop",
+			Name:      "cluster_projection_repairs_total",
+			Help:      "Total number of successful cluster projection repair passes.",
+		}),
+		ClusterProjectionRepairFailures: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "messageloop",
+			Name:      "cluster_projection_repair_failures_total",
+			Help:      "Total number of failed cluster projection repair passes.",
+		}),
 	}
 	reg.MustRegister(
 		m.ConnectionsTotal,
@@ -54,6 +84,11 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.MessagesDelivered,
 		m.PublishDuration,
 		m.DeliveryFailures,
+		m.ClusterCommandDedupeHits,
+		m.ClusterCommandTimeouts,
+		m.ClusterCommandUnknownFinalState,
+		m.ClusterProjectionRepairs,
+		m.ClusterProjectionRepairFailures,
 	)
 	return m
 }

@@ -42,6 +42,10 @@ func main() {
 		}
 
 		node := messageloop.NewNode(&cfg.Server)
+		reg := prometheus.NewRegistry()
+		metrics := messageloop.NewMetrics(reg)
+		node.SetMetrics(metrics)
+
 		clusterRuntime, err := messageloop.NewClusterRuntime(messageloop.ClusterOptions{
 			Enabled: cfg.Cluster.Enabled,
 			NodeID:  cfg.Cluster.NodeID,
@@ -65,6 +69,9 @@ func main() {
 			)
 			clusterDeps.ProjectionRepairer = messageloop.NewClusterProjectionRepairer(node, clusterDeps.QueryStore, messageloop.ClusterProjectionRepairerConfig{})
 			clusterDeps.CommandBus.SetHandler(node.ClusterCommandHandler())
+			if metricsAware, ok := clusterDeps.CommandBus.(interface{ SetMetrics(*messageloop.Metrics) }); ok {
+				metricsAware.SetMetrics(metrics)
+			}
 			node.SetPresenceStore(redisbroker.NewPresenceStore(cfg.Broker.Redis))
 
 			clusterRuntime, err = messageloop.NewClusterRuntime(messageloop.ClusterOptions{
@@ -122,11 +129,6 @@ func main() {
 		if err := node.Run(ctx); err != nil {
 			return err
 		}
-
-		// Set up Prometheus metrics and admin HTTP server
-		reg := prometheus.NewRegistry()
-		metrics := messageloop.NewMetrics(reg)
-		node.SetMetrics(metrics)
 
 		adminAddr := cfg.Server.Http.Addr
 		if adminAddr == "" {
