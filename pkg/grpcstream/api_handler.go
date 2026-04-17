@@ -5,9 +5,9 @@ import (
 
 	"github.com/lynx-go/x/log"
 	"github.com/messageloopio/messageloop"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
 	serverpb "github.com/messageloopio/messageloop/shared/genproto/server/v1"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
 )
 
 type apiServiceHandler struct {
