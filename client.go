@@ -132,12 +132,17 @@ func (c *Client) close(disconnect Disconnect) error {
 		presCtx := context.Background()
 		for _, ch := range channels {
 			_ = c.node.presence.Remove(presCtx, ch, c.session)
+			go c.node.PublishPresenceLeave(ch, c.session, c.user)
 		}
 	}
 
 	// Clean up session from hub
 	if c.session != "" {
 		c.node.hub.RemoveSession(c.session)
+	}
+
+	if c.node.metrics != nil {
+		c.node.metrics.ConnectionsTotal.Dec()
 	}
 
 	// Notify proxy about disconnection
@@ -310,7 +315,10 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 	c.mu.Lock()
 	c.authenticated = true
 	c.client = connect.ClientId
-	c.node.AddClient(c)
+	if err := c.node.AddClient(c); err != nil {
+		c.mu.Unlock()
+		return err
+	}
 	c.mu.Unlock()
 
 	// Notify proxy about client connection
@@ -591,6 +599,16 @@ func (c *Client) handlePublish(ctx context.Context, in *clientpb.InboundMessage,
 }
 
 func (c *Client) handleSubscribe(ctx context.Context, in *clientpb.InboundMessage, sub *clientpb.Subscribe) error {
+	// Enforce per-client subscription limit.
+	if limit := c.node.limits.MaxSubscriptionsPerClient; limit > 0 {
+		c.mu.RLock()
+		currentCount := len(c.subscribedChannels)
+		c.mu.RUnlock()
+		if currentCount+len(sub.Subscriptions) > limit {
+			return DisconnectChannelLimit
+		}
+	}
+
 	subs := []*clientpb.Subscription{}
 	for _, ch := range sub.Subscriptions {
 		// Proxy ACL check - check if there's a proxy configured for subscription ACL
@@ -645,6 +663,9 @@ func (c *Client) handleSubscribe(ctx context.Context, in *clientpb.InboundMessag
 		c.subscribedChannels[ch.Channel] = struct{}{}
 		c.mu.Unlock()
 
+		// Publish presence join event asynchronously
+		go c.node.PublishPresenceJoin(ch.Channel, c.session, c.user)
+
 		// Notify proxy about subscription
 		if p != nil {
 			subscribedReq := &proxy.OnSubscribedProxyRequest{
@@ -674,6 +695,7 @@ func (c *Client) write(ctx context.Context, msg proto.Message) error {
 	err = c.transport.Write(bytes)
 	if err != nil {
 		log.ErrorContext(ctx, "failed to write to transport", err)
+		go c.close(DisconnectSlowConsumer)
 	} else {
 		log.DebugContext(ctx, "message written to transport successfully")
 	}
@@ -690,6 +712,9 @@ func (c *Client) handleUnsubscribe(ctx context.Context, in *clientpb.InboundMess
 		c.mu.Lock()
 		delete(c.subscribedChannels, sub.Channel)
 		c.mu.Unlock()
+
+		// Publish presence leave event asynchronously
+		go c.node.PublishPresenceLeave(sub.Channel, c.session, c.user)
 
 		// Notify proxy about unsubscription
 		p := c.node.FindProxy(sub.Channel, "unsubscribe")

@@ -44,7 +44,7 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 
 	subProtocols := websocket.Subprotocols(r)
 	marshaler := h.marshaler(subProtocols)
-	transport := newTransport(conn, msgTypeFromSubprotocol(conn.Subprotocol()))
+	transport := newTransport(conn, msgTypeFromSubprotocol(conn.Subprotocol()), h.opt.WriteTimeout)
 	ctx := r.Context()
 	client, closeFn, err := messageloop.NewClient(ctx, h.node, transport, marshaler, messageloop.WithProtocol("ws"))
 	if err != nil {

@@ -18,10 +18,11 @@ type Server struct {
 }
 
 type Options struct {
-	Addr        string
-	WsPath      string
-	ReadTimeout time.Duration
-	CheckOrigin func(r *http.Request) bool
+	Addr         string
+	WsPath       string
+	ReadTimeout  time.Duration
+	WriteTimeout time.Duration
+	CheckOrigin  func(r *http.Request) bool
 }
 
 func DefaultOptions() Options {

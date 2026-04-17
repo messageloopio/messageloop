@@ -12,6 +12,7 @@ import (
 	"github.com/messageloopio/messageloop/proxy"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 type Node struct {
@@ -22,6 +23,8 @@ type Node struct {
 	proxy            *proxy.Router
 	heartbeatManager *HeartbeatManager
 	rpcTimeout       time.Duration
+	limits           config.Limits
+	metrics          *Metrics
 	surveys          map[string]*Survey
 	surveyMu         sync.RWMutex
 }
@@ -36,10 +39,16 @@ func NewNode(cfg *config.Server) *Node {
 		subLocks[i] = &sync.Mutex{}
 	}
 
+	var limits config.Limits
+	if cfg != nil {
+		limits = cfg.Limits
+	}
+
 	node := &Node{
 		subLocks:   subLocks,
-		hub:        newHub(0),
+		hub:        newHub(0, limits.MaxConnectionsPerUser),
 		rpcTimeout: proxy.DefaultRPCTimeout,
+		limits:     limits,
 		surveys:    make(map[string]*Survey),
 		presence:   NewMemoryPresenceStore(),
 	}
@@ -111,9 +120,21 @@ func (n *Node) Hub() *Hub {
 	return n.hub
 }
 
+// SetMetrics sets the Prometheus metrics collector for the node.
+func (n *Node) SetMetrics(m *Metrics) {
+	n.metrics = m
+}
+
 // AddClient adds a client session to the node's hub.
-func (n *Node) AddClient(c *Client) {
-	n.hub.add(c)
+// Returns an error (DisconnectConnectionLimit) if the per-user connection limit is exceeded.
+func (n *Node) AddClient(c *Client) error {
+	if err := n.hub.add(c); err != nil {
+		return err
+	}
+	if n.metrics != nil {
+		n.metrics.ConnectionsTotal.Inc()
+	}
+	return nil
 }
 
 // AddSubscription adds a subscription for a client to a channel.
@@ -133,6 +154,9 @@ func (n *Node) AddSubscription(ctx context.Context, ch string, sub Subscriber) e
 			return err
 		}
 	}
+	if n.metrics != nil {
+		n.metrics.SubscriptionsTotal.Inc()
+	}
 	return nil
 }
 
@@ -142,15 +166,27 @@ func (n *Node) RemoveSubscription(ch string, c *Client) error {
 	mu.Lock()
 	defer mu.Unlock()
 	last, removed := n.hub.removeSub(ch, c)
-	if removed && last {
-		_ = n.broker.Unsubscribe(ch)
+	if removed {
+		if n.metrics != nil {
+			n.metrics.SubscriptionsTotal.Dec()
+		}
+		if last {
+			_ = n.broker.Unsubscribe(ch)
+		}
 	}
 	return nil
 }
 
 // Publish sends payload to ch via the broker.
 func (n *Node) Publish(ch string, payload []byte, isText bool) error {
+	if n.metrics != nil {
+		timer := prometheus.NewTimer(n.metrics.PublishDuration)
+		defer timer.ObserveDuration()
+	}
 	_, err := n.broker.Publish(ch, payload, isText)
+	if err == nil && n.metrics != nil {
+		n.metrics.MessagesPublished.Inc()
+	}
 	return err
 }
 
@@ -304,4 +340,29 @@ func (n *Node) AddSurveyResponse(ctx context.Context, sessionID string, requestI
 		return
 	}
 	survey.AddResponse(sessionID, payload, err)
+}
+
+// presenceChannel returns the internal channel name for presence events.
+func presenceChannel(ch string) string {
+	return ch + "/__presence"
+}
+
+// PublishPresenceJoin publishes a presence join event to the channel's presence sub-channel.
+func (n *Node) PublishPresenceJoin(channel, clientID, userID string) {
+	evt := newPresenceEvent("join", channel, clientID, userID)
+	data, err := marshalPresenceEvent(evt)
+	if err != nil {
+		return
+	}
+	_ = n.Publish(presenceChannel(channel), data, true)
+}
+
+// PublishPresenceLeave publishes a presence leave event to the channel's presence sub-channel.
+func (n *Node) PublishPresenceLeave(channel, clientID, userID string) {
+	evt := newPresenceEvent("leave", channel, clientID, userID)
+	data, err := marshalPresenceEvent(evt)
+	if err != nil {
+		return
+	}
+	_ = n.Publish(presenceChannel(channel), data, true)
 }

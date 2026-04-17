@@ -15,16 +15,18 @@ import (
 const numHubShards = 64
 
 type Hub struct {
-	mu         sync.RWMutex
-	sessions   map[string]*Client
-	connShards [numHubShards]*connShard
-	subShards  [numHubShards]*subShard
+	mu              sync.RWMutex
+	sessions        map[string]*Client
+	connShards      [numHubShards]*connShard
+	subShards       [numHubShards]*subShard
+	maxConnsPerUser int
 }
 
 // newHub initializes Hub.
-func newHub(maxTimeLagMilli int64) *Hub {
+func newHub(maxTimeLagMilli int64, maxConnsPerUser int) *Hub {
 	h := &Hub{
-		sessions: map[string]*Client{},
+		sessions:        map[string]*Client{},
+		maxConnsPerUser: maxConnsPerUser,
 	}
 	for i := 0; i < numHubShards; i++ {
 		h.connShards[i] = newConnShard()
@@ -67,13 +69,20 @@ func newConnShard() *connShard {
 	}
 }
 
-// Add connection into clientHub connections registry.
-func (h *connShard) add(c *Client) {
+// addWithLimit adds a connection into the registry, enforcing per-user connection limits.
+// Returns DisconnectConnectionLimit if maxPerUser > 0 and the limit is reached.
+func (h *connShard) addWithLimit(c *Client, maxPerUser int) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	uid := c.SessionID()
 	user := c.UserID()
+
+	if maxPerUser > 0 {
+		if sessions, ok := h.users[user]; ok && len(sessions) >= maxPerUser {
+			return DisconnectConnectionLimit
+		}
+	}
 
 	h.clients[uid] = c
 
@@ -81,6 +90,7 @@ func (h *connShard) add(c *Client) {
 		h.users[user] = make(map[string]struct{})
 	}
 	h.users[user][uid] = struct{}{}
+	return nil
 }
 
 // remove removes a connection from the registry by session ID.
@@ -245,6 +255,8 @@ func (h *subShard) broadcastPublication(channel string, pub *Publication) error 
 			}()
 			if err := sub.Client.Send(ctx, out); err != nil {
 				log.ErrorContext(ctx, "send publication error", err)
+			} else if sub.Client.node.metrics != nil {
+				sub.Client.node.metrics.MessagesDelivered.Inc()
 			}
 		}(sub)
 	}
@@ -253,14 +265,18 @@ func (h *subShard) broadcastPublication(channel string, pub *Publication) error 
 	return nil
 }
 
-// Add connection into clientHub connections registry.
-func (h *Hub) add(c *Client) {
+// add adds a connection into the hub, enforcing per-user connection limits.
+func (h *Hub) add(c *Client) error {
+	shard := h.connShards[index(c.UserID(), numHubShards)]
+	if err := shard.addWithLimit(c, h.maxConnsPerUser); err != nil {
+		return err
+	}
 	h.mu.Lock()
 	if c.SessionID() != "" {
 		h.sessions[c.SessionID()] = c
 	}
-	h.connShards[index(c.UserID(), numHubShards)].add(c)
 	h.mu.Unlock()
+	return nil
 }
 
 // NumSubscribers returns number of current subscribers for a given channel.

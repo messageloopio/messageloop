@@ -13,6 +13,12 @@ type Server struct {
 	Http       HttpServer `yaml:"http" json:"http"`
 	Heartbeat  Heartbeat  `yaml:"heartbeat" json:"heartbeat"`
 	RPCTimeout string     `yaml:"rpc_timeout" json:"rpc_timeout"` // default: "30s"
+	Limits     Limits     `yaml:"limits" json:"limits"`
+}
+
+type Limits struct {
+	MaxConnectionsPerUser     int `yaml:"max_connections_per_user" json:"max_connections_per_user"`         // 0 = unlimited
+	MaxSubscriptionsPerClient int `yaml:"max_subscriptions_per_client" json:"max_subscriptions_per_client"` // 0 = unlimited
 }
 
 type HttpServer struct {
@@ -29,14 +35,16 @@ type Transport struct {
 }
 
 type WebSocketTransport struct {
-	Addr        string `yaml:"addr" json:"addr"`
-	Path        string `yaml:"path" json:"path"`
-	ReadTimeout string `yaml:"read_timeout" json:"read_timeout"` // duration string
-	CheckOrigin bool   `yaml:"check_origin" json:"check_origin"` // Allow any origin when true
+	Addr         string `yaml:"addr" json:"addr"`
+	Path         string `yaml:"path" json:"path"`
+	ReadTimeout  string `yaml:"read_timeout" json:"read_timeout"`   // duration string
+	WriteTimeout string `yaml:"write_timeout" json:"write_timeout"` // duration string, e.g. "10s"
+	CheckOrigin  bool   `yaml:"check_origin" json:"check_origin"`   // Allow any origin when true
 }
 
 type GRPCTransport struct {
-	Addr string `yaml:"addr" json:"addr"`
+	Addr         string `yaml:"addr" json:"addr"`
+	WriteTimeout string `yaml:"write_timeout" json:"write_timeout"` // duration string, e.g. "10s"
 }
 
 // ProxyConfig wraps the proxy.ProxyConfig for YAML unmarshaling.

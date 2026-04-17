@@ -3,18 +3,20 @@ package grpcstream
 import (
 	"context"
 	"net"
+	"time"
 
 	"github.com/lynx-go/lynx"
 	"github.com/lynx-go/x/log"
 	"github.com/messageloopio/messageloop"
-	serverpb "github.com/messageloopio/messageloop/shared/genproto/server/v1"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
+	serverpb "github.com/messageloopio/messageloop/shared/genproto/server/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/encoding"
 )
 
 type Options struct {
-	Addr string `yaml:"addr" json:"addr"`
+	Addr         string        `yaml:"addr" json:"addr"`
+	WriteTimeout time.Duration `yaml:"write_timeout" json:"write_timeout"`
 }
 
 func NewServer(opts Options, node *messageloop.Node) (*Server, error) {
@@ -23,7 +25,11 @@ func NewServer(opts Options, node *messageloop.Node) (*Server, error) {
 	grpcServer := grpc.NewServer(grpcOpts...)
 
 	// Register client streaming service
-	clientHandler := NewGRPCHandler(node)
+	var handlerOpts []GRPCHandlerOption
+	if opts.WriteTimeout > 0 {
+		handlerOpts = append(handlerOpts, WithWriteTimeout(opts.WriteTimeout))
+	}
+	clientHandler := NewGRPCHandler(node, handlerOpts...)
 	clientpb.RegisterMessageLoopServiceServer(grpcServer, clientHandler)
 
 	// Register server-side API service

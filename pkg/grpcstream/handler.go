@@ -2,6 +2,7 @@ package grpcstream
 
 import (
 	"io"
+	"time"
 
 	"github.com/lynx-go/x/log"
 	"github.com/messageloopio/messageloop"
@@ -12,7 +13,8 @@ import (
 
 type gRPCHandler struct {
 	clientpb.UnimplementedMessageLoopServiceServer
-	node *messageloop.Node
+	node         *messageloop.Node
+	writeTimeout time.Duration
 }
 
 func (h *gRPCHandler) MessageLoop(stream grpc.BidiStreamingServer[clientpb.InboundMessage, clientpb.OutboundMessage]) error {
@@ -21,7 +23,7 @@ func (h *gRPCHandler) MessageLoop(stream grpc.BidiStreamingServer[clientpb.Inbou
 	if p, ok := peer.FromContext(stream.Context()); ok {
 		remoteAddr = p.Addr.String()
 	}
-	transport := newGRPCTransport(stream, remoteAddr)
+	transport := newGRPCTransport(stream, remoteAddr, h.writeTimeout)
 	client, closeFn, err := messageloop.NewClient(stream.Context(), h.node, transport, messageloop.ProtobufMarshaler{}, messageloop.WithProtocol("grpc"))
 	if err != nil {
 		return err
@@ -52,8 +54,22 @@ func (h *gRPCHandler) MessageLoop(stream grpc.BidiStreamingServer[clientpb.Inbou
 	}
 }
 
-func NewGRPCHandler(node *messageloop.Node) clientpb.MessageLoopServiceServer {
-	return &gRPCHandler{
+func NewGRPCHandler(node *messageloop.Node, opts ...GRPCHandlerOption) clientpb.MessageLoopServiceServer {
+	h := &gRPCHandler{
 		node: node,
+	}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
+}
+
+// GRPCHandlerOption configures the gRPC handler.
+type GRPCHandlerOption func(*gRPCHandler)
+
+// WithWriteTimeout sets the write timeout for gRPC streams.
+func WithWriteTimeout(d time.Duration) GRPCHandlerOption {
+	return func(h *gRPCHandler) {
+		h.writeTimeout = d
 	}
 }

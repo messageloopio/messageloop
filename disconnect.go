@@ -97,4 +97,9 @@ var (
 		Code:   3511,
 		Reason: "idle timeout",
 	}
+	// DisconnectSlowConsumer may be issued when client can't consume messages fast enough.
+	DisconnectSlowConsumer = Disconnect{
+		Code:   3512,
+		Reason: "slow consumer",
+	}
 )

@@ -14,6 +14,8 @@ import (
 	"github.com/messageloopio/messageloop/pkg/redisbroker"
 	"github.com/messageloopio/messageloop/pkg/websocket"
 	proxyproxy "github.com/messageloopio/messageloop/proxy"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/pflag"
 )
 
@@ -84,9 +86,41 @@ func main() {
 		if err := node.Run(ctx); err != nil {
 			return err
 		}
-		grpcServer, err := grpcstream.NewServer(grpcstream.Options{
+
+		// Set up Prometheus metrics and admin HTTP server
+		reg := prometheus.NewRegistry()
+		metrics := messageloop.NewMetrics(reg)
+		node.SetMetrics(metrics)
+
+		adminAddr := cfg.Server.Http.Addr
+		if adminAddr == "" {
+			adminAddr = ":8080"
+		}
+		adminMux := http.NewServeMux()
+		adminMux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
+		adminMux.HandleFunc("/health", node.HealthHandler())
+		adminServer := &http.Server{Addr: adminAddr, Handler: adminMux}
+		go func() {
+			if err := adminServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				app.Logger().Error("admin HTTP server error: " + err.Error())
+			}
+		}()
+		go func() {
+			<-ctx.Done()
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = adminServer.Shutdown(shutdownCtx)
+		}()
+
+		grpcOpts := grpcstream.Options{
 			Addr: cfg.Transport.GRPC.Addr,
-		}, node)
+		}
+		if cfg.Transport.GRPC.WriteTimeout != "" {
+			if d, err := time.ParseDuration(cfg.Transport.GRPC.WriteTimeout); err == nil {
+				grpcOpts.WriteTimeout = d
+			}
+		}
+		grpcServer, err := grpcstream.NewServer(grpcOpts, node)
 		if err != nil {
 			return err
 		}
@@ -94,6 +128,11 @@ func main() {
 		wsOpts := websocket.Options{
 			Addr:   cfg.Transport.WebSocket.Addr,
 			WsPath: cfg.Transport.WebSocket.Path,
+		}
+		if cfg.Transport.WebSocket.WriteTimeout != "" {
+			if d, err := time.ParseDuration(cfg.Transport.WebSocket.WriteTimeout); err == nil {
+				wsOpts.WriteTimeout = d
+			}
 		}
 		if cfg.Transport.WebSocket.CheckOrigin {
 			app.Logger().Info("setting websocket CheckOrigin to allow all origins")

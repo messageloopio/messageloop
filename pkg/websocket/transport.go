@@ -18,13 +18,14 @@ func msgTypeFromSubprotocol(subprotocol string) int {
 }
 
 type Transport struct {
-	conn    *websocket.Conn
-	msgType int
-	writeMu sync.Mutex
+	conn         *websocket.Conn
+	msgType      int
+	writeMu      sync.Mutex
+	writeTimeout time.Duration
 }
 
-func newTransport(conn *websocket.Conn, msgType int) *Transport {
-	return &Transport{conn: conn, msgType: msgType}
+func newTransport(conn *websocket.Conn, msgType int, writeTimeout time.Duration) *Transport {
+	return &Transport{conn: conn, msgType: msgType, writeTimeout: writeTimeout}
 }
 
 func (t *Transport) RemoteAddr() string {
@@ -39,9 +40,15 @@ func (t *Transport) WriteMany(msgs ...[]byte) error {
 	t.writeMu.Lock()
 	defer t.writeMu.Unlock()
 	for _, msg := range msgs {
+		if t.writeTimeout > 0 {
+			_ = t.conn.SetWriteDeadline(time.Now().Add(t.writeTimeout))
+		}
 		if err := t.conn.WriteMessage(t.msgType, msg); err != nil {
 			return err
 		}
+	}
+	if t.writeTimeout > 0 {
+		_ = t.conn.SetWriteDeadline(time.Time{})
 	}
 	return nil
 }

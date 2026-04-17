@@ -1,22 +1,24 @@
 package grpcstream
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
 	"github.com/messageloopio/messageloop"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	"google.golang.org/grpc"
 )
 
 type Transport struct {
-	stream     grpc.BidiStreamingServer[clientpb.InboundMessage, clientpb.OutboundMessage]
-	remoteAddr string
-	mu         sync.RWMutex
-	closed     bool
-	closeCh    chan struct{}
-	closeOnce  sync.Once
+	stream       grpc.BidiStreamingServer[clientpb.InboundMessage, clientpb.OutboundMessage]
+	remoteAddr   string
+	mu           sync.RWMutex
+	closed       bool
+	closeCh      chan struct{}
+	closeOnce    sync.Once
+	writeTimeout time.Duration
 }
 
 func (t *Transport) Write(message []byte) error {
@@ -33,18 +35,34 @@ func (t *Transport) WriteMany(messages ...[]byte) error {
 	t.mu.RUnlock()
 
 	for i := 0; i < len(messages); i++ {
-		// Double-check after acquiring the write lock for each send
+		// Double-check after acquiring the read lock for each send
 		t.mu.RLock()
 		closed := t.closed
 		t.mu.RUnlock()
 		if closed {
 			return nil
 		}
-		if err := t.stream.SendMsg(rawFrame(messages[i])); err != nil {
+		if err := t.sendWithTimeout(rawFrame(messages[i])); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (t *Transport) sendWithTimeout(msg rawFrame) error {
+	if t.writeTimeout <= 0 {
+		return t.stream.SendMsg(msg)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- t.stream.SendMsg(msg)
+	}()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(t.writeTimeout):
+		return fmt.Errorf("write timeout after %v", t.writeTimeout)
+	}
 }
 
 func (t *Transport) Close(disconnect messageloop.Disconnect) error {
@@ -82,11 +100,13 @@ var _ messageloop.Transport = new(Transport)
 func newGRPCTransport(
 	stream grpc.BidiStreamingServer[clientpb.InboundMessage, clientpb.OutboundMessage],
 	remoteAddr string,
+	writeTimeout time.Duration,
 ) *Transport {
 	return &Transport{
-		stream:     stream,
-		remoteAddr: remoteAddr,
-		closeCh:    make(chan struct{}),
+		stream:       stream,
+		remoteAddr:   remoteAddr,
+		closeCh:      make(chan struct{}),
+		writeTimeout: writeTimeout,
 	}
 }
 
