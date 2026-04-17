@@ -92,7 +92,7 @@ func TestNode_DisconnectSession_RemoteRoutesThroughCommandBus(t *testing.T) {
 		LeaseVersion:  3,
 	}}
 	bus := &fakeClusterCommandBus{}
-	runtime, err := NewClusterRuntime(ClusterOptions{Enabled: true, NodeID: "node-a", IncarnationID: "inc-a", Backend: "memory"}, ClusterDependencies{
+	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-a", IncarnationID: "inc-a", Backend: "memory"}, ClusterDependencies{
 		SessionDirectory: directory,
 		CommandBus:       bus,
 		QueryStore:       fakeQueryStore{},
@@ -100,7 +100,7 @@ func TestNode_DisconnectSession_RemoteRoutesThroughCommandBus(t *testing.T) {
 	require.NoError(t, err)
 
 	node := NewNode(nil)
-	node.SetClusterRuntime(runtime)
+	node.SetCluster(runtime)
 
 	ok, err := node.DisconnectSession(context.Background(), "sess-remote", Disconnect{Code: 3001, Reason: "remote"})
 	require.NoError(t, err)
@@ -131,7 +131,7 @@ func TestNode_ResumeRemoteSession_UsesSnapshotAndTakeover(t *testing.T) {
 		},
 	}
 	bus := &fakeClusterCommandBus{result: &ClusterCommandResult{Status: ClusterCommandStatusSucceeded}}
-	runtime, err := NewClusterRuntime(ClusterOptions{Enabled: true, NodeID: "node-a", IncarnationID: "inc-a", Backend: "memory"}, ClusterDependencies{
+	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-a", IncarnationID: "inc-a", Backend: "memory"}, ClusterDependencies{
 		SessionDirectory: directory,
 		CommandBus:       bus,
 		QueryStore:       fakeQueryStore{},
@@ -139,7 +139,7 @@ func TestNode_ResumeRemoteSession_UsesSnapshotAndTakeover(t *testing.T) {
 	require.NoError(t, err)
 
 	node := NewNode(nil)
-	node.SetClusterRuntime(runtime)
+	node.SetCluster(runtime)
 	client, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
 	require.NoError(t, err)
 
@@ -171,7 +171,7 @@ func TestNode_Survey_ClusterReturnsPartialFailures(t *testing.T) {
 		ErrorCode:     "CLUSTER_COMMAND_SEND_FAILED",
 		ErrorMessage:  "remote node timed out",
 	}}}
-	runtime, err := NewClusterRuntime(ClusterOptions{Enabled: true, NodeID: "node-a", IncarnationID: "inc-a", Backend: "memory"}, ClusterDependencies{
+	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-a", IncarnationID: "inc-a", Backend: "memory"}, ClusterDependencies{
 		SessionDirectory: &fakeSessionDirectory{},
 		CommandBus:       bus,
 		QueryStore:       fakeQueryStore{},
@@ -179,7 +179,7 @@ func TestNode_Survey_ClusterReturnsPartialFailures(t *testing.T) {
 	require.NoError(t, err)
 
 	node := NewNode(nil)
-	node.SetClusterRuntime(runtime)
+	node.SetCluster(runtime)
 
 	results, err := node.Survey(context.Background(), "chat.room", []byte("ping"), 200*time.Millisecond)
 	require.NoError(t, err)

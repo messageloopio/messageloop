@@ -46,7 +46,7 @@ func main() {
 		metrics := messageloop.NewMetrics(reg)
 		node.SetMetrics(metrics)
 
-		clusterRuntime, err := messageloop.NewClusterRuntime(messageloop.ClusterOptions{
+		cluster, err := messageloop.NewCluster(messageloop.ClusterOptions{
 			Enabled: cfg.Cluster.Enabled,
 			NodeID:  cfg.Cluster.NodeID,
 			Backend: cfg.Cluster.Backend,
@@ -56,15 +56,15 @@ func main() {
 		}
 
 		clusterDeps := messageloop.ClusterDependencies{}
-		if clusterRuntime.Enabled() && clusterRuntime.Backend() == "redis" {
+		if cluster.Enabled() && cluster.Backend() == "redis" {
 			clusterDeps.SessionDirectory = redisbroker.NewSessionDirectory(cfg.Broker.Redis)
-			clusterDeps.CommandBus = redisbroker.NewClusterCommandBus(cfg.Broker.Redis, clusterRuntime.NodeID(), clusterRuntime.IncarnationID())
-			clusterDeps.QueryStore = redisbroker.NewClusterQueryStore(cfg.Broker.Redis, clusterRuntime.NodeID(), clusterRuntime.IncarnationID())
+			clusterDeps.CommandBus = redisbroker.NewClusterCommandBus(cfg.Broker.Redis, cluster.NodeID(), cluster.IncarnationID())
+			clusterDeps.QueryStore = redisbroker.NewClusterQueryStore(cfg.Broker.Redis, cluster.NodeID(), cluster.IncarnationID())
 			clusterDeps.NodeLeaseManager = messageloop.NewClusterNodeLeaseManager(
 				clusterDeps.SessionDirectory,
 				messageloop.ClusterNodeLeaseManagerConfig{
-					NodeID:        clusterRuntime.NodeID(),
-					IncarnationID: clusterRuntime.IncarnationID(),
+					NodeID:        cluster.NodeID(),
+					IncarnationID: cluster.IncarnationID(),
 				},
 			)
 			clusterDeps.ProjectionRepairer = messageloop.NewClusterProjectionRepairer(node, clusterDeps.QueryStore, messageloop.ClusterProjectionRepairerConfig{})
@@ -74,17 +74,17 @@ func main() {
 			}
 			node.SetPresenceStore(redisbroker.NewPresenceStore(cfg.Broker.Redis))
 
-			clusterRuntime, err = messageloop.NewClusterRuntime(messageloop.ClusterOptions{
+			cluster, err = messageloop.NewCluster(messageloop.ClusterOptions{
 				Enabled:       true,
-				NodeID:        clusterRuntime.NodeID(),
-				Backend:       clusterRuntime.Backend(),
-				IncarnationID: clusterRuntime.IncarnationID(),
+				NodeID:        cluster.NodeID(),
+				Backend:       cluster.Backend(),
+				IncarnationID: cluster.IncarnationID(),
 			}, clusterDeps)
 			if err != nil {
-				return fmt.Errorf("wire cluster runtime: %w", err)
+				return fmt.Errorf("wire cluster: %w", err)
 			}
 		}
-		node.SetClusterRuntime(clusterRuntime)
+		node.SetCluster(cluster)
 
 		// Configure broker based on config
 		brokerType := cfg.Broker.Type

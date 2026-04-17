@@ -81,10 +81,10 @@ func (c *trackingClusterComponent) ListChannels(context.Context) ([]ClusterChann
 	return nil, nil
 }
 
-func TestNewClusterRuntime_Disabled(t *testing.T) {
+func TestNewCluster_Disabled(t *testing.T) {
 	t.Parallel()
 
-	runtime, err := NewClusterRuntime(ClusterOptions{}, ClusterDependencies{})
+	runtime, err := NewCluster(ClusterOptions{}, ClusterDependencies{})
 	assert.NoError(t, err)
 	assert.NotNil(t, runtime)
 	assert.False(t, runtime.Enabled())
@@ -93,18 +93,18 @@ func TestNewClusterRuntime_Disabled(t *testing.T) {
 	assert.Empty(t, runtime.Backend())
 }
 
-func TestNewClusterRuntime_EnabledRequiresNodeID(t *testing.T) {
+func TestNewCluster_EnabledRequiresNodeID(t *testing.T) {
 	t.Parallel()
 
-	runtime, err := NewClusterRuntime(ClusterOptions{Enabled: true, Backend: "redis"}, ClusterDependencies{})
+	runtime, err := NewCluster(ClusterOptions{Enabled: true, Backend: "redis"}, ClusterDependencies{})
 	assert.Nil(t, runtime)
 	assert.EqualError(t, err, "cluster node_id is required when cluster is enabled")
 }
 
-func TestNewClusterRuntime_EnabledGeneratesIncarnationID(t *testing.T) {
+func TestNewCluster_EnabledGeneratesIncarnationID(t *testing.T) {
 	t.Parallel()
 
-	runtime, err := NewClusterRuntime(ClusterOptions{Enabled: true, NodeID: "node-a", Backend: "redis"}, ClusterDependencies{})
+	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-a", Backend: "redis"}, ClusterDependencies{})
 	assert.NoError(t, err)
 	assert.True(t, runtime.Enabled())
 	assert.Equal(t, "node-a", runtime.NodeID())
@@ -112,7 +112,7 @@ func TestNewClusterRuntime_EnabledGeneratesIncarnationID(t *testing.T) {
 	assert.NotEmpty(t, runtime.IncarnationID())
 }
 
-func TestClusterRuntime_StartAndShutdownOnlyOnce(t *testing.T) {
+func TestCluster_StartAndShutdownOnlyOnce(t *testing.T) {
 	t.Parallel()
 
 	sessionDirectory := &trackingClusterComponent{}
@@ -121,7 +121,7 @@ func TestClusterRuntime_StartAndShutdownOnlyOnce(t *testing.T) {
 	nodeLeaseManager := &trackingClusterComponent{}
 	projectionRepairer := &trackingClusterComponent{}
 
-	runtime, err := NewClusterRuntime(ClusterOptions{Enabled: true, NodeID: "node-a"}, ClusterDependencies{
+	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-a"}, ClusterDependencies{
 		SessionDirectory:   sessionDirectory,
 		CommandBus:         commandBus,
 		QueryStore:         queryStore,

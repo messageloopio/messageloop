@@ -134,7 +134,7 @@ func (noopClusterQueryStore) ListChannels(context.Context) ([]ClusterChannelInfo
 }
 
 // SessionDirectory returns the cluster session directory adapter.
-func (r *ClusterRuntime) SessionDirectory() SessionDirectory {
+func (r *Cluster) SessionDirectory() SessionDirectory {
 	if r == nil {
 		return &noopSessionDirectory{}
 	}
@@ -142,7 +142,7 @@ func (r *ClusterRuntime) SessionDirectory() SessionDirectory {
 }
 
 // CommandBus returns the cluster command bus adapter.
-func (r *ClusterRuntime) CommandBus() ClusterCommandBus {
+func (r *Cluster) CommandBus() ClusterCommandBus {
 	if r == nil {
 		return &noopClusterCommandBus{}
 	}
@@ -150,7 +150,7 @@ func (r *ClusterRuntime) CommandBus() ClusterCommandBus {
 }
 
 // QueryStore returns the cluster query store adapter.
-func (r *ClusterRuntime) QueryStore() ClusterQueryStore {
+func (r *Cluster) QueryStore() ClusterQueryStore {
 	if r == nil {
 		return &noopClusterQueryStore{}
 	}

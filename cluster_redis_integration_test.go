@@ -430,28 +430,28 @@ func newClusterRedisTestNode(t *testing.T, parent context.Context, redisCfg conf
 	node.SetBroker(redisbroker.New(redisCfg))
 	node.SetPresenceStore(redisbroker.NewPresenceStore(redisCfg))
 
-	clusterRuntime, err := messageloop.NewClusterRuntime(messageloop.ClusterOptions{Enabled: true, NodeID: nodeID, Backend: "redis"}, messageloop.ClusterDependencies{})
+	cluster, err := messageloop.NewCluster(messageloop.ClusterOptions{Enabled: true, NodeID: nodeID, Backend: "redis"}, messageloop.ClusterDependencies{})
 	require.NoError(t, err)
 
 	clusterDeps := messageloop.ClusterDependencies{}
 	clusterDeps.SessionDirectory = redisbroker.NewSessionDirectory(redisCfg)
-	clusterDeps.CommandBus = redisbroker.NewClusterCommandBus(redisCfg, clusterRuntime.NodeID(), clusterRuntime.IncarnationID())
-	clusterDeps.QueryStore = redisbroker.NewClusterQueryStore(redisCfg, clusterRuntime.NodeID(), clusterRuntime.IncarnationID())
+	clusterDeps.CommandBus = redisbroker.NewClusterCommandBus(redisCfg, cluster.NodeID(), cluster.IncarnationID())
+	clusterDeps.QueryStore = redisbroker.NewClusterQueryStore(redisCfg, cluster.NodeID(), cluster.IncarnationID())
 	clusterDeps.NodeLeaseManager = messageloop.NewClusterNodeLeaseManager(clusterDeps.SessionDirectory, messageloop.ClusterNodeLeaseManagerConfig{
-		NodeID:        clusterRuntime.NodeID(),
-		IncarnationID: clusterRuntime.IncarnationID(),
+		NodeID:        cluster.NodeID(),
+		IncarnationID: cluster.IncarnationID(),
 	})
 	clusterDeps.ProjectionRepairer = messageloop.NewClusterProjectionRepairer(node, clusterDeps.QueryStore, messageloop.ClusterProjectionRepairerConfig{Interval: 200 * time.Millisecond})
 	clusterDeps.CommandBus.SetHandler(node.ClusterCommandHandler())
 
-	clusterRuntime, err = messageloop.NewClusterRuntime(messageloop.ClusterOptions{
+	cluster, err = messageloop.NewCluster(messageloop.ClusterOptions{
 		Enabled:       true,
-		NodeID:        clusterRuntime.NodeID(),
-		Backend:       clusterRuntime.Backend(),
-		IncarnationID: clusterRuntime.IncarnationID(),
+		NodeID:        cluster.NodeID(),
+		Backend:       cluster.Backend(),
+		IncarnationID: cluster.IncarnationID(),
 	}, clusterDeps)
 	require.NoError(t, err)
-	node.SetClusterRuntime(clusterRuntime)
+	node.SetCluster(cluster)
 
 	ctx, cancel := context.WithCancel(parent)
 	t.Cleanup(func() {

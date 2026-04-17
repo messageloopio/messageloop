@@ -22,12 +22,12 @@ The project supports a simple single-node setup with in-memory components and ca
 
 | Component | Responsibility |
 | --- | --- |
-| `Node` | Central coordinator for transports, broker, proxy, presence, surveys, and cluster runtime |
+| `Node` | Central coordinator for transports, broker, proxy, presence, surveys, and the cluster control plane |
 | `Hub` | Sharded in-memory registry for sessions and subscriptions |
 | `Broker` | Pub/sub backend, implemented by in-memory broker or Redis broker |
 | `Transport` | Connection abstraction used by WebSocket and gRPC streaming servers |
 | `Proxy` | RPC/auth/ACL/lifecycle delegation to HTTP or gRPC backends |
-| `ClusterRuntime` | Optional Redis-backed control plane for multi-node session ownership and coordination |
+| `Cluster` | Optional Redis-backed control plane for multi-node session ownership and coordination |
 
 ## Quick Start
 

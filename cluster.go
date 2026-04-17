@@ -168,8 +168,8 @@ type ClusterDependencies struct {
 	ProjectionRepairer ClusterProjectionRepairer
 }
 
-// ClusterRuntime owns lifecycle coordination for cluster control-plane adapters.
-type ClusterRuntime struct {
+// Cluster owns lifecycle coordination for cluster control-plane adapters.
+type Cluster struct {
 	options ClusterOptions
 	deps    ClusterDependencies
 
@@ -179,8 +179,8 @@ type ClusterRuntime struct {
 	shutdownErr  error
 }
 
-// NewClusterRuntime creates a lifecycle coordinator for cluster control-plane components.
-func NewClusterRuntime(options ClusterOptions, deps ClusterDependencies) (*ClusterRuntime, error) {
+// NewCluster creates a lifecycle coordinator for cluster control-plane components.
+func NewCluster(options ClusterOptions, deps ClusterDependencies) (*Cluster, error) {
 	normalized, err := options.normalize()
 	if err != nil {
 		return nil, err
@@ -202,14 +202,14 @@ func NewClusterRuntime(options ClusterOptions, deps ClusterDependencies) (*Clust
 		deps.ProjectionRepairer = &noopClusterProjectionRepairer{}
 	}
 
-	return &ClusterRuntime{
+	return &Cluster{
 		options: normalized,
 		deps:    deps,
 	}, nil
 }
 
 // Enabled reports whether the cluster control plane is active for this runtime.
-func (r *ClusterRuntime) Enabled() bool {
+func (r *Cluster) Enabled() bool {
 	if r == nil {
 		return false
 	}
@@ -217,7 +217,7 @@ func (r *ClusterRuntime) Enabled() bool {
 }
 
 // NodeID returns the configured cluster node identifier.
-func (r *ClusterRuntime) NodeID() string {
+func (r *Cluster) NodeID() string {
 	if r == nil {
 		return ""
 	}
@@ -225,7 +225,7 @@ func (r *ClusterRuntime) NodeID() string {
 }
 
 // IncarnationID returns the generated process incarnation identifier.
-func (r *ClusterRuntime) IncarnationID() string {
+func (r *Cluster) IncarnationID() string {
 	if r == nil {
 		return ""
 	}
@@ -233,7 +233,7 @@ func (r *ClusterRuntime) IncarnationID() string {
 }
 
 // Backend returns the configured cluster backend.
-func (r *ClusterRuntime) Backend() string {
+func (r *Cluster) Backend() string {
 	if r == nil {
 		return ""
 	}
@@ -241,7 +241,7 @@ func (r *ClusterRuntime) Backend() string {
 }
 
 // Start starts all cluster control-plane components exactly once.
-func (r *ClusterRuntime) Start(ctx context.Context) error {
+func (r *Cluster) Start(ctx context.Context) error {
 	if r == nil || !r.options.Enabled {
 		return nil
 	}
@@ -259,7 +259,7 @@ func (r *ClusterRuntime) Start(ctx context.Context) error {
 }
 
 // Shutdown stops all cluster control-plane components exactly once.
-func (r *ClusterRuntime) Shutdown(ctx context.Context) error {
+func (r *Cluster) Shutdown(ctx context.Context) error {
 	if r == nil || !r.options.Enabled {
 		return nil
 	}
@@ -276,7 +276,7 @@ func (r *ClusterRuntime) Shutdown(ctx context.Context) error {
 	return r.shutdownErr
 }
 
-func (r *ClusterRuntime) components() []ClusterLifecycle {
+func (r *Cluster) components() []ClusterLifecycle {
 	return []ClusterLifecycle{
 		r.deps.SessionDirectory,
 		r.deps.CommandBus,

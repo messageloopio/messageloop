@@ -22,7 +22,7 @@ type Node struct {
 	hub              *Hub
 	broker           Broker
 	presence         PresenceStore
-	cluster          *ClusterRuntime
+	cluster          *Cluster
 	subLocks         map[int]*sync.Mutex
 	proxy            *proxy.Router
 	heartbeatManager *HeartbeatManager
@@ -99,7 +99,7 @@ func NewNode(cfg *config.Server) *Node {
 func (n *Node) Run(ctx context.Context) error {
 	if n.cluster != nil {
 		if err := n.cluster.Start(ctx); err != nil {
-			return fmt.Errorf("start cluster runtime: %w", err)
+			return fmt.Errorf("start cluster: %w", err)
 		}
 	}
 
@@ -132,13 +132,13 @@ func (n *Node) Shutdown() {
 	}
 }
 
-// SetClusterRuntime sets the cluster control-plane runtime for this node.
-func (n *Node) SetClusterRuntime(runtime *ClusterRuntime) {
+// SetCluster sets the cluster control-plane coordinator for this node.
+func (n *Node) SetCluster(runtime *Cluster) {
 	n.cluster = runtime
 }
 
-// ClusterRuntime returns the configured cluster control-plane runtime.
-func (n *Node) ClusterRuntime() *ClusterRuntime {
+// Cluster returns the configured cluster control-plane coordinator.
+func (n *Node) Cluster() *Cluster {
 	return n.cluster
 }
 
