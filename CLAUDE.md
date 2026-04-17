@@ -35,15 +35,16 @@ go test -v ./pkg/topics/... -run TestCSTrieMatcher # Run a single test
 
 ### Run the server
 ```bash
-go run cmd/server/main.go --config-dir ./configs
+go run cmd/server/main.go --config ./config.yaml
 ```
 
 ## Configuration
 
 Config structure defined in `config/config.go` with example in `config-example.yaml`:
-- **server** - HTTP admin address (`:8080`), heartbeat idle timeout (default: `300s`), RPC timeout (default: `30s`)
-- **transport** - WebSocket (`:9080` with `/ws` path) and gRPC (`:9090`) listeners
-- **broker** - Type selection (`memory` or `redis`) with Redis connection settings
+- **server** - HTTP admin address (`:8080`), heartbeat idle timeout (default: `300s`), RPC timeout (default: `30s`), per-user and per-client limits, built-in ACL rules
+- **transport** - WebSocket (`:9080` with `/ws` path) and gRPC (`:9090`) listeners, plus optional TLS, compression, and write timeouts
+- **broker** - Type selection (`memory` or `redis`) with Redis connection, stream, and history settings
+- **cluster** - Optional Redis-backed distributed control plane with `enabled`, `node_id`, and `backend`
 - **proxy** - Backend proxy configurations with routes, timeout, and HTTP/gRPC backends
 
 ## Architecture

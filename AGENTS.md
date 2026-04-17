@@ -4,7 +4,7 @@ This file provides guidance for agentic coding agents operating in this reposito
 
 ## Project Overview
 
-MessageLoop is a realtime messaging platform server written in Go. It provides pub/sub messaging over WebSocket and gRPC, using CloudEvents-based protocol.
+MessageLoop is a realtime messaging platform server written in Go. It provides pub/sub messaging over WebSocket and gRPC using protobuf-defined message envelopes and shared payload types.
 
 ## Build Commands
 
@@ -31,7 +31,7 @@ task generate-protocol
 task init
 
 # Run the server
-go run cmd/server/main.go --config-dir ./configs
+go run cmd/server/main.go --config ./config.yaml
 ```
 
 ## Code Style Guidelines
@@ -52,9 +52,9 @@ import (
     "sync"
     "time"
 
-    cloudevents "github.com/cloudevents/sdk-go/binding/format/protobuf/v2/pb"
+    serverpb "github.com/messageloopio/messageloop/shared/genproto/server/v1"
     sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
-    clientpb "github.com/messageloopio/messageloop/shared/genproto/v1"
+    clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
     "github.com/messageloopio/messageloop/proxy"
     "github.com/lynx-go/x/log"
     "github.com/samber/lo"
@@ -121,11 +121,11 @@ func TestCSTrieMatcher(t *testing.T) {
 }
 ```
 
-### CloudEvents Usage
+### Payload Usage
 
-- Use `cloudevents.CloudEvent` for Publish and RPC operations
-- Access data via `event.GetBinaryData()` and `event.GetTextData()`
-- CloudEvents are wrapped in `InboundMessage` and `OutboundMessage` envelopes
+- Client protocol messages use `InboundMessage` and `OutboundMessage` envelopes.
+- Publish and RPC payloads use `sharedpb.Payload` with binary, text, or JSON variants.
+- SDK-level helpers wrap payloads as `Message` plus typed `Data` helpers rather than CloudEvents.
 
 ## Architecture Patterns
 

@@ -1,14 +1,15 @@
 # MessageLoop TypeScript SDK
 
-A TypeScript SDK for MessageLoop messaging platform, supporting both Node.js and browsers.
+A TypeScript SDK for MessageLoop, supporting Node.js and browsers over WebSocket.
 
 ## Features
 
-- WebSocket transport with JSON and Protobuf encoding
-- Pub/sub messaging with wildcard channel support
-- RPC-style request/response
-- Automatic reconnection support (coming soon)
-- Heartbeat/ping-pong keepalive
+- WebSocket client for Node.js and browsers
+- JSON and protobuf encoding
+- Channel pub/sub and RPC
+- Automatic reconnection with session resumption
+- Heartbeat and pong timeout handling
+- Message helpers for JSON, text, and binary payloads
 
 ## Installation
 
@@ -19,63 +20,82 @@ npm install @messageloop/sdk
 ## Quick Start
 
 ```typescript
-import { dial, createMessage } from "@messageloop/sdk";
+import {
+  MessageLoopClient,
+  createJSONMessage,
+  setAutoSubscribe,
+  setClientId,
+  setEncoding,
+} from "@messageloop/sdk";
 
-// Create and connect client
-const client = await dial("ws://localhost:9080/ws", [
+const client = await MessageLoopClient.dial("ws://localhost:9080/ws", [
   setClientId("my-client"),
   setAutoSubscribe("chat.messages"),
+  setEncoding("json"),
 ]);
 
-// Set up handlers
 client.onConnected((sessionId) => console.log("Connected:", sessionId));
-client.onMessage((events) => {
-  events.forEach((msg) => console.log("Message:", msg.payload));
+client.onMessage((messages) => {
+  for (const msg of messages) {
+    console.log(msg.channel, msg.message.type, msg.message.data);
+  }
 });
 client.onError((err) => console.error("Error:", err));
 
-// Publish a message
-const msg = createMessage({
-  channel: "chat.messages",
-  payload: { text: "Hello!" },
-});
-await client.publish(msg);
+await client.publish(
+  "chat.messages",
+  createJSONMessage("chat.message", { text: "Hello!" })
+);
 
-// Make an RPC call
-const response = await client.rpc("user.service", "GetUser", requestMsg);
+const response = await client.rpc(
+  "user.service",
+  "GetUser",
+  createJSONMessage("user.get", { userId: "123" }),
+  { timeout: 5000 }
+);
+console.log("RPC:", response.data);
 
-// Clean up
 await client.close();
 ```
 
-## Configuration Options
+## Option Builders
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `encoding` | `"json"` \| `"proto"` | `"json"` | Message encoding |
-| `clientId` | `string` | Auto-generated | Client identifier |
-| `clientType` | `string` | `"sdk"` | Client type |
-| `token` | `string` | `""` | Authentication token |
-| `version` | `string` | `"1.0.0"` | Client version |
-| `autoSubscribe` | `string[]` | `[]` | Channels to auto-subscribe |
-| `pingInterval` | `number` | `30000` | Heartbeat interval (ms) |
-| `pingTimeout` | `number` | `10000` | Pong timeout (ms) |
-| `connectTimeout` | `number` | `30000` | Connection timeout (ms) |
-| `rpcTimeout` | `number` | `30000` | RPC timeout (ms) |
+| Builder | Default | Description |
+|--------|---------|-------------|
+| `setEncoding("json" \| "proto")` | `"json"` | Select wire encoding |
+| `setClientId(string)` | auto-generated UUID | Set logical client ID |
+| `setClientType(string)` | `"sdk"` | Set client type metadata |
+| `setToken(string)` | `""` | Authentication token passed in `Connect` |
+| `setVersion(string)` | `"1.0.0"` | Client version metadata |
+| `setAutoSubscribe(...channels)` | `[]` | Subscribe automatically on connect |
+| `setPingInterval(number)` | `30000` | Ping interval in milliseconds |
+| `setPingTimeout(number)` | `10000` | Pong timeout in milliseconds |
+| `setConnectTimeout(number)` | `30000` | Initial WebSocket connect timeout |
+| `setRPCTimeout(number)` | `30000` | Default RPC timeout |
+| `setEphemeral(boolean)` | `false` | Mark subscriptions as ephemeral |
+| `setAutoReconnect(boolean)` | `true` | Enable or disable reconnect logic |
+| `setReconnectDelay(initial, max)` | `1000`, `30000` | Configure reconnect backoff window |
+| `setReconnectMaxAttempts(number)` | `0` | Maximum reconnect attempts, `0` = unlimited |
 
 ## API Reference
 
+### Create And Connect
+
+- `MessageLoopClient.dial(url, options?)` - Connect and return a ready client
+
 ### Client Methods
 
-- `connect()` - Connect to the server
 - `close()` - Close the connection
 - `subscribe(...channels)` - Subscribe to channels
 - `unsubscribe(...channels)` - Unsubscribe from channels
 - `publish(channel, message)` - Publish a message to a channel
 - `rpc(channel, method, request, options?)` - Make an RPC call
 - `getSessionId()` - Get current session ID
+- `getConnectionState()` - Get `disconnected`, `connecting`, `connected`, or `reconnecting`
 - `isConnected()` - Check connection status
 - `getSubscribedChannels()` - Get subscribed channels
+- `disableAutoReconnect()` - Stop reconnect attempts
+- `enableAutoReconnect()` - Re-enable reconnect attempts
 
 ### Event Handlers
 
@@ -83,6 +103,22 @@ await client.close();
 - `onError(handler)` - Handle errors
 - `onConnected(handler)` - Handle connection established
 - `onClosed(handler)` - Handle connection closed
+- `addMessageHandler(handler)` - Register an additional message handler and get a disposer
+- `addStateChangeHandler(handler)` - Observe connection state transitions and get a disposer
+
+### Message Helpers
+
+- `createJSONMessage(type, json)`
+- `createTextMessage(type, text)`
+- `createBinaryMessage(type, binary)`
+- `createMessage(type, data)`
+- `createData(contentType, value)`
+- `dataAs(message)`
+
+## Examples
+
+- `examples/node/client.ts` - Node.js WebSocket client example
+- `examples/browser/index.html` - Browser example using the built SDK bundle
 
 ## Building
 
@@ -96,3 +132,9 @@ npm run build
 ```bash
 npm test
 ```
+
+## Notes
+
+- Node.js `>=18` is required.
+- The current TypeScript SDK is WebSocket-based; it does not expose a gRPC transport.
+- Run `npm run build` before opening the browser example because it imports from `dist/`.

@@ -1,16 +1,29 @@
 # Distributed Deployment Implementation Plan
 
+## Status
+
+This document is a historical implementation plan captured on 2026-04-17.
+
+It describes the intended rollout order at planning time, not a live checklist of what is still missing today.
+
+For current behavior and configuration, use:
+
+- `README.md`
+- `config-example.yaml`
+- `CLAUDE.md`
+- current code and tests in the repository
+
 ## Inputs
 
 - Design baseline: `docs/superpowers/specs/2026-04-17-distributed-deployment-design.md`
-- Goal: implement true distributed deployment support for MessageLoop.
+- Goal at planning time: implement true distributed deployment support for MessageLoop.
 - Constraint: backward compatibility is not required.
 
 ## Strategy
 
 Keep `Hub` as a local in-memory runtime structure and add distributed control-plane capabilities around `Node` through explicit ports and Redis-backed adapters.
 
-This minimizes architecture churn while replacing current node-local assumptions in session ownership, presence, admin routing, and cluster-wide queries.
+This minimizes architecture churn while replacing the then-current node-local assumptions in session ownership, presence, admin routing, and cluster-wide queries.
 
 ## Phase 1: Cluster Skeleton And Wiring
 

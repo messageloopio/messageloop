@@ -1,32 +1,62 @@
 server:
   http:
-    addr: ":8080"
+    addr: ":8080"   # Admin HTTP server exposing /health and /metrics
   heartbeat:
-    idle_timeout: "300s"
-  rpc_timeout: "30s"  # Default RPC request timeout
+    idle_timeout: "300s"  # Close idle client connections after this duration
+  rpc_timeout: "30s"      # Default timeout for proxied RPC requests
+  limits:
+    max_connections_per_user: 0       # 0 = unlimited
+    max_subscriptions_per_client: 0   # 0 = unlimited
+    max_publishes_per_second: 0       # 0 = unlimited
+  acl:
+    rules:
+      - channel_pattern: "chat.public.*"
+        allow_subscribe: ["*"]
+        allow_publish: ["alice", "bob"]
+      - channel_pattern: "chat.private.*"
+        deny_all: true
 
 transport:
   websocket:
     addr: ":9080"
     path: "/ws"
     check_origin: true  # Set to true for development to allow cross-origin requests
+    compression: true   # Enable permessage-deflate
+    # write_timeout: "10s"
+    # tls:
+    #   cert_file: "./certs/server.crt"
+    #   key_file: "./certs/server.key"
   grpc:
     addr: ":9090"
+    # write_timeout: "10s"
+    # tls:
+    #   cert_file: "./certs/server.crt"
+    #   key_file: "./certs/server.key"
 
 broker:
-  type: redis
+  type: redis  # Use "memory" for a single-node in-process broker
   redis:
     addr: 127.0.0.1:6379
     password: ""
     db: 10
+    # pool_size: 10
+    # min_idle_conns: 5
+    # max_retries: 3
+    # dial_timeout: "5s"
+    # read_timeout: "3s"
+    # write_timeout: "3s"
+    # stream_max_length: 10000
+    # stream_approximate: true
+    # history_ttl: "24h"
 
 cluster:
   enabled: false       # Set to true to enable the Redis-backed distributed control plane.
   node_id: node-a      # Must be unique per logical node in the cluster.
   backend: redis       # Current distributed control-plane backend.
+                       # In practice this should be paired with broker.type=redis.
 
 proxy:
-  - name: example
+  - name: example-grpc
     endpoint: 127.0.0.1:9091
     timeout: 30s
     grpc:
@@ -34,3 +64,15 @@ proxy:
     routes:
       - channel: "*"
         method: "*"
+  # - name: example-http
+  #   endpoint: "https://backend.example.com/rpc"
+  #   timeout: 10s
+  #   http:
+  #     headers:
+  #       X-Backend: messageloop
+  #     tls:
+  #       insecure_skip_verify: false
+  #       server_name: backend.example.com
+  #   routes:
+  #     - channel: "rpc.*"
+  #       method: "*"

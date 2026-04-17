@@ -1,17 +1,28 @@
 # Distributed Deployment Design
 
-## Context
+## Status
 
-MessageLoop already supports distributed message fan-out through the Redis broker, but distributed deployment is not end-to-end complete.
+This document is a historical design baseline written on 2026-04-17 before the cluster work was implemented end-to-end.
 
-Current gaps:
+Use the following as the current source of truth for runtime behavior and operator-facing configuration:
+
+- `README.md`
+- `config-example.yaml`
+- `CLAUDE.md`
+- current code under the root package and `pkg/redisbroker/`
+
+## Historical Context
+
+At design time, MessageLoop already supported distributed message fan-out through the Redis broker, but distributed deployment was not end-to-end complete.
+
+Gaps at design time:
 
 - Presence is still node-local by default.
 - Admin operations are node-local even when message delivery is distributed.
 - Session resume depends on local in-memory session ownership.
 - Global queries such as active channels and presence are not backed by a shared cluster view.
 
-This design makes MessageLoop support true multi-node deployment across both the data plane and control plane.
+This design proposed how MessageLoop could support true multi-node deployment across both the data plane and control plane.
 
 ## Goals
 
