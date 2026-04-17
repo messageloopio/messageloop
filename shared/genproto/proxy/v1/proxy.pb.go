@@ -173,6 +173,8 @@ type AuthenticateRequest struct {
 	ClientId      string                 `protobuf:"bytes,1,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
 	Token         string                 `protobuf:"bytes,2,opt,name=token,proto3" json:"token,omitempty"`
 	ClientType    string                 `protobuf:"bytes,3,opt,name=client_type,json=clientType,proto3" json:"client_type,omitempty"`
+	SessionId     string                 `protobuf:"bytes,4,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	RemoteAddr    string                 `protobuf:"bytes,5,opt,name=remote_addr,json=remoteAddr,proto3" json:"remote_addr,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -224,6 +226,20 @@ func (x *AuthenticateRequest) GetToken() string {
 func (x *AuthenticateRequest) GetClientType() string {
 	if x != nil {
 		return x.ClientType
+	}
+	return ""
+}
+
+func (x *AuthenticateRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *AuthenticateRequest) GetRemoteAddr() string {
+	if x != nil {
+		return x.RemoteAddr
 	}
 	return ""
 }
@@ -360,6 +376,8 @@ type SubscribeAclRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Channel       string                 `protobuf:"bytes,1,opt,name=channel,proto3" json:"channel,omitempty"`
 	Token         string                 `protobuf:"bytes,2,opt,name=token,proto3" json:"token,omitempty"`
+	UserId        string                 `protobuf:"bytes,3,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	SessionId     string                 `protobuf:"bytes,4,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -408,8 +426,23 @@ func (x *SubscribeAclRequest) GetToken() string {
 	return ""
 }
 
+func (x *SubscribeAclRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *SubscribeAclRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
 type SubscribeAclResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	Error         *v1.Error              `protobuf:"bytes,1,opt,name=error,proto3" json:"error,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -444,10 +477,19 @@ func (*SubscribeAclResponse) Descriptor() ([]byte, []int) {
 	return file_proxy_v1_proxy_proto_rawDescGZIP(), []int{6}
 }
 
+func (x *SubscribeAclResponse) GetError() *v1.Error {
+	if x != nil {
+		return x.Error
+	}
+	return nil
+}
+
 type PublishAclRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Channel       string                 `protobuf:"bytes,1,opt,name=channel,proto3" json:"channel,omitempty"`
 	Token         string                 `protobuf:"bytes,2,opt,name=token,proto3" json:"token,omitempty"`
+	UserId        string                 `protobuf:"bytes,3,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	SessionId     string                 `protobuf:"bytes,4,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -496,8 +538,23 @@ func (x *PublishAclRequest) GetToken() string {
 	return ""
 }
 
+func (x *PublishAclRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *PublishAclRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
 type PublishAclResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	Error         *v1.Error              `protobuf:"bytes,1,opt,name=error,proto3" json:"error,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -530,6 +587,13 @@ func (x *PublishAclResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use PublishAclResponse.ProtoReflect.Descriptor instead.
 func (*PublishAclResponse) Descriptor() ([]byte, []int) {
 	return file_proxy_v1_proxy_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *PublishAclResponse) GetError() *v1.Error {
+	if x != nil {
+		return x.Error
+	}
+	return nil
 }
 
 type OnConnectedRequest struct {
@@ -904,7 +968,7 @@ var File_proxy_v1_proxy_proto protoreflect.FileDescriptor
 
 const file_proxy_v1_proxy_proto_rawDesc = "" +
 	"\n" +
-	"\x14proxy/v1/proxy.proto\x12\x14messageloop.proxy.v1\x1a\x15shared/v1/types.proto\x1a\x16shared/v1/errors.proto\"\xc5\x01\n" +
+	"\x14proxy/v1/proxy.proto\x12\x14messageloop.proxy.v1\x1a\x16shared/v1/errors.proto\x1a\x15shared/v1/types.proto\"\xc5\x01\n" +
 	"\n" +
 	"RPCRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
@@ -916,12 +980,16 @@ const file_proxy_v1_proxy_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x128\n" +
 	"\apayload\x18\x02 \x01(\v2\x1e.messageloop.shared.v1.PayloadR\apayload\x12;\n" +
 	"\bmetadata\x18\x03 \x01(\v2\x1f.messageloop.shared.v1.MetadataR\bmetadata\x122\n" +
-	"\x05error\x18\x04 \x01(\v2\x1c.messageloop.shared.v1.ErrorR\x05error\"i\n" +
+	"\x05error\x18\x04 \x01(\v2\x1c.messageloop.shared.v1.ErrorR\x05error\"\xa9\x01\n" +
 	"\x13AuthenticateRequest\x12\x1b\n" +
 	"\tclient_id\x18\x01 \x01(\tR\bclientId\x12\x14\n" +
 	"\x05token\x18\x02 \x01(\tR\x05token\x12\x1f\n" +
 	"\vclient_type\x18\x03 \x01(\tR\n" +
-	"clientType\"\x87\x01\n" +
+	"clientType\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x04 \x01(\tR\tsessionId\x12\x1f\n" +
+	"\vremote_addr\x18\x05 \x01(\tR\n" +
+	"remoteAddr\"\x87\x01\n" +
 	"\x14AuthenticateResponse\x122\n" +
 	"\x05error\x18\x01 \x01(\v2\x1c.messageloop.shared.v1.ErrorR\x05error\x12;\n" +
 	"\tuser_info\x18\x02 \x01(\v2\x1e.messageloop.proxy.v1.UserInfoR\buserInfo\"\x8a\x01\n" +
@@ -931,15 +999,23 @@ const file_proxy_v1_proxy_proto_rawDesc = "" +
 	"\x05token\x18\x03 \x01(\tR\x05token\x12\x1f\n" +
 	"\vclient_type\x18\x04 \x01(\tR\n" +
 	"clientType\x12\x1b\n" +
-	"\tclient_id\x18\x05 \x01(\tR\bclientId\"E\n" +
+	"\tclient_id\x18\x05 \x01(\tR\bclientId\"}\n" +
 	"\x13SubscribeAclRequest\x12\x18\n" +
 	"\achannel\x18\x01 \x01(\tR\achannel\x12\x14\n" +
-	"\x05token\x18\x02 \x01(\tR\x05token\"\x16\n" +
-	"\x14SubscribeAclResponse\"C\n" +
+	"\x05token\x18\x02 \x01(\tR\x05token\x12\x17\n" +
+	"\auser_id\x18\x03 \x01(\tR\x06userId\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x04 \x01(\tR\tsessionId\"J\n" +
+	"\x14SubscribeAclResponse\x122\n" +
+	"\x05error\x18\x01 \x01(\v2\x1c.messageloop.shared.v1.ErrorR\x05error\"{\n" +
 	"\x11PublishAclRequest\x12\x18\n" +
 	"\achannel\x18\x01 \x01(\tR\achannel\x12\x14\n" +
-	"\x05token\x18\x02 \x01(\tR\x05token\"\x14\n" +
-	"\x12PublishAclResponse\"O\n" +
+	"\x05token\x18\x02 \x01(\tR\x05token\x12\x17\n" +
+	"\auser_id\x18\x03 \x01(\tR\x06userId\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x04 \x01(\tR\tsessionId\"H\n" +
+	"\x12PublishAclResponse\x122\n" +
+	"\x05error\x18\x01 \x01(\v2\x1c.messageloop.shared.v1.ErrorR\x05error\"O\n" +
 	"\x12OnConnectedRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1a\n" +
@@ -1016,27 +1092,29 @@ var file_proxy_v1_proxy_proto_depIdxs = []int32{
 	19, // 4: messageloop.proxy.v1.RPCResponse.error:type_name -> messageloop.shared.v1.Error
 	19, // 5: messageloop.proxy.v1.AuthenticateResponse.error:type_name -> messageloop.shared.v1.Error
 	4,  // 6: messageloop.proxy.v1.AuthenticateResponse.user_info:type_name -> messageloop.proxy.v1.UserInfo
-	0,  // 7: messageloop.proxy.v1.ProxyService.RPC:input_type -> messageloop.proxy.v1.RPCRequest
-	2,  // 8: messageloop.proxy.v1.ProxyService.Authenticate:input_type -> messageloop.proxy.v1.AuthenticateRequest
-	5,  // 9: messageloop.proxy.v1.ProxyService.SubscribeAcl:input_type -> messageloop.proxy.v1.SubscribeAclRequest
-	7,  // 10: messageloop.proxy.v1.ProxyService.PublishAcl:input_type -> messageloop.proxy.v1.PublishAclRequest
-	9,  // 11: messageloop.proxy.v1.ProxyService.OnConnected:input_type -> messageloop.proxy.v1.OnConnectedRequest
-	11, // 12: messageloop.proxy.v1.ProxyService.OnSubscribed:input_type -> messageloop.proxy.v1.OnSubscribedRequest
-	13, // 13: messageloop.proxy.v1.ProxyService.OnUnsubscribed:input_type -> messageloop.proxy.v1.OnUnsubscribedRequest
-	15, // 14: messageloop.proxy.v1.ProxyService.OnDisconnected:input_type -> messageloop.proxy.v1.OnDisconnectedRequest
-	1,  // 15: messageloop.proxy.v1.ProxyService.RPC:output_type -> messageloop.proxy.v1.RPCResponse
-	3,  // 16: messageloop.proxy.v1.ProxyService.Authenticate:output_type -> messageloop.proxy.v1.AuthenticateResponse
-	6,  // 17: messageloop.proxy.v1.ProxyService.SubscribeAcl:output_type -> messageloop.proxy.v1.SubscribeAclResponse
-	8,  // 18: messageloop.proxy.v1.ProxyService.PublishAcl:output_type -> messageloop.proxy.v1.PublishAclResponse
-	10, // 19: messageloop.proxy.v1.ProxyService.OnConnected:output_type -> messageloop.proxy.v1.OnConnectedResponse
-	12, // 20: messageloop.proxy.v1.ProxyService.OnSubscribed:output_type -> messageloop.proxy.v1.OnSubscribedResponse
-	14, // 21: messageloop.proxy.v1.ProxyService.OnUnsubscribed:output_type -> messageloop.proxy.v1.OnUnsubscribedResponse
-	16, // 22: messageloop.proxy.v1.ProxyService.OnDisconnected:output_type -> messageloop.proxy.v1.OnDisconnectedResponse
-	15, // [15:23] is the sub-list for method output_type
-	7,  // [7:15] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	19, // 7: messageloop.proxy.v1.SubscribeAclResponse.error:type_name -> messageloop.shared.v1.Error
+	19, // 8: messageloop.proxy.v1.PublishAclResponse.error:type_name -> messageloop.shared.v1.Error
+	0,  // 9: messageloop.proxy.v1.ProxyService.RPC:input_type -> messageloop.proxy.v1.RPCRequest
+	2,  // 10: messageloop.proxy.v1.ProxyService.Authenticate:input_type -> messageloop.proxy.v1.AuthenticateRequest
+	5,  // 11: messageloop.proxy.v1.ProxyService.SubscribeAcl:input_type -> messageloop.proxy.v1.SubscribeAclRequest
+	7,  // 12: messageloop.proxy.v1.ProxyService.PublishAcl:input_type -> messageloop.proxy.v1.PublishAclRequest
+	9,  // 13: messageloop.proxy.v1.ProxyService.OnConnected:input_type -> messageloop.proxy.v1.OnConnectedRequest
+	11, // 14: messageloop.proxy.v1.ProxyService.OnSubscribed:input_type -> messageloop.proxy.v1.OnSubscribedRequest
+	13, // 15: messageloop.proxy.v1.ProxyService.OnUnsubscribed:input_type -> messageloop.proxy.v1.OnUnsubscribedRequest
+	15, // 16: messageloop.proxy.v1.ProxyService.OnDisconnected:input_type -> messageloop.proxy.v1.OnDisconnectedRequest
+	1,  // 17: messageloop.proxy.v1.ProxyService.RPC:output_type -> messageloop.proxy.v1.RPCResponse
+	3,  // 18: messageloop.proxy.v1.ProxyService.Authenticate:output_type -> messageloop.proxy.v1.AuthenticateResponse
+	6,  // 19: messageloop.proxy.v1.ProxyService.SubscribeAcl:output_type -> messageloop.proxy.v1.SubscribeAclResponse
+	8,  // 20: messageloop.proxy.v1.ProxyService.PublishAcl:output_type -> messageloop.proxy.v1.PublishAclResponse
+	10, // 21: messageloop.proxy.v1.ProxyService.OnConnected:output_type -> messageloop.proxy.v1.OnConnectedResponse
+	12, // 22: messageloop.proxy.v1.ProxyService.OnSubscribed:output_type -> messageloop.proxy.v1.OnSubscribedResponse
+	14, // 23: messageloop.proxy.v1.ProxyService.OnUnsubscribed:output_type -> messageloop.proxy.v1.OnUnsubscribedResponse
+	16, // 24: messageloop.proxy.v1.ProxyService.OnDisconnected:output_type -> messageloop.proxy.v1.OnDisconnectedResponse
+	17, // [17:25] is the sub-list for method output_type
+	9,  // [9:17] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_proxy_v1_proxy_proto_init() }

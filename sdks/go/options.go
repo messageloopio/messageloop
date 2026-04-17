@@ -58,6 +58,17 @@ type Options struct {
 	PingInterval time.Duration
 	// PingTimeout is the timeout for waiting for a pong response
 	PingTimeout time.Duration
+
+	// AutoReconnect enables automatic reconnection on disconnect.
+	AutoReconnect bool
+	// ReconnectInitialDelay is the initial delay before the first reconnect attempt.
+	ReconnectInitialDelay time.Duration
+	// ReconnectMaxDelay is the maximum delay between reconnect attempts.
+	ReconnectMaxDelay time.Duration
+	// ReconnectBackoffFactor is the multiplier applied to the delay after each attempt.
+	ReconnectBackoffFactor float64
+	// ReconnectMaxAttempts is the maximum number of reconnect attempts (0 = unlimited).
+	ReconnectMaxAttempts int
 }
 
 // Option is a function that modifies Options.
@@ -66,15 +77,20 @@ type Option func(*Options)
 // defaultOptions returns the default options.
 func defaultOptions() *Options {
 	return &Options{
-		Encoding:      EncodingJSON,
-		DialTimeout:   10 * time.Second,
-		ClientID:      "",
-		ClientType:    "sdk",
-		Token:         "",
-		Version:       "1.0.0",
-		AutoSubscribe: nil,
-		PingInterval:  30 * time.Second,
-		PingTimeout:   10 * time.Second,
+		Encoding:               EncodingJSON,
+		DialTimeout:            10 * time.Second,
+		ClientID:               "",
+		ClientType:             "sdk",
+		Token:                  "",
+		Version:                "1.0.0",
+		AutoSubscribe:          nil,
+		PingInterval:           30 * time.Second,
+		PingTimeout:            10 * time.Second,
+		AutoReconnect:          false,
+		ReconnectInitialDelay:  1 * time.Second,
+		ReconnectMaxDelay:      30 * time.Second,
+		ReconnectBackoffFactor: 2.0,
+		ReconnectMaxAttempts:   0,
 	}
 }
 
@@ -138,5 +154,28 @@ func WithPingInterval(interval time.Duration) Option {
 func WithPingTimeout(timeout time.Duration) Option {
 	return func(o *Options) {
 		o.PingTimeout = timeout
+	}
+}
+
+// WithAutoReconnect enables automatic reconnection with session resumption.
+func WithAutoReconnect(enabled bool) Option {
+	return func(o *Options) {
+		o.AutoReconnect = enabled
+	}
+}
+
+// WithReconnectBackoff configures the reconnection backoff parameters.
+func WithReconnectBackoff(initial, max time.Duration, factor float64) Option {
+	return func(o *Options) {
+		o.ReconnectInitialDelay = initial
+		o.ReconnectMaxDelay = max
+		o.ReconnectBackoffFactor = factor
+	}
+}
+
+// WithReconnectMaxAttempts sets the maximum number of reconnect attempts (0 = unlimited).
+func WithReconnectMaxAttempts(max int) Option {
+	return func(o *Options) {
+		o.ReconnectMaxAttempts = max
 	}
 }

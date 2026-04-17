@@ -159,6 +159,8 @@ type AuthenticateProxyRequest struct {
 	ClientID   string
 	Token      string
 	ClientType string
+	SessionID  string
+	RemoteAddr string
 }
 
 // ToProtoRequest converts an AuthenticateProxyRequest to the protobuf AuthenticateRequest.
@@ -167,6 +169,8 @@ func (r *AuthenticateProxyRequest) ToProtoRequest() *proxypb.AuthenticateRequest
 		ClientId:   r.ClientID,
 		Token:      r.Token,
 		ClientType: r.ClientType,
+		SessionId:  r.SessionID,
+		RemoteAddr: r.RemoteAddr,
 	}
 }
 
@@ -208,15 +212,19 @@ func FromProtoAuthenticateResponse(resp *proxypb.AuthenticateResponse) *Authenti
 
 // SubscribeAclProxyRequest represents a subscription ACL check request to be proxied.
 type SubscribeAclProxyRequest struct {
-	Channel string
-	Token   string
+	Channel   string
+	Token     string
+	UserID    string
+	SessionID string
 }
 
 // ToProtoRequest converts a SubscribeAclProxyRequest to the protobuf SubscribeAclRequest.
 func (r *SubscribeAclProxyRequest) ToProtoRequest() *proxypb.SubscribeAclRequest {
 	return &proxypb.SubscribeAclRequest{
-		Channel: r.Channel,
-		Token:   r.Token,
+		Channel:   r.Channel,
+		Token:     r.Token,
+		UserId:    r.UserID,
+		SessionId: r.SessionID,
 	}
 }
 
@@ -230,20 +238,24 @@ func FromProtoSubscribeAclResponse(resp *proxypb.SubscribeAclResponse) *Subscrib
 	if resp == nil {
 		return &SubscribeAclProxyResponse{}
 	}
-	return &SubscribeAclProxyResponse{}
+	return &SubscribeAclProxyResponse{Error: resp.Error}
 }
 
 // PublishAclProxyRequest represents a publish ACL check request to be proxied.
 type PublishAclProxyRequest struct {
-	Channel string
-	Token   string
+	Channel   string
+	Token     string
+	UserID    string
+	SessionID string
 }
 
 // ToProtoRequest converts a PublishAclProxyRequest to the protobuf PublishAclRequest.
 func (r *PublishAclProxyRequest) ToProtoRequest() *proxypb.PublishAclRequest {
 	return &proxypb.PublishAclRequest{
-		Channel: r.Channel,
-		Token:   r.Token,
+		Channel:   r.Channel,
+		Token:     r.Token,
+		UserId:    r.UserID,
+		SessionId: r.SessionID,
 	}
 }
 
@@ -257,7 +269,7 @@ func FromProtoPublishAclResponse(resp *proxypb.PublishAclResponse) *PublishAclPr
 	if resp == nil {
 		return &PublishAclProxyResponse{}
 	}
-	return &PublishAclProxyResponse{}
+	return &PublishAclProxyResponse{Error: resp.Error}
 }
 
 // OnConnectedProxyRequest represents a client connected notification to be proxied.

@@ -3,25 +3,25 @@ syntax = "proto3";
 // buf:lint:ignore PACKAGE_DIRECTORY_MATCH
 package messageloop.proxy.v1;
 
-option go_package = "github.com/messageloopio/messageloop/genproto/proxy/v1;proxypb";
-
-import "shared/v1/types.proto";
 import "shared/v1/errors.proto";
+import "shared/v1/types.proto";
+
+option go_package = "github.com/messageloopio/messageloop/genproto/proxy/v1;proxypb";
 
 service ProxyService {
   // RPC 调用
-  rpc RPC(RPCRequest) returns(RPCResponse);
+  rpc RPC(RPCRequest) returns (RPCResponse);
   // 认证
-  rpc Authenticate(AuthenticateRequest) returns(AuthenticateResponse);
+  rpc Authenticate(AuthenticateRequest) returns (AuthenticateResponse);
   // 订阅权限校验
-  rpc SubscribeAcl(SubscribeAclRequest) returns(SubscribeAclResponse);
+  rpc SubscribeAcl(SubscribeAclRequest) returns (SubscribeAclResponse);
   // 发布权限校验
-  rpc PublishAcl(PublishAclRequest) returns(PublishAclResponse);
+  rpc PublishAcl(PublishAclRequest) returns (PublishAclResponse);
   // 生命周期钩子
-  rpc OnConnected(OnConnectedRequest) returns(OnConnectedResponse);
-  rpc OnSubscribed(OnSubscribedRequest) returns(OnSubscribedResponse);
-  rpc OnUnsubscribed(OnUnsubscribedRequest) returns(OnUnsubscribedResponse);
-  rpc OnDisconnected(OnDisconnectedRequest) returns(OnDisconnectedResponse);
+  rpc OnConnected(OnConnectedRequest) returns (OnConnectedResponse);
+  rpc OnSubscribed(OnSubscribedRequest) returns (OnSubscribedResponse);
+  rpc OnUnsubscribed(OnUnsubscribedRequest) returns (OnUnsubscribedResponse);
+  rpc OnDisconnected(OnDisconnectedRequest) returns (OnDisconnectedResponse);
 }
 
 // --- RPC ---
@@ -47,6 +47,8 @@ message AuthenticateRequest {
   string client_id = 1;
   string token = 2;
   string client_type = 3;
+  string session_id = 4;
+  string remote_addr = 5;
 }
 
 message AuthenticateResponse {
@@ -67,18 +69,26 @@ message UserInfo {
 message SubscribeAclRequest {
   string channel = 1;
   string token = 2;
+  string user_id = 3;
+  string session_id = 4;
 }
 
-message SubscribeAclResponse {}
+message SubscribeAclResponse {
+  messageloop.shared.v1.Error error = 1;
+}
 
 // --- PublishAcl ---
 
 message PublishAclRequest {
   string channel = 1;
   string token = 2;
+  string user_id = 3;
+  string session_id = 4;
 }
 
-message PublishAclResponse {}
+message PublishAclResponse {
+  messageloop.shared.v1.Error error = 1;
+}
 
 // --- 生命周期钩子 ---
 

@@ -11,11 +11,11 @@ import {
   PingSchema,
   PublishSchema,
   RpcRequestSchema,
-} from "../proto/v1/service_pb";
+} from "../proto/client/v1/service_pb";
 
 import { PayloadSchema, MetadataSchema } from "../proto/shared/v1/types_pb";
 
-import type { InboundMessage, OutboundMessage, Message as ProtoMessage, Publication, Publish, RpcRequest, RpcReply } from "../proto/v1/service_pb";
+import type { InboundMessage, OutboundMessage, Message as ProtoMessage, Publication, Publish, RpcRequest, RpcReply } from "../proto/client/v1/service_pb";
 import type { Payload, Metadata } from "../proto/shared/v1/types_pb";
 
 import {
@@ -64,18 +64,23 @@ export function createConnectMessage(
   clientType: string,
   token: string,
   version: string,
-  autoSubscribe: { channel: string; ephemeral: boolean; token: string }[]
+  autoSubscribe: { channel: string; ephemeral: boolean; token: string; recover?: boolean; offset?: bigint; epoch?: string }[],
+  sessionId?: string
 ): InboundMessage {
   const connect = create(ConnectSchema, {
     clientId,
     clientType,
     token,
     version,
+    sessionId: sessionId || "",
     subscriptions: autoSubscribe.map((sub) =>
       create(SubscriptionSchema, {
         channel: sub.channel,
         ephemeral: sub.ephemeral,
         token: sub.token,
+        recover: sub.recover || false,
+        offset: sub.offset || BigInt(0),
+        epoch: sub.epoch || "",
       })
     ),
   });
@@ -273,5 +278,5 @@ export function extractRpcReply(reply: RpcReply): {
 
 // Re-export types that might be needed
 export { create };
-export type { InboundMessage, OutboundMessage, Message as ProtoMessage, Publication, Publish, RpcRequest, RpcReply } from "../proto/v1/service_pb";
+export type { InboundMessage, OutboundMessage, Message as ProtoMessage, Publication, Publish, RpcRequest, RpcReply } from "../proto/client/v1/service_pb";
 export type { Payload, Metadata } from "../proto/shared/v1/types_pb";

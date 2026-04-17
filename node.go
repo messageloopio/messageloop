@@ -27,6 +27,7 @@ type Node struct {
 	metrics          *Metrics
 	surveys          map[string]*Survey
 	surveyMu         sync.RWMutex
+	acl              *ACLEngine
 }
 
 const (
@@ -72,6 +73,20 @@ func NewNode(cfg *config.Server) *Node {
 	}
 
 	node.broker = NewMemoryBroker(MemoryBrokerOptions{})
+
+	if cfg != nil && len(cfg.ACL.Rules) > 0 {
+		rules := make([]ACLRule, len(cfg.ACL.Rules))
+		for i, r := range cfg.ACL.Rules {
+			rules[i] = ACLRule{
+				ChannelPattern: r.ChannelPattern,
+				AllowSubscribe: r.AllowSubscribe,
+				AllowPublish:   r.AllowPublish,
+				DenyAll:        r.DenyAll,
+			}
+		}
+		node.acl = NewACLEngine(rules)
+	}
+
 	return node
 }
 

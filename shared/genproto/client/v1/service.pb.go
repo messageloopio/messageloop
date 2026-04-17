@@ -1556,7 +1556,7 @@ var File_client_v1_service_proto protoreflect.FileDescriptor
 
 const file_client_v1_service_proto_rawDesc = "" +
 	"\n" +
-	"\x17client/v1/service.proto\x12\x15messageloop.client.v1\x1a\x15shared/v1/types.proto\x1a\x16shared/v1/errors.proto\"\x9d\x05\n" +
+	"\x17client/v1/service.proto\x12\x15messageloop.client.v1\x1a\x16shared/v1/errors.proto\x1a\x15shared/v1/types.proto\"\x9d\x05\n" +
 	"\x0eInboundMessage\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04time\x18\x02 \x01(\x04R\x04time\x12:\n" +

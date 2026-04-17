@@ -7,8 +7,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 )
 
 // transport is the interface for sending/receiving messages.
@@ -38,6 +38,10 @@ type Client interface {
 	OnError(fn func(error))
 	// OnConnected sets the connected handler
 	OnConnected(fn func(sessionID string))
+	// OnReconnecting sets the reconnecting handler, called before each attempt.
+	OnReconnecting(fn func(attempt int))
+	// OnReconnected sets the reconnected handler, called after successful reconnect.
+	OnReconnected(fn func(sessionID string))
 	// SessionID returns the session ID
 	SessionID() string
 	// IsConnected returns the connection status
@@ -46,25 +50,37 @@ type Client interface {
 
 // client is the implementation of the Client interface.
 type client struct {
-	mu               sync.RWMutex
-	ctx              context.Context
-	cancel           context.CancelFunc
-	transport        transport
-	opts             *Options
-	sessionID        string
-	connected        atomic.Bool
-	closed           atomic.Bool
-	connectedCh      chan struct{} // Closed when connection is established
-	connectErrCh     chan error    // For connection errors
-	msgHandler       func([]*Message)
-	errorHandler     func(error)
-	connectedHandler func(string)
-	pendingRPC       map[string]chan *clientpb.OutboundMessage
-	pendingRPCMu     sync.RWMutex
-	nextMsgID        atomic.Uint64
-	subscriptions    map[string]bool
-	subMu            sync.RWMutex
-	pingCancel       context.CancelFunc
+	mu                  sync.RWMutex
+	ctx                 context.Context
+	cancel              context.CancelFunc
+	transport           transport
+	opts                *Options
+	sessionID           string
+	connected           atomic.Bool
+	closed              atomic.Bool
+	reconnecting        atomic.Bool
+	connectedCh         chan struct{} // Closed when connection is established
+	connectErrCh        chan error    // For connection errors
+	msgHandler          func([]*Message)
+	errorHandler        func(error)
+	connectedHandler    func(string)
+	reconnectingHandler func(int)
+	reconnectedHandler  func(string)
+	pendingRPC          map[string]chan *clientpb.OutboundMessage
+	pendingRPCMu        sync.RWMutex
+	nextMsgID           atomic.Uint64
+	subscriptions       map[string]bool
+	subMu               sync.RWMutex
+	pingCancel          context.CancelFunc
+
+	// Session resumption state
+	epoch          string
+	channelOffsets map[string]uint64
+	offsetMu       sync.RWMutex
+
+	// Reconnection: stores connection parameters for re-dialing
+	dialURL  string // WebSocket URL (empty for gRPC)
+	dialAddr string // gRPC address (empty for WebSocket)
 }
 
 // Dial creates a new WebSocket client connecting to the specified URL.
@@ -82,7 +98,9 @@ func Dial(url string, opts ...Option) (Client, error) {
 		return nil, err
 	}
 
-	return newClient(ctx, cancel, trans, options), nil
+	c := newClient(ctx, cancel, trans, options)
+	c.dialURL = url
+	return c, nil
 }
 
 // DialGRPC creates a new gRPC client connecting to the specified address.
@@ -100,20 +118,23 @@ func DialGRPC(addr string, opts ...Option) (Client, error) {
 		return nil, err
 	}
 
-	return newClient(ctx, cancel, trans, options), nil
+	c := newClient(ctx, cancel, trans, options)
+	c.dialAddr = addr
+	return c, nil
 }
 
 // newClient creates a new client with the given transport.
 func newClient(ctx context.Context, cancel context.CancelFunc, trans transport, opts *Options) *client {
 	c := &client{
-		ctx:           ctx,
-		cancel:        cancel,
-		transport:     trans,
-		opts:          opts,
-		connectedCh:   make(chan struct{}),
-		connectErrCh:  make(chan error, 1),
-		pendingRPC:    make(map[string]chan *clientpb.OutboundMessage),
-		subscriptions: make(map[string]bool),
+		ctx:            ctx,
+		cancel:         cancel,
+		transport:      trans,
+		opts:           opts,
+		connectedCh:    make(chan struct{}),
+		connectErrCh:   make(chan error, 1),
+		pendingRPC:     make(map[string]chan *clientpb.OutboundMessage),
+		subscriptions:  make(map[string]bool),
+		channelOffsets: make(map[string]uint64),
 	}
 	return c
 }
@@ -185,6 +206,11 @@ func (c *client) receiveLoop() {
 			if !c.closed.Load() {
 				isConnError := !c.connected.Load()
 				c.handleError(fmt.Errorf("receive error: %w", err), isConnError)
+				c.connected.Store(false)
+				// Attempt reconnection if enabled
+				if c.opts.AutoReconnect && !c.closed.Load() {
+					go c.reconnectLoop()
+				}
 			}
 			return
 		}
@@ -229,9 +255,13 @@ func (c *client) handleMessage(msg *clientpb.OutboundMessage) {
 func (c *client) handleConnected(connected *clientpb.Connected) {
 	c.mu.Lock()
 	c.sessionID = connected.GetSessionId()
+	c.epoch = connected.GetEpoch()
+	resumed := connected.GetResumed()
 	ch := c.connectedCh
 	c.mu.Unlock()
 	c.connected.Store(true)
+
+	wasReconnecting := c.reconnecting.Swap(false)
 
 	// Signal that connection is established
 	select {
@@ -241,15 +271,25 @@ func (c *client) handleConnected(connected *clientpb.Connected) {
 		close(ch)
 	}
 
-	// Track subscriptions
-	for _, sub := range connected.GetSubscriptions() {
-		c.subMu.Lock()
-		c.subscriptions[sub.GetChannel()] = true
-		c.subMu.Unlock()
+	// Track subscriptions (skip if session was resumed — server preserved them)
+	if !resumed {
+		for _, sub := range connected.GetSubscriptions() {
+			c.subMu.Lock()
+			c.subscriptions[sub.GetChannel()] = true
+			c.subMu.Unlock()
+		}
 	}
 
-	// Handle initial publications
+	// Handle initial publications (recovery messages)
 	for _, pub := range connected.GetPublications() {
+		// Update offsets from recovered publications
+		for _, env := range pub.GetMessages() {
+			if env != nil && env.GetOffset() > 0 {
+				c.offsetMu.Lock()
+				c.channelOffsets[env.GetChannel()] = env.GetOffset()
+				c.offsetMu.Unlock()
+			}
+		}
 		msgs := wrapPublicationToMessages(pub)
 		if c.msgHandler != nil && len(msgs) > 0 {
 			c.msgHandler(msgs)
@@ -259,6 +299,9 @@ func (c *client) handleConnected(connected *clientpb.Connected) {
 	// Start ping loop
 	c.startPingLoop()
 
+	if wasReconnecting && c.reconnectedHandler != nil {
+		c.reconnectedHandler(c.sessionID)
+	}
 	if c.connectedHandler != nil {
 		c.connectedHandler(c.sessionID)
 	}
@@ -284,6 +327,14 @@ func (c *client) handleUnsubscribeAck(ack *clientpb.UnsubscribeAck) {
 
 // handlePublication handles the Publication message.
 func (c *client) handlePublication(pub *clientpb.Publication) {
+	// Update per-channel offsets for session resumption
+	for _, env := range pub.GetMessages() {
+		if env != nil && env.GetOffset() > 0 {
+			c.offsetMu.Lock()
+			c.channelOffsets[env.GetChannel()] = env.GetOffset()
+			c.offsetMu.Unlock()
+		}
+	}
 	msgs := wrapPublicationToMessages(pub)
 	if c.msgHandler != nil && len(msgs) > 0 {
 		c.msgHandler(msgs)
@@ -503,6 +554,16 @@ func (c *client) OnConnected(fn func(string)) {
 	c.connectedHandler = fn
 }
 
+// OnReconnecting sets the handler called before each reconnect attempt.
+func (c *client) OnReconnecting(fn func(attempt int)) {
+	c.reconnectingHandler = fn
+}
+
+// OnReconnected sets the handler called after a successful reconnect.
+func (c *client) OnReconnected(fn func(sessionID string)) {
+	c.reconnectedHandler = fn
+}
+
 // SessionID returns the session ID.
 func (c *client) SessionID() string {
 	c.mu.RLock()
@@ -513,6 +574,149 @@ func (c *client) SessionID() string {
 // IsConnected returns the connection status.
 func (c *client) IsConnected() bool {
 	return c.connected.Load()
+}
+
+// reconnectLoop attempts to reconnect with exponential backoff.
+func (c *client) reconnectLoop() {
+	if !c.reconnecting.CompareAndSwap(false, true) {
+		return // Already reconnecting
+	}
+
+	// Stop the ping loop during reconnection
+	c.mu.Lock()
+	if c.pingCancel != nil {
+		c.pingCancel()
+		c.pingCancel = nil
+	}
+	c.mu.Unlock()
+
+	delay := c.opts.ReconnectInitialDelay
+	for attempt := 1; ; attempt++ {
+		if c.closed.Load() {
+			c.reconnecting.Store(false)
+			return
+		}
+		if c.opts.ReconnectMaxAttempts > 0 && attempt > c.opts.ReconnectMaxAttempts {
+			c.reconnecting.Store(false)
+			if c.errorHandler != nil {
+				c.errorHandler(fmt.Errorf("reconnect failed after %d attempts", c.opts.ReconnectMaxAttempts))
+			}
+			return
+		}
+
+		if c.reconnectingHandler != nil {
+			c.reconnectingHandler(attempt)
+		}
+
+		select {
+		case <-c.ctx.Done():
+			c.reconnecting.Store(false)
+			return
+		case <-time.After(delay):
+		}
+
+		if err := c.reconnect(); err != nil {
+			if c.errorHandler != nil {
+				c.errorHandler(fmt.Errorf("reconnect attempt %d failed: %w", attempt, err))
+			}
+			delay = time.Duration(float64(delay) * c.opts.ReconnectBackoffFactor)
+			if delay > c.opts.ReconnectMaxDelay {
+				delay = c.opts.ReconnectMaxDelay
+			}
+			continue
+		}
+		return // reconnect succeeded, handleConnected will clear reconnecting flag
+	}
+}
+
+// reconnect creates a new transport and sends a Connect with session resumption.
+func (c *client) reconnect() error {
+	// Close old transport
+	_ = c.transport.Close()
+
+	// Create new transport
+	var trans transport
+	var err error
+	if c.dialURL != "" {
+		trans, err = newWSTransport(c.dialURL, c.opts.Encoding, c.opts.DialTimeout)
+	} else if c.dialAddr != "" {
+		trans, err = newGRPCTransport(c.ctx, c.dialAddr)
+	} else {
+		return fmt.Errorf("no dial address configured")
+	}
+	if err != nil {
+		return err
+	}
+	c.transport = trans
+
+	// Build Connect message with session resumption
+	c.mu.RLock()
+	sessionID := c.sessionID
+	epoch := c.epoch
+	c.mu.RUnlock()
+
+	connectMsg := &clientpb.InboundMessage{
+		Id: c.generateID(),
+		Envelope: &clientpb.InboundMessage_Connect{
+			Connect: &clientpb.Connect{
+				ClientId:   c.opts.ClientID,
+				ClientType: c.opts.ClientType,
+				Token:      c.opts.Token,
+				Version:    c.opts.Version,
+				SessionId:  sessionID,
+			},
+		},
+	}
+
+	// Build subscriptions with recovery offsets
+	c.subMu.RLock()
+	subs := make([]*clientpb.Subscription, 0, len(c.subscriptions))
+	for ch := range c.subscriptions {
+		sub := &clientpb.Subscription{
+			Channel: ch,
+			Recover: true,
+			Epoch:   epoch,
+		}
+		c.offsetMu.RLock()
+		if offset, ok := c.channelOffsets[ch]; ok {
+			sub.Offset = offset
+		}
+		c.offsetMu.RUnlock()
+		subs = append(subs, sub)
+	}
+	c.subMu.RUnlock()
+	connectMsg.GetConnect().Subscriptions = subs
+
+	// Reset connection channels
+	c.mu.Lock()
+	c.connectedCh = make(chan struct{})
+	c.connectErrCh = make(chan error, 1)
+	c.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(c.ctx, 30*time.Second)
+	defer cancel()
+
+	if err := c.transport.Send(ctx, connectMsg); err != nil {
+		return fmt.Errorf("send connect failed: %w", err)
+	}
+
+	// Start receive loop
+	go c.receiveLoop()
+
+	// Wait for connection
+	c.mu.RLock()
+	connCh := c.connectedCh
+	errCh := c.connectErrCh
+	c.mu.RUnlock()
+
+	select {
+	case <-connCh:
+		return nil
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		return fmt.Errorf("reconnect timeout")
+	}
 }
 
 // Close closes the connection.

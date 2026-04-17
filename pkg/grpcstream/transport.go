@@ -11,6 +11,11 @@ import (
 	"google.golang.org/grpc"
 )
 
+type sendRequest struct {
+	msg   rawFrame
+	errCh chan<- error
+}
+
 type Transport struct {
 	stream       grpc.BidiStreamingServer[clientpb.InboundMessage, clientpb.OutboundMessage]
 	remoteAddr   string
@@ -19,6 +24,7 @@ type Transport struct {
 	closeCh      chan struct{}
 	closeOnce    sync.Once
 	writeTimeout time.Duration
+	sendCh       chan sendRequest
 }
 
 func (t *Transport) Write(message []byte) error {
@@ -53,14 +59,18 @@ func (t *Transport) sendWithTimeout(msg rawFrame) error {
 	if t.writeTimeout <= 0 {
 		return t.stream.SendMsg(msg)
 	}
-	done := make(chan error, 1)
-	go func() {
-		done <- t.stream.SendMsg(msg)
-	}()
+	errCh := make(chan error, 1)
+	timer := time.NewTimer(t.writeTimeout)
+	defer timer.Stop()
 	select {
-	case err := <-done:
+	case t.sendCh <- sendRequest{msg: msg, errCh: errCh}:
+	case <-timer.C:
+		return fmt.Errorf("write timeout after %v", t.writeTimeout)
+	}
+	select {
+	case err := <-errCh:
 		return err
-	case <-time.After(t.writeTimeout):
+	case <-timer.C:
 		return fmt.Errorf("write timeout after %v", t.writeTimeout)
 	}
 }
@@ -77,6 +87,7 @@ func (t *Transport) Close(disconnect messageloop.Disconnect) error {
 		t.writeError(int32(disconnect.Code), disconnect.Reason)
 		time.Sleep(100 * time.Millisecond)
 		close(t.closeCh)
+		close(t.sendCh)
 		t.closed = true
 	})
 	return err
@@ -102,12 +113,20 @@ func newGRPCTransport(
 	remoteAddr string,
 	writeTimeout time.Duration,
 ) *Transport {
-	return &Transport{
+	t := &Transport{
 		stream:       stream,
 		remoteAddr:   remoteAddr,
 		closeCh:      make(chan struct{}),
 		writeTimeout: writeTimeout,
+		sendCh:       make(chan sendRequest, 64),
 	}
+	// Single worker goroutine serializes all sends to the gRPC stream.
+	go func() {
+		for req := range t.sendCh {
+			req.errCh <- t.stream.SendMsg(req.msg)
+		}
+	}()
+	return t
 }
 
 func (t *Transport) RemoteAddr() string {

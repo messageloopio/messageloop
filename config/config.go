@@ -14,6 +14,21 @@ type Server struct {
 	Heartbeat  Heartbeat  `yaml:"heartbeat" json:"heartbeat"`
 	RPCTimeout string     `yaml:"rpc_timeout" json:"rpc_timeout"` // default: "30s"
 	Limits     Limits     `yaml:"limits" json:"limits"`
+	ACL        ACLConfig  `yaml:"acl" json:"acl"`
+}
+
+// ACLConfig defines built-in channel access control rules.
+// These rules are evaluated only when no proxy ACL is configured for a channel.
+type ACLConfig struct {
+	Rules []ACLRule `yaml:"rules" json:"rules"`
+}
+
+// ACLRule defines a single access control rule.
+type ACLRule struct {
+	ChannelPattern string   `yaml:"channel_pattern" json:"channel_pattern"`
+	AllowSubscribe []string `yaml:"allow_subscribe" json:"allow_subscribe"`
+	AllowPublish   []string `yaml:"allow_publish" json:"allow_publish"`
+	DenyAll        bool     `yaml:"deny_all" json:"deny_all"`
 }
 
 type Limits struct {

@@ -22,12 +22,10 @@ describe("Codec", () => {
     });
 
     it("should decode string to object", () => {
+      // Proto3 JSON wire format uses field names directly, not envelope.case
       const jsonString = JSON.stringify({
         id: "msg-1",
-        envelope: {
-          case: "connected",
-          value: { sessionId: "session-123" },
-        },
+        connected: { session_id: "session-123" },
       });
 
       const decoded = codec.decode(jsonString);

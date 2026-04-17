@@ -1,6 +1,6 @@
-import type { OutboundMessage } from "../../proto/v1/service_pb";
+import type { OutboundMessage } from "../../proto/client/v1/service_pb";
 import type { Codec } from "./codec";
-import { OutboundMessageSchema } from "../../proto/v1/service_pb";
+import { OutboundMessageSchema } from "../../proto/client/v1/service_pb";
 
 /**
  * Protobuf codec implementation.

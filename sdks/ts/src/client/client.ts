@@ -1,4 +1,4 @@
-import type { OutboundMessage } from "../proto/v1/service_pb";
+import type { OutboundMessage } from "../proto/client/v1/service_pb";
 import type { ReceivedMessage, Message } from "../message";
 import type { Transport } from "../transport/transport";
 import type { Codec } from "../transport/codec/codec";
@@ -67,6 +67,10 @@ export class MessageLoopClient {
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private isReconnecting = false;
+
+  // Session resumption state
+  private epoch: string = "";
+  private channelOffsets: Map<string, bigint> = new Map();
 
   /**
    * Create a new MessageLoop client.
@@ -190,6 +194,8 @@ export class MessageLoopClient {
     switch (parsed.type) {
       case "connected": {
         this.sessionId = parsed.data.sessionId || null;
+        this.epoch = parsed.data.epoch || "";
+        const resumed = parsed.data.resumed || false;
         this.isConnectedFlag = true;
         this.reconnectAttempts = 0;
         this.isReconnecting = false;
@@ -198,8 +204,8 @@ export class MessageLoopClient {
         const wasReconnecting = this.connectionState === "reconnecting";
         this.setConnectionState("connected");
 
-        // Resubscribe to channels after reconnection
-        if (wasReconnecting && this.subscribedChannels.size > 0) {
+        // Resubscribe to channels after reconnection only if session was not resumed
+        if (wasReconnecting && !resumed && this.subscribedChannels.size > 0) {
           this.resubscribeAllChannels();
         }
 
@@ -218,6 +224,10 @@ export class MessageLoopClient {
         const messages: ReceivedMessage[] = [];
         const msgs = parsed.data.messages || [];
         for (const m of msgs) {
+          // Track per-channel offsets for session resumption
+          if (m.offset && m.channel) {
+            this.channelOffsets.set(m.channel, BigInt(m.offset));
+          }
           messages.push({
             id: m.id,
             channel: m.channel,
@@ -491,16 +501,23 @@ export class MessageLoopClient {
       throw new Error("Transport not initialized");
     }
 
+    // Build subscription list with recovery info when reconnecting
+    const subs = Array.from(this.subscribedChannels).map((ch) => ({
+      channel: ch,
+      ephemeral: this.options.ephemeral,
+      token: "",
+      recover: this.isReconnecting && this.epoch !== "",
+      offset: this.channelOffsets.get(ch) || BigInt(0),
+      epoch: this.isReconnecting ? this.epoch : "",
+    }));
+
     const connectMsg = createConnectMessage(
       this.options.clientId,
       this.options.clientType,
       this.options.token,
       this.options.version,
-      Array.from(this.subscribedChannels).map((ch) => ({
-        channel: ch,
-        ephemeral: this.options.ephemeral,
-        token: "",
-      }))
+      subs,
+      this.isReconnecting ? (this.sessionId || undefined) : undefined
     );
 
     await this.transport.send(connectMsg as any);

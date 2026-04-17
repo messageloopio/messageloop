@@ -6,17 +6,17 @@
 
 import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
-import type { Metadata, Payload } from "../../shared/v1/types_pb";
-import { file_shared_v1_types } from "../../shared/v1/types_pb";
 import type { Error } from "../../shared/v1/errors_pb";
 import { file_shared_v1_errors } from "../../shared/v1/errors_pb";
+import type { Metadata, Payload } from "../../shared/v1/types_pb";
+import { file_shared_v1_types } from "../../shared/v1/types_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file proxy/v1/proxy.proto.
  */
 export const file_proxy_v1_proxy: GenFile = /*@__PURE__*/
-  fileDesc("ChRwcm94eS92MS9wcm94eS5wcm90bxIUbWVzc2FnZWxvb3AucHJveHkudjEinQEKClJQQ1JlcXVlc3QSCgoCaWQYASABKAkSDwoHY2hhbm5lbBgCIAEoCRIOCgZtZXRob2QYAyABKAkSLwoHcGF5bG9hZBgEIAEoCzIeLm1lc3NhZ2Vsb29wLnNoYXJlZC52MS5QYXlsb2FkEjEKCG1ldGFkYXRhGAUgASgLMh8ubWVzc2FnZWxvb3Auc2hhcmVkLnYxLk1ldGFkYXRhIqoBCgtSUENSZXNwb25zZRIKCgJpZBgBIAEoCRIvCgdwYXlsb2FkGAIgASgLMh4ubWVzc2FnZWxvb3Auc2hhcmVkLnYxLlBheWxvYWQSMQoIbWV0YWRhdGEYAyABKAsyHy5tZXNzYWdlbG9vcC5zaGFyZWQudjEuTWV0YWRhdGESKwoFZXJyb3IYBCABKAsyHC5tZXNzYWdlbG9vcC5zaGFyZWQudjEuRXJyb3IiTAoTQXV0aGVudGljYXRlUmVxdWVzdBIRCgljbGllbnRfaWQYASABKAkSDQoFdG9rZW4YAiABKAkSEwoLY2xpZW50X3R5cGUYAyABKAkidgoUQXV0aGVudGljYXRlUmVzcG9uc2USKwoFZXJyb3IYASABKAsyHC5tZXNzYWdlbG9vcC5zaGFyZWQudjEuRXJyb3ISMQoJdXNlcl9pbmZvGAIgASgLMh4ubWVzc2FnZWxvb3AucHJveHkudjEuVXNlckluZm8iXwoIVXNlckluZm8SCgoCaWQYASABKAkSEAoIdXNlcm5hbWUYAiABKAkSDQoFdG9rZW4YAyABKAkSEwoLY2xpZW50X3R5cGUYBCABKAkSEQoJY2xpZW50X2lkGAUgASgJIjUKE1N1YnNjcmliZUFjbFJlcXVlc3QSDwoHY2hhbm5lbBgBIAEoCRINCgV0b2tlbhgCIAEoCSIWChRTdWJzY3JpYmVBY2xSZXNwb25zZSIzChFQdWJsaXNoQWNsUmVxdWVzdBIPCgdjaGFubmVsGAEgASgJEg0KBXRva2VuGAIgASgJIhQKElB1Ymxpc2hBY2xSZXNwb25zZSI6ChJPbkNvbm5lY3RlZFJlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRIQCgh1c2VybmFtZRgCIAEoCSIVChNPbkNvbm5lY3RlZFJlc3BvbnNlIkwKE09uU3Vic2NyaWJlZFJlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRIPCgdjaGFubmVsGAIgASgJEhAKCHVzZXJuYW1lGAMgASgJIhYKFE9uU3Vic2NyaWJlZFJlc3BvbnNlIk4KFU9uVW5zdWJzY3JpYmVkUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEg8KB2NoYW5uZWwYAiABKAkSEAoIdXNlcm5hbWUYAyABKAkiGAoWT25VbnN1YnNjcmliZWRSZXNwb25zZSI9ChVPbkRpc2Nvbm5lY3RlZFJlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRIQCgh1c2VybmFtZRgCIAEoCSIYChZPbkRpc2Nvbm5lY3RlZFJlc3BvbnNlMq4GCgxQcm94eVNlcnZpY2USSgoDUlBDEiAubWVzc2FnZWxvb3AucHJveHkudjEuUlBDUmVxdWVzdBohLm1lc3NhZ2Vsb29wLnByb3h5LnYxLlJQQ1Jlc3BvbnNlEmUKDEF1dGhlbnRpY2F0ZRIpLm1lc3NhZ2Vsb29wLnByb3h5LnYxLkF1dGhlbnRpY2F0ZVJlcXVlc3QaKi5tZXNzYWdlbG9vcC5wcm94eS52MS5BdXRoZW50aWNhdGVSZXNwb25zZRJlCgxTdWJzY3JpYmVBY2wSKS5tZXNzYWdlbG9vcC5wcm94eS52MS5TdWJzY3JpYmVBY2xSZXF1ZXN0GioubWVzc2FnZWxvb3AucHJveHkudjEuU3Vic2NyaWJlQWNsUmVzcG9uc2USXwoKUHVibGlzaEFjbBInLm1lc3NhZ2Vsb29wLnByb3h5LnYxLlB1Ymxpc2hBY2xSZXF1ZXN0GigubWVzc2FnZWxvb3AucHJveHkudjEuUHVibGlzaEFjbFJlc3BvbnNlEmIKC09uQ29ubmVjdGVkEigubWVzc2FnZWxvb3AucHJveHkudjEuT25Db25uZWN0ZWRSZXF1ZXN0GikubWVzc2FnZWxvb3AucHJveHkudjEuT25Db25uZWN0ZWRSZXNwb25zZRJlCgxPblN1YnNjcmliZWQSKS5tZXNzYWdlbG9vcC5wcm94eS52MS5PblN1YnNjcmliZWRSZXF1ZXN0GioubWVzc2FnZWxvb3AucHJveHkudjEuT25TdWJzY3JpYmVkUmVzcG9uc2USawoOT25VbnN1YnNjcmliZWQSKy5tZXNzYWdlbG9vcC5wcm94eS52MS5PblVuc3Vic2NyaWJlZFJlcXVlc3QaLC5tZXNzYWdlbG9vcC5wcm94eS52MS5PblVuc3Vic2NyaWJlZFJlc3BvbnNlEmsKDk9uRGlzY29ubmVjdGVkEisubWVzc2FnZWxvb3AucHJveHkudjEuT25EaXNjb25uZWN0ZWRSZXF1ZXN0GiwubWVzc2FnZWxvb3AucHJveHkudjEuT25EaXNjb25uZWN0ZWRSZXNwb25zZUJAWj5naXRodWIuY29tL21lc3NhZ2Vsb29waW8vbWVzc2FnZWxvb3AvZ2VucHJvdG8vcHJveHkvdjE7cHJveHlwYmIGcHJvdG8z", [file_shared_v1_types, file_shared_v1_errors]);
+  fileDesc("ChRwcm94eS92MS9wcm94eS5wcm90bxIUbWVzc2FnZWxvb3AucHJveHkudjEinQEKClJQQ1JlcXVlc3QSCgoCaWQYASABKAkSDwoHY2hhbm5lbBgCIAEoCRIOCgZtZXRob2QYAyABKAkSLwoHcGF5bG9hZBgEIAEoCzIeLm1lc3NhZ2Vsb29wLnNoYXJlZC52MS5QYXlsb2FkEjEKCG1ldGFkYXRhGAUgASgLMh8ubWVzc2FnZWxvb3Auc2hhcmVkLnYxLk1ldGFkYXRhIqoBCgtSUENSZXNwb25zZRIKCgJpZBgBIAEoCRIvCgdwYXlsb2FkGAIgASgLMh4ubWVzc2FnZWxvb3Auc2hhcmVkLnYxLlBheWxvYWQSMQoIbWV0YWRhdGEYAyABKAsyHy5tZXNzYWdlbG9vcC5zaGFyZWQudjEuTWV0YWRhdGESKwoFZXJyb3IYBCABKAsyHC5tZXNzYWdlbG9vcC5zaGFyZWQudjEuRXJyb3IidQoTQXV0aGVudGljYXRlUmVxdWVzdBIRCgljbGllbnRfaWQYASABKAkSDQoFdG9rZW4YAiABKAkSEwoLY2xpZW50X3R5cGUYAyABKAkSEgoKc2Vzc2lvbl9pZBgEIAEoCRITCgtyZW1vdGVfYWRkchgFIAEoCSJ2ChRBdXRoZW50aWNhdGVSZXNwb25zZRIrCgVlcnJvchgBIAEoCzIcLm1lc3NhZ2Vsb29wLnNoYXJlZC52MS5FcnJvchIxCgl1c2VyX2luZm8YAiABKAsyHi5tZXNzYWdlbG9vcC5wcm94eS52MS5Vc2VySW5mbyJfCghVc2VySW5mbxIKCgJpZBgBIAEoCRIQCgh1c2VybmFtZRgCIAEoCRINCgV0b2tlbhgDIAEoCRITCgtjbGllbnRfdHlwZRgEIAEoCRIRCgljbGllbnRfaWQYBSABKAkiWgoTU3Vic2NyaWJlQWNsUmVxdWVzdBIPCgdjaGFubmVsGAEgASgJEg0KBXRva2VuGAIgASgJEg8KB3VzZXJfaWQYAyABKAkSEgoKc2Vzc2lvbl9pZBgEIAEoCSJDChRTdWJzY3JpYmVBY2xSZXNwb25zZRIrCgVlcnJvchgBIAEoCzIcLm1lc3NhZ2Vsb29wLnNoYXJlZC52MS5FcnJvciJYChFQdWJsaXNoQWNsUmVxdWVzdBIPCgdjaGFubmVsGAEgASgJEg0KBXRva2VuGAIgASgJEg8KB3VzZXJfaWQYAyABKAkSEgoKc2Vzc2lvbl9pZBgEIAEoCSJBChJQdWJsaXNoQWNsUmVzcG9uc2USKwoFZXJyb3IYASABKAsyHC5tZXNzYWdlbG9vcC5zaGFyZWQudjEuRXJyb3IiOgoST25Db25uZWN0ZWRSZXF1ZXN0EhIKCnNlc3Npb25faWQYASABKAkSEAoIdXNlcm5hbWUYAiABKAkiFQoTT25Db25uZWN0ZWRSZXNwb25zZSJMChNPblN1YnNjcmliZWRSZXF1ZXN0EhIKCnNlc3Npb25faWQYASABKAkSDwoHY2hhbm5lbBgCIAEoCRIQCgh1c2VybmFtZRgDIAEoCSIWChRPblN1YnNjcmliZWRSZXNwb25zZSJOChVPblVuc3Vic2NyaWJlZFJlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRIPCgdjaGFubmVsGAIgASgJEhAKCHVzZXJuYW1lGAMgASgJIhgKFk9uVW5zdWJzY3JpYmVkUmVzcG9uc2UiPQoVT25EaXNjb25uZWN0ZWRSZXF1ZXN0EhIKCnNlc3Npb25faWQYASABKAkSEAoIdXNlcm5hbWUYAiABKAkiGAoWT25EaXNjb25uZWN0ZWRSZXNwb25zZTKuBgoMUHJveHlTZXJ2aWNlEkoKA1JQQxIgLm1lc3NhZ2Vsb29wLnByb3h5LnYxLlJQQ1JlcXVlc3QaIS5tZXNzYWdlbG9vcC5wcm94eS52MS5SUENSZXNwb25zZRJlCgxBdXRoZW50aWNhdGUSKS5tZXNzYWdlbG9vcC5wcm94eS52MS5BdXRoZW50aWNhdGVSZXF1ZXN0GioubWVzc2FnZWxvb3AucHJveHkudjEuQXV0aGVudGljYXRlUmVzcG9uc2USZQoMU3Vic2NyaWJlQWNsEikubWVzc2FnZWxvb3AucHJveHkudjEuU3Vic2NyaWJlQWNsUmVxdWVzdBoqLm1lc3NhZ2Vsb29wLnByb3h5LnYxLlN1YnNjcmliZUFjbFJlc3BvbnNlEl8KClB1Ymxpc2hBY2wSJy5tZXNzYWdlbG9vcC5wcm94eS52MS5QdWJsaXNoQWNsUmVxdWVzdBooLm1lc3NhZ2Vsb29wLnByb3h5LnYxLlB1Ymxpc2hBY2xSZXNwb25zZRJiCgtPbkNvbm5lY3RlZBIoLm1lc3NhZ2Vsb29wLnByb3h5LnYxLk9uQ29ubmVjdGVkUmVxdWVzdBopLm1lc3NhZ2Vsb29wLnByb3h5LnYxLk9uQ29ubmVjdGVkUmVzcG9uc2USZQoMT25TdWJzY3JpYmVkEikubWVzc2FnZWxvb3AucHJveHkudjEuT25TdWJzY3JpYmVkUmVxdWVzdBoqLm1lc3NhZ2Vsb29wLnByb3h5LnYxLk9uU3Vic2NyaWJlZFJlc3BvbnNlEmsKDk9uVW5zdWJzY3JpYmVkEisubWVzc2FnZWxvb3AucHJveHkudjEuT25VbnN1YnNjcmliZWRSZXF1ZXN0GiwubWVzc2FnZWxvb3AucHJveHkudjEuT25VbnN1YnNjcmliZWRSZXNwb25zZRJrCg5PbkRpc2Nvbm5lY3RlZBIrLm1lc3NhZ2Vsb29wLnByb3h5LnYxLk9uRGlzY29ubmVjdGVkUmVxdWVzdBosLm1lc3NhZ2Vsb29wLnByb3h5LnYxLk9uRGlzY29ubmVjdGVkUmVzcG9uc2VCQFo+Z2l0aHViLmNvbS9tZXNzYWdlbG9vcGlvL21lc3NhZ2Vsb29wL2dlbnByb3RvL3Byb3h5L3YxO3Byb3h5cGJiBnByb3RvMw", [file_shared_v1_errors, file_shared_v1_types]);
 
 /**
  * @generated from message messageloop.proxy.v1.RPCRequest
@@ -105,6 +105,16 @@ export type AuthenticateRequest = Message<"messageloop.proxy.v1.AuthenticateRequ
    * @generated from field: string client_type = 3;
    */
   clientType: string;
+
+  /**
+   * @generated from field: string session_id = 4;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: string remote_addr = 5;
+   */
+  remoteAddr: string;
 };
 
 /**
@@ -186,6 +196,16 @@ export type SubscribeAclRequest = Message<"messageloop.proxy.v1.SubscribeAclRequ
    * @generated from field: string token = 2;
    */
   token: string;
+
+  /**
+   * @generated from field: string user_id = 3;
+   */
+  userId: string;
+
+  /**
+   * @generated from field: string session_id = 4;
+   */
+  sessionId: string;
 };
 
 /**
@@ -199,6 +219,10 @@ export const SubscribeAclRequestSchema: GenMessage<SubscribeAclRequest> = /*@__P
  * @generated from message messageloop.proxy.v1.SubscribeAclResponse
  */
 export type SubscribeAclResponse = Message<"messageloop.proxy.v1.SubscribeAclResponse"> & {
+  /**
+   * @generated from field: messageloop.shared.v1.Error error = 1;
+   */
+  error?: Error;
 };
 
 /**
@@ -221,6 +245,16 @@ export type PublishAclRequest = Message<"messageloop.proxy.v1.PublishAclRequest"
    * @generated from field: string token = 2;
    */
   token: string;
+
+  /**
+   * @generated from field: string user_id = 3;
+   */
+  userId: string;
+
+  /**
+   * @generated from field: string session_id = 4;
+   */
+  sessionId: string;
 };
 
 /**
@@ -234,6 +268,10 @@ export const PublishAclRequestSchema: GenMessage<PublishAclRequest> = /*@__PURE_
  * @generated from message messageloop.proxy.v1.PublishAclResponse
  */
 export type PublishAclResponse = Message<"messageloop.proxy.v1.PublishAclResponse"> & {
+  /**
+   * @generated from field: messageloop.shared.v1.Error error = 1;
+   */
+  error?: Error;
 };
 
 /**

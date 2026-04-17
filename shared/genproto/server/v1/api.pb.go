@@ -1232,7 +1232,7 @@ var File_server_v1_api_proto protoreflect.FileDescriptor
 
 const file_server_v1_api_proto_rawDesc = "" +
 	"\n" +
-	"\x13server/v1/api.proto\x12\x15messageloop.server.v1\x1a\x15shared/v1/types.proto\x1a\x16shared/v1/errors.proto\"\x9f\x03\n" +
+	"\x13server/v1/api.proto\x12\x15messageloop.server.v1\x1a\x16shared/v1/errors.proto\x1a\x15shared/v1/types.proto\"\x9f\x03\n" +
 	"\vPublication\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12P\n" +
 	"\vdestination\x18\x02 \x01(\v2..messageloop.server.v1.Publication.DestinationR\vdestination\x12D\n" +

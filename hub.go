@@ -300,17 +300,11 @@ func (h *subShard) broadcastPublication(channel string, pub *Publication) error 
 		}}
 	})
 
-	// Send to all subscribers in parallel
-	var wg sync.WaitGroup
-	for _, sub := range subscribers {
-		wg.Add(1)
-		go func(sub Subscriber) {
-			defer func() {
-				if r := recover(); r != nil {
-					log.ErrorContext(ctx, "panic in send publication", fmt.Errorf("panic: %v, channel: %s", r, channel))
-				}
-				wg.Done()
-			}()
+	const broadcastParallelThreshold = 8
+
+	if len(subscribers) <= broadcastParallelThreshold {
+		// Serial send for small fan-out — avoids goroutine overhead
+		for _, sub := range subscribers {
 			if err := sub.Client.Send(ctx, out); err != nil {
 				log.ErrorContext(ctx, "send publication error", err)
 				if sub.Client.node.metrics != nil {
@@ -319,9 +313,31 @@ func (h *subShard) broadcastPublication(channel string, pub *Publication) error 
 			} else if sub.Client.node.metrics != nil {
 				sub.Client.node.metrics.MessagesDelivered.Inc()
 			}
-		}(sub)
+		}
+	} else {
+		// Parallel send for large fan-out
+		var wg sync.WaitGroup
+		for _, sub := range subscribers {
+			wg.Add(1)
+			go func(sub Subscriber) {
+				defer func() {
+					if r := recover(); r != nil {
+						log.ErrorContext(ctx, "panic in send publication", fmt.Errorf("panic: %v, channel: %s", r, channel))
+					}
+					wg.Done()
+				}()
+				if err := sub.Client.Send(ctx, out); err != nil {
+					log.ErrorContext(ctx, "send publication error", err)
+					if sub.Client.node.metrics != nil {
+						sub.Client.node.metrics.DeliveryFailures.Inc()
+					}
+				} else if sub.Client.node.metrics != nil {
+					sub.Client.node.metrics.MessagesDelivered.Inc()
+				}
+			}(sub)
+		}
+		wg.Wait()
 	}
-	wg.Wait()
 
 	return nil
 }

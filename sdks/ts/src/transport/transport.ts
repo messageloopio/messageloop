@@ -1,4 +1,4 @@
-import type { OutboundMessage } from "../proto/v1/service_pb";
+import type { OutboundMessage } from "../proto/client/v1/service_pb";
 
 /**
  * Transport interface for sending and receiving messages.

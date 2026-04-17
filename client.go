@@ -326,6 +326,8 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 				ClientID:   connect.ClientId,
 				Token:      connect.Token,
 				ClientType: connect.ClientType,
+				SessionID:  c.session,
+				RemoteAddr: c.transport.RemoteAddr(),
 			}
 			authResp, err := p.Authenticate(ctx, authReq)
 			if err != nil {
@@ -617,10 +619,12 @@ func (c *Client) handlePublish(ctx context.Context, in *clientpb.InboundMessage,
 
 	// Proxy ACL check - check if there's a proxy configured for publish ACL
 	p := c.node.FindProxy(channel, "publish")
-	if p != nil && publish.Token != "" {
+	if p != nil {
 		aclReq := &proxy.PublishAclProxyRequest{
-			Channel: channel,
-			Token:   publish.Token,
+			Channel:   channel,
+			Token:     publish.Token,
+			UserID:    c.user,
+			SessionID: c.session,
 		}
 		aclResp, err := p.PublishAcl(ctx, aclReq)
 		if err != nil {
@@ -641,6 +645,21 @@ func (c *Client) handlePublish(ctx context.Context, in *clientpb.InboundMessage,
 			_ = c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 				out.Envelope = &clientpb.OutboundMessage_Error{
 					Error: aclResp.Error,
+				}
+			}))
+			return DisconnectInvalidToken
+		}
+	} else if c.node.acl != nil {
+		// Built-in ACL check (fallback when no proxy is configured)
+		if !c.node.acl.CanPublish(channel, c.user) {
+			log.WarnContext(ctx, "ACL denied publish", "channel", channel, "user", c.user)
+			_ = c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+				out.Envelope = &clientpb.OutboundMessage_Error{
+					Error: &sharedpb.Error{
+						Code:    "ACL_DENIED",
+						Type:    "acl_error",
+						Message: "publish denied by ACL rule",
+					},
 				}
 			}))
 			return DisconnectInvalidToken
@@ -690,10 +709,12 @@ func (c *Client) handleSubscribe(ctx context.Context, in *clientpb.InboundMessag
 	for _, ch := range sub.Subscriptions {
 		// Proxy ACL check - check if there's a proxy configured for subscription ACL
 		p := c.node.FindProxy(ch.Channel, "subscribe")
-		if p != nil && ch.Token != "" {
+		if p != nil {
 			aclReq := &proxy.SubscribeAclProxyRequest{
-				Channel: ch.Channel,
-				Token:   ch.Token,
+				Channel:   ch.Channel,
+				Token:     ch.Token,
+				UserID:    c.user,
+				SessionID: c.session,
 			}
 			aclResp, err := p.SubscribeAcl(ctx, aclReq)
 			if err != nil {
@@ -714,6 +735,21 @@ func (c *Client) handleSubscribe(ctx context.Context, in *clientpb.InboundMessag
 				_ = c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 					out.Envelope = &clientpb.OutboundMessage_Error{
 						Error: aclResp.Error,
+					}
+				}))
+				return DisconnectInvalidToken
+			}
+		} else if c.node.acl != nil {
+			// Built-in ACL check (fallback when no proxy is configured)
+			if !c.node.acl.CanSubscribe(ch.Channel, c.user) {
+				log.WarnContext(ctx, "ACL denied subscribe", "channel", ch.Channel, "user", c.user)
+				_ = c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+					out.Envelope = &clientpb.OutboundMessage_Error{
+						Error: &sharedpb.Error{
+							Code:    "ACL_DENIED",
+							Type:    "acl_error",
+							Message: "subscribe denied by ACL rule",
+						},
 					}
 				}))
 				return DisconnectInvalidToken
@@ -764,12 +800,15 @@ func (c *Client) handleSubscribe(ctx context.Context, in *clientpb.InboundMessag
 
 func (c *Client) write(ctx context.Context, msg proto.Message) error {
 	log.DebugContext(ctx, "sending message", "message", jsonLog(msg))
-	bytes, err := c.marshal(msg)
+	buf := getBuffer()
+	defer putBuffer(buf)
+	var err error
+	*buf, err = c.marshaler.MarshalAppend((*buf)[:0], msg)
 	if err != nil {
 		return err
 	}
-	log.DebugContext(ctx, "message marshaled", "size", len(bytes))
-	err = c.transport.Write(bytes)
+	log.DebugContext(ctx, "message marshaled", "size", len(*buf))
+	err = c.transport.Write(*buf)
 	if err != nil {
 		log.ErrorContext(ctx, "failed to write to transport", err)
 		go c.close(DisconnectSlowConsumer)

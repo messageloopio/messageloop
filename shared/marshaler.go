@@ -11,6 +11,8 @@ import (
 type Marshaler interface {
 	// Marshal converts a message to bytes.
 	Marshal(msg any) ([]byte, error)
+	// MarshalAppend appends the marshaled message to buf and returns the extended buffer.
+	MarshalAppend(buf []byte, msg any) ([]byte, error)
 	// Unmarshal converts bytes to a message.
 	Unmarshal(data []byte, msg any) error
 	// Name returns the marshaler name.
@@ -25,6 +27,18 @@ func (JSONMarshaler) Marshal(msg any) ([]byte, error) {
 		return ProtoJSONMarshaler.Marshal(m)
 	}
 	return json.Marshal(msg)
+}
+
+func (j JSONMarshaler) MarshalAppend(buf []byte, msg any) ([]byte, error) {
+	if m, ok := msg.(proto.Message); ok {
+		return ProtoJSONMarshaler.MarshalAppend(buf, m)
+	}
+	// json.Encoder doesn't support append; fall back to Marshal + copy
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return buf, err
+	}
+	return append(buf, data...), nil
 }
 
 func (JSONMarshaler) Unmarshal(data []byte, msg any) error {
@@ -47,6 +61,14 @@ func (ProtobufMarshaler) Marshal(msg any) ([]byte, error) {
 		return nil, &MarshalTypeError{Type: msg}
 	}
 	return proto.Marshal(m)
+}
+
+func (ProtobufMarshaler) MarshalAppend(buf []byte, msg any) ([]byte, error) {
+	m, ok := msg.(proto.Message)
+	if !ok {
+		return buf, &MarshalTypeError{Type: msg}
+	}
+	return proto.MarshalOptions{}.MarshalAppend(buf, m)
 }
 
 func (ProtobufMarshaler) Unmarshal(data []byte, msg any) error {
@@ -83,6 +105,14 @@ func (p *protoJSONMarshaler) Marshal(msg any) ([]byte, error) {
 		return nil, &MarshalTypeError{Type: msg}
 	}
 	return p.Marshaler.Marshal(m)
+}
+
+func (p *protoJSONMarshaler) MarshalAppend(buf []byte, msg any) ([]byte, error) {
+	m, ok := msg.(proto.Message)
+	if !ok {
+		return buf, &MarshalTypeError{Type: msg}
+	}
+	return p.Marshaler.MarshalAppend(buf, m)
 }
 
 func (p *protoJSONMarshaler) Unmarshal(data []byte, msg any) error {

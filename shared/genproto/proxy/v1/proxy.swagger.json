@@ -129,7 +129,12 @@
       "title": "统一的数据载荷类型"
     },
     "v1PublishAclResponse": {
-      "type": "object"
+      "type": "object",
+      "properties": {
+        "error": {
+          "$ref": "#/definitions/v1Error"
+        }
+      }
     },
     "v1RPCResponse": {
       "type": "object",
@@ -149,7 +154,12 @@
       }
     },
     "v1SubscribeAclResponse": {
-      "type": "object"
+      "type": "object",
+      "properties": {
+        "error": {
+          "$ref": "#/definitions/v1Error"
+        }
+      }
     },
     "v1UserInfo": {
       "type": "object",
