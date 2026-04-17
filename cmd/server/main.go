@@ -107,6 +107,8 @@ func main() {
 		}()
 		go func() {
 			<-ctx.Done()
+			// Drain all client connections before shutting down.
+			node.Shutdown()
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			_ = adminServer.Shutdown(shutdownCtx)

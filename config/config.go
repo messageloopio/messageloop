@@ -19,6 +19,7 @@ type Server struct {
 type Limits struct {
 	MaxConnectionsPerUser     int `yaml:"max_connections_per_user" json:"max_connections_per_user"`         // 0 = unlimited
 	MaxSubscriptionsPerClient int `yaml:"max_subscriptions_per_client" json:"max_subscriptions_per_client"` // 0 = unlimited
+	MaxPublishesPerSecond     int `yaml:"max_publishes_per_second" json:"max_publishes_per_second"`         // 0 = unlimited
 }
 
 type HttpServer struct {

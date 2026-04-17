@@ -25,12 +25,17 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverpb.PublishRe
 	for _, pub := range req.Publications {
 		// Extract data from Payload
 		var data []byte
+		var isText bool
 		if pub.Payload != nil {
 			switch p := pub.Payload.Data.(type) {
 			case *sharedpb.Payload_Binary:
 				data = p.Binary
 			case *sharedpb.Payload_Json:
 				data = []byte(p.Json.String())
+				isText = true
+			case *sharedpb.Payload_Text:
+				data = []byte(p.Text)
+				isText = true
 			}
 		}
 
@@ -83,7 +88,7 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverpb.PublishRe
 				if addHistory {
 					log.DebugContext(ctx, "add_history option set but not yet implemented", "channel", channel)
 				}
-				if err := h.node.Publish(channel, data, false); err != nil {
+				if err := h.node.Publish(channel, data, isText); err != nil {
 					log.ErrorContext(ctx, "failed to publish to channel", err)
 				}
 			}

@@ -13,6 +13,7 @@ import (
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	"github.com/samber/lo"
+	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -88,6 +89,9 @@ type Client struct {
 
 	// Tracks channels this client is subscribed to, for presence cleanup.
 	subscribedChannels map[string]struct{}
+
+	// Rate limiter for publish operations.
+	publishLimiter *rate.Limiter
 
 	// Survey field - stores the last received survey request ID
 	lastSurveyRequestID string
@@ -319,6 +323,9 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 		c.mu.Unlock()
 		return err
 	}
+	if limit := c.node.limits.MaxPublishesPerSecond; limit > 0 {
+		c.publishLimiter = rate.NewLimiter(rate.Limit(limit), limit)
+	}
 	c.mu.Unlock()
 
 	// Notify proxy about client connection
@@ -533,6 +540,18 @@ func (c *Client) handlePublish(ctx context.Context, in *clientpb.InboundMessage,
 		return DisconnectStale
 	}
 
+	if c.publishLimiter != nil && !c.publishLimiter.Allow() {
+		return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+			out.Envelope = &clientpb.OutboundMessage_Error{
+				Error: &sharedpb.Error{
+					Code:    "RATE_LIMITED",
+					Type:    "rate_limit",
+					Message: "publish rate limit exceeded",
+				},
+			}
+		}))
+	}
+
 	channel := publish.Channel
 	if channel == "" {
 		return errors.New("missing channel in publish message")
@@ -738,6 +757,7 @@ func (c *Client) handleUnsubscribe(ctx context.Context, in *clientpb.InboundMess
 
 func (c *Client) handlePing(ctx context.Context, in *clientpb.InboundMessage, ping *clientpb.Ping) error {
 	c.ResetActivity()
+	go c.refreshPresence()
 	log.DebugContext(ctx, "received ping, sending pong", "message_id", in.Id)
 	err := c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_Pong{
@@ -753,8 +773,23 @@ func (c *Client) handlePing(ctx context.Context, in *clientpb.InboundMessage, pi
 }
 
 func (c *Client) handleSubRefresh(ctx context.Context, in *clientpb.InboundMessage, refresh *clientpb.SubRefresh) error {
-	// SubRefresh is used to refresh subscriptions, currently just acknowledges the refresh
-	// The proxy is notified through OnSubscribed/OnUnsubscribed, so no additional action needed here
+	for _, ch := range refresh.Channels {
+		p := c.node.FindProxy(ch, "subscribe")
+		if p == nil {
+			continue
+		}
+		aclReq := &proxy.SubscribeAclProxyRequest{Channel: ch}
+		aclResp, err := p.SubscribeAcl(ctx, aclReq)
+		if err != nil || aclResp.Error != nil {
+			// ACL check failed — revoke subscription for this channel.
+			_ = c.node.RemoveSubscription(ch, c)
+			_ = c.node.presence.Remove(ctx, ch, c.session)
+			c.mu.Lock()
+			delete(c.subscribedChannels, ch)
+			c.mu.Unlock()
+			go c.node.PublishPresenceLeave(ch, c.session, c.user)
+		}
+	}
 	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_SubRefreshAck{
 			SubRefreshAck: &clientpb.SubRefreshAck{},
@@ -857,4 +892,30 @@ func (c *Client) ResetActivity() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.lastActivity = time.Now()
+}
+
+// refreshPresence re-adds presence entries for all subscribed channels to reset TTL.
+func (c *Client) refreshPresence() {
+	c.mu.RLock()
+	channels := make([]string, 0, len(c.subscribedChannels))
+	for ch := range c.subscribedChannels {
+		channels = append(channels, ch)
+	}
+	session := c.session
+	user := c.user
+	connAt := c.connectedAt.UnixMilli()
+	c.mu.RUnlock()
+
+	if len(channels) == 0 {
+		return
+	}
+	ctx := context.Background()
+	info := &PresenceInfo{
+		ClientID:    session,
+		UserID:      user,
+		ConnectedAt: connAt,
+	}
+	for _, ch := range channels {
+		_ = c.node.presence.Add(ctx, ch, info)
+	}
 }

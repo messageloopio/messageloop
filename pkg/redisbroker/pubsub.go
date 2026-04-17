@@ -5,8 +5,32 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lynx-go/x/log"
 	"github.com/messageloopio/messageloop"
 )
+
+// runPubSubWithRetry wraps runPubSub with exponential backoff reconnection.
+func (b *redisBroker) runPubSubWithRetry(ctx context.Context) error {
+	backoff := 1 * time.Second
+	const maxBackoff = 30 * time.Second
+
+	for {
+		err := b.runPubSub(ctx)
+		if ctx.Err() != nil {
+			return nil
+		}
+		log.WarnContext(ctx, "redis pubsub disconnected, retrying", "error", err, "backoff", backoff)
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(backoff):
+		}
+		backoff *= 2
+		if backoff > maxBackoff {
+			backoff = maxBackoff
+		}
+	}
+}
 
 // runPubSub subscribes to the wildcard Redis Pub/Sub pattern and dispatches
 // incoming publication messages to the handler. Blocks until ctx is done.
@@ -42,7 +66,7 @@ func (b *redisBroker) runPubSub(ctx context.Context) error {
 
 			pub := &messageloop.Publication{
 				Channel: channelName,
-				Offset:  0, // real-time pub/sub messages don't carry stream offset
+				Offset:  redisMsg.Offset,
 				Payload: redisMsg.Payload,
 				IsText:  redisMsg.IsText,
 				Time:    time.Now().UnixMilli(),

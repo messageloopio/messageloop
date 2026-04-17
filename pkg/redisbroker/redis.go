@@ -56,7 +56,7 @@ func (b *redisBroker) Start(ctx context.Context, handler messageloop.Publication
 	}
 
 	defer b.client.Close()
-	return b.runPubSub(ctx)
+	return b.runPubSubWithRetry(ctx)
 }
 
 // Subscribe registers interest in ch on this node.
@@ -82,17 +82,18 @@ func (b *redisBroker) Publish(ch string, payload []byte, isText bool) (uint64, e
 	defer cancel()
 
 	msg := &redisMessage{Type: messageTypePublication, Channel: ch, Payload: payload, IsText: isText}
-	data, err := serializeMessage(msg)
+
+	// First, write to stream to get the offset.
+	streamData, err := serializeMessage(msg)
 	if err != nil {
 		return 0, err
 	}
-
 	stream := b.opts.StreamPrefix + ch
 	id, err := b.client.XAdd(ctx, &redis.XAddArgs{
 		Stream: stream,
 		MaxLen: b.opts.StreamMaxLength,
 		Approx: b.opts.StreamApproximate,
-		Values: map[string]interface{}{"data": data},
+		Values: map[string]interface{}{"data": streamData},
 	}).Result()
 	if err != nil {
 		return 0, err
@@ -101,11 +102,19 @@ func (b *redisBroker) Publish(ch string, payload []byte, isText bool) (uint64, e
 		log.WarnContext(ctx, "failed to set stream TTL", "stream", stream, "error", err)
 	}
 
-	if err := b.client.Publish(ctx, b.opts.PubSubPrefix+ch, data).Err(); err != nil {
+	offset := parseStreamOffset(id)
+
+	// Serialize again with offset included for pub/sub delivery.
+	msg.Offset = offset
+	pubSubData, err := serializeMessage(msg)
+	if err != nil {
+		return 0, err
+	}
+	if err := b.client.Publish(ctx, b.opts.PubSubPrefix+ch, pubSubData).Err(); err != nil {
 		return 0, err
 	}
 
-	return parseStreamOffset(id), nil
+	return offset, nil
 }
 
 // History returns publications stored for ch with offset >= sinceOffset.

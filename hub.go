@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"hash/fnv"
+	"strings"
 	"sync"
 
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
+	"github.com/messageloopio/messageloop/pkg/topics"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 )
@@ -20,6 +22,11 @@ type Hub struct {
 	connShards      [numHubShards]*connShard
 	subShards       [numHubShards]*subShard
 	maxConnsPerUser int
+
+	// Wildcard subscription support
+	matcher    topics.Matcher
+	wcSubsMu   sync.Mutex
+	wcSubs     map[string]*topics.Subscription // key: "sessionID:channel"
 }
 
 // newHub initializes Hub.
@@ -27,6 +34,8 @@ func newHub(maxTimeLagMilli int64, maxConnsPerUser int) *Hub {
 	h := &Hub{
 		sessions:        map[string]*Client{},
 		maxConnsPerUser: maxConnsPerUser,
+		matcher:         topics.NewCSTrieMatcher(),
+		wcSubs:          make(map[string]*topics.Subscription),
 	}
 	for i := 0; i < numHubShards; i++ {
 		h.connShards[i] = newConnShard()
@@ -35,13 +44,54 @@ func newHub(maxTimeLagMilli int64, maxConnsPerUser int) *Hub {
 	return h
 }
 
+// isWildcard returns true if the channel pattern contains a wildcard character.
+func isWildcard(ch string) bool {
+	return strings.Contains(ch, "*")
+}
+
 func (h *Hub) addSub(ch string, sub Subscriber) (bool, error) {
+	if isWildcard(ch) {
+		return h.addWildcardSub(ch, sub)
+	}
 	return h.subShards[index(ch, numHubShards)].addSub(ch, sub)
+}
+
+func (h *Hub) addWildcardSub(ch string, sub Subscriber) (bool, error) {
+	h.wcSubsMu.Lock()
+	defer h.wcSubsMu.Unlock()
+
+	key := sub.Client.SessionID() + ":" + ch
+	if _, exists := h.wcSubs[key]; exists {
+		return false, nil
+	}
+	topicSub, err := h.matcher.Subscribe(ch, sub)
+	if err != nil {
+		return false, err
+	}
+	h.wcSubs[key] = topicSub
+	return true, nil
 }
 
 // removeSub removes connection from clientHub subscriptions registry.
 func (h *Hub) removeSub(ch string, c *Client) (bool, bool) {
+	if isWildcard(ch) {
+		return h.removeWildcardSub(ch, c)
+	}
 	return h.subShards[index(ch, numHubShards)].removeSub(ch, c)
+}
+
+func (h *Hub) removeWildcardSub(ch string, c *Client) (bool, bool) {
+	h.wcSubsMu.Lock()
+	defer h.wcSubsMu.Unlock()
+
+	key := c.SessionID() + ":" + ch
+	topicSub, exists := h.wcSubs[key]
+	if !exists {
+		return true, false
+	}
+	h.matcher.Unsubscribe(topicSub)
+	delete(h.wcSubs, key)
+	return true, true
 }
 
 // index chooses bucket number in range [0, numBuckets).
@@ -222,10 +272,18 @@ func (h *subShard) broadcastPublication(channel string, pub *Publication) error 
 	// Create Payload from publication data
 	var payload *sharedpb.Payload
 	if len(pub.Payload) > 0 {
-		payload = &sharedpb.Payload{
-			Data: &sharedpb.Payload_Binary{
-				Binary: pub.Payload,
-			},
+		if pub.IsText {
+			payload = &sharedpb.Payload{
+				Data: &sharedpb.Payload_Text{
+					Text: string(pub.Payload),
+				},
+			}
+		} else {
+			payload = &sharedpb.Payload{
+				Data: &sharedpb.Payload_Binary{
+					Binary: pub.Payload,
+				},
+			}
 		}
 	}
 
@@ -285,7 +343,63 @@ func (h *Hub) NumSubscribers(ch string) int {
 }
 
 func (h *Hub) broadcastPublication(ch string, pub *Publication) error {
-	return h.subShards[index(ch, numHubShards)].broadcastPublication(ch, pub)
+	// Broadcast to exact subscribers via shards.
+	if err := h.subShards[index(ch, numHubShards)].broadcastPublication(ch, pub); err != nil {
+		return err
+	}
+
+	// Broadcast to wildcard subscribers via matcher.
+	wcMatches := h.matcher.Lookup(ch)
+	if len(wcMatches) == 0 {
+		return nil
+	}
+
+	ctx := context.Background()
+
+	// Build the outbound message for wildcard subscribers.
+	var payload *sharedpb.Payload
+	if len(pub.Payload) > 0 {
+		if pub.IsText {
+			payload = &sharedpb.Payload{Data: &sharedpb.Payload_Text{Text: string(pub.Payload)}}
+		} else {
+			payload = &sharedpb.Payload{Data: &sharedpb.Payload_Binary{Binary: pub.Payload}}
+		}
+	}
+	msg := &clientpb.Message{
+		Channel: ch,
+		Id:      uuid.NewString(),
+		Offset:  pub.Offset,
+		Payload: payload,
+	}
+	out := MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
+		out.Envelope = &clientpb.OutboundMessage_Publication{Publication: &clientpb.Publication{
+			Messages: []*clientpb.Message{msg},
+		}}
+	})
+
+	var wg sync.WaitGroup
+	for _, match := range wcMatches {
+		sub, ok := match.(Subscriber)
+		if !ok {
+			continue
+		}
+		wg.Add(1)
+		go func(sub Subscriber) {
+			defer func() {
+				if r := recover(); r != nil {
+					log.ErrorContext(ctx, "panic in wildcard send publication", fmt.Errorf("panic: %v, channel: %s", r, ch))
+				}
+				wg.Done()
+			}()
+			if err := sub.Client.Send(ctx, out); err != nil {
+				log.ErrorContext(ctx, "wildcard send publication error", err)
+			} else if sub.Client.node.metrics != nil {
+				sub.Client.node.metrics.MessagesDelivered.Inc()
+			}
+		}(sub)
+	}
+	wg.Wait()
+	return nil
 }
 
 // RemoveSession removes a session from the sessions map and connShards.
@@ -329,4 +443,24 @@ func (h *Hub) LookupSession(sessionID string) *Client {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return h.sessions[sessionID]
+}
+
+// DrainAll sends a disconnect to all connected clients and waits for them to close.
+func (h *Hub) DrainAll(disconnect Disconnect) {
+	h.mu.RLock()
+	sessions := make([]*Client, 0, len(h.sessions))
+	for _, c := range h.sessions {
+		sessions = append(sessions, c)
+	}
+	h.mu.RUnlock()
+
+	var wg sync.WaitGroup
+	for _, c := range sessions {
+		wg.Add(1)
+		go func(c *Client) {
+			defer wg.Done()
+			_ = c.Close(disconnect)
+		}(c)
+	}
+	wg.Wait()
 }

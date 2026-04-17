@@ -95,6 +95,11 @@ func (n *Node) Run(ctx context.Context) error {
 	return nil
 }
 
+// Shutdown gracefully drains all client connections.
+func (n *Node) Shutdown() {
+	n.hub.DrainAll(DisconnectForceNoReconnect)
+}
+
 func (n *Node) SetBroker(broker Broker) {
 	n.broker = broker
 }
