@@ -48,7 +48,12 @@ func (t *Transport) WriteMany(messages ...[]byte) error {
 		if closed {
 			return nil
 		}
-		if err := t.sendWithTimeout(rawFrame(messages[i])); err != nil {
+		// Copy the message bytes because the caller may reuse the underlying
+		// buffer (e.g. sync.Pool) after Write returns, while gRPC's transport
+		// layer may still be reading the data asynchronously.
+		copied := make(rawFrame, len(messages[i]))
+		copy(copied, messages[i])
+		if err := t.sendWithTimeout(copied); err != nil {
 			return err
 		}
 	}

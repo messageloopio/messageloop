@@ -353,6 +353,8 @@ npm test
 ## Repository Guide
 
 - [config-example.yaml](config-example.yaml): fuller Redis and proxy example
+- [docs/deployment.md](docs/deployment.md): production deployment guide, TLS, Docker, multi-node
+- [docs/protocol.md](docs/protocol.md): client protocol reference with message formats
 - [CLAUDE.md](CLAUDE.md): architecture and development notes
 - [RPC_TIMEOUT.md](RPC_TIMEOUT.md): RPC timeout behavior and rationale
 - [sdks/go](sdks/go): Go SDK module and examples
