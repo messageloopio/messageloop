@@ -23,7 +23,7 @@ type Node struct {
 	broker           Broker
 	presence         PresenceStore
 	cluster          *Cluster
-	subLocks         map[int]*sync.Mutex
+	subLocks         [numSubLocks]sync.Mutex
 	proxy            *proxy.Router
 	heartbeatManager *HeartbeatManager
 	rpcTimeout       time.Duration
@@ -32,6 +32,7 @@ type Node struct {
 	surveys          map[string]*Survey
 	surveyMu         sync.RWMutex
 	acl              *ACLEngine
+	requireAuth      bool
 }
 
 const (
@@ -39,23 +40,18 @@ const (
 )
 
 func NewNode(cfg *config.Server) *Node {
-	subLocks := make(map[int]*sync.Mutex, numSubLocks)
-	for i := 0; i < numSubLocks; i++ {
-		subLocks[i] = &sync.Mutex{}
-	}
-
 	var limits config.Limits
 	if cfg != nil {
 		limits = cfg.Limits
 	}
 
 	node := &Node{
-		subLocks:   subLocks,
-		hub:        newHub(0, limits.MaxConnectionsPerUser),
-		rpcTimeout: proxy.DefaultRPCTimeout,
-		limits:     limits,
-		surveys:    make(map[string]*Survey),
-		presence:   NewMemoryPresenceStore(),
+		hub:         newHub(0, limits.MaxConnectionsPerUser),
+		rpcTimeout:  proxy.DefaultRPCTimeout,
+		limits:      limits,
+		surveys:     make(map[string]*Survey),
+		presence:    NewMemoryPresenceStore(),
+		requireAuth: cfg != nil && cfg.RequireAuth,
 	}
 
 	if cfg != nil && cfg.RPCTimeout != "" {
@@ -180,7 +176,7 @@ func (n *Node) ClearPresenceForSession(ctx context.Context, ch string, c *Client
 }
 
 func (n *Node) subLock(ch string) *sync.Mutex {
-	return n.subLocks[index(ch, numSubLocks)]
+	return &n.subLocks[index(ch, numSubLocks)]
 }
 
 func (n *Node) Hub() *Hub {
@@ -417,6 +413,12 @@ func (n *Node) GetHeartbeatIdleTimeout() time.Duration {
 		return n.heartbeatManager.Config().IdleTimeout
 	}
 	return 0
+}
+
+// MaxMessageSize returns the configured max message size in bytes.
+// Returns 0 if no limit is configured.
+func (n *Node) MaxMessageSize() int {
+	return n.limits.MaxMessageSize
 }
 
 // Survey sends a request to all subscribers of a channel and collects responses.

@@ -11,16 +11,21 @@ import (
 	"github.com/lynx-go/lynx"
 	"github.com/lynx-go/x/log"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/encoding"
 	_ "google.golang.org/grpc/encoding/gzip"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 type Options struct {
-	Addr         string        `yaml:"addr" json:"addr"`
-	WriteTimeout time.Duration `yaml:"write_timeout" json:"write_timeout"`
-	TLSCertFile  string
-	TLSKeyFile   string
+	Addr           string        `yaml:"addr" json:"addr"`
+	WriteTimeout   time.Duration `yaml:"write_timeout" json:"write_timeout"`
+	TLSCertFile    string
+	TLSKeyFile     string
+	AdminAuthToken string // Bearer token for admin API authentication
+	MaxRecvMsgSize int    // Max inbound message size in bytes (0 = gRPC default)
 }
 
 var registerRawCodecOnce sync.Once
@@ -41,14 +46,17 @@ func validateOptions(name string, opts Options) error {
 	return nil
 }
 
-func prepareServer(name string, opts Options, register func(*grpc.Server)) (*Server, error) {
+func prepareServer(name string, opts Options, register func(*grpc.Server), extraOpts ...grpc.ServerOption) (*Server, error) {
 	if err := validateOptions(name, opts); err != nil {
 		return nil, err
 	}
 
 	registerRawCodec()
 
-	grpcOpts := []grpc.ServerOption{}
+	grpcOpts := append([]grpc.ServerOption{}, extraOpts...)
+	if opts.MaxRecvMsgSize > 0 {
+		grpcOpts = append(grpcOpts, grpc.MaxRecvMsgSize(opts.MaxRecvMsgSize))
+	}
 	if opts.TLSCertFile != "" {
 		creds, err := credentials.NewServerTLSFromFile(opts.TLSCertFile, opts.TLSKeyFile)
 		if err != nil {
@@ -71,6 +79,29 @@ func prepareServer(name string, opts Options, register func(*grpc.Server)) (*Ser
 		conn: conn,
 		opts: &opts,
 	}, nil
+}
+
+// adminAuthInterceptor returns a gRPC unary interceptor that validates bearer tokens.
+func adminAuthInterceptor(token string) grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		md, ok := metadata.FromIncomingContext(ctx)
+		if !ok {
+			return nil, status.Error(codes.Unauthenticated, "missing metadata")
+		}
+		values := md.Get("authorization")
+		if len(values) == 0 {
+			return nil, status.Error(codes.Unauthenticated, "missing authorization token")
+		}
+		authHeader := values[0]
+		const bearerPrefix = "Bearer "
+		if len(authHeader) <= len(bearerPrefix) || authHeader[:len(bearerPrefix)] != bearerPrefix {
+			return nil, status.Error(codes.Unauthenticated, "invalid authorization format")
+		}
+		if authHeader[len(bearerPrefix):] != token {
+			return nil, status.Error(codes.Unauthenticated, "invalid authorization token")
+		}
+		return handler(ctx, req)
+	}
 }
 
 type Server struct {

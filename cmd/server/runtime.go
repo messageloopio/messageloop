@@ -40,9 +40,10 @@ func (s *preparedGRPCServers) Close() {
 
 func prepareGRPCServers(cfg *config.Config, node *messageloop.Node) (*preparedGRPCServers, error) {
 	clientOpts := grpcstream.Options{
-		Addr:        cfg.Transport.GRPC.Addr,
-		TLSCertFile: cfg.Transport.GRPC.TLS.CertFile,
-		TLSKeyFile:  cfg.Transport.GRPC.TLS.KeyFile,
+		Addr:           cfg.Transport.GRPC.Addr,
+		TLSCertFile:    cfg.Transport.GRPC.TLS.CertFile,
+		TLSKeyFile:     cfg.Transport.GRPC.TLS.KeyFile,
+		MaxRecvMsgSize: cfg.Server.Limits.MaxMessageSize,
 	}
 	if cfg.Transport.GRPC.WriteTimeout != "" {
 		if d, err := time.ParseDuration(cfg.Transport.GRPC.WriteTimeout); err == nil {
@@ -56,9 +57,10 @@ func prepareGRPCServers(cfg *config.Config, node *messageloop.Node) (*preparedGR
 	}
 
 	adminServer, err := grpcstream.PrepareAdminServer(grpcstream.Options{
-		Addr:        cfg.Server.GRPCAdmin.Addr,
-		TLSCertFile: cfg.Server.GRPCAdmin.TLS.CertFile,
-		TLSKeyFile:  cfg.Server.GRPCAdmin.TLS.KeyFile,
+		Addr:           cfg.Server.GRPCAdmin.Addr,
+		TLSCertFile:    cfg.Server.GRPCAdmin.TLS.CertFile,
+		TLSKeyFile:     cfg.Server.GRPCAdmin.TLS.KeyFile,
+		AdminAuthToken: cfg.Server.GRPCAdmin.AuthToken,
 	}, node)
 	if err != nil {
 		_ = clientServer.Close()

@@ -348,41 +348,52 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 	var p proxy.Proxy
 	if connect.Token != "" {
 		p = c.node.FindProxy("", SystemMethodAuthenticate)
-		if p != nil {
-			authReq := &proxy.AuthenticateProxyRequest{
-				ClientID:   connect.ClientId,
-				Token:      connect.Token,
-				ClientType: connect.ClientType,
-				SessionID:  c.session,
-				RemoteAddr: c.transport.RemoteAddr(),
+	} else if c.node.requireAuth {
+		_ = c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+			out.Envelope = &clientpb.OutboundMessage_Error{
+				Error: &sharedpb.Error{
+					Code:    "AUTH_REQUIRED",
+					Type:    "auth_error",
+					Message: "authentication token is required",
+				},
 			}
-			authResp, err := p.Authenticate(ctx, authReq)
-			if err != nil {
-				log.WarnContext(ctx, "proxy authentication failed", "error", err)
-				_ = c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
-					out.Envelope = &clientpb.OutboundMessage_Error{
-						Error: &sharedpb.Error{
-							Code:    "AUTH_ERROR",
-							Type:    "auth_error",
-							Message: err.Error(),
-						},
-					}
-				}))
-				return DisconnectInvalidToken
-			}
-			if authResp.Error != nil {
-				log.WarnContext(ctx, "proxy authentication returned error", "error", authResp.Error)
-				_ = c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
-					out.Envelope = &clientpb.OutboundMessage_Error{
-						Error: authResp.Error,
-					}
-				}))
-				return DisconnectInvalidToken
-			}
-			// Store user info from proxy response
-			if authResp.UserInfo != nil {
-				c.user = authResp.UserInfo.ID
-			}
+		}))
+		return DisconnectInvalidToken
+	}
+	if p != nil {
+		authReq := &proxy.AuthenticateProxyRequest{
+			ClientID:   connect.ClientId,
+			Token:      connect.Token,
+			ClientType: connect.ClientType,
+			SessionID:  c.session,
+			RemoteAddr: c.transport.RemoteAddr(),
+		}
+		authResp, err := p.Authenticate(ctx, authReq)
+		if err != nil {
+			log.WarnContext(ctx, "proxy authentication failed", "error", err)
+			_ = c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+				out.Envelope = &clientpb.OutboundMessage_Error{
+					Error: &sharedpb.Error{
+						Code:    "AUTH_ERROR",
+						Type:    "auth_error",
+						Message: err.Error(),
+					},
+				}
+			}))
+			return DisconnectInvalidToken
+		}
+		if authResp.Error != nil {
+			log.WarnContext(ctx, "proxy authentication returned error", "error", authResp.Error)
+			_ = c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+				out.Envelope = &clientpb.OutboundMessage_Error{
+					Error: authResp.Error,
+				}
+			}))
+			return DisconnectInvalidToken
+		}
+		// Store user info from proxy response
+		if authResp.UserInfo != nil {
+			c.user = authResp.UserInfo.ID
 		}
 	}
 
@@ -678,7 +689,7 @@ func (c *Client) handlePublish(ctx context.Context, in *clientpb.InboundMessage,
 		aclResp, err := p.PublishAcl(ctx, aclReq)
 		if err != nil {
 			log.WarnContext(ctx, "proxy publish ACL check failed", "channel", channel, "error", err)
-			_ = c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+			return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 				out.Envelope = &clientpb.OutboundMessage_Error{
 					Error: &sharedpb.Error{
 						Code:    "ACL_ERROR",
@@ -687,22 +698,20 @@ func (c *Client) handlePublish(ctx context.Context, in *clientpb.InboundMessage,
 					},
 				}
 			}))
-			return DisconnectInvalidToken
 		}
 		if aclResp.Error != nil {
 			log.WarnContext(ctx, "proxy publish ACL returned error", "channel", channel, "error", aclResp.Error)
-			_ = c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+			return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 				out.Envelope = &clientpb.OutboundMessage_Error{
 					Error: aclResp.Error,
 				}
 			}))
-			return DisconnectInvalidToken
 		}
 	} else if c.node.acl != nil {
 		// Built-in ACL check (fallback when no proxy is configured)
 		if !c.node.acl.CanPublish(channel, c.user) {
 			log.WarnContext(ctx, "ACL denied publish", "channel", channel, "user", c.user)
-			_ = c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+			return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 				out.Envelope = &clientpb.OutboundMessage_Error{
 					Error: &sharedpb.Error{
 						Code:    "ACL_DENIED",
@@ -711,7 +720,6 @@ func (c *Client) handlePublish(ctx context.Context, in *clientpb.InboundMessage,
 					},
 				}
 			}))
-			return DisconnectInvalidToken
 		}
 	}
 
@@ -779,7 +787,7 @@ func (c *Client) handleSubscribe(ctx context.Context, in *clientpb.InboundMessag
 						},
 					}
 				}))
-				return DisconnectInvalidToken
+				continue
 			}
 			if aclResp.Error != nil {
 				log.WarnContext(ctx, "proxy subscribe ACL returned error", "channel", ch.Channel, "error", aclResp.Error)
@@ -788,7 +796,7 @@ func (c *Client) handleSubscribe(ctx context.Context, in *clientpb.InboundMessag
 						Error: aclResp.Error,
 					}
 				}))
-				return DisconnectInvalidToken
+				continue
 			}
 		} else if c.node.acl != nil {
 			// Built-in ACL check (fallback when no proxy is configured)
@@ -803,7 +811,7 @@ func (c *Client) handleSubscribe(ctx context.Context, in *clientpb.InboundMessag
 						},
 					}
 				}))
-				return DisconnectInvalidToken
+				continue
 			}
 		}
 

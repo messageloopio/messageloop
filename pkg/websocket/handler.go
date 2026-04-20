@@ -56,6 +56,11 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	ctx = log.Context(ctx, log.FromContext(ctx), "client_id", client.SessionID())
 	defer closeFn()
 
+	// Set max message size
+	if maxSize := h.node.MaxMessageSize(); maxSize > 0 {
+		conn.SetReadLimit(int64(maxSize))
+	}
+
 	// Set read deadline based on heartbeat configuration
 	readTimeout := 60 * time.Second
 	if idleTimeout := h.node.GetHeartbeatIdleTimeout(); idleTimeout > 0 {

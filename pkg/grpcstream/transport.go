@@ -85,7 +85,6 @@ func (t *Transport) Close(disconnect messageloop.Disconnect) error {
 			return
 		}
 		t.writeError(int32(disconnect.Code), disconnect.Reason)
-		time.Sleep(100 * time.Millisecond)
 		close(t.closeCh)
 		close(t.sendCh)
 		t.closed = true

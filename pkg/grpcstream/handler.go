@@ -33,23 +33,21 @@ func (h *gRPCHandler) MessageLoop(stream grpc.BidiStreamingServer[clientpb.Inbou
 	ctx = log.Context(ctx, log.FromContext(ctx), "client_id", client.SessionID())
 
 	for {
-		select {
-		case <-stream.Context().Done():
-			return stream.Context().Err()
-		case <-transport.closeCh:
+		in, err := stream.Recv()
+		if err == io.EOF {
 			return nil
-
-		default:
-			in, err := stream.Recv()
-			if err == io.EOF {
+		}
+		if err != nil {
+			// Check if transport was closed intentionally.
+			select {
+			case <-transport.closeCh:
 				return nil
+			default:
 			}
-			if err != nil {
-				return err
-			}
-			if err := client.HandleMessage(ctx, in); err != nil {
-				return err
-			}
+			return err
+		}
+		if err := client.HandleMessage(ctx, in); err != nil {
+			return err
 		}
 	}
 }

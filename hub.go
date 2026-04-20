@@ -263,10 +263,19 @@ func (h *subShard) removeSub(ch string, c *Client) (bool, bool) {
 }
 
 func (h *subShard) broadcastPublication(channel string, pub *Publication) error {
+	h.mu.RLock()
 	subscribers, ok := h.subs[channel]
 	if !ok {
+		h.mu.RUnlock()
 		return nil
 	}
+
+	// Copy subscribers under lock to avoid data race during iteration.
+	subs := make([]Subscriber, 0, len(subscribers))
+	for _, sub := range subscribers {
+		subs = append(subs, sub)
+	}
+	h.mu.RUnlock()
 
 	ctx := context.Background()
 
@@ -303,9 +312,9 @@ func (h *subShard) broadcastPublication(channel string, pub *Publication) error 
 
 	const broadcastParallelThreshold = 8
 
-	if len(subscribers) <= broadcastParallelThreshold {
+	if len(subs) <= broadcastParallelThreshold {
 		// Serial send for small fan-out — avoids goroutine overhead
-		for _, sub := range subscribers {
+		for _, sub := range subs {
 			if err := sub.Client.Send(ctx, out); err != nil {
 				log.ErrorContext(ctx, "send publication error", err)
 				if sub.Client.node.metrics != nil {
@@ -318,7 +327,7 @@ func (h *subShard) broadcastPublication(channel string, pub *Publication) error 
 	} else {
 		// Parallel send for large fan-out
 		var wg sync.WaitGroup
-		for _, sub := range subscribers {
+		for _, sub := range subs {
 			wg.Add(1)
 			go func(sub Subscriber) {
 				defer func() {

@@ -3,6 +3,7 @@ server:
     addr: "127.0.0.1:8080"   # Admin HTTP server exposing /health and /metrics
   grpc_admin:
     addr: "127.0.0.1:9091"   # Server-side gRPC admin API; keep this on a private interface
+    auth_token: ""            # Required bearer token for admin API; leave empty to disable auth (NOT recommended in production)
     # tls:
     #   cert_file: "./certs/admin.crt"
     #   key_file: "./certs/admin.key"
@@ -13,6 +14,7 @@ server:
     max_connections_per_user: 0       # 0 = unlimited
     max_subscriptions_per_client: 0   # 0 = unlimited
     max_publishes_per_second: 0       # 0 = unlimited
+    max_message_size: 65536           # bytes, 0 = default
   acl:
     rules:
       - channel_pattern: "chat.public.*"
@@ -25,7 +27,10 @@ transport:
   websocket:
     addr: ":9080"
     path: "/ws"
-    check_origin: true  # Set to true for development to allow cross-origin requests
+    allow_all_origins: true  # Set to true for development to allow cross-origin requests
+    # allowed_origins:       # Whitelist of allowed origins (used when allow_all_origins is false)
+    #   - "https://example.com"
+    #   - "https://app.example.com"
     compression: true   # Enable permessage-deflate
     # write_timeout: "10s"
     # tls:

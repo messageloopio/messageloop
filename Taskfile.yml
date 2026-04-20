@@ -56,3 +56,18 @@ tasks:
       - npm exec rimraf -- dist
       - npm run build
       - npm publish --access public --registry https://registry.npmjs.org/
+
+  test:
+    dir: '{{.USER_WORKING_DIR}}'
+    cmds:
+      - go test -race ./...
+
+  vet:
+    dir: '{{.USER_WORKING_DIR}}'
+    cmds:
+      - go vet ./...
+
+  lint:
+    dir: '{{.USER_WORKING_DIR}}'
+    cmds:
+      - golangci-lint run

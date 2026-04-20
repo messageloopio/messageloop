@@ -39,6 +39,9 @@ func main() {
 		if err := app.Config().Unmarshal(cfg, lynx.TagNameJSON); err != nil {
 			return err
 		}
+		if err := cfg.Validate(); err != nil {
+			return fmt.Errorf("invalid config: %w", err)
+		}
 
 		node := messageloop.NewNode(&cfg.Server)
 		reg := prometheus.NewRegistry()
@@ -162,9 +165,18 @@ func main() {
 				wsOpts.WriteTimeout = d
 			}
 		}
-		if cfg.Transport.WebSocket.CheckOrigin {
+		if cfg.Transport.WebSocket.AllowAllOrigins || cfg.Transport.WebSocket.CheckOrigin {
 			app.Logger().Info("setting websocket CheckOrigin to allow all origins")
 			wsOpts.CheckOrigin = func(r *http.Request) bool { return true }
+		} else if len(cfg.Transport.WebSocket.AllowedOrigins) > 0 {
+			allowed := make(map[string]bool, len(cfg.Transport.WebSocket.AllowedOrigins))
+			for _, o := range cfg.Transport.WebSocket.AllowedOrigins {
+				allowed[o] = true
+			}
+			wsOpts.CheckOrigin = func(r *http.Request) bool {
+				origin := r.Header.Get("Origin")
+				return allowed[origin]
+			}
 		}
 		wsServer := websocket.NewServer(wsOpts, node)
 

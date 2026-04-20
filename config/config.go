@@ -1,6 +1,11 @@
 package config
 
-import "github.com/messageloopio/messageloop/proxy"
+import (
+	"fmt"
+	"time"
+
+	"github.com/messageloopio/messageloop/proxy"
+)
 
 type Config struct {
 	Server    Server        `yaml:"server" json:"server"`
@@ -18,12 +23,13 @@ type ClusterConfig struct {
 }
 
 type Server struct {
-	Http       HttpServer `yaml:"http" json:"http"`
-	GRPCAdmin  GRPCAdmin  `yaml:"grpc_admin" json:"grpc_admin"`
-	Heartbeat  Heartbeat  `yaml:"heartbeat" json:"heartbeat"`
-	RPCTimeout string     `yaml:"rpc_timeout" json:"rpc_timeout"` // default: "30s"
-	Limits     Limits     `yaml:"limits" json:"limits"`
-	ACL        ACLConfig  `yaml:"acl" json:"acl"`
+	Http        HttpServer `yaml:"http" json:"http"`
+	GRPCAdmin   GRPCAdmin  `yaml:"grpc_admin" json:"grpc_admin"`
+	Heartbeat   Heartbeat  `yaml:"heartbeat" json:"heartbeat"`
+	RPCTimeout  string     `yaml:"rpc_timeout" json:"rpc_timeout"` // default: "30s"
+	Limits      Limits     `yaml:"limits" json:"limits"`
+	ACL         ACLConfig  `yaml:"acl" json:"acl"`
+	RequireAuth bool       `yaml:"require_auth" json:"require_auth"` // Reject connections with empty token
 }
 
 // ACLConfig defines built-in channel access control rules.
@@ -44,6 +50,7 @@ type Limits struct {
 	MaxConnectionsPerUser     int `yaml:"max_connections_per_user" json:"max_connections_per_user"`         // 0 = unlimited
 	MaxSubscriptionsPerClient int `yaml:"max_subscriptions_per_client" json:"max_subscriptions_per_client"` // 0 = unlimited
 	MaxPublishesPerSecond     int `yaml:"max_publishes_per_second" json:"max_publishes_per_second"`         // 0 = unlimited
+	MaxMessageSize            int `yaml:"max_message_size" json:"max_message_size"`                         // bytes, 0 = default (64KB)
 }
 
 type HttpServer struct {
@@ -51,8 +58,9 @@ type HttpServer struct {
 }
 
 type GRPCAdmin struct {
-	Addr string    `yaml:"addr" json:"addr"`
-	TLS  TLSConfig `yaml:"tls" json:"tls"`
+	Addr      string    `yaml:"addr" json:"addr"`
+	TLS       TLSConfig `yaml:"tls" json:"tls"`
+	AuthToken string    `yaml:"auth_token" json:"auth_token"` // Required bearer token for admin API calls
 }
 
 type Heartbeat struct {
@@ -70,13 +78,17 @@ type TLSConfig struct {
 }
 
 type WebSocketTransport struct {
-	Addr         string    `yaml:"addr" json:"addr"`
-	Path         string    `yaml:"path" json:"path"`
-	ReadTimeout  string    `yaml:"read_timeout" json:"read_timeout"`   // duration string
-	WriteTimeout string    `yaml:"write_timeout" json:"write_timeout"` // duration string, e.g. "10s"
-	CheckOrigin  bool      `yaml:"check_origin" json:"check_origin"`   // Allow any origin when true
-	TLS          TLSConfig `yaml:"tls" json:"tls"`
-	Compression  bool      `yaml:"compression" json:"compression"` // Enable permessage-deflate
+	Addr            string    `yaml:"addr" json:"addr"`
+	Path            string    `yaml:"path" json:"path"`
+	ReadTimeout     string    `yaml:"read_timeout" json:"read_timeout"`           // duration string
+	WriteTimeout    string    `yaml:"write_timeout" json:"write_timeout"`         // duration string, e.g. "10s"
+	AllowAllOrigins bool      `yaml:"allow_all_origins" json:"allow_all_origins"` // Allow any origin (development only)
+	AllowedOrigins  []string  `yaml:"allowed_origins" json:"allowed_origins"`     // Whitelist of allowed origins
+	TLS             TLSConfig `yaml:"tls" json:"tls"`
+	Compression     bool      `yaml:"compression" json:"compression"` // Enable permessage-deflate
+
+	// Deprecated: Use AllowAllOrigins instead.
+	CheckOrigin bool `yaml:"check_origin" json:"check_origin"`
 }
 
 type GRPCTransport struct {
@@ -125,4 +137,62 @@ type RedisConfig struct {
 	StreamApproximate bool   `yaml:"stream_approximate" json:"stream_approximate"`
 	HistoryTTL        string `yaml:"history_ttl" json:"history_ttl"`
 	ConsumerGroup     string `yaml:"consumer_group" json:"consumer_group"`
+}
+
+// Validate checks the configuration for common errors and returns a descriptive error if any are found.
+func (c *Config) Validate() error {
+	if c.Transport.WebSocket.Addr == "" && c.Transport.GRPC.Addr == "" {
+		return fmt.Errorf("at least one transport address (websocket or grpc) must be configured")
+	}
+
+	// Validate duration fields.
+	for _, entry := range []struct {
+		name  string
+		value string
+	}{
+		{"server.heartbeat.idle_timeout", c.Server.Heartbeat.IdleTimeout},
+		{"server.rpc_timeout", c.Server.RPCTimeout},
+		{"transport.websocket.read_timeout", c.Transport.WebSocket.ReadTimeout},
+		{"transport.websocket.write_timeout", c.Transport.WebSocket.WriteTimeout},
+		{"transport.grpc.write_timeout", c.Transport.GRPC.WriteTimeout},
+	} {
+		if entry.value != "" {
+			if _, err := time.ParseDuration(entry.value); err != nil {
+				return fmt.Errorf("invalid duration for %s: %w", entry.name, err)
+			}
+		}
+	}
+
+	// Validate TLS pair completeness.
+	for _, entry := range []struct {
+		name string
+		tls  TLSConfig
+	}{
+		{"server.grpc_admin.tls", c.Server.GRPCAdmin.TLS},
+		{"transport.websocket.tls", c.Transport.WebSocket.TLS},
+		{"transport.grpc.tls", c.Transport.GRPC.TLS},
+	} {
+		if (entry.tls.CertFile == "") != (entry.tls.KeyFile == "") {
+			return fmt.Errorf("%s: cert_file and key_file must both be set or both be empty", entry.name)
+		}
+	}
+
+	// Validate broker config.
+	switch c.Broker.Type {
+	case "", "memory":
+		// ok
+	case "redis":
+		if c.Broker.Redis.Addr == "" {
+			return fmt.Errorf("broker.redis.addr is required when broker.type is redis")
+		}
+	default:
+		return fmt.Errorf("unknown broker.type: %q (expected \"memory\" or \"redis\")", c.Broker.Type)
+	}
+
+	// Validate cluster requires redis broker.
+	if c.Cluster.Enabled && c.Broker.Type != "redis" {
+		return fmt.Errorf("cluster requires broker.type=redis")
+	}
+
+	return nil
 }

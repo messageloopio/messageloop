@@ -23,9 +23,7 @@ func TestNewNode(t *testing.T) {
 	if node.broker == nil {
 		t.Error("broker should be initialized")
 	}
-	if node.subLocks == nil {
-		t.Error("subLocks should be initialized")
-	}
+	// subLocks is a fixed-size array, always has numSubLocks elements
 	if len(node.subLocks) != numSubLocks {
 		t.Errorf("len(subLocks) = %d, want %d", len(node.subLocks), numSubLocks)
 	}
