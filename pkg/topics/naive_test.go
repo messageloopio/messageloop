@@ -60,7 +60,7 @@ func BenchmarkNaiveMatcherSubscribe(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		m.Subscribe("foo.*.baz.qux.quux", s0)
+		_, _ = m.Subscribe("foo.*.baz.qux.quux", s0)
 	}
 }
 
@@ -83,7 +83,7 @@ func BenchmarkNaiveMatcherLookup(b *testing.B) {
 		m  = NewNaiveMatcher()
 		s0 = 0
 	)
-	m.Subscribe("foo.*.baz.qux.quux", s0)
+	_, _ = m.Subscribe("foo.*.baz.qux.quux", s0)
 	populateMatcher(m, 1000, 5)
 
 	b.ResetTimer()
@@ -100,7 +100,7 @@ func BenchmarkNaiveMatcherSubscribeCold(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		m.Subscribe("foo.*.baz.qux.quux", s0)
+		_, _ = m.Subscribe("foo.*.baz.qux.quux", s0)
 	}
 }
 
@@ -122,7 +122,7 @@ func BenchmarkNaiveMatcherLookupCold(b *testing.B) {
 		m  = NewNaiveMatcher()
 		s0 = 0
 	)
-	m.Subscribe("foo.*.baz.qux.quux", s0)
+	_, _ = m.Subscribe("foo.*.baz.qux.quux", s0)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

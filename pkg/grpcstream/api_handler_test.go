@@ -43,10 +43,10 @@ func TestAPIServiceHandler_PublishToSessions(t *testing.T) {
 	transport := &mockTransport{}
 	client, closeFn, err := messageloop.NewClient(ctx, node, transport, messageloop.ProtobufMarshaler{})
 	require.NoError(t, err)
-	defer closeFn()
+	defer func() { _ = closeFn() }()
 
 	// Authenticate the client (required for it to be in the hub)
-	node.AddClient(client)
+	_ = node.AddClient(client)
 
 	// Create payload
 	s, _ := structpb.NewStruct(map[string]interface{}{"message": "test payload"})
@@ -149,7 +149,7 @@ func TestAPIServiceHandler_Disconnect(t *testing.T) {
 	require.NoError(t, err)
 
 	// Add the client to the hub
-	node.AddClient(client)
+	_ = node.AddClient(client)
 
 	// Test disconnecting the session
 	req := &serverpb.DisconnectRequest{
@@ -192,10 +192,10 @@ func TestAPIServiceHandler_Subscribe(t *testing.T) {
 	transport := &mockTransport{}
 	client, closeFn, err := messageloop.NewClient(ctx, node, transport, messageloop.ProtobufMarshaler{})
 	require.NoError(t, err)
-	defer closeFn()
+	defer func() { _ = closeFn() }()
 
 	// Add the client to the hub
-	node.AddClient(client)
+	_ = node.AddClient(client)
 
 	// Test subscribing to channels
 	req := &serverpb.SubscribeRequest{
@@ -236,10 +236,10 @@ func TestAPIServiceHandler_Unsubscribe(t *testing.T) {
 	transport := &mockTransport{}
 	client, closeFn, err := messageloop.NewClient(ctx, node, transport, messageloop.ProtobufMarshaler{})
 	require.NoError(t, err)
-	defer closeFn()
+	defer func() { _ = closeFn() }()
 
 	// Add the client to the hub
-	node.AddClient(client)
+	_ = node.AddClient(client)
 
 	// First subscribe to a channel
 	subReq := &serverpb.SubscribeRequest{

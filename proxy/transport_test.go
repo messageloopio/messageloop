@@ -15,8 +15,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v1"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 )
 
 func TestNewHTTPProxy(t *testing.T) {
@@ -61,7 +61,7 @@ func TestHTTPProxy_RPC(t *testing.T) {
 		}`
 
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(respJSON))
+		_, _ = w.Write([]byte(respJSON))
 	}))
 	defer server.Close()
 
@@ -73,7 +73,7 @@ func TestHTTPProxy_RPC(t *testing.T) {
 
 	p, err := NewHTTPProxy(cfg)
 	require.NoError(t, err)
-	defer p.Close()
+	defer func() { _ = p.Close() }()
 
 	ctx := context.Background()
 
@@ -112,7 +112,7 @@ func TestHTTPProxy_Timeout(t *testing.T) {
 
 	p, err := NewHTTPProxy(cfg)
 	require.NoError(t, err)
-	defer p.Close()
+	defer func() { _ = p.Close() }()
 
 	ctx := context.Background()
 	s, _ := structpb.NewStruct(map[string]interface{}{})
@@ -138,7 +138,7 @@ func TestNewGRPCProxy(t *testing.T) {
 
 	server := grpc.NewServer()
 	proxypb.RegisterProxyServiceServer(server, &mockGRPCServer{})
-	go server.Serve(lis)
+	go func() { _ = server.Serve(lis) }()
 	defer server.Stop()
 
 	cfg := &ProxyConfig{
@@ -185,7 +185,7 @@ func TestGRPCProxy_RPC(t *testing.T) {
 
 	s := grpc.NewServer()
 	proxypb.RegisterProxyServiceServer(s, mockSrv)
-	go s.Serve(lis)
+	go func() { _ = s.Serve(lis) }()
 	defer s.Stop()
 
 	cfg := &ProxyConfig{
@@ -198,7 +198,7 @@ func TestGRPCProxy_RPC(t *testing.T) {
 
 	p, err := NewGRPCProxy(cfg)
 	require.NoError(t, err)
-	defer p.Close()
+	defer func() { _ = p.Close() }()
 
 	ctx := context.Background()
 

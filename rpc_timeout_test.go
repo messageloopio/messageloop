@@ -76,7 +76,6 @@ func (m *MockSlowProxy) Close() error {
 
 // MockTransport for testing
 type MockTransport struct {
-	messages []*clientpb.OutboundMessage
 }
 
 func (m *MockTransport) Write(data []byte) error {

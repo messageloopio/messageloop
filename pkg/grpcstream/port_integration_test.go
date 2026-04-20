@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -32,12 +33,18 @@ func dialPreparedServer(t *testing.T, addr string) *grpc.ClientConn {
 
 	var conn *grpc.ClientConn
 	require.Eventually(t, func() bool {
+		var err error
+		conn, err = grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if err != nil {
+			return false
+		}
+		// Verify connectivity with a short deadline.
 		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 		defer cancel()
-
-		var err error
-		conn, err = grpc.DialContext(ctx, addr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock())
-		return err == nil
+		conn.Connect()
+		state := conn.GetState()
+		_ = conn.WaitForStateChange(ctx, state)
+		return conn.GetState() == connectivity.Ready
 	}, 3*time.Second, 25*time.Millisecond)
 
 	t.Cleanup(func() {

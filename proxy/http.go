@@ -229,11 +229,7 @@ func (p *HTTPProxy) OnConnected(ctx context.Context, req *OnConnectedProxyReques
 
 	result, err := p.doRequest(ctx, httpReq, "OnConnected", req.SessionID, "",
 		func(respBody []byte) (any, error) {
-			var protoResp proxypb.OnConnectedResponse
-			if err := json.Unmarshal(respBody, &protoResp); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal response: %w", err)
-			}
-			return FromProtoOnConnectedResponse(&protoResp), nil
+			return FromProtoOnConnectedResponse(nil), nil
 		},
 	)
 	if err != nil {
@@ -264,11 +260,7 @@ func (p *HTTPProxy) OnSubscribed(ctx context.Context, req *OnSubscribedProxyRequ
 
 	result, err := p.doRequest(ctx, httpReq, "OnSubscribed", req.SessionID, req.Channel,
 		func(respBody []byte) (any, error) {
-			var protoResp proxypb.OnSubscribedResponse
-			if err := json.Unmarshal(respBody, &protoResp); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal response: %w", err)
-			}
-			return FromProtoOnSubscribedResponse(&protoResp), nil
+			return FromProtoOnSubscribedResponse(nil), nil
 		},
 	)
 	if err != nil {
@@ -299,11 +291,7 @@ func (p *HTTPProxy) OnUnsubscribed(ctx context.Context, req *OnUnsubscribedProxy
 
 	result, err := p.doRequest(ctx, httpReq, "OnUnsubscribed", req.SessionID, req.Channel,
 		func(respBody []byte) (any, error) {
-			var protoResp proxypb.OnUnsubscribedResponse
-			if err := json.Unmarshal(respBody, &protoResp); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal response: %w", err)
-			}
-			return FromProtoOnUnsubscribedResponse(&protoResp), nil
+			return FromProtoOnUnsubscribedResponse(nil), nil
 		},
 	)
 	if err != nil {
@@ -333,11 +321,7 @@ func (p *HTTPProxy) OnDisconnected(ctx context.Context, req *OnDisconnectedProxy
 
 	result, err := p.doRequest(ctx, httpReq, "OnDisconnected", req.SessionID, "",
 		func(respBody []byte) (any, error) {
-			var protoResp proxypb.OnDisconnectedResponse
-			if err := json.Unmarshal(respBody, &protoResp); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal response: %w", err)
-			}
-			return FromProtoOnDisconnectedResponse(&protoResp), nil
+			return FromProtoOnDisconnectedResponse(nil), nil
 		},
 	)
 	if err != nil {
@@ -366,7 +350,7 @@ func (p *HTTPProxy) doRequest(ctx context.Context, httpReq *http.Request, method
 	if err != nil {
 		return nil, fmt.Errorf("HTTP request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Read response
 	respBody, err := io.ReadAll(resp.Body)

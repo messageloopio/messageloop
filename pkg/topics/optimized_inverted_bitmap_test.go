@@ -60,7 +60,7 @@ func BenchmarkOptimizedInvertedBitmapMatcherSubscribe(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ib.Subscribe("foo.*.baz.qux.quux", s0)
+		_, _ = ib.Subscribe("foo.*.baz.qux.quux", s0)
 	}
 }
 
@@ -83,7 +83,7 @@ func BenchmarkOptimizedInvertedBitmapMatcherLookup(b *testing.B) {
 		ib = NewOptimizedInvertedBitmapMatcher(5)
 		s0 = 0
 	)
-	ib.Subscribe("foo.*.baz.qux.quux", s0)
+	_, _ = ib.Subscribe("foo.*.baz.qux.quux", s0)
 	populateMatcher(ib, 1000, 5)
 
 	b.ResetTimer()
@@ -100,7 +100,7 @@ func BenchmarkOptimizedInvertedBitmapMatcherSubscribeCold(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ib.Subscribe("foo.*.baz.qux.quux", s0)
+		_, _ = ib.Subscribe("foo.*.baz.qux.quux", s0)
 	}
 }
 
@@ -122,7 +122,7 @@ func BenchmarkOptimizedInvertedBitmapMatcherLookupCold(b *testing.B) {
 		ib = NewOptimizedInvertedBitmapMatcher(5)
 		s0 = 0
 	)
-	ib.Subscribe("foo.*.baz.qux.quux", s0)
+	_, _ = ib.Subscribe("foo.*.baz.qux.quux", s0)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 )
 
 // capturingTransport captures all written messages for inspection
@@ -66,12 +66,6 @@ func (c *capturingTransport) Close(disconnect Disconnect) error {
 	return nil
 }
 
-func (c *capturingTransport) getMessages() [][]byte {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.messages
-}
-
 func (c *capturingTransport) getMessageCount() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -124,12 +118,6 @@ func (f *failTransport) Close(disconnect Disconnect) error {
 
 func (f *failTransport) RemoteAddr() string {
 	return "127.0.0.1:12345"
-}
-
-func (f *failTransport) wasCloseCalled() bool {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.closeCalled
 }
 
 func TestNewClient(t *testing.T) {

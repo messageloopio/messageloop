@@ -8,7 +8,7 @@ import (
 	"github.com/RoaringBitmap/roaring"
 )
 
-var ErrBadTopic = errors.New("Topic does not fit within topic space")
+var ErrBadTopic = errors.New("topic does not fit within topic space")
 
 type constituentBitmap struct {
 	bitmaps map[string]*roaring.Bitmap
@@ -147,7 +147,7 @@ func (b *optimizedInvertedBitmapMatcher) Lookup(topic string) []Subscriber {
 
 	subscribers := make([]Subscriber, len(subscriberSet))
 	i = 0
-	for sub, _ := range subscriberSet {
+	for sub := range subscriberSet {
 		subscribers[i] = sub
 		i++
 	}

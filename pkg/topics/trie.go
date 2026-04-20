@@ -88,7 +88,7 @@ func (t *trieMatcher) Lookup(topic string) []Subscriber {
 		i      = 0
 	)
 	t.mu.RUnlock()
-	for sub, _ := range subMap {
+	for sub := range subMap {
 		subs[i] = sub
 		i++
 	}

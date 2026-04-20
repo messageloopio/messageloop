@@ -54,7 +54,7 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx = log.Context(ctx, log.FromContext(ctx), "client_id", client.SessionID())
-	defer closeFn()
+	defer func() { _ = closeFn() }()
 
 	// Set max message size
 	if maxSize := h.node.MaxMessageSize(); maxSize > 0 {

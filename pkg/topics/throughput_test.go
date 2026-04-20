@@ -33,7 +33,7 @@ func init() {
 	}
 	for i := 0; i < numMsgs; i++ {
 		topic := subs[i%numSubs]
-		msgs[i] = strings.Replace(topic, "*", strconv.Itoa(rand.Intn(10)), -1)
+		msgs[i] = strings.ReplaceAll(topic, "*", strconv.Itoa(rand.Intn(10)))
 	}
 }
 

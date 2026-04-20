@@ -45,10 +45,7 @@ func NewGRPCProxy(cfg *ProxyConfig) (*GRPCProxy, error) {
 		dialOpts = append(dialOpts, grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{})))
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	conn, err := grpc.DialContext(ctx, cfg.Endpoint, dialOpts...)
+	conn, err := grpc.NewClient(cfg.Endpoint, dialOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to gRPC server: %w", err)
 	}

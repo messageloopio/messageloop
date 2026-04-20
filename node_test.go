@@ -89,8 +89,8 @@ func TestNode_HandlePublication(t *testing.T) {
 	client.authenticated = true
 	client.mu.Unlock()
 
-	node.AddClient(client)
-	node.AddSubscription(ctx, "test-channel", Subscriber{Client: client, Ephemeral: false})
+	_ = node.AddClient(client)
+	_ = node.AddSubscription(ctx, "test-channel", Subscriber{Client: client, Ephemeral: false})
 
 	// Publish via the broker so the internal handler is triggered.
 	err = node.Publish("test-channel", []byte("test payload"), false)
@@ -133,8 +133,8 @@ func TestNode_Publish(t *testing.T) {
 	client.authenticated = true
 	client.mu.Unlock()
 
-	node.AddClient(client)
-	node.AddSubscription(ctx, "test-channel", Subscriber{Client: client, Ephemeral: false})
+	_ = node.AddClient(client)
+	_ = node.AddSubscription(ctx, "test-channel", Subscriber{Client: client, Ephemeral: false})
 
 	// Clear transport messages from subscription
 	transport.messages = nil
@@ -170,7 +170,7 @@ func TestNode_AddClient(t *testing.T) {
 		t.Fatalf("NewClient() error = %v", err)
 	}
 
-	node.AddClient(client)
+	_ = node.AddClient(client)
 
 	// Check that client was added to hub
 	hub := node.Hub()
@@ -427,7 +427,7 @@ func TestNode_RPC_WithProxy(t *testing.T) {
 		t.Fatalf("RPC() error = %v", err)
 	}
 	if resp == nil {
-		t.Error("RPC() should return response")
+		t.Fatal("RPC() should return response")
 	}
 	if resp.Payload == nil {
 		t.Error("Response payload should not be nil")
@@ -497,8 +497,8 @@ func TestNode_ConcurrentPublish(t *testing.T) {
 	client.authenticated = true
 	client.mu.Unlock()
 
-	node.AddClient(client)
-	node.AddSubscription(ctx, "test-channel", Subscriber{Client: client, Ephemeral: false})
+	_ = node.AddClient(client)
+	_ = node.AddSubscription(ctx, "test-channel", Subscriber{Client: client, Ephemeral: false})
 
 	// Clear transport messages from subscription
 	transport.messages = nil
@@ -604,10 +604,10 @@ func TestNode_Publish_MultipleChannels(t *testing.T) {
 	client2.authenticated = true
 	client2.mu.Unlock()
 
-	node.AddClient(client1)
-	node.AddClient(client2)
-	node.AddSubscription(ctx, "channel-1", Subscriber{Client: client1, Ephemeral: false})
-	node.AddSubscription(ctx, "channel-2", Subscriber{Client: client2, Ephemeral: false})
+	_ = node.AddClient(client1)
+	_ = node.AddClient(client2)
+	_ = node.AddSubscription(ctx, "channel-1", Subscriber{Client: client1, Ephemeral: false})
+	_ = node.AddSubscription(ctx, "channel-2", Subscriber{Client: client2, Ephemeral: false})
 
 	// Clear transport messages from subscriptions
 	transport1.messages = nil
@@ -695,14 +695,14 @@ func BenchmarkNode_Publish(b *testing.B) {
 	client.authenticated = true
 	client.mu.Unlock()
 
-	node.AddClient(client)
-	node.AddSubscription(ctx, "test-channel", Subscriber{Client: client, Ephemeral: false})
+	_ = node.AddClient(client)
+	_ = node.AddSubscription(ctx, "test-channel", Subscriber{Client: client, Ephemeral: false})
 
 	payload := []byte("test payload")
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		node.Publish("test-channel", payload, false)
+		_ = node.Publish("test-channel", payload, false)
 	}
 }
 
@@ -715,7 +715,7 @@ func BenchmarkNode_AddSubscription(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		transport := &capturingTransport{}
 		client, _, _ := NewClient(ctx, node, transport, JSONMarshaler{})
-		node.AddSubscription(ctx, "test-channel", Subscriber{Client: client, Ephemeral: false})
+		_ = node.AddSubscription(ctx, "test-channel", Subscriber{Client: client, Ephemeral: false})
 	}
 }
 

@@ -24,7 +24,7 @@ func populateMatcher(m Matcher, num, topicSize int) {
 			topic += prefix + strconv.Itoa(rand.Int())
 			prefix = "."
 		}
-		m.Subscribe(topic, Subscriber(topic))
+		_, _ = m.Subscribe(topic, Subscriber(topic))
 	}
 }
 
@@ -51,7 +51,7 @@ func benchmark5050(b *testing.B, numItems, numThreads int, factory func([][]stri
 			go func(j int) {
 				if j%2 != 0 {
 					for _, key := range itemsToInsert[j] {
-						m.Subscribe(key, sub)
+						_, _ = m.Subscribe(key, sub)
 					}
 				} else {
 					for _, key := range itemsToInsert[j] {
@@ -88,7 +88,7 @@ func benchmark9010(b *testing.B, numItems, numThreads int, factory func([][]stri
 			go func(j int) {
 				if j%10 == 0 {
 					for _, key := range itemsToInsert[j] {
-						m.Subscribe(key, sub)
+						_, _ = m.Subscribe(key, sub)
 					}
 				} else {
 					for _, key := range itemsToInsert[j] {

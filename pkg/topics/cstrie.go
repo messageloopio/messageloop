@@ -140,7 +140,7 @@ func (b *branch) removed(sub Subscriber) *branch {
 func (b *branch) subscribers() []Subscriber {
 	subs := make([]Subscriber, len(b.subs))
 	i := 0
-	for sub, _ := range b.subs {
+	for sub := range b.subs {
 		subs[i] = sub
 		i++
 	}
@@ -166,7 +166,7 @@ func (c *csTrieMatcher) Subscribe(topic string, sub Subscriber) (*Subscription, 
 		root    = (*iNode)(atomic.LoadPointer(rootPtr))
 	)
 	if !c.iinsert(root, nil, words, sub) {
-		c.Subscribe(topic, sub)
+		return c.Subscribe(topic, sub)
 	}
 	return &Subscription{Topic: topic, Subscriber: sub}, nil
 }
@@ -337,7 +337,7 @@ func (c *csTrieMatcher) ilookup(i, parent *iNode, words []string) ([]Subscriber,
 		}
 		s := make([]Subscriber, len(subs))
 		i := 0
-		for sub, _ := range subs {
+		for sub := range subs {
 			s[i] = sub
 			i++
 		}

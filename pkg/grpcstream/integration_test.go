@@ -34,7 +34,7 @@ func startTestGRPCServer(t *testing.T, node *messageloop.Node) serverpb.APIServi
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	require.NoError(t, err)
-	t.Cleanup(func() { conn.Close() })
+	t.Cleanup(func() { _ = conn.Close() })
 
 	return serverpb.NewAPIServiceClient(conn)
 }

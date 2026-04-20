@@ -292,7 +292,7 @@ func (n *Node) RemoveSubscription(ch string, c *Client) error {
 	if removed {
 		if last {
 			if err := n.broker.Unsubscribe(ch); err != nil {
-				n.hub.addSub(ch, subscriber)
+				_, _ = n.hub.addSub(ch, subscriber)
 				c.mu.Lock()
 				c.subscribedChannels[ch] = struct{}{}
 				c.mu.Unlock()
@@ -304,7 +304,7 @@ func (n *Node) RemoveSubscription(ch string, c *Client) error {
 		}
 		ctx := context.Background()
 		if err := n.syncClusterSessionState(ctx, c); err != nil {
-			n.hub.addSub(ch, subscriber)
+			_, _ = n.hub.addSub(ch, subscriber)
 			if last {
 				_ = n.broker.Subscribe(ch)
 				if n.metrics != nil {
@@ -317,7 +317,7 @@ func (n *Node) RemoveSubscription(ch string, c *Client) error {
 			return fmt.Errorf("sync cluster session unsubscription: %w", err)
 		}
 		if err := n.adjustClusterChannelSubscriptions(ctx, ch, -1); err != nil {
-			n.hub.addSub(ch, subscriber)
+			_, _ = n.hub.addSub(ch, subscriber)
 			if last {
 				_ = n.broker.Subscribe(ch)
 				if n.metrics != nil {

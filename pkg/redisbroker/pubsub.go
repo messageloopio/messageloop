@@ -36,7 +36,7 @@ func (b *redisBroker) runPubSubWithRetry(ctx context.Context) error {
 // incoming publication messages to the handler. Blocks until ctx is done.
 func (b *redisBroker) runPubSub(ctx context.Context) error {
 	pubsub := b.client.PSubscribe(ctx, b.opts.PubSubPrefix+"*")
-	defer pubsub.Close()
+	defer func() { _ = pubsub.Close() }()
 
 	ch := pubsub.Channel()
 	for {

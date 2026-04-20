@@ -60,7 +60,7 @@ func BenchmarkTrieMatcherSubscribe(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		m.Subscribe("foo.*.baz.qux.quux", s0)
+		_, _ = m.Subscribe("foo.*.baz.qux.quux", s0)
 	}
 }
 
@@ -83,7 +83,7 @@ func BenchmarkTrieMatcherLookup(b *testing.B) {
 		m  = NewTrieMatcher()
 		s0 = 0
 	)
-	m.Subscribe("foo.*.baz.qux.quux", s0)
+	_, _ = m.Subscribe("foo.*.baz.qux.quux", s0)
 	populateMatcher(m, 1000, 5)
 
 	b.ResetTimer()
@@ -100,7 +100,7 @@ func BenchmarkTrieMatcherSubscribeCold(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		m.Subscribe("foo.*.baz.qux.quux", s0)
+		_, _ = m.Subscribe("foo.*.baz.qux.quux", s0)
 	}
 }
 
@@ -122,7 +122,7 @@ func BenchmarkTrieMatcherLookupCold(b *testing.B) {
 		m  = NewTrieMatcher()
 		s0 = 0
 	)
-	m.Subscribe("foo.*.baz.qux.quux", s0)
+	_, _ = m.Subscribe("foo.*.baz.qux.quux", s0)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

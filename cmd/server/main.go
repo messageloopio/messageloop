@@ -165,7 +165,7 @@ func main() {
 				wsOpts.WriteTimeout = d
 			}
 		}
-		if cfg.Transport.WebSocket.AllowAllOrigins || cfg.Transport.WebSocket.CheckOrigin {
+		if cfg.Transport.WebSocket.AllowAllOrigins || cfg.Transport.WebSocket.CheckOrigin { //nolint:staticcheck // backward compat
 			app.Logger().Info("setting websocket CheckOrigin to allow all origins")
 			wsOpts.CheckOrigin = func(r *http.Request) bool { return true }
 		} else if len(cfg.Transport.WebSocket.AllowedOrigins) > 0 {

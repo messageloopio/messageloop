@@ -167,7 +167,7 @@ func (b *redisClusterCommandBus) SendCommand(ctx context.Context, cmd *messagelo
 	cmd.Metadata[clusterCommandReplyKey] = replyChannel
 
 	pubsub := b.client.Subscribe(commandCtx, replyChannel)
-	defer pubsub.Close()
+	defer func() { _ = pubsub.Close() }()
 	if _, err := pubsub.Receive(commandCtx); err != nil {
 		return nil, err
 	}
@@ -414,7 +414,7 @@ func (b *redisClusterCommandBus) claimCommandExecution(ctx context.Context, comm
 	if err != nil {
 		return false, nil, err
 	}
-	claimed, err := b.client.SetNX(ctx, b.commandStateKey(command.CommandID), encodedPending, defaultCommandStateTTL).Result()
+	claimed, err := b.client.SetNX(ctx, b.commandStateKey(command.CommandID), encodedPending, defaultCommandStateTTL).Result() //nolint:staticcheck // SetNX is the clearest API for this pattern
 	if err != nil {
 		return false, nil, err
 	}
@@ -428,7 +428,7 @@ func (b *redisClusterCommandBus) claimCommandExecution(ctx context.Context, comm
 	if storedResult != nil {
 		return false, storedResult, nil
 	}
-	claimed, err = b.client.SetNX(ctx, b.commandStateKey(command.CommandID), encodedPending, defaultCommandStateTTL).Result()
+	claimed, err = b.client.SetNX(ctx, b.commandStateKey(command.CommandID), encodedPending, defaultCommandStateTTL).Result() //nolint:staticcheck
 	if err != nil {
 		return false, nil, err
 	}

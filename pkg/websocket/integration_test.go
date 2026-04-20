@@ -32,7 +32,7 @@ func dialWS(t *testing.T, server *httptest.Server) *websocket.Conn {
 	dialer := websocket.Dialer{Subprotocols: []string{"messageloop+json"}}
 	conn, _, err := dialer.Dial(url, nil)
 	require.NoError(t, err)
-	t.Cleanup(func() { conn.Close() })
+	t.Cleanup(func() { _ = conn.Close() })
 	return conn
 }
 

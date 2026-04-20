@@ -48,7 +48,7 @@ func (b *redisBroker) Start(ctx context.Context, handler messageloop.Publication
 		return fmt.Errorf("redis broker: connect: %w", err)
 	}
 
-	defer b.client.Close()
+	defer func() { _ = b.client.Close() }()
 	return b.runPubSubWithRetry(ctx)
 }
 

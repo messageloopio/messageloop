@@ -68,13 +68,11 @@ type ClientInfo struct {
 
 type Client struct {
 	mu            sync.RWMutex
-	connectMu     sync.Mutex // allows syncing connect with disconnect.
 	ctx           context.Context
 	transport     Transport
 	client        string // 客户端上传的
 	session       string // 服务端生成
 	user          string // 用户 ID
-	info          []byte
 	status        status
 	node          *Node
 	marshaler     Marshaler
@@ -879,7 +877,7 @@ func (c *Client) write(ctx context.Context, msg proto.Message) error {
 	err = c.transport.Write(*buf)
 	if err != nil {
 		log.ErrorContext(ctx, "failed to write to transport", err)
-		go c.close(DisconnectSlowConsumer)
+		go func() { _ = c.close(DisconnectSlowConsumer) }()
 	} else {
 		log.DebugContext(ctx, "message written to transport successfully")
 	}
