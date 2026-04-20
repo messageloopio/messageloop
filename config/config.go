@@ -19,6 +19,7 @@ type ClusterConfig struct {
 
 type Server struct {
 	Http       HttpServer `yaml:"http" json:"http"`
+	GRPCAdmin  GRPCAdmin  `yaml:"grpc_admin" json:"grpc_admin"`
 	Heartbeat  Heartbeat  `yaml:"heartbeat" json:"heartbeat"`
 	RPCTimeout string     `yaml:"rpc_timeout" json:"rpc_timeout"` // default: "30s"
 	Limits     Limits     `yaml:"limits" json:"limits"`
@@ -47,6 +48,11 @@ type Limits struct {
 
 type HttpServer struct {
 	Addr string `yaml:"addr" json:"addr"`
+}
+
+type GRPCAdmin struct {
+	Addr string    `yaml:"addr" json:"addr"`
+	TLS  TLSConfig `yaml:"tls" json:"tls"`
 }
 
 type Heartbeat struct {

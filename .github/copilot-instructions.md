@@ -19,10 +19,18 @@
   - `RedisBroker`: Distributed pub/sub using Redis Streams and Pub/Sub.
 - **Transports**: Pluggable connection handling abstraction:
   - `WebSocket`: Handles HTTP upgrades and negotiates encoding (json/proto).
-  - `gRPC`: Handles bidirectional streaming with custom `RawCodec` to avoid double-encoding.
+  - `gRPC client streaming`: Handles bidirectional client sessions with custom `RawCodec` to avoid double-encoding.
+  - `gRPC admin API`: Exposes `messageloop.server.v1.APIService` on a separate listener.
 - **Protocol**: Protobuf-defined client envelopes and shared payloads.
   - `InboundMessage`/`OutboundMessage` contain operations such as Connect, Publish, Subscribe, RPC, and Survey.
   - `sharedpb.Payload` supports Binary, Text, or JSON data fields.
+
+## Listener Model
+
+- `transport.websocket.addr`: WebSocket client traffic
+- `transport.grpc.addr`: client gRPC streaming traffic
+- `server.grpc_admin.addr`: server-side gRPC admin API
+- `server.http.addr`: health and Prometheus metrics
 
 ## Key Conventions
 
@@ -40,6 +48,13 @@
   - Use table-driven tests for multiple cases.
   - Place tests in `*_test.go` files within the same package.
 - **Configuration**: Use `lynx` framework options pattern and `config` package structs.
+
+## gRPC Package Structure
+
+- `pkg/grpcstream/client_server.go`: client streaming listener/component
+- `pkg/grpcstream/admin_server.go`: admin gRPC listener/component
+- `pkg/grpcstream/server.go`: shared preparation, validation, TLS loading, and pre-bound listener lifecycle
+- `cmd/server/runtime.go`: bootstrap preflight that prepares gRPC listeners before `node.Run(...)`
 
 ## MCP Servers
 

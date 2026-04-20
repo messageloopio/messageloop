@@ -41,8 +41,8 @@ go run cmd/server/main.go --config ./config.yaml
 ## Configuration
 
 Config structure defined in `config/config.go` with example in `config-example.yaml`:
-- **server** - HTTP admin address (`:8080`), heartbeat idle timeout (default: `300s`), RPC timeout (default: `30s`), per-user and per-client limits, built-in ACL rules
-- **transport** - WebSocket (`:9080` with `/ws` path) and gRPC (`:9090`) listeners, plus optional TLS, compression, and write timeouts
+- **server** - Admin HTTP address (`127.0.0.1:8080`), admin gRPC address (`127.0.0.1:9091`), heartbeat idle timeout (default: `300s`), RPC timeout (default: `30s`), per-user and per-client limits, built-in ACL rules
+- **transport** - WebSocket (`:9080` with `/ws` path) and client gRPC streaming (`:9090`) listeners, plus optional TLS, compression, and write timeouts
 - **broker** - Type selection (`memory` or `redis`) with Redis connection, stream, and history settings
 - **cluster** - Optional Redis-backed distributed control plane with `enabled`, `node_id`, and `backend`
 - **proxy** - Backend proxy configurations with routes, timeout, and HTTP/gRPC backends

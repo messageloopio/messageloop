@@ -1,6 +1,11 @@
 server:
   http:
-    addr: ":8080"   # Admin HTTP server exposing /health and /metrics
+    addr: "127.0.0.1:8080"   # Admin HTTP server exposing /health and /metrics
+  grpc_admin:
+    addr: "127.0.0.1:9091"   # Server-side gRPC admin API; keep this on a private interface
+    # tls:
+    #   cert_file: "./certs/admin.crt"
+    #   key_file: "./certs/admin.key"
   heartbeat:
     idle_timeout: "300s"  # Close idle client connections after this duration
   rpc_timeout: "30s"      # Default timeout for proxied RPC requests
@@ -27,7 +32,7 @@ transport:
     #   cert_file: "./certs/server.crt"
     #   key_file: "./certs/server.key"
   grpc:
-    addr: ":9090"
+    addr: ":9090"  # Client-facing gRPC streaming listener
     # write_timeout: "10s"
     # tls:
     #   cert_file: "./certs/server.crt"
@@ -57,7 +62,7 @@ cluster:
 
 proxy:
   - name: example-grpc
-    endpoint: 127.0.0.1:9091
+    endpoint: 127.0.0.1:10091
     timeout: 30s
     grpc:
       insecure: true

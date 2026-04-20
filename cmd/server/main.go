@@ -10,7 +10,6 @@ import (
 	"github.com/lynx-go/lynx/contrib/zap"
 	"github.com/messageloopio/messageloop"
 	"github.com/messageloopio/messageloop/config"
-	"github.com/messageloopio/messageloop/pkg/grpcstream"
 	"github.com/messageloopio/messageloop/pkg/redisbroker"
 	"github.com/messageloopio/messageloop/pkg/websocket"
 	proxyproxy "github.com/messageloopio/messageloop/proxy"
@@ -126,13 +125,57 @@ func main() {
 			}
 		}
 
-		if err := node.Run(ctx); err != nil {
+		var grpcServers *preparedGRPCServers
+		if err := runNodeWithPreflight(ctx, node, func() error {
+			var err error
+			grpcServers, err = prepareGRPCServers(cfg, node)
+			return err
+		}); err != nil {
+			if grpcServers != nil {
+				grpcServers.Close()
+			}
+			return err
+		}
+		nodeStarted := true
+		cleanupOnError := true
+		defer func() {
+			if !cleanupOnError {
+				return
+			}
+			if grpcServers != nil {
+				grpcServers.Close()
+			}
+			if nodeStarted {
+				node.Shutdown()
+			}
+		}()
+
+		wsOpts := websocket.Options{
+			Addr:        cfg.Transport.WebSocket.Addr,
+			WsPath:      cfg.Transport.WebSocket.Path,
+			TLSCertFile: cfg.Transport.WebSocket.TLS.CertFile,
+			TLSKeyFile:  cfg.Transport.WebSocket.TLS.KeyFile,
+			Compression: cfg.Transport.WebSocket.Compression,
+		}
+		if cfg.Transport.WebSocket.WriteTimeout != "" {
+			if d, err := time.ParseDuration(cfg.Transport.WebSocket.WriteTimeout); err == nil {
+				wsOpts.WriteTimeout = d
+			}
+		}
+		if cfg.Transport.WebSocket.CheckOrigin {
+			app.Logger().Info("setting websocket CheckOrigin to allow all origins")
+			wsOpts.CheckOrigin = func(r *http.Request) bool { return true }
+		}
+		wsServer := websocket.NewServer(wsOpts, node)
+
+		components := append([]lynx.Component{wsServer}, grpcServers.Components()...)
+		if err := app.Hooks(lynx.Components(components...)); err != nil {
 			return err
 		}
 
 		adminAddr := cfg.Server.Http.Addr
 		if adminAddr == "" {
-			adminAddr = ":8080"
+			adminAddr = "127.0.0.1:8080"
 		}
 		adminMux := http.NewServeMux()
 		adminMux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
@@ -152,41 +195,7 @@ func main() {
 			_ = adminServer.Shutdown(shutdownCtx)
 		}()
 
-		grpcOpts := grpcstream.Options{
-			Addr:        cfg.Transport.GRPC.Addr,
-			TLSCertFile: cfg.Transport.GRPC.TLS.CertFile,
-			TLSKeyFile:  cfg.Transport.GRPC.TLS.KeyFile,
-		}
-		if cfg.Transport.GRPC.WriteTimeout != "" {
-			if d, err := time.ParseDuration(cfg.Transport.GRPC.WriteTimeout); err == nil {
-				grpcOpts.WriteTimeout = d
-			}
-		}
-		grpcServer, err := grpcstream.NewServer(grpcOpts, node)
-		if err != nil {
-			return err
-		}
-
-		wsOpts := websocket.Options{
-			Addr:        cfg.Transport.WebSocket.Addr,
-			WsPath:      cfg.Transport.WebSocket.Path,
-			TLSCertFile: cfg.Transport.WebSocket.TLS.CertFile,
-			TLSKeyFile:  cfg.Transport.WebSocket.TLS.KeyFile,
-			Compression: cfg.Transport.WebSocket.Compression,
-		}
-		if cfg.Transport.WebSocket.WriteTimeout != "" {
-			if d, err := time.ParseDuration(cfg.Transport.WebSocket.WriteTimeout); err == nil {
-				wsOpts.WriteTimeout = d
-			}
-		}
-		if cfg.Transport.WebSocket.CheckOrigin {
-			app.Logger().Info("setting websocket CheckOrigin to allow all origins")
-			wsOpts.CheckOrigin = func(r *http.Request) bool { return true }
-		}
-		wsServer := websocket.NewServer(wsOpts, node)
-		if err := app.Hooks(lynx.Components(wsServer, grpcServer)); err != nil {
-			return err
-		}
+		cleanupOnError = false
 		return nil
 	})
 

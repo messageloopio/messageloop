@@ -45,6 +45,8 @@ Create a local config file:
 server:
   http:
     addr: ":8080"
+  grpc_admin:
+    addr: "127.0.0.1:9091"
 
 transport:
   websocket:
@@ -67,7 +69,8 @@ go run cmd/server/main.go --config ./config.yaml
 Default endpoints:
 
 - WebSocket: `ws://localhost:9080/ws`
-- gRPC streaming and admin API: `localhost:9090`
+- gRPC streaming: `localhost:9090`
+- gRPC admin API: `127.0.0.1:9091`
 - Health: `http://localhost:8080/health`
 - Prometheus metrics: `http://localhost:8080/metrics`
 
@@ -125,9 +128,9 @@ MessageLoop reads a single YAML file passed through `--config`.
 
 | Section | Purpose | Key Fields |
 | --- | --- | --- |
-| `server` | Admin HTTP listener and core runtime behavior | `http.addr`, `heartbeat.idle_timeout`, `rpc_timeout`, `limits.*`, `acl.rules` |
+| `server` | Admin-side listeners and core runtime behavior | `http.addr`, `grpc_admin.addr`, `grpc_admin.tls.*`, `heartbeat.idle_timeout`, `rpc_timeout`, `limits.*`, `acl.rules` |
 | `transport.websocket` | WebSocket listener configuration | `addr`, `path`, `check_origin`, `compression`, `write_timeout`, `tls.*` |
-| `transport.grpc` | gRPC listener configuration | `addr`, `write_timeout`, `tls.*` |
+| `transport.grpc` | Client gRPC streaming listener configuration | `addr`, `write_timeout`, `tls.*` |
 | `broker` | Messaging backend selection | `type`, `redis.*` |
 | `cluster` | Optional distributed control plane | `enabled`, `node_id`, `backend` |
 | `proxy` | Backend routing rules for RPC and hooks | `name`, `endpoint`, `timeout`, `http`, `grpc`, `routes` |
@@ -165,7 +168,7 @@ Example:
 ```yaml
 proxy:
   - name: example
-    endpoint: 127.0.0.1:9091
+    endpoint: 127.0.0.1:10091
     timeout: 30s
     grpc:
       insecure: true
@@ -207,7 +210,7 @@ The client protocol supports these core flows:
 
 ### Server-Side gRPC Admin API
 
-The gRPC listener also exposes `messageloop.server.v1.APIService`, including:
+The admin gRPC listener exposed by `server.grpc_admin.addr` serves `messageloop.server.v1.APIService`, including:
 
 - `Publish`
 - `Survey`

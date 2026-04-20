@@ -28,7 +28,7 @@ server:
 ```yaml
 proxy:
   - name: example
-    endpoint: 127.0.0.1:9091
+    endpoint: 127.0.0.1:10091
     timeout: 10s  # 该代理的超时时间（覆盖全局设置）
     grpc:
       insecure: true

@@ -6,6 +6,13 @@ This file provides guidance for agentic coding agents operating in this reposito
 
 MessageLoop is a realtime messaging platform server written in Go. It provides pub/sub messaging over WebSocket and gRPC using protobuf-defined message envelopes and shared payload types.
 
+Current listener model:
+
+- WebSocket client traffic on `transport.websocket.addr`.
+- Client gRPC streaming on `transport.grpc.addr`.
+- Server-side gRPC admin API on `server.grpc_admin.addr`.
+- Admin HTTP health/metrics on `server.http.addr`.
+
 ## Build Commands
 
 ```bash
@@ -131,6 +138,7 @@ func TestCSTrieMatcher(t *testing.T) {
 
 - **Sharding**: Hub uses 64 shards, subscription locks use 16384 shards
 - **Protocol abstraction**: Core logic independent of transport (WebSocket/gRPC)
+- **Split gRPC surfaces**: Client streaming and admin RPCs run on separate listeners but share the same in-process `Node`
 - **Marshaler pattern**: `Marshaler` interface with `JSONMarshaler` and `ProtobufMarshaler`
 - **Disconnect handling**: Typed errors for graceful disconnection with codes
 
@@ -140,4 +148,9 @@ func TestCSTrieMatcher(t *testing.T) {
 - `hub.go`: Connection registry with sharding
 - `broker.go`: Pub/sub interface with memory/Redis implementations
 - `node.go`: Central coordinator
+- `cmd/server/main.go`: Bootstrap wiring and listener setup
+- `cmd/server/runtime.go`: gRPC preflight and startup ordering helpers
+- `pkg/grpcstream/client_server.go`: Client gRPC streaming server component
+- `pkg/grpcstream/admin_server.go`: Admin gRPC server component
+- `pkg/grpcstream/server.go`: Shared gRPC server preparation and listener lifecycle
 - `pkg/topics/`: Topic matcher implementations (cstrie, trie, naive, inverted_bitmap)
