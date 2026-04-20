@@ -40,7 +40,7 @@ type Broker interface {
 	Publish(ch string, payload []byte, isText bool) (uint64, error)
 
 	// History returns publications stored for ch with offset >= sinceOffset.
-	// limit <= 0 means return all available entries.
+	// limit <= 0 uses DefaultHistoryLimit as a safety cap.
 	// Returns an empty slice (not an error) when history is disabled or empty.
 	History(ch string, sinceOffset uint64, limit int) ([]*Publication, error)
 }

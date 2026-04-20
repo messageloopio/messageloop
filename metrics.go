@@ -9,7 +9,9 @@ type Metrics struct {
 	MessagesPublished               prometheus.Counter
 	MessagesDelivered               prometheus.Counter
 	PublishDuration                 prometheus.Histogram
+	RPCDuration                     prometheus.Histogram
 	DeliveryFailures                prometheus.Counter
+	ActiveChannels                  prometheus.Gauge
 	ClusterCommandDedupeHits        prometheus.Counter
 	ClusterCommandTimeouts          prometheus.Counter
 	ClusterCommandUnknownFinalState prometheus.Counter
@@ -46,10 +48,21 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Help:      "Time taken to publish a message.",
 			Buckets:   prometheus.DefBuckets,
 		}),
+		RPCDuration: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Namespace: "messageloop",
+			Name:      "rpc_duration_seconds",
+			Help:      "Time taken to handle an RPC request (proxy round-trip).",
+			Buckets:   prometheus.DefBuckets,
+		}),
 		DeliveryFailures: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: "messageloop",
 			Name:      "delivery_failures_total",
 			Help:      "Total number of message delivery failures (dead letters).",
+		}),
+		ActiveChannels: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: "messageloop",
+			Name:      "active_channels",
+			Help:      "Current number of channels with at least one subscriber.",
 		}),
 		ClusterCommandDedupeHits: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: "messageloop",
@@ -83,7 +96,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.MessagesPublished,
 		m.MessagesDelivered,
 		m.PublishDuration,
+		m.RPCDuration,
 		m.DeliveryFailures,
+		m.ActiveChannels,
 		m.ClusterCommandDedupeHits,
 		m.ClusterCommandTimeouts,
 		m.ClusterCommandUnknownFinalState,

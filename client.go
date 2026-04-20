@@ -580,6 +580,10 @@ func (c *Client) handleRPC(ctx context.Context, in *clientpb.InboundMessage, rpc
 	proxyResp, err := c.node.ProxyRPC(rpcCtx, channel, method, proxyReq)
 	duration := time.Since(startTime)
 
+	if c.node.metrics != nil {
+		c.node.metrics.RPCDuration.Observe(duration.Seconds())
+	}
+
 	if err != nil {
 		// Check for timeout error
 		if errors.Is(err, context.DeadlineExceeded) {

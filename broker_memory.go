@@ -114,6 +114,10 @@ func (b *memoryBroker) History(ch string, sinceOffset uint64, limit int) ([]*Pub
 		return nil, nil
 	}
 
+	if limit <= 0 {
+		limit = DefaultHistoryLimit
+	}
+
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -124,7 +128,7 @@ func (b *memoryBroker) History(ch string, sinceOffset uint64, limit int) ([]*Pub
 			continue
 		}
 		result = append(result, pub)
-		if limit > 0 && len(result) >= limit {
+		if len(result) >= limit {
 			break
 		}
 	}

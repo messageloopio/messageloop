@@ -20,6 +20,10 @@ func (b *redisBroker) getHistory(ch string, sinceOffset uint64, limit int) ([]*m
 
 	stream := b.opts.StreamPrefix + ch
 
+	if limit <= 0 {
+		limit = messageloop.DefaultHistoryLimit
+	}
+
 	// Build start ID. Use exclusive form "(ts-seq" so we start AFTER sinceOffset.
 	var start string
 	if sinceOffset == 0 {
@@ -30,13 +34,7 @@ func (b *redisBroker) getHistory(ch string, sinceOffset uint64, limit int) ([]*m
 		start = fmt.Sprintf("(%d-%d", ts, seq)
 	}
 
-	var messages []redis.XMessage
-	var err error
-	if limit > 0 {
-		messages, err = b.client.XRangeN(ctx, stream, start, "+", int64(limit)).Result()
-	} else {
-		messages, err = b.client.XRange(ctx, stream, start, "+").Result()
-	}
+	messages, err := b.client.XRangeN(ctx, stream, start, "+", int64(limit)).Result()
 	if err != nil && !errors.Is(err, redis.Nil) {
 		return nil, err
 	}

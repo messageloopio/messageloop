@@ -65,7 +65,7 @@ func NewNode(cfg *config.Server) *Node {
 	if cfg != nil && cfg.Heartbeat.IdleTimeout != "" {
 		idleTimeout, err := time.ParseDuration(cfg.Heartbeat.IdleTimeout)
 		if err != nil {
-			idleTimeout = 300 * time.Second
+			idleTimeout = DefaultHeartbeatIdleTimeout
 		}
 		node.heartbeatManager = NewHeartbeatManager(HeartbeatConfig{
 			IdleTimeout: idleTimeout,
@@ -116,12 +116,25 @@ func (n *Node) Run(ctx context.Context) error {
 	return nil
 }
 
-// Shutdown gracefully drains all client connections.
+// Shutdown gracefully drains all client connections and cleans up resources.
 func (n *Node) Shutdown() {
-	n.hub.DrainAll(DisconnectForceNoReconnect)
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultShutdownTimeout)
+	defer cancel()
+
+	// Signal the disconnect code to indicate server-initiated shutdown.
+	done := make(chan struct{})
+	go func() {
+		n.hub.DrainAll(DisconnectForceNoReconnect)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+		log.WarnContext(ctx, "shutdown: timed out draining client connections")
+	}
+
 	if n.cluster != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
 		if err := n.cluster.Shutdown(ctx); err != nil {
 			log.WarnContext(ctx, "cluster shutdown error", "error", err)
 		}
@@ -229,6 +242,9 @@ func (n *Node) AddSubscription(ctx context.Context, ch string, sub Subscriber) e
 			sub.Client.mu.Unlock()
 			return err
 		}
+		if n.metrics != nil {
+			n.metrics.ActiveChannels.Inc()
+		}
 	}
 	if err := n.syncClusterSessionState(ctx, sub.Client); err != nil {
 		n.hub.removeSub(ch, sub.Client)
@@ -282,12 +298,18 @@ func (n *Node) RemoveSubscription(ch string, c *Client) error {
 				c.mu.Unlock()
 				return err
 			}
+			if n.metrics != nil {
+				n.metrics.ActiveChannels.Dec()
+			}
 		}
 		ctx := context.Background()
 		if err := n.syncClusterSessionState(ctx, c); err != nil {
 			n.hub.addSub(ch, subscriber)
 			if last {
 				_ = n.broker.Subscribe(ch)
+				if n.metrics != nil {
+					n.metrics.ActiveChannels.Inc()
+				}
 			}
 			c.mu.Lock()
 			c.subscribedChannels[ch] = struct{}{}
@@ -298,6 +320,9 @@ func (n *Node) RemoveSubscription(ch string, c *Client) error {
 			n.hub.addSub(ch, subscriber)
 			if last {
 				_ = n.broker.Subscribe(ch)
+				if n.metrics != nil {
+					n.metrics.ActiveChannels.Inc()
+				}
 			}
 			c.mu.Lock()
 			c.subscribedChannels[ch] = struct{}{}
