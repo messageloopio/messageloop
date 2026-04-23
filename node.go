@@ -104,6 +104,7 @@ func (n *Node) Run(ctx context.Context) error {
 			return n.hub.broadcastPublication(ch, pub)
 		}); err != nil {
 			log.ErrorContext(ctx, "broker stopped with error", err)
+			panic(err)
 		}
 	}()
 	type readyBroker interface{ Ready() <-chan struct{} }
