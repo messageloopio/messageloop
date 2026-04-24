@@ -39,8 +39,6 @@ const CASE_TO_JSON_FIELD: Record<string, string> = {
  * Bufbuild: {"id": "xxx", "envelope": {"case": "pong", "value": {}}}
  */
 function transformOutboundMessage(json: Record<string, unknown>): OutboundMessage {
-  console.debug("[JSONCodec] transforming message:", json);
-
   const result: any = {
     id: json.id,
     metadata: json.metadata,
@@ -51,7 +49,6 @@ function transformOutboundMessage(json: Record<string, unknown>): OutboundMessag
   // Find which oneof field is present
   for (const [fieldName, caseName] of Object.entries(JSON_FIELD_TO_CASE)) {
     if (fieldName in json && json[fieldName] !== undefined) {
-      console.debug("[JSONCodec] found envelope field:", fieldName, "-> case:", caseName);
       result.envelope = {
         case: caseName,
         value: json[fieldName],
@@ -60,7 +57,6 @@ function transformOutboundMessage(json: Record<string, unknown>): OutboundMessag
     }
   }
 
-  console.debug("[JSONCodec] transformed result:", result);
   return result as OutboundMessage;
 }
 
@@ -70,8 +66,6 @@ function transformOutboundMessage(json: Record<string, unknown>): OutboundMessag
  * Proto3 JSON: {"id": "xxx", "connect": {...}}
  */
 function transformInboundMessage(msg: Record<string, unknown>): Record<string, unknown> {
-  console.debug("[JSONCodec] transforming inbound message:", msg);
-
   const result: Record<string, unknown> = {};
 
   // Copy standard fields
@@ -89,7 +83,6 @@ function transformInboundMessage(msg: Record<string, unknown>): Record<string, u
     result[jsonField] = deepTransform(envelope.value);
   }
 
-  console.debug("[JSONCodec] transformed inbound result:", result);
   return result;
 }
 
@@ -172,7 +165,6 @@ export class JSONCodec implements Codec {
   }
 
   decode(data: Uint8Array | string): OutboundMessage {
-    console.debug("[JSONCodec] decoding data:", typeof data === "string" ? data : new TextDecoder().decode(data as Uint8Array));
     const json = typeof data === "string" ? JSON.parse(data) : JSON.parse(new TextDecoder().decode(data));
     return transformOutboundMessage(json);
   }

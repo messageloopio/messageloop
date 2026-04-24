@@ -183,13 +183,7 @@ export class MessageLoopClient {
    * Handle an incoming message from the transport.
    */
   private handleMessage(msg: OutboundMessage): void {
-    // Debug: log raw message and envelope
-    console.debug("[MessageLoopClient] received message:", {
-      id: (msg as any).id,
-      envelope: (msg as any).envelope,
-    });
     const parsed = parseOutboundMessage(msg);
-    console.debug("[MessageLoopClient] parsed message type:", parsed.type);
 
     switch (parsed.type) {
       case "connected": {
@@ -272,7 +266,6 @@ export class MessageLoopClient {
       }
 
       case "pong": {
-        console.debug("[MessageLoopClient] received pong, clearing ping timeout timer");
         if (this.pingTimeoutTimer) {
           clearTimeout(this.pingTimeoutTimer);
           this.pingTimeoutTimer = null;
@@ -468,13 +461,11 @@ export class MessageLoopClient {
     if (!this.transport || !this.isConnectedFlag) return;
 
     try {
-      console.debug("[MessageLoopClient] sending ping");
       const pingMsg = createPingMessage();
       await this.transport.send(pingMsg as any);
 
       // Set up pong timeout
       this.pingTimeoutTimer = setTimeout(() => {
-        console.debug("[MessageLoopClient] pong timeout, closing connection");
         this.handleError(new Error("Pong timeout"));
         this.close();
       }, this.options.pingTimeout);
