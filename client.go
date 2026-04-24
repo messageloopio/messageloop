@@ -924,8 +924,10 @@ func (c *Client) handlePing(ctx context.Context, in *clientpb.InboundMessage, pi
 	c.ResetActivity()
 	go c.refreshPresence()
 	go func() {
-		if err := c.node.syncClusterSessionState(context.Background(), c); err != nil {
-			log.WarnContext(context.Background(), "failed to refresh cluster session state", "session", c.session, "error", err)
+		clusterCtx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
+			defer cancel()
+			if err := c.node.syncClusterSessionState(clusterCtx, c); err != nil {
+			log.WarnContext(clusterCtx, "failed to refresh cluster session state", "session", c.session, "error", err)
 		}
 	}()
 	log.DebugContext(ctx, "received ping, sending pong", "message_id", in.Id)
@@ -1112,13 +1114,12 @@ func (c *Client) refreshPresence() {
 	if len(channels) == 0 {
 		return
 	}
-	ctx := context.Background()
 	info := &PresenceInfo{
 		ClientID:    session,
 		UserID:      user,
 		ConnectedAt: connAt,
 	}
 	for _, ch := range channels {
-		_ = c.node.presence.Add(ctx, ch, info)
+		_ = c.node.presence.Add(c.ctx, ch, info)
 	}
 }

@@ -223,51 +223,90 @@ func (n *Node) AddSubscription(ctx context.Context, ch string, sub Subscriber) e
 	mu := n.subLock(ch)
 	mu.Lock()
 	defer mu.Unlock()
+
 	if _, exists := n.hub.LookupSubscriber(ch, sub.Client); exists {
 		return nil
 	}
-	log.InfoContext(ctx, "add subscriber", "channel", ch, "sub", sub)
-	first, err := n.hub.addSub(ch, sub)
+
+	var first bool
+
+	// Each step captures the state needed to commit and undo itself.
+	err := runSubSaga([]subSagaStep{
+		{
+			name: "hub.addSub",
+			commit: func() (err error) {
+				first, err = n.hub.addSub(ch, sub)
+				return err
+			},
+			rollback: func() {
+				_, _ = n.hub.removeSub(ch, sub.Client)
+			},
+		},
+		{
+			name: "track.client",
+			commit: func() error {
+				sub.Client.mu.Lock()
+				sub.Client.subscribedChannels[ch] = struct{}{}
+				sub.Client.mu.Unlock()
+				return nil
+			},
+			rollback: func() {
+				sub.Client.mu.Lock()
+				delete(sub.Client.subscribedChannels, ch)
+				sub.Client.mu.Unlock()
+			},
+		},
+		{
+			name: "broker.Subscribe",
+			commit: func() error {
+				if !first {
+					return nil
+				}
+				if err := n.broker.Subscribe(ch); err != nil {
+					return err
+				}
+				if n.metrics != nil {
+					n.metrics.ActiveChannels.Inc()
+				}
+				return nil
+			},
+			rollback: func() {
+				if !first {
+					return
+				}
+				_ = n.broker.Unsubscribe(ch)
+				if n.metrics != nil {
+					n.metrics.ActiveChannels.Dec()
+				}
+			},
+		},
+		{
+			name: "cluster.session",
+			commit: func() error {
+				return n.syncClusterSessionState(ctx, sub.Client)
+			},
+			rollback: func() {
+				rctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = n.syncClusterSessionState(rctx, sub.Client)
+			},
+		},
+		{
+			name: "cluster.channel",
+			commit: func() error {
+				return n.adjustClusterChannelSubscriptions(ctx, ch, 1)
+			},
+			rollback: func() {
+				rctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = n.adjustClusterChannelSubscriptions(rctx, ch, -1)
+			},
+		},
+	})
 	if err != nil {
 		return err
 	}
-	log.InfoContext(ctx, "added subscriber", "channel", ch, "sub", sub)
-	sub.Client.mu.Lock()
-	sub.Client.subscribedChannels[ch] = struct{}{}
-	sub.Client.mu.Unlock()
-	if first {
-		if err := n.broker.Subscribe(ch); err != nil {
-			n.hub.removeSub(ch, sub.Client)
-			sub.Client.mu.Lock()
-			delete(sub.Client.subscribedChannels, ch)
-			sub.Client.mu.Unlock()
-			return err
-		}
-		if n.metrics != nil {
-			n.metrics.ActiveChannels.Inc()
-		}
-	}
-	if err := n.syncClusterSessionState(ctx, sub.Client); err != nil {
-		n.hub.removeSub(ch, sub.Client)
-		if first {
-			_ = n.broker.Unsubscribe(ch)
-		}
-		sub.Client.mu.Lock()
-		delete(sub.Client.subscribedChannels, ch)
-		sub.Client.mu.Unlock()
-		return fmt.Errorf("sync cluster session subscription: %w", err)
-	}
-	if err := n.adjustClusterChannelSubscriptions(ctx, ch, 1); err != nil {
-		n.hub.removeSub(ch, sub.Client)
-		if first {
-			_ = n.broker.Unsubscribe(ch)
-		}
-		sub.Client.mu.Lock()
-		delete(sub.Client.subscribedChannels, ch)
-		sub.Client.mu.Unlock()
-		_ = n.syncClusterSessionState(ctx, sub.Client)
-		return fmt.Errorf("sync cluster channel projection: %w", err)
-	}
+
 	if n.metrics != nil {
 		n.metrics.SubscriptionsTotal.Inc()
 	}
@@ -279,61 +318,98 @@ func (n *Node) RemoveSubscription(ch string, c *Client) error {
 	mu := n.subLock(ch)
 	mu.Lock()
 	defer mu.Unlock()
+
 	subscriber, exists := n.hub.LookupSubscriber(ch, c)
 	if !exists {
 		return nil
 	}
-	last, removed := n.hub.removeSub(ch, c)
-	if !removed {
-		return nil
-	}
-	c.mu.Lock()
-	delete(c.subscribedChannels, ch)
-	c.mu.Unlock()
-	if removed {
-		if last {
-			if err := n.broker.Unsubscribe(ch); err != nil {
+	var last, removed bool
+
+	err := runSubSaga([]subSagaStep{
+		{
+			name: "hub.removeSub",
+			commit: func() (err error) {
+				last, removed = n.hub.removeSub(ch, c)
+				if !removed {
+					return fmt.Errorf("subscription not found for channel %s", ch)
+				}
+				return nil
+			},
+			rollback: func() {
 				_, _ = n.hub.addSub(ch, subscriber)
+			},
+		},
+		{
+			name: "untrack.client",
+			commit: func() error {
+				c.mu.Lock()
+				delete(c.subscribedChannels, ch)
+				c.mu.Unlock()
+				return nil
+			},
+			rollback: func() {
 				c.mu.Lock()
 				c.subscribedChannels[ch] = struct{}{}
 				c.mu.Unlock()
-				return err
-			}
-			if n.metrics != nil {
-				n.metrics.ActiveChannels.Dec()
-			}
-		}
-		ctx := context.Background()
-		if err := n.syncClusterSessionState(ctx, c); err != nil {
-			_, _ = n.hub.addSub(ch, subscriber)
-			if last {
+			},
+		},
+		{
+			name: "broker.Unsubscribe",
+			commit: func() error {
+				if !last {
+					return nil
+				}
+				if err := n.broker.Unsubscribe(ch); err != nil {
+					return err
+				}
+				if n.metrics != nil {
+					n.metrics.ActiveChannels.Dec()
+				}
+				return nil
+			},
+			rollback: func() {
+				if !last {
+					return
+				}
 				_ = n.broker.Subscribe(ch)
 				if n.metrics != nil {
 					n.metrics.ActiveChannels.Inc()
 				}
-			}
-			c.mu.Lock()
-			c.subscribedChannels[ch] = struct{}{}
-			c.mu.Unlock()
-			return fmt.Errorf("sync cluster session unsubscription: %w", err)
-		}
-		if err := n.adjustClusterChannelSubscriptions(ctx, ch, -1); err != nil {
-			_, _ = n.hub.addSub(ch, subscriber)
-			if last {
-				_ = n.broker.Subscribe(ch)
-				if n.metrics != nil {
-					n.metrics.ActiveChannels.Inc()
-				}
-			}
-			c.mu.Lock()
-			c.subscribedChannels[ch] = struct{}{}
-			c.mu.Unlock()
-			_ = n.syncClusterSessionState(ctx, c)
-			return fmt.Errorf("sync cluster channel projection: %w", err)
-		}
-		if n.metrics != nil {
-			n.metrics.SubscriptionsTotal.Dec()
-		}
+			},
+		},
+		{
+			name: "cluster.session",
+			commit: func() error {
+				rctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				return n.syncClusterSessionState(rctx, c)
+			},
+			rollback: func() {
+				rctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = n.syncClusterSessionState(rctx, c)
+			},
+		},
+		{
+			name: "cluster.channel",
+			commit: func() error {
+				rctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				return n.adjustClusterChannelSubscriptions(rctx, ch, -1)
+			},
+			rollback: func() {
+				rctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = n.adjustClusterChannelSubscriptions(rctx, ch, 1)
+			},
+		},
+	})
+	if err != nil {
+		return err
+	}
+
+	if n.metrics != nil {
+		n.metrics.SubscriptionsTotal.Dec()
 	}
 	return nil
 }
