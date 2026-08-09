@@ -48,6 +48,19 @@ type Client interface {
 	IsConnected() bool
 }
 
+// rpcPending tracks a pending RPC call and its response channel.
+// The channel close is guarded by sync.Once so concurrent close from
+// RPC's defer and Client.Close cannot double-close and panic.
+type rpcPending struct {
+	ch   chan *clientpb.OutboundMessage
+	once sync.Once
+}
+
+// close closes the response channel exactly once.
+func (r *rpcPending) close() {
+	r.once.Do(func() { close(r.ch) })
+}
+
 // client is the implementation of the Client interface.
 type client struct {
 	mu                  sync.RWMutex
@@ -59,6 +72,7 @@ type client struct {
 	connected           atomic.Bool
 	closed              atomic.Bool
 	reconnecting        atomic.Bool
+	generation          atomic.Uint64 // Connection generation, advanced on every reconnect
 	connectedCh         chan struct{} // Closed when connection is established
 	connectErrCh        chan error    // For connection errors
 	msgHandler          func([]*Message)
@@ -66,7 +80,7 @@ type client struct {
 	connectedHandler    func(string)
 	reconnectingHandler func(int)
 	reconnectedHandler  func(string)
-	pendingRPC          map[string]chan *clientpb.OutboundMessage
+	pendingRPC          map[string]*rpcPending
 	pendingRPCMu        sync.RWMutex
 	nextMsgID           atomic.Uint64
 	subscriptions       map[string]bool
@@ -81,6 +95,11 @@ type client struct {
 	// Reconnection: stores connection parameters for re-dialing
 	dialURL  string // WebSocket URL (empty for gRPC)
 	dialAddr string // gRPC address (empty for WebSocket)
+
+	// newTransport overrides the transport factory used by reconnect (tests).
+	newTransport func() (transport, error)
+	// connectTimeout overrides the default connect timeout when non-zero (tests).
+	connectTimeout time.Duration
 }
 
 // Dial creates a new WebSocket client connecting to the specified URL.
@@ -132,7 +151,7 @@ func newClient(ctx context.Context, cancel context.CancelFunc, trans transport, 
 		opts:           opts,
 		connectedCh:    make(chan struct{}),
 		connectErrCh:   make(chan error, 1),
-		pendingRPC:     make(map[string]chan *clientpb.OutboundMessage),
+		pendingRPC:     make(map[string]*rpcPending),
 		subscriptions:  make(map[string]bool),
 		channelOffsets: make(map[string]uint64),
 	}
@@ -172,12 +191,15 @@ func (c *client) Connect(ctx context.Context) error {
 		connectMsg.GetConnect().Subscriptions = subs
 	}
 
-	if err := c.transport.Send(ctx, connectMsg); err != nil {
+	c.mu.RLock()
+	trans := c.transport
+	c.mu.RUnlock()
+	if err := trans.Send(ctx, connectMsg); err != nil {
 		return fmt.Errorf("send connect failed: %w", err)
 	}
 
 	// Start receive loop
-	go c.receiveLoop()
+	go c.receiveLoop(trans, 0)
 
 	// Wait for connection to be established or an error
 	select {
@@ -187,13 +209,15 @@ func (c *client) Connect(ctx context.Context) error {
 		return err
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-time.After(30 * time.Second):
+	case <-time.After(c.connectionTimeout()):
 		return fmt.Errorf("connection timeout")
 	}
 }
 
-// receiveLoop is the main receive loop.
-func (c *client) receiveLoop() {
+// receiveLoop is the main receive loop. It is bound to a single transport
+// and its connection generation, so it never reads from a superseded
+// transport after a reconnect swaps in a new one.
+func (c *client) receiveLoop(trans transport, gen uint64) {
 	for {
 		select {
 		case <-c.ctx.Done():
@@ -201,7 +225,7 @@ func (c *client) receiveLoop() {
 		default:
 		}
 
-		msg, err := c.transport.Recv(c.ctx)
+		msg, err := trans.Recv(c.ctx)
 		if err != nil {
 			if !c.closed.Load() {
 				isConnError := !c.connected.Load()
@@ -215,19 +239,24 @@ func (c *client) receiveLoop() {
 			return
 		}
 
-		c.handleMessage(msg)
+		c.handleMessage(msg, gen)
 	}
 }
 
 // handleMessage handles an incoming message from the server.
-func (c *client) handleMessage(msg *clientpb.OutboundMessage) {
+func (c *client) handleMessage(msg *clientpb.OutboundMessage, gen uint64) {
 	switch env := msg.GetEnvelope().(type) {
 	case *clientpb.OutboundMessage_Connected:
-		c.handleConnected(env.Connected)
+		c.handleConnected(env.Connected, gen)
 
 	case *clientpb.OutboundMessage_Error:
-		err := fmt.Errorf("server error: %s (code: %s)", env.Error.GetMessage(), env.Error.GetCode())
-		c.handleError(err, !c.connected.Load())
+		// If the error references a pending RPC request, deliver it to the
+		// RPC caller so the call fails fast with the server error instead of
+		// hanging until the context deadline.
+		if !c.deliverPending(msg) {
+			err := fmt.Errorf("server error: %s (code: %s)", env.Error.GetMessage(), env.Error.GetCode())
+			c.handleError(err, !c.connected.Load())
+		}
 
 	case *clientpb.OutboundMessage_SubscribeAck:
 		c.handleSubscribeAck(env.SubscribeAck)
@@ -252,7 +281,13 @@ func (c *client) handleMessage(msg *clientpb.OutboundMessage) {
 }
 
 // handleConnected handles the Connected message.
-func (c *client) handleConnected(connected *clientpb.Connected) {
+func (c *client) handleConnected(connected *clientpb.Connected, gen uint64) {
+	// Drop stale Connected responses from a superseded connection: they
+	// would otherwise reset the reconnecting flag and session bookkeeping.
+	if c.generation.Load() != gen {
+		return
+	}
+
 	c.mu.Lock()
 	c.sessionID = connected.GetSessionId()
 	c.epoch = connected.GetEpoch()
@@ -343,19 +378,35 @@ func (c *client) handlePublication(pub *clientpb.Publication) {
 
 // handleRPCReply handles the RPC reply message.
 func (c *client) handleRPCReply(msg *clientpb.OutboundMessage, reply *clientpb.RpcReply) {
+	c.deliverPending(msg)
+}
+
+// deliverPending delivers msg to the pending RPC with the matching ID, if
+// any, and removes the entry. It reports whether the message was routed to a
+// pending RPC.
+//
+// The delivery is non-blocking and happens under the pendingRPC write lock:
+// RPC's deferred cleanup and Client.Close only close the response channel
+// while holding (or after acquiring) the same lock, so the send cannot race
+// with the channel close.
+func (c *client) deliverPending(msg *clientpb.OutboundMessage) bool {
 	id := msg.GetId()
+	if id == "" {
+		return false
+	}
 
-	c.pendingRPCMu.RLock()
-	ch, ok := c.pendingRPC[id]
-	c.pendingRPCMu.RUnlock()
-
+	c.pendingRPCMu.Lock()
+	rp, ok := c.pendingRPC[id]
 	if ok {
+		delete(c.pendingRPC, id)
 		select {
-		case ch <- msg:
+		case rp.ch <- msg:
 		default:
-			// Channel is full or closed, discard
+			// Channel is full, discard
 		}
 	}
+	c.pendingRPCMu.Unlock()
+	return ok
 }
 
 // handleError handles an error.
@@ -399,7 +450,10 @@ func (c *client) Subscribe(channels ...string) error {
 		},
 	}
 
-	if err := c.transport.Send(c.ctx, msg); err != nil {
+	c.mu.RLock()
+	trans := c.transport
+	c.mu.RUnlock()
+	if err := trans.Send(c.ctx, msg); err != nil {
 		return fmt.Errorf("subscribe failed: %w", err)
 	}
 
@@ -429,7 +483,10 @@ func (c *client) Unsubscribe(channels ...string) error {
 		},
 	}
 
-	if err := c.transport.Send(c.ctx, msg); err != nil {
+	c.mu.RLock()
+	trans := c.transport
+	c.mu.RUnlock()
+	if err := trans.Send(c.ctx, msg); err != nil {
 		return fmt.Errorf("unsubscribe failed: %w", err)
 	}
 
@@ -458,7 +515,10 @@ func (c *client) Publish(channel string, msg *Message) error {
 		},
 	}
 
-	if err := c.transport.Send(c.ctx, pbMsg); err != nil {
+	c.mu.RLock()
+	trans := c.transport
+	c.mu.RUnlock()
+	if err := trans.Send(c.ctx, pbMsg); err != nil {
 		return fmt.Errorf("publish failed: %w", err)
 	}
 
@@ -478,17 +538,17 @@ func (c *client) RPC(ctx context.Context, channel, method string, req, resp *Mes
 	}
 
 	id := c.generateID()
-	ch := make(chan *clientpb.OutboundMessage, 1)
+	rp := &rpcPending{ch: make(chan *clientpb.OutboundMessage, 1)}
 
 	c.pendingRPCMu.Lock()
-	c.pendingRPC[id] = ch
+	c.pendingRPC[id] = rp
 	c.pendingRPCMu.Unlock()
 
 	defer func() {
 		c.pendingRPCMu.Lock()
 		delete(c.pendingRPC, id)
 		c.pendingRPCMu.Unlock()
-		close(ch)
+		rp.close()
 	}()
 
 	msg := &clientpb.InboundMessage{
@@ -502,14 +562,17 @@ func (c *client) RPC(ctx context.Context, channel, method string, req, resp *Mes
 		},
 	}
 
-	if err := c.transport.Send(c.ctx, msg); err != nil {
+	c.mu.RLock()
+	trans := c.transport
+	c.mu.RUnlock()
+	if err := trans.Send(c.ctx, msg); err != nil {
 		return fmt.Errorf("rpc send failed: %w", err)
 	}
 
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case outMsg := <-ch:
+	case outMsg := <-rp.ch:
 		if outMsg == nil {
 			return fmt.Errorf("rpc failed: no response")
 		}
@@ -632,12 +695,17 @@ func (c *client) reconnectLoop() {
 // reconnect creates a new transport and sends a Connect with session resumption.
 func (c *client) reconnect() error {
 	// Close old transport
-	_ = c.transport.Close()
+	c.mu.RLock()
+	old := c.transport
+	c.mu.RUnlock()
+	_ = old.Close()
 
 	// Create new transport
 	var trans transport
 	var err error
-	if c.dialURL != "" {
+	if c.newTransport != nil {
+		trans, err = c.newTransport()
+	} else if c.dialURL != "" {
 		trans, err = newWSTransport(c.dialURL, c.opts.Encoding, c.opts.DialTimeout)
 	} else if c.dialAddr != "" {
 		trans, err = newGRPCTransport(c.ctx, c.dialAddr)
@@ -647,7 +715,13 @@ func (c *client) reconnect() error {
 	if err != nil {
 		return err
 	}
+
+	// Every new transport advances the connection generation so stale
+	// Connected responses from superseded connections can be recognized.
+	gen := c.generation.Add(1)
+	c.mu.Lock()
 	c.transport = trans
+	c.mu.Unlock()
 
 	// Build Connect message with session resumption
 	c.mu.RLock()
@@ -693,15 +767,19 @@ func (c *client) reconnect() error {
 	c.connectErrCh = make(chan error, 1)
 	c.mu.Unlock()
 
-	ctx, cancel := context.WithTimeout(c.ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(c.ctx, c.connectionTimeout())
 	defer cancel()
 
-	if err := c.transport.Send(ctx, connectMsg); err != nil {
+	c.mu.RLock()
+	cur := c.transport
+	c.mu.RUnlock()
+	if err := cur.Send(ctx, connectMsg); err != nil {
+		_ = trans.Close()
 		return fmt.Errorf("send connect failed: %w", err)
 	}
 
 	// Start receive loop
-	go c.receiveLoop()
+	go c.receiveLoop(trans, gen)
 
 	// Wait for connection
 	c.mu.RLock()
@@ -713,10 +791,21 @@ func (c *client) reconnect() error {
 	case <-connCh:
 		return nil
 	case err := <-errCh:
+		_ = trans.Close()
 		return err
 	case <-ctx.Done():
+		_ = trans.Close()
 		return fmt.Errorf("reconnect timeout")
 	}
+}
+
+// connectionTimeout returns the timeout for a single connection attempt,
+// or the test override when set.
+func (c *client) connectionTimeout() time.Duration {
+	if c.connectTimeout > 0 {
+		return c.connectTimeout
+	}
+	return 30 * time.Second
 }
 
 // Close closes the connection.
@@ -752,13 +841,16 @@ func (c *client) Close() error {
 
 	// Clean up pending RPCs
 	c.pendingRPCMu.Lock()
-	for id, ch := range c.pendingRPC {
+	for id, rp := range c.pendingRPC {
 		delete(c.pendingRPC, id)
-		close(ch)
+		rp.close()
 	}
 	c.pendingRPCMu.Unlock()
 
-	return c.transport.Close()
+	c.mu.RLock()
+	trans := c.transport
+	c.mu.RUnlock()
+	return trans.Close()
 }
 
 // generateID generates a unique message ID.
@@ -961,7 +1053,10 @@ func (c *client) pingLoop(ctx context.Context) {
 				},
 			}
 
-			if err := c.transport.Send(ctx, pingMsg); err != nil {
+			c.mu.RLock()
+			trans := c.transport
+			c.mu.RUnlock()
+			if err := trans.Send(ctx, pingMsg); err != nil {
 				// Log error but don't break the loop
 				// The connection will be closed by receive loop if there's a real error
 				continue

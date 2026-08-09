@@ -8,7 +8,6 @@ import (
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/encoding"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -39,13 +38,14 @@ func (c *RawCodec) Unmarshal(data []byte, v interface{}) error {
 	return proto.Unmarshal(data, vv)
 }
 
+// Name returns the codec name used as the gRPC content-subtype. The name is
+// package-prefixed instead of the default "proto" so that this codec is never
+// registered in the process-global codec registry under the default name
+// (which would override the standard proto codec for every gRPC connection in
+// the process). The codec is applied per-connection via ForceCodec in
+// newGRPCTransport; it must match the codec name used by the server.
 func (c *RawCodec) Name() string {
-	return "proto"
-}
-
-func init() {
-	// Register the raw codec to match the server's codec
-	encoding.RegisterCodec(&RawCodec{})
+	return "messageloop-proto"
 }
 
 // grpcTransport is a gRPC-based transport implementation.
@@ -62,7 +62,10 @@ func newGRPCTransport(ctx context.Context, addr string, opts ...grpc.DialOption)
 	// Default options
 	defaultOpts := []grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		// Use the default codec which will now use our registered RawCodec
+		// Force the raw codec per-connection instead of registering it globally
+		// in init(): a global "proto" registration would override the standard
+		// codec for every gRPC client in the process.
+		grpc.WithDefaultCallOptions(grpc.ForceCodec(&RawCodec{})),
 	}
 	defaultOpts = append(defaultOpts, opts...)
 

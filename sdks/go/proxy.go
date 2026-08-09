@@ -149,12 +149,64 @@ func (h *LifecycleHandlerImpl) OnUnsubscribed(ctx context.Context) error {
 
 // HandlerImpl is a default implementation of all handlers.
 // Services can embed this type and override only the methods they need.
+//
+// Custom handlers are injected through the RPCHandler, AuthHandler,
+// ACLHandler and LifecycleHandler fields. When a field is set it takes
+// precedence over the corresponding embedded default implementation
+// (RPCHandlerImpl/AuthHandlerImpl/ACLHandlerImpl/LifecycleHandlerImpl);
+// a zero-value HandlerImpl dispatches to the embedded defaults.
 type HandlerImpl struct {
 	proxypb.UnimplementedProxyServiceServer
 	RPCHandlerImpl
 	AuthHandlerImpl
 	ACLHandlerImpl
 	LifecycleHandlerImpl
+
+	// RPCHandler overrides the RPC dispatch target when non-nil.
+	RPCHandler RPCHandler
+	// AuthHandler overrides the authentication dispatch target when non-nil.
+	AuthHandler AuthHandler
+	// ACLHandler overrides the ACL dispatch target when non-nil.
+	ACLHandler ACLHandler
+	// LifecycleHandler overrides the lifecycle dispatch target when non-nil.
+	LifecycleHandler LifecycleHandler
+}
+
+// rpcHandler returns the RPC handler used for dispatch, defaulting to the
+// embedded RPCHandlerImpl when no override is configured.
+func (h *HandlerImpl) rpcHandler() RPCHandler {
+	if h.RPCHandler != nil {
+		return h.RPCHandler
+	}
+	return &h.RPCHandlerImpl
+}
+
+// authHandler returns the auth handler used for dispatch, defaulting to the
+// embedded AuthHandlerImpl when no override is configured.
+func (h *HandlerImpl) authHandler() AuthHandler {
+	if h.AuthHandler != nil {
+		return h.AuthHandler
+	}
+	return &h.AuthHandlerImpl
+}
+
+// aclHandler returns the ACL handler used for dispatch, defaulting to the
+// embedded ACLHandlerImpl when no override is configured.
+func (h *HandlerImpl) aclHandler() ACLHandler {
+	if h.ACLHandler != nil {
+		return h.ACLHandler
+	}
+	return &h.ACLHandlerImpl
+}
+
+// lifecycleHandler returns the lifecycle handler used for dispatch,
+// defaulting to the embedded LifecycleHandlerImpl when no override is
+// configured.
+func (h *HandlerImpl) lifecycleHandler() LifecycleHandler {
+	if h.LifecycleHandler != nil {
+		return h.LifecycleHandler
+	}
+	return &h.LifecycleHandlerImpl
 }
 
 // RPC implements ProxyServiceServer.RPC.
@@ -178,7 +230,7 @@ func (h *HandlerImpl) RPC(ctx context.Context, req *proxypb.RPCRequest) (*proxyp
 		Payload: payload,
 	}
 
-	resp, err := h.RPCHandlerImpl.HandleRPC(ctx, rpcReq)
+	resp, err := h.rpcHandler().HandleRPC(ctx, rpcReq)
 	if err != nil {
 		slog.ErrorContext(ctx, "RPC handler failed", "error", err)
 		return &proxypb.RPCResponse{
@@ -201,9 +253,12 @@ func (h *HandlerImpl) RPC(ctx context.Context, req *proxypb.RPCRequest) (*proxyp
 	// Convert Message to Payload
 	var respPayload *sharedpb.Payload
 	if resp.Payload != nil {
-		if p, err := resp.Payload.ToPayload(); err == nil {
-			respPayload = p
+		p, err := resp.Payload.ToPayload()
+		if err != nil {
+			slog.ErrorContext(ctx, "failed to convert response payload", "error", err)
+			return nil, status.Error(codes.Internal, fmt.Sprintf("failed to convert response payload: %v", err))
 		}
+		respPayload = p
 	}
 
 	return &proxypb.RPCResponse{
@@ -226,7 +281,7 @@ func (h *HandlerImpl) Authenticate(ctx context.Context, req *proxypb.Authenticat
 		ClientType: req.ClientType,
 	}
 
-	resp, err := h.AuthHandlerImpl.Authenticate(ctx, authReq)
+	resp, err := h.authHandler().Authenticate(ctx, authReq)
 	if err != nil {
 		slog.ErrorContext(ctx, "auth handler failed", "error", err)
 		return &proxypb.AuthenticateResponse{
@@ -250,7 +305,7 @@ func (h *HandlerImpl) SubscribeAcl(ctx context.Context, req *proxypb.SubscribeAc
 		"channel", req.Channel,
 	)
 
-	err := h.ACLHandlerImpl.CheckSubscribeACL(ctx, req.Channel, req.Token)
+	err := h.aclHandler().CheckSubscribeACL(ctx, req.Channel, req.Token)
 	if err != nil {
 		slog.ErrorContext(ctx, "subscription denied by ACL", "error", err)
 		return &proxypb.SubscribeAclResponse{}, status.Error(codes.PermissionDenied, err.Error())
@@ -265,7 +320,7 @@ func (h *HandlerImpl) PublishAcl(ctx context.Context, req *proxypb.PublishAclReq
 		"channel", req.Channel,
 	)
 
-	err := h.ACLHandlerImpl.CheckPublishACL(ctx, req.Channel, req.Token)
+	err := h.aclHandler().CheckPublishACL(ctx, req.Channel, req.Token)
 	if err != nil {
 		slog.ErrorContext(ctx, "publish denied by ACL", "error", err)
 		return &proxypb.PublishAclResponse{}, status.Error(codes.PermissionDenied, err.Error())
@@ -281,7 +336,7 @@ func (h *HandlerImpl) OnConnected(ctx context.Context, req *proxypb.OnConnectedR
 		"username", req.Username,
 	)
 
-	if err := h.LifecycleHandlerImpl.OnConnected(ctx, req.SessionId, req.Username); err != nil {
+	if err := h.lifecycleHandler().OnConnected(ctx, req.SessionId, req.Username); err != nil {
 		slog.ErrorContext(ctx, "OnConnected handler failed", "error", err)
 		return nil, status.Error(codes.Internal, err.Error())
 	}
@@ -293,7 +348,7 @@ func (h *HandlerImpl) OnConnected(ctx context.Context, req *proxypb.OnConnectedR
 func (h *HandlerImpl) OnSubscribed(ctx context.Context, req *proxypb.OnSubscribedRequest) (*proxypb.OnSubscribedResponse, error) {
 	slog.DebugContext(ctx, "received OnSubscribed hook")
 
-	if err := h.LifecycleHandlerImpl.OnSubscribed(ctx); err != nil {
+	if err := h.lifecycleHandler().OnSubscribed(ctx); err != nil {
 		slog.ErrorContext(ctx, "OnSubscribed handler failed", "error", err)
 		return nil, status.Error(codes.Internal, err.Error())
 	}
@@ -305,7 +360,7 @@ func (h *HandlerImpl) OnSubscribed(ctx context.Context, req *proxypb.OnSubscribe
 func (h *HandlerImpl) OnUnsubscribed(ctx context.Context, req *proxypb.OnUnsubscribedRequest) (*proxypb.OnUnsubscribedResponse, error) {
 	slog.DebugContext(ctx, "received OnUnsubscribed hook")
 
-	if err := h.LifecycleHandlerImpl.OnUnsubscribed(ctx); err != nil {
+	if err := h.lifecycleHandler().OnUnsubscribed(ctx); err != nil {
 		slog.ErrorContext(ctx, "OnUnsubscribed handler failed", "error", err)
 		return nil, status.Error(codes.Internal, err.Error())
 	}
@@ -320,7 +375,7 @@ func (h *HandlerImpl) OnDisconnected(ctx context.Context, req *proxypb.OnDisconn
 		"username", req.Username,
 	)
 
-	if err := h.LifecycleHandlerImpl.OnDisconnected(ctx, req.SessionId, req.Username); err != nil {
+	if err := h.lifecycleHandler().OnDisconnected(ctx, req.SessionId, req.Username); err != nil {
 		slog.ErrorContext(ctx, "OnDisconnected handler failed", "error", err)
 		return nil, status.Error(codes.Internal, err.Error())
 	}

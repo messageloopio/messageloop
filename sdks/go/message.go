@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -40,25 +40,28 @@ func (d *Data) ContentType() string {
 	return d.contentType
 }
 
-// AsJSON returns the data as a JSON map. Returns nil if data is not JSON.
+// AsJSON returns the data as a JSON map. Returns nil if data is not JSON or
+// has no value.
 func (d *Data) AsJSON() map[string]any {
-	if d.isJSON() {
+	if d.isJSON() && d.value != nil {
 		return d.value.(map[string]any)
 	}
 	return nil
 }
 
-// AsBinary returns the data as bytes. Returns nil if data is not binary.
+// AsBinary returns the data as bytes. Returns nil if data is not binary or
+// has no value.
 func (d *Data) AsBinary() []byte {
-	if d.isBinary() {
+	if d.isBinary() && d.value != nil {
 		return d.value.([]byte)
 	}
 	return nil
 }
 
-// AsText returns the data as a string. Returns empty string if data is not text.
+// AsText returns the data as a string. Returns empty string if data is not
+// text or has no value.
 func (d *Data) AsText() string {
-	if d.isText() {
+	if d.isText() && d.value != nil {
 		return d.value.(string)
 	}
 	return ""
@@ -82,6 +85,9 @@ func (d *Data) As(out any) error {
 	}
 
 	if d.isBinary() {
+		if d.value == nil {
+			return fmt.Errorf("no data to decode")
+		}
 		// Try to unmarshal as JSON first
 		binary := d.value.([]byte)
 		if err := json.Unmarshal(binary, out); err != nil {
@@ -96,6 +102,9 @@ func (d *Data) As(out any) error {
 	}
 
 	if d.isText() {
+		if d.value == nil {
+			return fmt.Errorf("no data to decode")
+		}
 		// Try to unmarshal as JSON first
 		text := d.value.(string)
 		if err := json.Unmarshal([]byte(text), out); err != nil {
