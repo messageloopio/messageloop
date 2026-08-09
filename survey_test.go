@@ -8,6 +8,8 @@ import (
 
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -637,6 +639,112 @@ func TestNode_Survey_ConcurrentClients(t *testing.T) {
 	}
 }
 
+// --- P1-8: survey responses from non-subscribers must be dropped ---
+
+func TestNode_AddSurveyResponse_ForgedSessionDropped(t *testing.T) {
+	node := NewNode(nil)
+	ctx := context.Background()
+
+	survey := NewSurvey("survey-forge-1", "forge.ch", []byte("payload"), 5*time.Second)
+	survey.AddExpectedSession("real-session")
+	require.True(t, node.registerSurvey(ctx, survey))
+	defer node.unregisterSurvey(survey.ID())
+
+	// A session that is not a subscriber of the survey channel tries to inject
+	// a response — it must be dropped.
+	node.AddSurveyResponse(ctx, "attacker-session", survey.ID(), []byte("forged"), nil)
+	assert.Empty(t, survey.Results(), "forged response must be dropped")
+
+	// The subscribed session's response is collected normally.
+	node.AddSurveyResponse(ctx, "real-session", survey.ID(), []byte("real"), nil)
+	results := survey.Results()
+	require.Len(t, results, 1)
+	assert.Equal(t, "real-session", results[0].SessionID)
+	assert.Equal(t, "real", string(results[0].Payload))
+}
+
+func TestNode_Survey_ForgedResponseFromNonSubscriberDropped(t *testing.T) {
+	node := NewNode(nil)
+	_ = node.Run(context.Background())
+	ctx := context.Background()
+
+	// Legitimate subscriber.
+	transport := &capturingTransport{}
+	subscriber, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
+	require.NoError(t, err)
+	connectMsg := &clientpb.InboundMessage{
+		Id:       "msg-1",
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: "client-1"}},
+	}
+	require.NoError(t, subscriber.HandleMessage(ctx, connectMsg))
+	transport.messages = nil
+	subMsg := &clientpb.InboundMessage{
+		Id: "msg-2",
+		Envelope: &clientpb.InboundMessage_Subscribe{
+			Subscribe: &clientpb.Subscribe{Subscriptions: []*clientpb.Subscription{{Channel: "survey-forge-channel"}}},
+		},
+	}
+	require.NoError(t, subscriber.HandleMessage(ctx, subMsg))
+	transport.messages = nil
+
+	// Attacker: connected but not subscribed to the channel.
+	attackerTransport := &capturingTransport{}
+	attacker, _, err := NewClient(ctx, node, attackerTransport, JSONMarshaler{})
+	require.NoError(t, err)
+	attackerConnect := &clientpb.InboundMessage{
+		Id:       "msg-a1",
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: "attacker"}},
+	}
+	require.NoError(t, attacker.HandleMessage(ctx, attackerConnect))
+
+	var results []*SurveyResult
+	var surveyErr error
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		results, surveyErr = node.Survey(ctx, "survey-forge-channel", []byte("ping"), 800*time.Millisecond)
+	}()
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Read the survey request ID from the subscriber's transport.
+	var req clientpb.OutboundMessage
+	require.NoError(t, JSONMarshaler{}.Unmarshal(transport.getLastMessage(), &req))
+	surveyReq := req.GetSurveyRequest()
+	require.NotNil(t, surveyReq)
+
+	// Legitimate response from the subscriber.
+	realMsg := &clientpb.InboundMessage{
+		Id: "msg-r1",
+		Envelope: &clientpb.InboundMessage_SurveyReply{
+			SurveyReply: &clientpb.SurveyReply{
+				RequestId: surveyReq.RequestId,
+				Payload:   &sharedpb.Payload{Data: &sharedpb.Payload_Binary{Binary: []byte("real")}},
+			},
+		},
+	}
+	require.NoError(t, subscriber.HandleMessage(ctx, realMsg))
+
+	// Forged response from the non-subscriber.
+	forgeMsg := &clientpb.InboundMessage{
+		Id: "msg-f1",
+		Envelope: &clientpb.InboundMessage_SurveyReply{
+			SurveyReply: &clientpb.SurveyReply{
+				RequestId: surveyReq.RequestId,
+				Payload:   &sharedpb.Payload{Data: &sharedpb.Payload_Binary{Binary: []byte("forged")}},
+			},
+		},
+	}
+	require.NoError(t, attacker.HandleMessage(ctx, forgeMsg))
+
+	wg.Wait()
+	require.NoError(t, surveyErr)
+	require.Len(t, results, 1, "forged response must be dropped")
+	assert.Equal(t, subscriber.SessionID(), results[0].SessionID)
+	assert.Equal(t, "real", string(results[0].Payload))
+}
+
 func TestHub_GetSubscribers(t *testing.T) {
 	node := NewNode(nil)
 	_ = node.Run(context.Background())
@@ -691,4 +799,125 @@ func TestHub_GetSubscribers_EmptyChannel(t *testing.T) {
 	if subscribers != nil {
 		t.Errorf("Expected nil for empty channel, got %d subscribers", len(subscribers))
 	}
+}
+
+// --- P2-3: survey robustness — send timeout, wait fallback, registry cap ---
+
+// blockingTransport blocks every write while block is true (until release is
+// closed), simulating a slow consumer whose send buffer is full.
+type blockingTransport struct {
+	mu      sync.Mutex
+	block   bool
+	release chan struct{}
+}
+
+func (t *blockingTransport) Write([]byte) error {
+	t.mu.Lock()
+	block := t.block
+	t.mu.Unlock()
+	if block {
+		<-t.release
+	}
+	return nil
+}
+
+func (t *blockingTransport) WriteMany(...[]byte) error {
+	t.mu.Lock()
+	block := t.block
+	t.mu.Unlock()
+	if block {
+		<-t.release
+	}
+	return nil
+}
+
+func (t *blockingTransport) Close(Disconnect) error { return nil }
+func (t *blockingTransport) RemoteAddr() string     { return "127.0.0.1:12345" }
+
+func (t *blockingTransport) setBlock(block bool) {
+	t.mu.Lock()
+	t.block = block
+	t.mu.Unlock()
+}
+
+// TestNode_Survey_BlockedWriteTimesOutInsteadOfHanging verifies P2-3 fix 1:
+// a subscriber whose transport blocks writes produces an error response and
+// the survey returns instead of hanging forever.
+func TestNode_Survey_BlockedWriteTimesOutInsteadOfHanging(t *testing.T) {
+	originalSendTimeout := surveySendTimeout
+	surveySendTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { surveySendTimeout = originalSendTimeout })
+
+	node := NewNode(nil)
+	require.NoError(t, node.Run(context.Background()))
+	ctx := context.Background()
+
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	transport := &blockingTransport{release: release}
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
+	require.NoError(t, err)
+
+	connectMsg := &clientpb.InboundMessage{
+		Id:       "connect-blocked",
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: "blocked-client"}},
+	}
+	require.NoError(t, client.HandleMessage(ctx, connectMsg))
+	subMsg := &clientpb.InboundMessage{
+		Id: "subscribe-blocked",
+		Envelope: &clientpb.InboundMessage_Subscribe{
+			Subscribe: &clientpb.Subscribe{Subscriptions: []*clientpb.Subscription{{Channel: "survey-blocked.ch"}}},
+		},
+	}
+	require.NoError(t, client.HandleMessage(ctx, subMsg))
+
+	// Now block the transport: the survey request write must time out and
+	// be recorded as a failure instead of hanging the survey.
+	transport.setBlock(true)
+
+	start := time.Now()
+	results, err := node.Survey(ctx, "survey-blocked.ch", []byte("ping"), time.Second)
+	elapsed := time.Since(start)
+
+	require.NoError(t, err)
+	require.Less(t, elapsed, 10*time.Second, "survey must return on send timeout, not hang")
+	require.Len(t, results, 1, "the blocked subscriber must yield one (error) result")
+	assert.Equal(t, client.SessionID(), results[0].SessionID)
+	assert.Error(t, results[0].Error, "send failure must be recorded in the response")
+
+	// Unblock writes so the abandoned send goroutine can finish.
+	transport.setBlock(false)
+}
+
+// TestSurvey_Wait_ZeroTimeoutFallsBackToDefault verifies P2-3 fix 3: a
+// timeout <= 0 must not make Wait expire immediately.
+func TestSurvey_Wait_ZeroTimeoutFallsBackToDefault(t *testing.T) {
+	originalDefault := defaultSurveyWaitTimeout
+	defaultSurveyWaitTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { defaultSurveyWaitTimeout = originalDefault })
+
+	survey := NewSurvey("wait-zero", "ch", []byte("payload"), 0)
+	start := time.Now()
+	results := survey.Wait(context.Background())
+	elapsed := time.Since(start)
+
+	require.Empty(t, results)
+	require.GreaterOrEqual(t, elapsed, 50*time.Millisecond,
+		"Wait must not expire immediately when the survey timeout is <= 0")
+}
+
+// TestNode_RegisterSurveyRegistryLimit verifies P2-3 fix 4: registration
+// beyond the cap is rejected.
+func TestNode_RegisterSurveyRegistryLimit(t *testing.T) {
+	originalLimit := maxActiveSurveys
+	maxActiveSurveys = 2
+	t.Cleanup(func() { maxActiveSurveys = originalLimit })
+
+	node := NewNode(nil)
+	ctx := context.Background()
+
+	require.True(t, node.registerSurvey(ctx, NewSurvey("reg-1", "ch", nil, time.Second)))
+	require.True(t, node.registerSurvey(ctx, NewSurvey("reg-2", "ch", nil, time.Second)))
+	require.False(t, node.registerSurvey(ctx, NewSurvey("reg-3", "ch", nil, time.Second)),
+		"registration beyond the cap must be rejected")
 }

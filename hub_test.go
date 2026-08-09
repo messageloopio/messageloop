@@ -6,6 +6,10 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // mockTransport is a mock implementation of Transport for testing
@@ -58,6 +62,15 @@ func (m *mockTransport) getMessageCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return len(m.messages)
+}
+
+func (m *mockTransport) getMessage(i int) []byte {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if i < 0 || i >= len(m.messages) {
+		return nil
+	}
+	return m.messages[i]
 }
 
 func newTestClient(t *testing.T, sessionID, userID string) *Client {
@@ -700,4 +713,175 @@ func TestHub_MultipleChannels(t *testing.T) {
 			t.Errorf("NumSubscribers(%q) = %d, want 1", ch, count)
 		}
 	}
+}
+
+// --- P1-13: exact + wildcard double subscription must not double-deliver ---
+
+func newTestPublication(channel string, offset uint64) *Publication {
+	return &Publication{
+		Channel: channel,
+		Offset:  offset,
+		Payload: []byte("test payload"),
+		Time:    time.Now().UnixMilli(),
+	}
+}
+
+// assertSinglePublication asserts the transport captured exactly one message
+// and that it is a Publication envelope carrying exactly one message.
+func assertSinglePublication(t *testing.T, transport *mockTransport, channel string) {
+	t.Helper()
+	require.Equal(t, 1, transport.getMessageCount())
+	var out clientpb.OutboundMessage
+	require.NoError(t, JSONMarshaler{}.Unmarshal(transport.getMessage(0), &out))
+	pub := out.GetPublication()
+	require.NotNil(t, pub, "outbound message should be a publication")
+	require.Len(t, pub.GetMessages(), 1)
+	assert.Equal(t, channel, pub.GetMessages()[0].GetChannel())
+}
+
+func TestHub_BroadcastPublication_DedupExactAndWildcard(t *testing.T) {
+	h := newHub(0, 0)
+	transport := &mockTransport{}
+	client := newTestClientWithTransport(t, "session-1", "user-1", transport)
+
+	_, err := h.addSub("chat.x", Subscriber{Client: client, Ephemeral: false})
+	require.NoError(t, err)
+	_, err = h.addSub("chat.*", Subscriber{Client: client, Ephemeral: false})
+	require.NoError(t, err)
+
+	err = h.broadcastPublication("chat.x", newTestPublication("chat.x", 1))
+	require.NoError(t, err)
+
+	// Subscribed both exactly and via wildcard: exactly one copy is delivered.
+	assertSinglePublication(t, transport, "chat.x")
+}
+
+func TestHub_BroadcastPublication_DedupExactAndWildcard_MixedSubscribers(t *testing.T) {
+	h := newHub(0, 0)
+
+	transportBoth := &mockTransport{}
+	transportWildcard := &mockTransport{}
+	transportExact := &mockTransport{}
+	clientBoth := newTestClientWithTransport(t, "session-both", "user-both", transportBoth)
+	clientWildcard := newTestClientWithTransport(t, "session-wild", "user-wild", transportWildcard)
+	clientExact := newTestClientWithTransport(t, "session-exact", "user-exact", transportExact)
+
+	for _, sub := range []struct {
+		channel string
+		client  *Client
+	}{
+		{"chat.x", clientBoth},
+		{"chat.*", clientBoth},
+		{"chat.*", clientWildcard},
+		{"chat.x", clientExact},
+	} {
+		_, err := h.addSub(sub.channel, Subscriber{Client: sub.client, Ephemeral: false})
+		require.NoError(t, err)
+	}
+
+	err := h.broadcastPublication("chat.x", newTestPublication("chat.x", 1))
+	require.NoError(t, err)
+
+	// Every client receives exactly one copy regardless of how it subscribed.
+	assertSinglePublication(t, transportBoth, "chat.x")
+	assertSinglePublication(t, transportWildcard, "chat.x")
+	assertSinglePublication(t, transportExact, "chat.x")
+}
+
+func TestHub_BroadcastPublication_ExactOnly_SingleDelivery(t *testing.T) {
+	h := newHub(0, 0)
+	transport := &mockTransport{}
+	client := newTestClientWithTransport(t, "session-1", "user-1", transport)
+
+	_, err := h.addSub("chat.x", Subscriber{Client: client, Ephemeral: false})
+	require.NoError(t, err)
+
+	err = h.broadcastPublication("chat.x", newTestPublication("chat.x", 1))
+	require.NoError(t, err)
+
+	assertSinglePublication(t, transport, "chat.x")
+}
+
+func TestHub_BroadcastPublication_WildcardOnly_SingleDelivery(t *testing.T) {
+	h := newHub(0, 0)
+	transport := &mockTransport{}
+	client := newTestClientWithTransport(t, "session-1", "user-1", transport)
+
+	_, err := h.addSub("chat.*", Subscriber{Client: client, Ephemeral: false})
+	require.NoError(t, err)
+
+	err = h.broadcastPublication("chat.x", newTestPublication("chat.x", 1))
+	require.NoError(t, err)
+
+	assertSinglePublication(t, transport, "chat.x")
+}
+
+// --- P2-16: large fan-out must deliver to all subscribers via bounded concurrency ---
+
+func TestHub_BroadcastPublication_LargeFanOut(t *testing.T) {
+	h := newHub(0, 0)
+	const n = 200
+	transports := make([]*mockTransport, n)
+	for i := 0; i < n; i++ {
+		transports[i] = &mockTransport{}
+		client := newTestClientWithTransport(t, fmt.Sprintf("session-%d", i), fmt.Sprintf("user-%d", i), transports[i])
+		_, err := h.addSub("fan.ch", Subscriber{Client: client, Ephemeral: false})
+		require.NoError(t, err)
+	}
+
+	err := h.broadcastPublication("fan.ch", newTestPublication("fan.ch", 1))
+	require.NoError(t, err)
+
+	for i, transport := range transports {
+		assert.Equal(t, 1, transport.getMessageCount(), "client %d should receive exactly one message", i)
+	}
+}
+
+// --- P1-3: realtime delivery message IDs must be stable (channel-offset) ---
+
+func TestHub_BroadcastPublication_StableMessageID(t *testing.T) {
+	h := newHub(0, 0)
+	transport := &mockTransport{}
+	client := newTestClientWithTransport(t, "session-1", "user-1", transport)
+
+	_, err := h.addSub("stable.ch", Subscriber{Client: client, Ephemeral: false})
+	require.NoError(t, err)
+
+	err = h.broadcastPublication("stable.ch", newTestPublication("stable.ch", 42))
+	require.NoError(t, err)
+
+	var out clientpb.OutboundMessage
+	require.NoError(t, JSONMarshaler{}.Unmarshal(transport.getMessage(0), &out))
+	pub := out.GetPublication()
+	require.NotNil(t, pub)
+	require.Len(t, pub.GetMessages(), 1)
+	assert.Equal(t, "stable.ch-42", pub.GetMessages()[0].GetId())
+}
+
+// --- P1-1: ReplaceSession must migrate wildcard subscriptions ---
+
+func TestHub_ReplaceSession_MigratesWildcardSubscription(t *testing.T) {
+	h := newHub(0, 0)
+	oldTransport := &mockTransport{}
+	newTransport := &mockTransport{}
+	oldClient := newTestClientWithTransport(t, "session-1", "user-1", oldTransport)
+	newClient := newTestClientWithTransport(t, "session-1", "user-1", newTransport)
+
+	require.NoError(t, h.add(oldClient))
+	_, err := h.addSub("chat.*", Subscriber{Client: oldClient, Ephemeral: false})
+	require.NoError(t, err)
+
+	h.ReplaceSession("session-1", newClient)
+
+	err = h.broadcastPublication("chat.x", newTestPublication("chat.x", 1))
+	require.NoError(t, err)
+
+	// The wildcard subscription must follow the session to the new client.
+	assertSinglePublication(t, newTransport, "chat.x")
+	assert.Equal(t, 0, oldTransport.getMessageCount(), "old client must not receive deliveries")
+
+	// The matcher record must point at the new client.
+	sub, ok := h.LookupSubscriber("chat.*", newClient)
+	require.True(t, ok)
+	assert.Same(t, newClient, sub.Client)
 }

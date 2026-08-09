@@ -3,6 +3,7 @@ package messageloop
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,6 +28,7 @@ func NewMemoryBroker(opts MemoryBrokerOptions) Broker {
 	return &memoryBroker{
 		historySize: size,
 		history:     make(map[string]*channelHistory),
+		subs:        make(map[string]int),
 		ready:       make(chan struct{}),
 		epoch:       uuid.NewString(),
 	}
@@ -42,12 +44,13 @@ type channelHistory struct {
 }
 
 type memoryBroker struct {
-	handler     PublicationHandler
+	handler     atomic.Pointer[PublicationHandler]
 	historySize int
 	epoch       string
 
 	mu      sync.RWMutex
 	history map[string]*channelHistory
+	subs    map[string]int // subscriber count per channel
 	ready   chan struct{}
 	once    sync.Once
 }
@@ -55,7 +58,7 @@ type memoryBroker struct {
 // Start stores the handler and blocks until ctx is cancelled.
 // The memory broker requires no background goroutines.
 func (b *memoryBroker) Start(ctx context.Context, handler PublicationHandler) error {
-	b.handler = handler
+	b.handler.Store(&handler)
 	b.once.Do(func() { close(b.ready) })
 	<-ctx.Done()
 	return nil
@@ -66,8 +69,45 @@ func (b *memoryBroker) Ready() <-chan struct{} {
 	return b.ready
 }
 
-func (b *memoryBroker) Subscribe(_ string) error   { return nil }
-func (b *memoryBroker) Unsubscribe(_ string) error { return nil }
+// Subscribe increments the subscriber count for ch. The channel's history is
+// retained while at least one subscriber is registered.
+func (b *memoryBroker) Subscribe(ch string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.subs[ch]++
+	return nil
+}
+
+// Unsubscribe decrements the subscriber count for ch. When the last
+// subscriber leaves and the channel has no retained history entries, the
+// channel's history entry is reclaimed so the history map does not grow
+// without bound. History is intentionally retained while the last subscriber
+// is away so that reconnect with recovery still works; the ring buffer
+// capacity bounds the retained entries per channel.
+//
+// Publish takes b.mu only to resolve the channelHistory reference and releases
+// it before taking h.mu; Unsubscribe holds b.mu while deleting the map entry,
+// so a Publish that already resolved the reference keeps writing to a live
+// object guarded by h.mu — safe.
+func (b *memoryBroker) Unsubscribe(ch string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.subs[ch] > 0 {
+		b.subs[ch]--
+	}
+	if b.subs[ch] == 0 {
+		delete(b.subs, ch)
+		if h, ok := b.history[ch]; ok {
+			h.mu.Lock()
+			empty := h.count == 0
+			h.mu.Unlock()
+			if empty {
+				delete(b.history, ch)
+			}
+		}
+	}
+	return nil
+}
 
 func (b *memoryBroker) Publish(ch string, payload []byte, isText bool) (uint64, error) {
 	b.mu.Lock()
@@ -100,10 +140,28 @@ func (b *memoryBroker) Publish(ch string, payload []byte, isText bool) (uint64, 
 	}
 	h.mu.Unlock()
 
-	if b.handler != nil {
-		return offset, b.handler(ch, pub)
+	if h := b.handler.Load(); h != nil {
+		return offset, (*h)(ch, pub)
 	}
 	return offset, nil
+}
+
+// PublishTransient delivers payload to subscribers in real time without
+// writing history. The returned offset is always 0 because transient
+// publications have no history entry.
+func (b *memoryBroker) PublishTransient(ch string, payload []byte, isText bool) (uint64, error) {
+	pub := &Publication{
+		Channel: ch,
+		Offset:  0,
+		Epoch:   b.epoch,
+		Payload: payload,
+		IsText:  isText,
+		Time:    time.Now().UnixMilli(),
+	}
+	if h := b.handler.Load(); h != nil {
+		return 0, (*h)(ch, pub)
+	}
+	return 0, nil
 }
 
 func (b *memoryBroker) History(ch string, sinceOffset uint64, limit int) ([]*Publication, error) {

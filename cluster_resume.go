@@ -2,13 +2,34 @@ package messageloop
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
+
+	"github.com/lynx-go/x/log"
 )
 
 const (
 	clusterCommandMetaNewNodeID        = "new_node_id"
 	clusterCommandMetaNewIncarnationID = "new_incarnation_id"
+
+	// clusterEvictRollbackTimeout bounds the re-subscription rollback after a
+	// partially failed session takeover eviction.
+	clusterEvictRollbackTimeout = 5 * time.Second
+	// clusterProjectionAdjustTimeout bounds each shared channel projection
+	// adjustment; failures are logged but never block the eviction/restore path.
+	clusterProjectionAdjustTimeout = 2 * time.Second
 )
+
+// adjustClusterChannelSubscriptionsTimeout adjusts the shared channel
+// projection with a short timeout, logging failures instead of blocking.
+func (n *Node) adjustClusterChannelSubscriptionsTimeout(channel string, delta int64) {
+	ctx, cancel := context.WithTimeout(context.Background(), clusterProjectionAdjustTimeout)
+	defer cancel()
+	if err := n.adjustClusterChannelSubscriptions(ctx, channel, delta); err != nil {
+		log.WarnContext(ctx, "failed to adjust cluster channel subscriptions", "channel", channel, "delta", delta, "error", err)
+	}
+}
 
 func (n *Node) resumeRemoteSession(ctx context.Context, client *Client, sessionID string) (*ClusterSessionSnapshot, bool, error) {
 	if !n.ClusterEnabled() || sessionID == "" {
@@ -92,21 +113,29 @@ func (n *Node) restoreSessionSubscriptions(ctx context.Context, client *Client, 
 	restored := make([]string, 0, len(subscriptions))
 	for _, sub := range subscriptions {
 		if err := n.restoreLocalSubscription(ctx, sub.Channel, NewSubscriber(client, sub.Ephemeral)); err != nil {
-			for _, channel := range restored {
-				_ = n.removeLocalSubscriptionOnly(channel, client, true)
-			}
+			n.rollbackRestoredSubscriptions(client, restored)
 			return err
 		}
 		if err := n.SetPresenceForSession(ctx, sub.Channel, client); err != nil {
-			for _, channel := range restored {
-				_ = n.removeLocalSubscriptionOnly(channel, client, true)
-			}
-			_ = n.removeLocalSubscriptionOnly(sub.Channel, client, true)
+			n.rollbackRestoredSubscriptions(client, append(restored, sub.Channel))
 			return err
 		}
 		restored = append(restored, sub.Channel)
+		n.adjustClusterChannelSubscriptionsTimeout(sub.Channel, 1)
 	}
 	return nil
+}
+
+// rollbackRestoredSubscriptions undoes restored subscriptions after a partial
+// restore failure, compensating the shared channel projection for each channel
+// that was actually removed.
+func (n *Node) rollbackRestoredSubscriptions(client *Client, channels []string) {
+	for _, channel := range channels {
+		removed, _ := n.removeLocalSubscriptionOnly(channel, client, true)
+		if removed {
+			n.adjustClusterChannelSubscriptionsTimeout(channel, -1)
+		}
+	}
 }
 
 func (n *Node) restoreLocalSubscription(ctx context.Context, ch string, sub Subscriber) error {
@@ -128,33 +157,40 @@ func (n *Node) restoreLocalSubscription(ctx context.Context, ch string, sub Subs
 			return err
 		}
 	}
+	sub.Client.mu.Lock()
+	sub.Client.subscribedChannels[ch] = struct{}{}
+	sub.Client.mu.Unlock()
 	if n.metrics != nil {
 		n.metrics.SubscriptionsTotal.Inc()
 	}
 	return nil
 }
 
-func (n *Node) removeLocalSubscriptionOnly(ch string, client *Client, updateMetrics bool) error {
+// removeLocalSubscriptionOnly removes one local subscription without touching
+// the shared channel projection. The returned bool reports whether the
+// subscription was removed from the hub (true even when the subsequent broker
+// Unsubscribe fails, since the hub state has already been mutated).
+func (n *Node) removeLocalSubscriptionOnly(ch string, client *Client, updateMetrics bool) (bool, error) {
 	mu := n.subLock(ch)
 	mu.Lock()
 	defer mu.Unlock()
 
 	last, removed := n.hub.removeSub(ch, client)
 	if !removed {
-		return nil
+		return false, nil
 	}
 	client.mu.Lock()
 	delete(client.subscribedChannels, ch)
 	client.mu.Unlock()
 	if last {
 		if err := n.broker.Unsubscribe(ch); err != nil {
-			return err
+			return true, err
 		}
 	}
 	if updateMetrics && n.metrics != nil {
 		n.metrics.SubscriptionsTotal.Dec()
 	}
-	return nil
+	return true, nil
 }
 
 func (n *Node) evictSessionForTakeover(client *Client) error {
@@ -175,11 +211,37 @@ func (n *Node) evictSessionForTakeover(client *Client) error {
 	sessionID := client.session
 	client.mu.Unlock()
 
+	// Remove every channel even when individual removals fail, so no channel
+	// is left behind; track which channels were actually removed from the hub
+	// for rollback and shared projection adjustment.
+	var evictErrs []error
+	removed := make([]string, 0, len(channels))
 	for _, ch := range channels {
-		if err := n.removeLocalSubscriptionOnly(ch, client, true); err != nil {
-			return err
+		wasRemoved, err := n.removeLocalSubscriptionOnly(ch, client, true)
+		if err != nil {
+			evictErrs = append(evictErrs, fmt.Errorf("remove channel %s: %w", ch, err))
 		}
+		if !wasRemoved {
+			continue
+		}
+		removed = append(removed, ch)
+		n.adjustClusterChannelSubscriptionsTimeout(ch, -1)
 	}
+
+	if len(evictErrs) > 0 {
+		// Roll back every removed channel (and the projection deltas) so the
+		// session is not left half-evicted, then report the aggregated error.
+		rollbackCtx, cancel := context.WithTimeout(context.Background(), clusterEvictRollbackTimeout)
+		for _, ch := range removed {
+			if err := n.restoreLocalSubscription(rollbackCtx, ch, NewSubscriber(client, false)); err != nil {
+				evictErrs = append(evictErrs, fmt.Errorf("rollback channel %s: %w", ch, err))
+			}
+			n.adjustClusterChannelSubscriptionsTimeout(ch, 1)
+		}
+		cancel()
+		return errors.Join(evictErrs...)
+	}
+
 	if sessionID != "" {
 		n.hub.RemoveSession(sessionID)
 	}

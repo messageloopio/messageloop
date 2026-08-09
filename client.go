@@ -2,10 +2,13 @@ package messageloop
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,6 +19,7 @@ import (
 	"github.com/samber/lo"
 	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 func NewClient(ctx context.Context, node *Node, t Transport, marshaler Marshaler, opts ...ClientOption) (*Client, ClientCloseFunc, error) {
@@ -95,11 +99,26 @@ type Client struct {
 
 	// Survey field - stores the last received survey request ID
 	lastSurveyRequestID string
+
+	// metricsCharged is set once AddClient has counted this connection in
+	// ConnectionsTotal; close() only decrements the gauge when it is set.
+	metricsCharged bool
+
+	// lastClusterSyncNano is the UnixNano timestamp of the last presence /
+	// cluster refresh triggered by a ping, used to throttle repeated syncs.
+	lastClusterSyncNano atomic.Int64
 }
 
 func jsonLog(msg proto.Message) string {
 	data, _ := ProtoJSONMarshaler.Marshal(msg)
 	return string(data)
+}
+
+// MarshalJSONStruct marshals a structpb.Struct into JSON bytes.
+// The structpb protobuf text format (fields:{...}) is not valid JSON, so
+// payloads must go through AsMap before json.Marshal.
+func MarshalJSONStruct(s *structpb.Struct) ([]byte, error) {
+	return json.Marshal(s.AsMap())
 }
 
 func (c *Client) marshal(msg any) ([]byte, error) {
@@ -129,35 +148,58 @@ func (c *Client) close(disconnect Disconnect) error {
 	for ch := range c.subscribedChannels {
 		channels = append(channels, ch)
 	}
+	sessionID := c.session
+	userID := c.user
+	metricsCharged := c.metricsCharged
 	c.mu.Unlock()
 
 	// Remove local subscriptions before clearing presence and hub state.
+	// Cleanup runs with bounded concurrency: each channel keeps its own saga
+	// ordering (RemoveSubscription serializes per-channel via subLock), while
+	// the cluster-mode steps no longer serialize thousands of channels.
 	if len(channels) > 0 {
-		for _, ch := range channels {
-			if err := c.node.RemoveSubscription(ch, c); err != nil {
-				log.WarnContext(context.Background(), "failed to remove subscription during close", "channel", ch, "session", c.session, "error", err)
-			}
+		const maxConcurrentRemovals = 16
+		work := make(chan string)
+		var wg sync.WaitGroup
+		for i := 0; i < maxConcurrentRemovals; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for ch := range work {
+					if err := c.node.RemoveSubscription(ch, c); err != nil {
+						log.WarnContext(context.Background(), "failed to remove subscription during close", "channel", ch, "session", sessionID, "error", err)
+					}
+				}
+			}()
 		}
+		for _, ch := range channels {
+			work <- ch
+		}
+		close(work)
+		wg.Wait()
 	}
 
 	// Remove presence for all subscribed channels.
 	if len(channels) > 0 {
 		presCtx := context.Background()
 		for _, ch := range channels {
-			_ = c.node.presence.Remove(presCtx, ch, c.session)
-			go c.node.PublishPresenceLeave(ch, c.session, c.user)
+			_ = c.node.presence.Remove(presCtx, ch, sessionID)
+			go c.node.PublishPresenceLeave(ch, sessionID, userID)
 		}
 	}
 
-	// Clean up session from hub
-	if c.session != "" {
-		c.node.hub.RemoveSession(c.session)
-		if err := c.node.deleteClusterSessionState(context.Background(), c.session); err != nil {
-			log.WarnContext(context.Background(), "failed to delete cluster session state", "session", c.session, "error", err)
+	// Clean up session from hub. Only remove the hub entry (and the matching
+	// cluster state) when this client still owns the session — a failed resume
+	// or a takeover must not evict the session currently being served.
+	if sessionID != "" {
+		if c.node.hub.RemoveSessionIfMatches(sessionID, c) {
+			if err := c.node.deleteClusterSessionState(context.Background(), sessionID); err != nil {
+				log.WarnContext(context.Background(), "failed to delete cluster session state", "session", sessionID, "error", err)
+			}
 		}
 	}
 
-	if c.node.metrics != nil {
+	if c.node.metrics != nil && metricsCharged {
 		c.node.metrics.ConnectionsTotal.Dec()
 	}
 
@@ -167,8 +209,8 @@ func (c *Client) close(disconnect Disconnect) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		disconnectedReq := &proxy.OnDisconnectedProxyRequest{
-			SessionID: c.session,
-			Username:  c.user,
+			SessionID: sessionID,
+			Username:  userID,
 		}
 		_, _ = p.OnDisconnected(ctx, disconnectedReq) // Ignore error for notification
 	}
@@ -200,15 +242,37 @@ func (c *Client) closeQuiet() {
 	_ = c.transport.Close(Disconnect{})
 }
 
+// MarkMetricsCharged records that AddClient succeeded, so close() only
+// decrements the connection gauge for clients that were actually counted.
+// If the client was already closed while AddClient was in flight, the gauge
+// increment performed by AddClient is undone immediately instead of drifting.
+func (c *Client) MarkMetricsCharged() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.status == statusClosed {
+		if c.node.metrics != nil {
+			c.node.metrics.ConnectionsTotal.Dec()
+		}
+		return
+	}
+	c.metricsCharged = true
+}
+
 func (c *Client) ClientID() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return c.client
 }
 
 func (c *Client) SessionID() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return c.session
 }
 
 func (c *Client) UserID() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return c.user
 }
 
@@ -226,7 +290,11 @@ func (c *Client) HandleMessage(ctx context.Context, in *clientpb.InboundMessage)
 	c.lastActivity = time.Now()
 	c.mu.Unlock()
 
-	log.DebugContext(ctx, "handling message", "message", jsonLog(in))
+	// Serialize the message body lazily: protojson.Marshal is expensive and
+	// only needed when debug logging is actually enabled.
+	if log.FromContext(ctx).Enabled(ctx, slog.LevelDebug) {
+		log.DebugContext(ctx, "handling message", "message", jsonLog(in))
+	}
 
 	select {
 	case <-c.ctx.Done():
@@ -283,6 +351,12 @@ const (
 	SystemMethodAuthenticate = "$authenticate"
 )
 
+// pingClusterRefreshInterval throttles the presence / cluster state refresh
+// triggered by client pings: pings arriving within this window only refresh
+// lastActivity and are answered with a pong, avoiding a goroutine pair plus
+// Redis round-trips per ping for malicious or chatty clients.
+const pingClusterRefreshInterval = 10 * time.Second
+
 func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage, connect *clientpb.Connect) error {
 	c.mu.RLock()
 	authenticated := c.authenticated
@@ -297,55 +371,37 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 		return DisconnectBadRequest
 	}
 
-	// Check if this is a resumption attempt
-	resumed := false
-	resumedLocal := false
-	var resumeSnapshot *ClusterSessionSnapshot
+	// The session ID is needed by the auth proxy (authReq.SessionID) before
+	// authentication, so it is set here. Takeover and state inheritance only
+	// run after authentication succeeds: an unauthenticated connect must not
+	// be able to evict a session that is still being served.
 	if connect.SessionId != "" {
-		// Try to find the old session
-		oldSession := c.node.hub.LookupSession(connect.SessionId)
-		if oldSession != nil {
-			resumed = true
-			resumedLocal = true
-
-			// 1. Inherit state from old session
-			oldSession.mu.Lock()
-			oldChannels := make(map[string]struct{}, len(oldSession.subscribedChannels))
-			for ch := range oldSession.subscribedChannels {
-				oldChannels[ch] = struct{}{}
-			}
-			oldUser := oldSession.user
-			oldClient := oldSession.client
-			oldLeaseVersion := oldSession.clusterLeaseVersion
-			oldSession.mu.Unlock()
-
-			// 2. Silently close old session (no presence leave, no sub removal)
-			oldSession.closeQuiet()
-
-			// 3. Set inherited state on new session
-			c.user = oldUser
-			c.client = oldClient
-			c.session = connect.SessionId // Reuse old session ID
-			c.subscribedChannels = oldChannels
-			if oldLeaseVersion > 0 {
-				c.clusterLeaseVersion = oldLeaseVersion + 1
-			}
-
-			// 4. Replace session references in hub (sessions map + subShards)
-			c.node.hub.ReplaceSession(connect.SessionId, c)
-		} else {
-			var err error
-			resumeSnapshot, resumed, err = c.node.resumeRemoteSession(ctx, c, connect.SessionId)
-			if err != nil {
-				return err
-			}
-		}
+		c.mu.Lock()
+		c.session = connect.SessionId
+		c.mu.Unlock()
 	}
 
 	// Proxy authentication - check if there's a proxy configured for authentication
 	var p proxy.Proxy
+	var authUser string
 	if connect.Token != "" {
 		p = c.node.FindProxy("", SystemMethodAuthenticate)
+		if p == nil && c.node.requireAuth {
+			// requireAuth is on but no proxy can verify the token: a non-empty
+			// token must not bypass authentication.
+			log.WarnContext(ctx, "authentication required but no auth proxy configured for token",
+				"session", c.session)
+			_ = c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+				out.Envelope = &clientpb.OutboundMessage_Error{
+					Error: &sharedpb.Error{
+						Code:    "AUTH_REQUIRED",
+						Type:    "auth_error",
+						Message: "authentication token is required",
+					},
+				}
+			}))
+			return DisconnectInvalidToken
+		}
 	} else if c.node.requireAuth {
 		_ = c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 			out.Envelope = &clientpb.OutboundMessage_Error{
@@ -391,12 +447,66 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 		}
 		// Store user info from proxy response
 		if authResp.UserInfo != nil {
-			c.user = authResp.UserInfo.ID
+			authUser = authResp.UserInfo.ID
+		}
+	}
+
+	// Check if this is a resumption attempt. Takeover and state inheritance
+	// (writes to user/client/subscribedChannels) happen only after a successful
+	// authentication, so a failed connect cannot evict or delete the session.
+	resumed := false
+	resumedLocal := false
+	var resumeSnapshot *ClusterSessionSnapshot
+	if connect.SessionId != "" {
+		// Try to find the old session
+		oldSession := c.node.hub.LookupSession(connect.SessionId)
+		if oldSession != nil {
+			resumed = true
+			resumedLocal = true
+
+			// 1. Copy state from the old session (no lock nesting: release
+			// oldSession.mu before taking c.mu).
+			oldSession.mu.Lock()
+			oldChannels := make(map[string]struct{}, len(oldSession.subscribedChannels))
+			for ch := range oldSession.subscribedChannels {
+				oldChannels[ch] = struct{}{}
+			}
+			oldUser := oldSession.user
+			oldClient := oldSession.client
+			oldLeaseVersion := oldSession.clusterLeaseVersion
+			oldSession.mu.Unlock()
+
+			// 2. Set inherited state on the new session
+			c.mu.Lock()
+			c.user = oldUser
+			c.client = oldClient
+			c.subscribedChannels = oldChannels
+			if oldLeaseVersion > 0 {
+				c.clusterLeaseVersion = oldLeaseVersion + 1
+			}
+			c.mu.Unlock()
+
+			// 3. Silently close old session (no presence leave, no sub removal)
+			oldSession.closeQuiet()
+
+			// 4. Replace session references in hub (sessions map + subShards)
+			c.node.hub.ReplaceSession(connect.SessionId, c)
+		} else {
+			var err error
+			resumeSnapshot, resumed, err = c.node.resumeRemoteSession(ctx, c, connect.SessionId)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
 	c.mu.Lock()
 	c.authenticated = true
+	// The authenticated user wins over the inherited one (matches the
+	// pre-resume reordering semantics).
+	if authUser != "" {
+		c.user = authUser
+	}
 	if !resumed {
 		c.client = connect.ClientId
 	}
@@ -412,6 +522,9 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 		if err := c.node.AddClient(c); err != nil {
 			return err
 		}
+		// Only a client that passed AddClient is counted in ConnectionsTotal;
+		// close() decrements the gauge solely for such clients.
+		c.MarkMetricsCharged()
 	} else if err := c.node.syncClusterSessionState(ctx, c); err != nil {
 		return err
 	}
@@ -435,6 +548,17 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 	var pubs []*clientpb.Publication
 	addedChannels := make([]string, 0, len(subs))
 
+	// Enforce the per-client subscription limit, counting channels inherited
+	// from a resumed session (they are already tracked in subscribedChannels).
+	if limit := c.node.limits.MaxSubscriptionsPerClient; limit > 0 {
+		c.mu.RLock()
+		inheritedCount := len(c.subscribedChannels)
+		c.mu.RUnlock()
+		if inheritedCount+len(subs) > limit {
+			return DisconnectChannelLimit
+		}
+	}
+
 	// Get current broker epoch for recovery validation
 	var currentEpoch string
 	if epocher, ok := c.node.broker.(interface{ Epoch() string }); ok {
@@ -442,6 +566,17 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 	}
 
 	for _, sub := range subs {
+		// Per-channel ACL check. Denied channels get an error envelope and are
+		// skipped; the connection stays up.
+		if aclErr := c.checkSubscribeACL(ctx, in, sub); aclErr != nil {
+			_ = c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+				out.Envelope = &clientpb.OutboundMessage_Error{
+					Error: aclErr,
+				}
+			}))
+			continue
+		}
+
 		alreadySubscribed := c.hasSubscription(sub.Channel)
 		if err := c.node.AddSubscription(ctx, sub.Channel, NewSubscriber(c, sub.Ephemeral)); err != nil {
 			for _, channel := range addedChannels {
@@ -462,10 +597,17 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 
 		// Handle message recovery if requested
 		if sub.Recover && sub.Offset > 0 {
-			// Epoch validation: if the broker has restarted, the client's offset is invalid
+			// Epoch validation: if the broker has restarted, the client's offset is invalid.
+			// A client that carries no epoch (older SDK) cannot prove its offset belongs
+			// to the current broker generation, so it is treated conservatively: recover
+			// from the beginning instead of silently skipping messages.
 			sinceOffset := sub.Offset + 1
-			if currentEpoch != "" && sub.Epoch != "" && sub.Epoch != currentEpoch {
-				// Epoch mismatch — broker restarted, recover from beginning
+			if currentEpoch != "" && sub.Epoch != currentEpoch {
+				if sub.Epoch == "" {
+					log.WarnContext(ctx, "client sent no epoch but broker epoch is set; recovering from the beginning",
+						"channel", sub.Channel, "broker_epoch", currentEpoch)
+				}
+				// Epoch mismatch or unknown — recover from the beginning
 				sinceOffset = 0
 			}
 			historyPubs, err := c.node.broker.History(sub.Channel, sinceOffset, 0)
@@ -473,8 +615,14 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 				log.WarnContext(ctx, "failed to recover messages", "channel", sub.Channel, "error", err)
 				continue
 			}
-			// Convert publications to protobuf format
+			// Convert publications to protobuf format. The total number of
+			// recovered messages is capped to keep the Connected envelope bounded.
 			for _, pub := range historyPubs {
+				if len(pubs) >= MaxRecoveredPublications {
+					log.WarnContext(ctx, "recovery truncated",
+						"channel", sub.Channel, "limit", MaxRecoveredPublications)
+					break
+				}
 				payload := &sharedpb.Payload{}
 				if len(pub.Payload) > 0 {
 					payload.Data = &sharedpb.Payload_Binary{
@@ -484,7 +632,7 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 				pubs = append(pubs, &clientpb.Publication{
 					Messages: []*clientpb.Message{
 						{
-							Id:      uuid.New().String(),
+							Id:      publicationID(sub.Channel, pub.Offset),
 							Channel: sub.Channel,
 							Offset:  pub.Offset,
 							Payload: payload,
@@ -506,6 +654,46 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 			},
 		}
 	}))
+}
+
+// checkSubscribeACL evaluates the subscribe ACL for one channel and returns the
+// error envelope to send to the client, or nil when the subscription is allowed.
+func (c *Client) checkSubscribeACL(ctx context.Context, in *clientpb.InboundMessage, ch *clientpb.Subscription) *sharedpb.Error {
+	p := c.node.FindProxy(ch.Channel, "subscribe")
+	if p != nil {
+		aclReq := &proxy.SubscribeAclProxyRequest{
+			Channel:   ch.Channel,
+			Token:     ch.Token,
+			UserID:    c.user,
+			SessionID: c.session,
+		}
+		aclResp, err := p.SubscribeAcl(ctx, aclReq)
+		if err != nil {
+			log.WarnContext(ctx, "proxy subscribe ACL check failed", "channel", ch.Channel, "error", err)
+			return &sharedpb.Error{
+				Code:    "ACL_ERROR",
+				Type:    "acl_error",
+				Message: err.Error(),
+			}
+		}
+		if aclResp.Error != nil {
+			log.WarnContext(ctx, "proxy subscribe ACL returned error", "channel", ch.Channel, "error", aclResp.Error)
+			return aclResp.Error
+		}
+		return nil
+	}
+	if c.node.acl != nil {
+		// Built-in ACL check (fallback when no proxy is configured)
+		if !c.node.acl.CanSubscribe(ch.Channel, c.user) {
+			log.WarnContext(ctx, "ACL denied subscribe", "channel", ch.Channel, "user", c.user)
+			return &sharedpb.Error{
+				Code:    "ACL_DENIED",
+				Type:    "acl_error",
+				Message: "subscribe denied by ACL rule",
+			}
+		}
+	}
+	return nil
 }
 
 func MakeOutboundMessage(in *clientpb.InboundMessage, bodyFunc func(out *clientpb.OutboundMessage)) *clientpb.OutboundMessage {
@@ -659,7 +847,9 @@ func (c *Client) handleRPC(ctx context.Context, in *clientpb.InboundMessage, rpc
 
 func (c *Client) handlePublish(ctx context.Context, in *clientpb.InboundMessage, publish *clientpb.Publish) error {
 	if !c.Authenticated() {
-		return DisconnectStale
+		// An unauthenticated publish is an auth problem, not a stale
+		// (auth-timeout) connection: use the invalid-token code.
+		return DisconnectInvalidToken
 	}
 
 	if c.publishLimiter != nil && !c.publishLimiter.Allow() {
@@ -728,26 +918,34 @@ func (c *Client) handlePublish(ctx context.Context, in *clientpb.InboundMessage,
 	// Extract data from Payload
 	var data []byte
 	var isText bool
+	var err error
 	if publish.Payload != nil {
 		switch p := publish.Payload.Data.(type) {
 		case *sharedpb.Payload_Json:
 			// JSON data - marshal to bytes
-			data = []byte(p.Json.String())
+			data, err = MarshalJSONStruct(p.Json)
+			if err != nil {
+				return err
+			}
 			isText = true
 		case *sharedpb.Payload_Binary:
 			data = p.Binary
 			isText = false
+		case *sharedpb.Payload_Text:
+			data = []byte(p.Text)
+			isText = true
 		}
 	}
 
-	if err := c.node.Publish(channel, data, isText); err != nil {
+	offset, err := c.node.Publish(channel, data, isText)
+	if err != nil {
 		return err
 	}
 	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_PublishAck{
 			PublishAck: &clientpb.PublishAck{
 				Id:     in.Id,
-				Offset: 0,
+				Offset: offset,
 			},
 		}
 	}))
@@ -769,52 +967,13 @@ func (c *Client) handleSubscribe(ctx context.Context, in *clientpb.InboundMessag
 	for _, ch := range sub.Subscriptions {
 		alreadySubscribed := c.hasSubscription(ch.Channel)
 		// Proxy ACL check - check if there's a proxy configured for subscription ACL
-		p := c.node.FindProxy(ch.Channel, "subscribe")
-		if p != nil {
-			aclReq := &proxy.SubscribeAclProxyRequest{
-				Channel:   ch.Channel,
-				Token:     ch.Token,
-				UserID:    c.user,
-				SessionID: c.session,
-			}
-			aclResp, err := p.SubscribeAcl(ctx, aclReq)
-			if err != nil {
-				log.WarnContext(ctx, "proxy subscribe ACL check failed", "channel", ch.Channel, "error", err)
-				_ = c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
-					out.Envelope = &clientpb.OutboundMessage_Error{
-						Error: &sharedpb.Error{
-							Code:    "ACL_ERROR",
-							Type:    "acl_error",
-							Message: err.Error(),
-						},
-					}
-				}))
-				continue
-			}
-			if aclResp.Error != nil {
-				log.WarnContext(ctx, "proxy subscribe ACL returned error", "channel", ch.Channel, "error", aclResp.Error)
-				_ = c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
-					out.Envelope = &clientpb.OutboundMessage_Error{
-						Error: aclResp.Error,
-					}
-				}))
-				continue
-			}
-		} else if c.node.acl != nil {
-			// Built-in ACL check (fallback when no proxy is configured)
-			if !c.node.acl.CanSubscribe(ch.Channel, c.user) {
-				log.WarnContext(ctx, "ACL denied subscribe", "channel", ch.Channel, "user", c.user)
-				_ = c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
-					out.Envelope = &clientpb.OutboundMessage_Error{
-						Error: &sharedpb.Error{
-							Code:    "ACL_DENIED",
-							Type:    "acl_error",
-							Message: "subscribe denied by ACL rule",
-						},
-					}
-				}))
-				continue
-			}
+		if aclErr := c.checkSubscribeACL(ctx, in, ch); aclErr != nil {
+			_ = c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+				out.Envelope = &clientpb.OutboundMessage_Error{
+					Error: aclErr,
+				}
+			}))
+			continue
 		}
 
 		if err := c.node.AddSubscription(ctx, ch.Channel, Subscriber{Client: c, Ephemeral: ch.Ephemeral}); err != nil {
@@ -846,7 +1005,7 @@ func (c *Client) handleSubscribe(ctx context.Context, in *clientpb.InboundMessag
 		}
 
 		// Notify proxy about subscription
-		if p != nil {
+		if p := c.node.FindProxy(ch.Channel, "subscribe"); p != nil {
 			subscribedReq := &proxy.OnSubscribedProxyRequest{
 				SessionID: c.session,
 				Channel:   ch.Channel,
@@ -865,7 +1024,11 @@ func (c *Client) handleSubscribe(ctx context.Context, in *clientpb.InboundMessag
 }
 
 func (c *Client) write(ctx context.Context, msg proto.Message) error {
-	log.DebugContext(ctx, "sending message", "message", jsonLog(msg))
+	// Serialize the message body lazily: protojson.Marshal is expensive and
+	// only needed when debug logging is actually enabled.
+	if log.FromContext(ctx).Enabled(ctx, slog.LevelDebug) {
+		log.DebugContext(ctx, "sending message", "message", jsonLog(msg))
+	}
 	buf := getBuffer()
 	defer putBuffer(buf)
 	var err error
@@ -922,14 +1085,23 @@ func (c *Client) handleUnsubscribe(ctx context.Context, in *clientpb.InboundMess
 
 func (c *Client) handlePing(ctx context.Context, in *clientpb.InboundMessage, ping *clientpb.Ping) error {
 	c.ResetActivity()
-	go c.refreshPresence()
-	go func() {
-		clusterCtx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
+
+	// Throttle the expensive presence/cluster refresh work: the refresh
+	// goroutines run at most once per pingClusterRefreshInterval. The CAS
+	// guard makes sure only one caller wins the window.
+	now := time.Now().UnixNano()
+	if last := c.lastClusterSyncNano.Load(); now-last >= int64(pingClusterRefreshInterval) &&
+		c.lastClusterSyncNano.CompareAndSwap(last, now) {
+		go c.refreshPresence()
+		go func() {
+			clusterCtx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
 			defer cancel()
 			if err := c.node.syncClusterSessionState(clusterCtx, c); err != nil {
-			log.WarnContext(clusterCtx, "failed to refresh cluster session state", "session", c.session, "error", err)
-		}
-	}()
+				log.WarnContext(clusterCtx, "failed to refresh cluster session state", "session", c.session, "error", err)
+			}
+		}()
+	}
+
 	log.DebugContext(ctx, "received ping, sending pong", "message_id", in.Id)
 	err := c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_Pong{
@@ -981,7 +1153,11 @@ func (c *Client) handleSurvey(ctx context.Context, in *clientpb.InboundMessage, 
 	if req.Payload != nil {
 		switch p := req.Payload.Data.(type) {
 		case *sharedpb.Payload_Json:
-			payload = []byte(p.Json.String())
+			data, err := MarshalJSONStruct(p.Json)
+			if err != nil {
+				return err
+			}
+			payload = data
 		case *sharedpb.Payload_Binary:
 			payload = p.Binary
 		case *sharedpb.Payload_Text:
@@ -1027,7 +1203,10 @@ func (c *Client) handleSurveyReply(ctx context.Context, in *clientpb.InboundMess
 	if reply.Payload != nil {
 		switch p := reply.Payload.Data.(type) {
 		case *sharedpb.Payload_Json:
-			payload = []byte(p.Json.String())
+			payload, err = MarshalJSONStruct(p.Json)
+			if err != nil {
+				return err
+			}
 		case *sharedpb.Payload_Binary:
 			payload = p.Binary
 		case *sharedpb.Payload_Text:

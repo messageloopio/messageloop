@@ -33,11 +33,28 @@ type Node struct {
 	surveyMu         sync.RWMutex
 	acl              *ACLEngine
 	requireAuth      bool
+	healthCheck      func(context.Context) error
 }
 
 const (
 	numSubLocks = 16384
+	// clusterStepTimeout bounds each cluster-side step (session/channel
+	// state sync) inside the subscription saga. Short by design: the state
+	// sync is an optimization for cross-node resume/query, and a slow
+	// cluster must not block client unsubscribe for 10s per channel.
+	clusterStepTimeout = 2 * time.Second
 )
+
+// surveySendTimeout bounds each local survey request send; a subscriber
+// whose transport blocks writes is recorded as a failed response instead of
+// hanging the whole survey. Variable for testability.
+var surveySendTimeout = 10 * time.Second
+
+// maxActiveSurveys caps the survey registry size as a defense against
+// unbounded growth (e.g. many slow surveys). Under normal operation the
+// per-send and per-wait timeouts keep the registry small. Variable for
+// testability.
+var maxActiveSurveys = 1000
 
 func NewNode(cfg *config.Server) *Node {
 	var limits config.Limits
@@ -145,6 +162,13 @@ func (n *Node) Shutdown() {
 // SetCluster sets the cluster control-plane coordinator for this node.
 func (n *Node) SetCluster(runtime *Cluster) {
 	n.cluster = runtime
+}
+
+// SetHealthCheck registers a connectivity probe (e.g. a Redis ping) invoked
+// by the health endpoint when cluster mode is enabled. Passing nil disables
+// the probe.
+func (n *Node) SetHealthCheck(fn func(context.Context) error) {
+	n.healthCheck = fn
 }
 
 // Cluster returns the configured cluster control-plane coordinator.
@@ -380,7 +404,7 @@ func (n *Node) RemoveSubscription(ch string, c *Client) error {
 		{
 			name: "cluster.session",
 			commit: func() error {
-				rctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				rctx, cancel := context.WithTimeout(context.Background(), clusterStepTimeout)
 				defer cancel()
 				return n.syncClusterSessionState(rctx, c)
 			},
@@ -393,7 +417,7 @@ func (n *Node) RemoveSubscription(ch string, c *Client) error {
 		{
 			name: "cluster.channel",
 			commit: func() error {
-				rctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				rctx, cancel := context.WithTimeout(context.Background(), clusterStepTimeout)
 				defer cancel()
 				return n.adjustClusterChannelSubscriptions(rctx, ch, -1)
 			},
@@ -435,12 +459,28 @@ func (n *Node) Channels(ctx context.Context) ([]ChannelInfo, error) {
 }
 
 // Publish sends payload to ch via the broker.
-func (n *Node) Publish(ch string, payload []byte, isText bool) error {
+// Returns the offset assigned to the publication by the broker (0 if history is disabled).
+func (n *Node) Publish(ch string, payload []byte, isText bool) (uint64, error) {
 	if n.metrics != nil {
 		timer := prometheus.NewTimer(n.metrics.PublishDuration)
 		defer timer.ObserveDuration()
 	}
-	_, err := n.broker.Publish(ch, payload, isText)
+	offset, err := n.broker.Publish(ch, payload, isText)
+	if err == nil && n.metrics != nil {
+		n.metrics.MessagesPublished.Inc()
+	}
+	return offset, err
+}
+
+// PublishTransient delivers payload to ch in real time without writing
+// broker history. Used for events (e.g. presence join/leave) that must not
+// appear in the recovery message stream.
+func (n *Node) PublishTransient(ch string, payload []byte, isText bool) error {
+	if n.metrics != nil {
+		timer := prometheus.NewTimer(n.metrics.PublishDuration)
+		defer timer.ObserveDuration()
+	}
+	_, err := n.broker.PublishTransient(ch, payload, isText)
 	if err == nil && n.metrics != nil {
 		n.metrics.MessagesPublished.Inc()
 	}
@@ -517,10 +557,15 @@ func (n *Node) GetHeartbeatIdleTimeout() time.Duration {
 	return 0
 }
 
-// MaxMessageSize returns the configured max message size in bytes.
-// Returns 0 if no limit is configured.
+// MaxMessageSize returns the max inbound message size in bytes.
+// A configured value of 0 means "use the default", so DefaultMaxMessageSize
+// (64KB) is applied; both WebSocket and gRPC transports read through this
+// method to keep the limit uniform.
 func (n *Node) MaxMessageSize() int {
-	return n.limits.MaxMessageSize
+	if n.limits.MaxMessageSize > 0 {
+		return n.limits.MaxMessageSize
+	}
+	return DefaultMaxMessageSize
 }
 
 // Survey sends a request to all subscribers of a channel and collects responses.
@@ -568,15 +613,28 @@ func (n *Node) localSurvey(ctx context.Context, channel string, payload []byte, 
 	surveyID := uuid.NewString()
 	survey := NewSurvey(surveyID, channel, payload, timeout)
 
-	n.registerSurvey(survey)
+	// Record the subscriber sessions the survey was sent to. Responses from
+	// any other session are forged and must be rejected by AddSurveyResponse.
+	for _, sub := range subscribers {
+		survey.AddExpectedSession(sub.SessionID())
+	}
+
+	if !n.registerSurvey(ctx, survey) {
+		return nil, fmt.Errorf("survey registry full (limit %d)", maxActiveSurveys)
+	}
 	defer n.unregisterSurvey(surveyID)
 
+	// Bound each subscriber's request send: a client whose transport blocks
+	// writes must not hang the whole survey — the send fails at
+	// surveySendTimeout and is recorded as an error response.
+	sendCtx, sendCancel := context.WithTimeout(ctx, surveySendTimeout)
+	defer sendCancel()
 	var wg sync.WaitGroup
 	for _, sub := range subscribers {
 		wg.Add(1)
 		go func(session *Client) {
 			defer wg.Done()
-			n.sendSurveyRequest(ctx, session, survey)
+			n.sendSurveyRequest(sendCtx, session, survey)
 		}(sub)
 	}
 	wg.Wait()
@@ -705,16 +763,35 @@ func (n *Node) sendSurveyRequest(ctx context.Context, session *Client, survey *S
 		}
 	})
 
-	if err := session.Send(ctx, msg); err != nil {
-		log.WarnContext(ctx, "failed to send survey request", "session", session.SessionID(), "error", err)
-		survey.AddResponse(session.SessionID(), nil, err)
+	// Bound the actual write: transports may block (slow consumer), so give
+	// up when the send context expires and record the failure as an error
+	// response instead of hanging the survey.
+	sendDone := make(chan error, 1)
+	go func() {
+		sendDone <- session.Send(ctx, msg)
+	}()
+	select {
+	case err := <-sendDone:
+		if err != nil {
+			log.WarnContext(ctx, "failed to send survey request", "session", session.SessionID(), "error", err)
+			survey.AddResponse(session.SessionID(), nil, err)
+		}
+	case <-ctx.Done():
+		log.WarnContext(ctx, "survey request send timed out", "session", session.SessionID(), "error", ctx.Err())
+		survey.AddResponse(session.SessionID(), nil, ctx.Err())
 	}
 }
 
-func (n *Node) registerSurvey(survey *Survey) {
+func (n *Node) registerSurvey(ctx context.Context, survey *Survey) bool {
 	n.surveyMu.Lock()
 	defer n.surveyMu.Unlock()
+	if len(n.surveys) >= maxActiveSurveys {
+		log.WarnContext(ctx, "survey registry full, rejecting survey registration",
+			"survey_id", survey.ID(), "limit", maxActiveSurveys)
+		return false
+	}
 	n.surveys[survey.ID()] = survey
+	return true
 }
 
 func (n *Node) unregisterSurvey(surveyID string) {
@@ -730,10 +807,17 @@ func (n *Node) getSurvey(surveyID string) *Survey {
 }
 
 // AddSurveyResponse adds a client response to the appropriate survey.
+// Only sessions that were sent the survey request (i.e. subscribers of the
+// survey channel) may respond; responses from any other session are forged
+// and dropped.
 func (n *Node) AddSurveyResponse(ctx context.Context, sessionID string, requestID string, payload []byte, err error) {
 	survey := n.getSurvey(requestID)
 	if survey == nil {
 		log.WarnContext(ctx, "survey not found for response", "request_id", requestID, "session", sessionID)
+		return
+	}
+	if !survey.IsExpectedSession(sessionID) {
+		log.WarnContext(ctx, "dropping survey response from non-subscriber", "request_id", requestID, "session", sessionID)
 		return
 	}
 	survey.AddResponse(sessionID, payload, err)
@@ -745,21 +829,25 @@ func presenceChannel(ch string) string {
 }
 
 // PublishPresenceJoin publishes a presence join event to the channel's presence sub-channel.
+// Presence events are transient: they are delivered in real time but never
+// written to broker history, so they do not leak into the recovery stream.
 func (n *Node) PublishPresenceJoin(channel, clientID, userID string) {
 	evt := newPresenceEvent("join", channel, clientID, userID)
 	data, err := marshalPresenceEvent(evt)
 	if err != nil {
 		return
 	}
-	_ = n.Publish(presenceChannel(channel), data, true)
+	_ = n.PublishTransient(presenceChannel(channel), data, true)
 }
 
 // PublishPresenceLeave publishes a presence leave event to the channel's presence sub-channel.
+// Presence events are transient: they are delivered in real time but never
+// written to broker history, so they do not leak into the recovery stream.
 func (n *Node) PublishPresenceLeave(channel, clientID, userID string) {
 	evt := newPresenceEvent("leave", channel, clientID, userID)
 	data, err := marshalPresenceEvent(evt)
 	if err != nil {
 		return
 	}
-	_ = n.Publish(presenceChannel(channel), data, true)
+	_ = n.PublishTransient(presenceChannel(channel), data, true)
 }

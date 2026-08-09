@@ -67,37 +67,55 @@ func NewACLEngine(rules []ACLRule) *ACLEngine {
 }
 
 // CanSubscribe returns true if userID is allowed to subscribe to the channel.
-// If no rule matches the channel, access is allowed by default.
+//
+// Rule evaluation uses worst-match-first (most restrictive wins) semantics:
+//   - If any matching rule has DenyAll set, access is denied regardless of
+//     rule order, so a permissive rule can never bypass a later denyAll.
+//   - Otherwise the last matching rule that specifies an allow list decides
+//     (documented deterministic last-write-wins behavior); a matching rule
+//     without an allow list only contributes its DenyAll flag and does not
+//     affect the allow decision.
+//   - If no rule matches the channel, access is allowed by default.
 func (e *ACLEngine) CanSubscribe(channel, userID string) bool {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
+	allowed := true
 	for _, entry := range e.entries {
 		if matched, _ := path.Match(entry.pattern, channel); matched {
 			if entry.denyAll {
 				return false
 			}
 			if entry.allowSubscribe != nil {
-				return entry.wildcardSub || entry.allowSubscribe[userID]
+				allowed = entry.wildcardSub || entry.allowSubscribe[userID]
 			}
 		}
 	}
-	return true
+	return allowed
 }
 
 // CanPublish returns true if userID is allowed to publish to the channel.
-// If no rule matches the channel, access is allowed by default.
+//
+// Rule evaluation uses worst-match-first (most restrictive wins) semantics:
+//   - If any matching rule has DenyAll set, access is denied regardless of
+//     rule order, so a permissive rule can never bypass a later denyAll.
+//   - Otherwise the last matching rule that specifies an allow list decides
+//     (documented deterministic last-write-wins behavior); a matching rule
+//     without an allow list only contributes its DenyAll flag and does not
+//     affect the allow decision.
+//   - If no rule matches the channel, access is allowed by default.
 func (e *ACLEngine) CanPublish(channel, userID string) bool {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
+	allowed := true
 	for _, entry := range e.entries {
 		if matched, _ := path.Match(entry.pattern, channel); matched {
 			if entry.denyAll {
 				return false
 			}
 			if entry.allowPublish != nil {
-				return entry.wildcardPub || entry.allowPublish[userID]
+				allowed = entry.wildcardPub || entry.allowPublish[userID]
 			}
 		}
 	}
-	return true
+	return allowed
 }

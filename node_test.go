@@ -7,8 +7,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/proxy"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -72,6 +76,22 @@ func TestNode_Run(t *testing.T) {
 	}
 }
 
+func TestNode_MaxMessageSize_DefaultWhenZero(t *testing.T) {
+	node := NewNode(nil)
+	if got := node.MaxMessageSize(); got != DefaultMaxMessageSize {
+		t.Errorf("MaxMessageSize() = %d, want default %d", got, DefaultMaxMessageSize)
+	}
+}
+
+func TestNode_MaxMessageSize_ConfiguredValue(t *testing.T) {
+	node := NewNode(&config.Server{
+		Limits: config.Limits{MaxMessageSize: 4096},
+	})
+	if got := node.MaxMessageSize(); got != 4096 {
+		t.Errorf("MaxMessageSize() = %d, want 4096", got)
+	}
+}
+
 func TestNode_HandlePublication(t *testing.T) {
 	node := NewNode(nil)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -93,7 +113,7 @@ func TestNode_HandlePublication(t *testing.T) {
 	_ = node.AddSubscription(ctx, "test-channel", Subscriber{Client: client, Ephemeral: false})
 
 	// Publish via the broker so the internal handler is triggered.
-	err = node.Publish("test-channel", []byte("test payload"), false)
+	_, err = node.Publish("test-channel", []byte("test payload"), false)
 	if err != nil {
 		t.Fatalf("Publish() error = %v", err)
 	}
@@ -111,7 +131,7 @@ func TestNode_HandlePublication_NoSubscribers(t *testing.T) {
 	_ = node.Run(ctx)
 
 	// Publish to a channel with no subscribers — should not error.
-	err := node.Publish("empty-channel", []byte("test payload"), false)
+	_, err := node.Publish("empty-channel", []byte("test payload"), false)
 	if err != nil {
 		t.Fatalf("Publish() to empty channel error = %v", err)
 	}
@@ -139,7 +159,7 @@ func TestNode_Publish(t *testing.T) {
 	// Clear transport messages from subscription
 	transport.messages = nil
 
-	err = node.Publish("test-channel", []byte("test payload"), false)
+	_, err = node.Publish("test-channel", []byte("test payload"), false)
 	if err != nil {
 		t.Fatalf("Publish() error = %v", err)
 	}
@@ -154,10 +174,85 @@ func TestNode_Publish_WithOptions(t *testing.T) {
 	node := NewNode(nil)
 	_ = node.Run(context.Background())
 
-	err := node.Publish("test-channel", []byte("test payload"), false)
+	_, err := node.Publish("test-channel", []byte("test payload"), false)
 	if err != nil {
 		t.Fatalf("Publish() error = %v", err)
 	}
+}
+
+// TestNode_PresenceEventsNotInHistory verifies P2-19: presence join/leave
+// events are delivered transiently and never appear in the History recovery
+// stream, while regular publications on the same channel still do.
+func TestNode_PresenceEventsNotInHistory(t *testing.T) {
+	node := NewNode(nil)
+	require.NoError(t, node.Run(context.Background()))
+
+	ch := presenceChannel("presence-hist.ch")
+	node.PublishPresenceJoin("presence-hist.ch", "client-1", "user-1")
+	node.PublishPresenceLeave("presence-hist.ch", "client-1", "user-1")
+
+	pubs, err := node.Broker().History(ch, 0, 0)
+	require.NoError(t, err)
+	require.Empty(t, pubs, "presence join/leave events must not appear in history")
+
+	_, err = node.Broker().Publish(ch, []byte("normal"), true)
+	require.NoError(t, err)
+	pubs, err = node.Broker().History(ch, 0, 0)
+	require.NoError(t, err)
+	require.Len(t, pubs, 1, "a regular publish on the same channel must still be recorded")
+}
+
+// TestNode_PublishPresenceJoin_DistinctMessageIDs verifies the final-review
+// fix for the presence message ID collision: transient presence events
+// (offset 0) must not all share the "channel-0" ID — every event delivered
+// on the presence channel gets a unique message ID.
+func TestNode_PublishPresenceJoin_DistinctMessageIDs(t *testing.T) {
+	node := NewNode(nil)
+	require.NoError(t, node.Run(context.Background()))
+	transport := &capturingTransport{}
+	ctx := context.Background()
+
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
+	require.NoError(t, err)
+
+	connectMsg := &clientpb.InboundMessage{
+		Id: "msg-1",
+		Envelope: &clientpb.InboundMessage_Connect{
+			Connect: &clientpb.Connect{ClientId: "client-1"},
+		},
+	}
+	require.NoError(t, client.HandleMessage(ctx, connectMsg))
+
+	subMsg := &clientpb.InboundMessage{
+		Id: "msg-2",
+		Envelope: &clientpb.InboundMessage_Subscribe{
+			Subscribe: &clientpb.Subscribe{
+				Subscriptions: []*clientpb.Subscription{{Channel: presenceChannel("presence-id.ch")}},
+			},
+		},
+	}
+	require.NoError(t, client.HandleMessage(ctx, subMsg))
+	transport.messages = nil
+
+	node.PublishPresenceJoin("presence-id.ch", "client-1", "user-1")
+	node.PublishPresenceJoin("presence-id.ch", "client-2", "user-2")
+
+	require.Len(t, transport.messages, 2)
+	id1 := capturedPublicationID(t, transport.messages[0])
+	id2 := capturedPublicationID(t, transport.messages[1])
+	assert.NotEqual(t, id1, id2, "each presence event must carry a distinct message ID")
+	assert.NotEqual(t, presenceChannel("presence-id.ch")+"-0", id1,
+		"transient events must not reuse the channel-0 ID")
+}
+
+func capturedPublicationID(t *testing.T, data []byte) string {
+	t.Helper()
+	var out clientpb.OutboundMessage
+	require.NoError(t, JSONMarshaler{}.Unmarshal(data, &out))
+	pub := out.GetPublication()
+	require.NotNil(t, pub)
+	require.Len(t, pub.GetMessages(), 1)
+	return pub.GetMessages()[0].GetId()
 }
 
 func TestNode_AddClient(t *testing.T) {
@@ -511,7 +606,7 @@ func TestNode_ConcurrentPublish(t *testing.T) {
 		go func(n int) {
 			defer wg.Done()
 			payload := []byte(string(rune('a' + (n % 26))))
-			_ = node.Publish("test-channel", payload, false)
+			_, _ = node.Publish("test-channel", payload, false)
 		}(i)
 	}
 
@@ -614,7 +709,7 @@ func TestNode_Publish_MultipleChannels(t *testing.T) {
 	transport2.messages = nil
 
 	// Publish to channel-1
-	_ = node.Publish("channel-1", []byte("payload-1"), false)
+	_, _ = node.Publish("channel-1", []byte("payload-1"), false)
 
 	// Only client1 should receive
 	if transport1.getMessageCount() != 1 {
@@ -702,7 +797,7 @@ func BenchmarkNode_Publish(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = node.Publish("test-channel", payload, false)
+		_, _ = node.Publish("test-channel", payload, false)
 	}
 }
 

@@ -43,7 +43,7 @@ func newGRPCClientServer(cfg *config.Config, node *messageloop.Node) (*grpcstrea
 		Addr:           cfg.Transport.GRPC.Addr,
 		TLSCertFile:    cfg.Transport.GRPC.TLS.CertFile,
 		TLSKeyFile:     cfg.Transport.GRPC.TLS.KeyFile,
-		MaxRecvMsgSize: cfg.Server.Limits.MaxMessageSize,
+		MaxRecvMsgSize: node.MaxMessageSize(),
 	}
 	if cfg.Transport.GRPC.WriteTimeout != "" {
 		if d, err := time.ParseDuration(cfg.Transport.GRPC.WriteTimeout); err == nil {

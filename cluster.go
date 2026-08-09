@@ -143,8 +143,12 @@ type ClusterCommand struct {
 	Channel             string
 	LeaseVersion        uint64
 	IssuedAt            time.Time
-	Payload             []byte
-	Metadata            map[string]string
+	// IssuedBy is the NodeID of the command sender, recorded for audit
+	// purposes. It is not a security boundary: the command bus performs no
+	// signature or authentication of this field.
+	IssuedBy string
+	Payload  []byte
+	Metadata map[string]string
 }
 
 // ClusterCommandResult is the normalized result of a cluster command execution.
@@ -173,11 +177,14 @@ type Cluster struct {
 	options ClusterOptions
 	deps    ClusterDependencies
 
-	startOnce    sync.Once
-	shutdownOnce sync.Once
+	mu           sync.Mutex
+	started      bool
 	startErr     error
+	shutdownOnce sync.Once
 	shutdownErr  error
 }
+
+const clusterStartRollbackTimeout = 5 * time.Second
 
 // NewCluster creates a lifecycle coordinator for cluster control-plane components.
 func NewCluster(options ClusterOptions, deps ClusterDependencies) (*Cluster, error) {
@@ -241,21 +248,41 @@ func (r *Cluster) Backend() string {
 }
 
 // Start starts all cluster control-plane components exactly once.
+// If a component fails to start, already-started components are shut down in
+// reverse order and the aggregated error is returned; a failed start leaves
+// the instance retryable (later Start calls restart every component).
 func (r *Cluster) Start(ctx context.Context) error {
 	if r == nil || !r.options.Enabled {
 		return nil
 	}
 
-	r.startOnce.Do(func() {
-		for _, component := range r.components() {
-			if err := component.Start(ctx); err != nil {
-				r.startErr = err
-				return
-			}
-		}
-	})
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.started {
+		return r.startErr
+	}
 
-	return r.startErr
+	components := r.components()
+	var startErrs []error
+	for index, component := range components {
+		if err := component.Start(ctx); err != nil {
+			startErrs = append(startErrs, fmt.Errorf("start %s: %w", clusterComponentName(component), err))
+			rollbackCtx, cancel := context.WithTimeout(context.Background(), clusterStartRollbackTimeout)
+			for rollback := index - 1; rollback >= 0; rollback-- {
+				if err := components[rollback].Shutdown(rollbackCtx); err != nil {
+					startErrs = append(startErrs, fmt.Errorf("rollback shutdown %s: %w", clusterComponentName(components[rollback]), err))
+				}
+			}
+			cancel()
+			r.started = false
+			r.startErr = errors.Join(startErrs...)
+			return r.startErr
+		}
+	}
+
+	r.started = true
+	r.startErr = nil
+	return nil
 }
 
 // Shutdown stops all cluster control-plane components exactly once.
@@ -283,6 +310,25 @@ func (r *Cluster) components() []ClusterLifecycle {
 		r.deps.QueryStore,
 		r.deps.NodeLeaseManager,
 		r.deps.ProjectionRepairer,
+	}
+}
+
+// clusterComponentName returns a stable label for a control-plane component
+// used in lifecycle error messages.
+func clusterComponentName(component ClusterLifecycle) string {
+	switch component.(type) {
+	case SessionDirectory:
+		return "session_directory"
+	case ClusterCommandBus:
+		return "command_bus"
+	case ClusterQueryStore:
+		return "query_store"
+	case ClusterNodeLeaseManager:
+		return "node_lease_manager"
+	case ClusterProjectionRepairer:
+		return "projection_repairer"
+	default:
+		return fmt.Sprintf("%T", component)
 	}
 }
 

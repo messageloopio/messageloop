@@ -14,6 +14,11 @@ const (
 	// when the caller does not specify a limit.
 	DefaultHistoryLimit = 1000
 
+	// MaxRecoveredPublications caps the total number of publications delivered
+	// to a client during connect-time history recovery. Exceeding publications
+	// are truncated and logged.
+	MaxRecoveredPublications = 1000
+
 	// DefaultShutdownTimeout is the maximum time to wait for graceful shutdown.
 	DefaultShutdownTimeout = 10 * time.Second
 )

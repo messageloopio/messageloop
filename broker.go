@@ -39,6 +39,13 @@ type Broker interface {
 	// Returns the offset assigned to this publication (0 if history is disabled).
 	Publish(ch string, payload []byte, isText bool) (uint64, error)
 
+	// PublishTransient delivers payload to all subscribers of ch in real
+	// time without writing history, so the publication never appears in
+	// History. The returned offset is always 0 because no history entry is
+	// assigned. Used for events (e.g. presence join/leave) that must not
+	// leak into the recovery message stream.
+	PublishTransient(ch string, payload []byte, isText bool) (uint64, error)
+
 	// History returns publications stored for ch with offset >= sinceOffset.
 	// limit <= 0 uses DefaultHistoryLimit as a safety cap.
 	// Returns an empty slice (not an error) when history is disabled or empty.

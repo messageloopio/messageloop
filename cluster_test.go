@@ -2,10 +2,12 @@ package messageloop
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type trackingClusterComponent struct {
@@ -81,6 +83,21 @@ func (c *trackingClusterComponent) ListChannels(context.Context) ([]ClusterChann
 	return nil, nil
 }
 
+// failingClusterComponent fails its Start call exactly once, on the call
+// whose startCount equals failOn.
+type failingClusterComponent struct {
+	trackingClusterComponent
+	failOn int
+}
+
+func (c *failingClusterComponent) Start(context.Context) error {
+	c.startCount++
+	if c.failOn > 0 && c.startCount == c.failOn {
+		return errors.New("start failed")
+	}
+	return nil
+}
+
 func TestNewCluster_Disabled(t *testing.T) {
 	t.Parallel()
 
@@ -144,6 +161,57 @@ func TestCluster_StartAndShutdownOnlyOnce(t *testing.T) {
 
 	assert.Equal(t, 1, sessionDirectory.shutdownCount)
 	assert.Equal(t, 1, commandBus.shutdownCount)
+	assert.Equal(t, 1, queryStore.shutdownCount)
+	assert.Equal(t, 1, nodeLeaseManager.shutdownCount)
+	assert.Equal(t, 1, projectionRepairer.shutdownCount)
+}
+
+func TestCluster_StartPartialFailureRollsBackAndAllowsRetry(t *testing.T) {
+	sessionDirectory := &trackingClusterComponent{}
+	commandBus := &trackingClusterComponent{}
+	queryStore := &failingClusterComponent{failOn: 1}
+	nodeLeaseManager := &trackingClusterComponent{}
+	projectionRepairer := &trackingClusterComponent{}
+
+	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-a"}, ClusterDependencies{
+		SessionDirectory:   sessionDirectory,
+		CommandBus:         commandBus,
+		QueryStore:         queryStore,
+		NodeLeaseManager:   nodeLeaseManager,
+		ProjectionRepairer: projectionRepairer,
+	})
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	err = runtime.Start(ctx)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "start failed")
+
+	// The failing component and its successors must not have been started.
+	assert.Equal(t, 1, sessionDirectory.startCount)
+	assert.Equal(t, 1, commandBus.startCount)
+	assert.Equal(t, 1, queryStore.startCount)
+	assert.Equal(t, 0, nodeLeaseManager.startCount)
+	assert.Equal(t, 0, projectionRepairer.startCount)
+
+	// Already-started components are shut down in reverse order.
+	assert.Equal(t, 1, sessionDirectory.shutdownCount)
+	assert.Equal(t, 1, commandBus.shutdownCount)
+	assert.Equal(t, 0, queryStore.shutdownCount)
+	assert.Equal(t, 0, nodeLeaseManager.shutdownCount)
+	assert.Equal(t, 0, projectionRepairer.shutdownCount)
+
+	// A failed start can be retried on the same instance.
+	require.NoError(t, runtime.Start(ctx))
+	assert.Equal(t, 2, sessionDirectory.startCount)
+	assert.Equal(t, 2, commandBus.startCount)
+	assert.Equal(t, 2, queryStore.startCount)
+	assert.Equal(t, 1, nodeLeaseManager.startCount)
+	assert.Equal(t, 1, projectionRepairer.startCount)
+
+	require.NoError(t, runtime.Shutdown(ctx))
+	assert.Equal(t, 2, sessionDirectory.shutdownCount)
+	assert.Equal(t, 2, commandBus.shutdownCount)
 	assert.Equal(t, 1, queryStore.shutdownCount)
 	assert.Equal(t, 1, nodeLeaseManager.shutdownCount)
 	assert.Equal(t, 1, projectionRepairer.shutdownCount)

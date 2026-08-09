@@ -15,7 +15,33 @@ import (
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 )
 
-const numHubShards = 64
+const (
+	numHubShards = 64
+	// broadcastParallelLimit caps the number of concurrent per-subscriber
+	// sends during a publication broadcast to avoid unbounded goroutine
+	// growth on channels with thousands of subscribers.
+	broadcastParallelLimit = 64
+)
+
+// publicationID builds the stable, globally unique message ID for a
+// publication: channel + offset. Realtime delivery and connect-time history
+// recovery use the same rule so clients can deduplicate by ID.
+func publicationID(channel string, offset uint64) string {
+	return fmt.Sprintf("%s-%d", channel, offset)
+}
+
+// publicationMessageID builds the message ID delivered for a publication.
+// Publications with a broker-assigned offset use the stable channel-offset
+// rule (realtime and recovery agree). Transient publications (offset 0, e.g.
+// presence join/leave events) fall back to a per-event UUID: every transient
+// event on a channel would otherwise share the same ID "channel-0" and
+// clients could not distinguish them.
+func publicationMessageID(channel string, offset uint64) string {
+	if offset > 0 {
+		return publicationID(channel, offset)
+	}
+	return uuid.NewString()
+}
 
 type Hub struct {
 	mu              sync.RWMutex
@@ -299,7 +325,7 @@ func (h *subShard) broadcastPublication(channel string, pub *Publication) error 
 
 	msg := &clientpb.Message{
 		Channel: channel,
-		Id:      uuid.NewString(),
+		Id:      publicationMessageID(channel, pub.Offset),
 		Offset:  pub.Offset,
 		Payload: payload,
 	}
@@ -325,15 +351,19 @@ func (h *subShard) broadcastPublication(channel string, pub *Publication) error 
 			}
 		}
 	} else {
-		// Parallel send for large fan-out
+		// Parallel send for large fan-out, bounded to broadcastParallelLimit
+		// concurrent goroutines.
 		var wg sync.WaitGroup
+		sem := make(chan struct{}, broadcastParallelLimit)
 		for _, sub := range subs {
+			sem <- struct{}{}
 			wg.Add(1)
 			go func(sub Subscriber) {
 				defer func() {
 					if r := recover(); r != nil {
 						log.ErrorContext(ctx, "panic in send publication", fmt.Errorf("panic: %v, channel: %s", r, channel))
 					}
+					<-sem
 					wg.Done()
 				}()
 				if err := sub.Client.Send(ctx, out); err != nil {
@@ -372,20 +402,32 @@ func (h *Hub) NumSubscribers(ch string) int {
 }
 
 func (h *Hub) broadcastPublication(ch string, pub *Publication) error {
-	// Broadcast to exact subscribers via shards.
-	if err := h.subShards[index(ch, numHubShards)].broadcastPublication(ch, pub); err != nil {
-		return err
+	// Merge exact and wildcard subscribers by session ID: a client subscribed
+	// to the channel exactly and via a wildcard pattern must receive the
+	// publication only once, with a single message ID.
+	subscribers := make(map[string]*Client)
+	for _, client := range h.GetSubscribers(ch) {
+		subscribers[client.SessionID()] = client
+	}
+	for _, candidate := range h.matcher.Lookup(ch) {
+		sub, ok := candidate.(Subscriber)
+		if !ok || sub.Client == nil {
+			continue
+		}
+		subscribers[sub.Client.SessionID()] = sub.Client
+	}
+	if len(subscribers) == 0 {
+		return nil
 	}
 
-	// Broadcast to wildcard subscribers via matcher.
-	wcMatches := h.matcher.Lookup(ch)
-	if len(wcMatches) == 0 {
-		return nil
+	clients := make([]*Client, 0, len(subscribers))
+	for _, client := range subscribers {
+		clients = append(clients, client)
 	}
 
 	ctx := context.Background()
 
-	// Build the outbound message for wildcard subscribers.
+	// Create Payload from publication data.
 	var payload *sharedpb.Payload
 	if len(pub.Payload) > 0 {
 		if pub.IsText {
@@ -394,61 +436,94 @@ func (h *Hub) broadcastPublication(ch string, pub *Publication) error {
 			payload = &sharedpb.Payload{Data: &sharedpb.Payload_Binary{Binary: pub.Payload}}
 		}
 	}
+
 	msg := &clientpb.Message{
 		Channel: ch,
-		Id:      uuid.NewString(),
+		Id:      publicationMessageID(ch, pub.Offset),
 		Offset:  pub.Offset,
 		Payload: payload,
 	}
+
 	out := MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_Publication{Publication: &clientpb.Publication{
 			Messages: []*clientpb.Message{msg},
 		}}
 	})
 
-	var wg sync.WaitGroup
-	for _, match := range wcMatches {
-		sub, ok := match.(Subscriber)
-		if !ok {
-			continue
-		}
-		wg.Add(1)
-		go func(sub Subscriber) {
-			defer func() {
-				if r := recover(); r != nil {
-					log.ErrorContext(ctx, "panic in wildcard send publication", fmt.Errorf("panic: %v, channel: %s", r, ch))
+	const broadcastParallelThreshold = 8
+
+	if len(clients) <= broadcastParallelThreshold {
+		// Serial send for small fan-out — avoids goroutine overhead
+		for _, client := range clients {
+			if err := client.Send(ctx, out); err != nil {
+				log.ErrorContext(ctx, "send publication error", err)
+				if client.node.metrics != nil {
+					client.node.metrics.DeliveryFailures.Inc()
 				}
-				wg.Done()
-			}()
-			if err := sub.Client.Send(ctx, out); err != nil {
-				log.ErrorContext(ctx, "wildcard send publication error", err)
-				if sub.Client.node.metrics != nil {
-					sub.Client.node.metrics.DeliveryFailures.Inc()
-				}
-			} else if sub.Client.node.metrics != nil {
-				sub.Client.node.metrics.MessagesDelivered.Inc()
+			} else if client.node.metrics != nil {
+				client.node.metrics.MessagesDelivered.Inc()
 			}
-		}(sub)
+		}
+	} else {
+		// Parallel send for large fan-out, bounded to broadcastParallelLimit
+		// concurrent goroutines.
+		var wg sync.WaitGroup
+		sem := make(chan struct{}, broadcastParallelLimit)
+		for _, client := range clients {
+			sem <- struct{}{}
+			wg.Add(1)
+			go func(client *Client) {
+				defer func() {
+					if r := recover(); r != nil {
+						log.ErrorContext(ctx, "panic in send publication", fmt.Errorf("panic: %v, channel: %s", r, ch))
+					}
+					<-sem
+					wg.Done()
+				}()
+				if err := client.Send(ctx, out); err != nil {
+					log.ErrorContext(ctx, "send publication error", err)
+					if client.node.metrics != nil {
+						client.node.metrics.DeliveryFailures.Inc()
+					}
+				} else if client.node.metrics != nil {
+					client.node.metrics.MessagesDelivered.Inc()
+				}
+			}(client)
+		}
+		wg.Wait()
 	}
-	wg.Wait()
+
 	return nil
 }
 
 // RemoveSession removes a session from the sessions map and connShards.
 func (h *Hub) RemoveSession(sessionID string) {
+	h.RemoveSessionIfMatches(sessionID, nil)
+}
+
+// RemoveSessionIfMatches removes a session from the sessions map and connShards
+// only when the registered client is the given client (nil matches any client).
+// On close this prevents a failed or stale connection from evicting a session
+// that a newer client has taken over or is resuming. It returns true when the
+// session was removed.
+func (h *Hub) RemoveSessionIfMatches(sessionID string, c *Client) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	// Get the client session to find the user ID before deleting
 	session, ok := h.sessions[sessionID]
 	if !ok {
-		return
+		return false
+	}
+	if c != nil && session != c {
+		return false
 	}
 	delete(h.sessions, sessionID)
 
 	// Also remove from connShards
 	userID := session.UserID()
 	h.connShards[index(userID, numHubShards)].remove(sessionID)
+	return true
 }
 
 // GetSubscribers returns a copy of all subscribers for a given channel.
@@ -626,4 +701,28 @@ func (h *Hub) ReplaceSession(sessionID string, newClient *Client) {
 		}
 		shard.mu.Unlock()
 	}
+
+	// Replace wildcard subscriptions. The matcher stores the Subscriber as an
+	// interface value copy, so each subscription of this session must be
+	// rebuilt: Unsubscribe the old record, Subscribe with the new client.
+	h.wcSubsMu.Lock()
+	for key, topicSub := range h.wcSubs {
+		if !strings.HasPrefix(key, sessionID+":") {
+			continue
+		}
+		sub, ok := topicSub.Subscriber.(Subscriber)
+		if !ok {
+			continue
+		}
+		h.matcher.Unsubscribe(topicSub)
+		newSub, err := h.matcher.Subscribe(topicSub.Topic, Subscriber{Client: newClient, Ephemeral: sub.Ephemeral})
+		if err != nil {
+			log.ErrorContext(context.Background(), "failed to rebuild wildcard subscription during session replace",
+				err, "topic", topicSub.Topic, "session", sessionID)
+			delete(h.wcSubs, key)
+			continue
+		}
+		h.wcSubs[key] = newSub
+	}
+	h.wcSubsMu.Unlock()
 }

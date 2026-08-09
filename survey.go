@@ -27,6 +27,10 @@ type Survey struct {
 	done       chan struct{}
 	closeOnce  sync.Once
 	mu         sync.Mutex
+	// expected holds the session IDs the survey request was sent to. Only
+	// these sessions are allowed to respond; responses from other sessions
+	// are treated as forged and rejected by the node.
+	expected map[string]struct{}
 }
 
 // NewSurvey creates a new Survey instance.
@@ -39,6 +43,7 @@ func NewSurvey(id, channel string, payload []byte, timeout time.Duration) *Surve
 		responses:  make(map[string]*SurveyResult),
 		responseCh: make(chan *SurveyResult, 100),
 		done:       make(chan struct{}),
+		expected:   make(map[string]struct{}),
 	}
 }
 
@@ -60,6 +65,23 @@ func (s *Survey) Payload() []byte {
 // Timeout returns the survey timeout duration.
 func (s *Survey) Timeout() time.Duration {
 	return s.timeout
+}
+
+// AddExpectedSession registers a session that the survey request was sent to
+// and is therefore allowed to respond.
+func (s *Survey) AddExpectedSession(sessionID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.expected[sessionID] = struct{}{}
+}
+
+// IsExpectedSession reports whether the given session may respond to this
+// survey, i.e. whether it was one of the subscribers the request went to.
+func (s *Survey) IsExpectedSession(sessionID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.expected[sessionID]
+	return ok
 }
 
 // AddResponse adds a client response to the survey.
@@ -91,11 +113,23 @@ func (s *Survey) AddResponse(sessionID string, payload []byte, err error) {
 	}
 }
 
+// defaultSurveyWaitTimeout is the fallback wait duration when the survey
+// timeout is <= 0, which would otherwise make Wait expire immediately.
+// Variable for testability.
+var defaultSurveyWaitTimeout = 5 * time.Second
+
 // Wait waits for responses until timeout or context cancellation.
 // Returns collected results.
 func (s *Survey) Wait(ctx context.Context) []*SurveyResult {
+	// A non-positive timeout means "expire immediately", which turns every
+	// survey into a no-op; fall back to the default wait instead.
+	timeout := s.timeout
+	if timeout <= 0 {
+		timeout = defaultSurveyWaitTimeout
+	}
+
 	// Create timeout context if not already timed
-	timeoutCtx, cancel := context.WithTimeout(ctx, s.timeout)
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	go func() {

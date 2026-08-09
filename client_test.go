@@ -3,6 +3,7 @@ package messageloop
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -10,6 +11,8 @@ import (
 
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // capturingTransport captures all written messages for inspection
@@ -391,8 +394,8 @@ func TestClientSession_HandleMessage_Publish_BeforeAuth(t *testing.T) {
 	}
 
 	reason := transport.getCloseReason()
-	if reason.Code != DisconnectStale.Code {
-		t.Errorf("Close code should be %d (stale), got %d", DisconnectStale.Code, reason.Code)
+	if reason.Code != DisconnectInvalidToken.Code {
+		t.Errorf("Close code should be %d (invalid token), got %d", DisconnectInvalidToken.Code, reason.Code)
 	}
 }
 
@@ -1038,6 +1041,216 @@ func TestClientSession_HandleMessage_WithBinaryData(t *testing.T) {
 	if transport.getMessageCount() != 1 {
 		t.Errorf("Transport should have 1 message, got %d", transport.getMessageCount())
 	}
+}
+
+// --- P1-3: recovered messages must use the same stable channel-offset IDs
+// as realtime delivery, and recovery is capped at a fixed total ---
+
+// fakeHistoryBroker returns a fixed publication list for History and does not
+// deliver publications in realtime.
+type fakeHistoryBroker struct {
+	pubs []*Publication
+}
+
+func (f *fakeHistoryBroker) Start(ctx context.Context, handler PublicationHandler) error {
+	<-ctx.Done()
+	return nil
+}
+
+func (f *fakeHistoryBroker) Subscribe(string) error   { return nil }
+func (f *fakeHistoryBroker) Unsubscribe(string) error { return nil }
+
+func (f *fakeHistoryBroker) Publish(ch string, payload []byte, isText bool) (uint64, error) {
+	return 0, nil
+}
+
+func (f *fakeHistoryBroker) PublishTransient(ch string, payload []byte, isText bool) (uint64, error) {
+	return 0, nil
+}
+
+func (f *fakeHistoryBroker) History(ch string, sinceOffset uint64, limit int) ([]*Publication, error) {
+	result := make([]*Publication, 0, len(f.pubs))
+	for _, p := range f.pubs {
+		if p.Offset >= sinceOffset {
+			result = append(result, p)
+		}
+	}
+	return result, nil
+}
+
+func TestNode_Connect_RecoveryIDsMatchRealtime(t *testing.T) {
+	ctx := context.Background()
+	node := NewNode(nil)
+	_ = node.Run(ctx)
+
+	transport1 := &capturingTransport{}
+	client1, _, err := NewClient(ctx, node, transport1, JSONMarshaler{})
+	require.NoError(t, err)
+
+	connectMsg := &clientpb.InboundMessage{
+		Id:       "msg-1",
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: "client-1"}},
+	}
+	require.NoError(t, client1.HandleMessage(ctx, connectMsg))
+
+	// Capture the broker epoch from the Connected envelope so the reconnect
+	// can prove its offset belongs to the current broker generation.
+	var connectedMsg clientpb.OutboundMessage
+	require.NoError(t, JSONMarshaler{}.Unmarshal(transport1.getLastMessage(), &connectedMsg))
+	epoch := connectedMsg.GetConnected().GetEpoch()
+	require.NotEmpty(t, epoch)
+
+	transport1.messages = nil
+
+	subMsg := &clientpb.InboundMessage{
+		Id: "msg-2",
+		Envelope: &clientpb.InboundMessage_Subscribe{
+			Subscribe: &clientpb.Subscribe{Subscriptions: []*clientpb.Subscription{{Channel: "recovery.ch"}}},
+		},
+	}
+	require.NoError(t, client1.HandleMessage(ctx, subMsg))
+	transport1.messages = nil
+
+	// Publish 3 messages and capture the realtime IDs per offset.
+	realtimeIDs := make(map[uint64]string)
+	for i := 0; i < 3; i++ {
+		_, err := node.Broker().Publish("recovery.ch", []byte(fmt.Sprintf("m%d", i+1)), false)
+		require.NoError(t, err)
+	}
+	require.Equal(t, 3, transport1.getMessageCount())
+	for i := 0; i < 3; i++ {
+		var out clientpb.OutboundMessage
+		require.NoError(t, JSONMarshaler{}.Unmarshal(transport1.getMessage(i), &out))
+		pub := out.GetPublication()
+		require.NotNil(t, pub)
+		require.Len(t, pub.GetMessages(), 1)
+		m := pub.GetMessages()[0]
+		realtimeIDs[m.GetOffset()] = m.GetId()
+		assert.Equal(t, fmt.Sprintf("recovery.ch-%d", m.GetOffset()), m.GetId(),
+			"realtime ID must follow the channel-offset rule")
+	}
+
+	// Disconnect and reconnect with recovery from offset 1.
+	_ = client1.Close(Disconnect{})
+	transport2 := &capturingTransport{}
+	client2, _, err := NewClient(ctx, node, transport2, JSONMarshaler{})
+	require.NoError(t, err)
+
+	recoverMsg := &clientpb.InboundMessage{
+		Id: "msg-3",
+		Envelope: &clientpb.InboundMessage_Connect{
+			Connect: &clientpb.Connect{
+				ClientId: "client-2",
+				Subscriptions: []*clientpb.Subscription{
+					{Channel: "recovery.ch", Recover: true, Offset: 1, Epoch: epoch},
+				},
+			},
+		},
+	}
+	require.NoError(t, client2.HandleMessage(ctx, recoverMsg))
+
+	var out clientpb.OutboundMessage
+	require.NoError(t, JSONMarshaler{}.Unmarshal(transport2.getLastMessage(), &out))
+	connected := out.GetConnected()
+	require.NotNil(t, connected)
+	require.Len(t, connected.GetPublications(), 2)
+	for _, pub := range connected.GetPublications() {
+		msgs := pub.GetMessages()
+		require.Len(t, msgs, 1)
+		m := msgs[0]
+		expected := fmt.Sprintf("recovery.ch-%d", m.GetOffset())
+		assert.Equal(t, expected, m.GetId(), "recovered ID must follow the channel-offset rule")
+		assert.Equal(t, realtimeIDs[m.GetOffset()], m.GetId(),
+			"recovered ID must equal the realtime ID for offset %d", m.GetOffset())
+	}
+}
+
+func TestNode_Connect_RecoveryCap(t *testing.T) {
+	ctx := context.Background()
+	node := NewNode(nil)
+
+	const total = MaxRecoveredPublications + 500
+	pubs := make([]*Publication, 0, total)
+	for i := 1; i <= total; i++ {
+		pubs = append(pubs, &Publication{
+			Channel: "cap-ch",
+			Offset:  uint64(i),
+			Payload: []byte("m"),
+			Time:    int64(i),
+		})
+	}
+	node.SetBroker(&fakeHistoryBroker{pubs: pubs})
+	_ = node.Run(ctx)
+
+	transport := &capturingTransport{}
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
+	require.NoError(t, err)
+
+	msg := &clientpb.InboundMessage{
+		Id: "msg-1",
+		Envelope: &clientpb.InboundMessage_Connect{
+			Connect: &clientpb.Connect{
+				ClientId: "client-1",
+				Subscriptions: []*clientpb.Subscription{
+					{Channel: "cap-ch", Recover: true, Offset: 1},
+				},
+			},
+		},
+	}
+	require.NoError(t, client.HandleMessage(ctx, msg))
+
+	var out clientpb.OutboundMessage
+	require.NoError(t, JSONMarshaler{}.Unmarshal(transport.getLastMessage(), &out))
+	connected := out.GetConnected()
+	require.NotNil(t, connected)
+	require.Len(t, connected.GetPublications(), MaxRecoveredPublications)
+	// The first recovered publication is offset 2 (sinceOffset = offset+1) and
+	// its ID must follow the channel-offset rule.
+	msgs := connected.GetPublications()[0].GetMessages()
+	require.NotEmpty(t, msgs)
+	assert.Equal(t, fmt.Sprintf("cap-ch-%d", msgs[0].GetOffset()), msgs[0].GetId())
+}
+
+// --- P1-4: PublishAck.Offset must carry the broker-assigned offset ---
+
+func TestClientSession_PublishAck_Offset(t *testing.T) {
+	ctx := context.Background()
+	node := NewNode(nil)
+	_ = node.Run(ctx) // Register event handler
+
+	transport := &capturingTransport{}
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
+	require.NoError(t, err)
+
+	connectMsg := &clientpb.InboundMessage{
+		Id:       "msg-1",
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{}},
+	}
+	require.NoError(t, client.HandleMessage(ctx, connectMsg))
+
+	// Seed the channel through the broker so the ack offset is deterministic.
+	seedOffset, err := node.Broker().Publish("ack-ch", []byte("seed"), false)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), seedOffset)
+
+	transport.messages = nil
+
+	pubMsg := &clientpb.InboundMessage{
+		Id: "msg-2",
+		Envelope: &clientpb.InboundMessage_Publish{
+			Publish: &clientpb.Publish{
+				Channel: "ack-ch",
+				Payload: &sharedpb.Payload{Data: &sharedpb.Payload_Binary{Binary: []byte("hi")}},
+			},
+		},
+	}
+	require.NoError(t, client.HandleMessage(ctx, pubMsg))
+
+	var out clientpb.OutboundMessage
+	require.NoError(t, JSONMarshaler{}.Unmarshal(transport.getLastMessage(), &out))
+	ack := out.GetPublishAck()
+	require.NotNil(t, ack, "expected a PublishAck envelope")
+	assert.Equal(t, uint64(2), ack.GetOffset())
 }
 
 func TestClientStatus_String(t *testing.T) {

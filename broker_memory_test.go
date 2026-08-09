@@ -2,9 +2,13 @@ package messageloop
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // newTestBroker creates a started broker with a handler that collects publications.
@@ -73,6 +77,77 @@ func TestMemoryBroker_Subscribe_Unsubscribe(t *testing.T) {
 	if err := b.Unsubscribe("ch"); err != nil {
 		t.Fatalf("Unsubscribe: %v", err)
 	}
+}
+
+// --- P2-18: empty channel history entries must be reclaimed ---
+
+func TestMemoryBroker_History_RetainedAfterLastUnsubscribe(t *testing.T) {
+	b := NewMemoryBroker(MemoryBrokerOptions{})
+	require.NoError(t, b.Subscribe("ch"))
+	_, err := b.Publish("ch", []byte("x"), false)
+	require.NoError(t, err)
+
+	pubs, err := b.History("ch", 0, 0)
+	require.NoError(t, err)
+	require.Len(t, pubs, 1)
+
+	require.NoError(t, b.Unsubscribe("ch"))
+
+	// History is intentionally retained while the last subscriber is away so
+	// that reconnect with recovery still works.
+	pubs, err = b.History("ch", 0, 0)
+	require.NoError(t, err)
+	assert.Len(t, pubs, 1, "history must be retained for recovery after the last unsubscribe")
+}
+
+func TestMemoryBroker_History_EmptyChannelEntryReclaimedAfterUnsubscribe(t *testing.T) {
+	b := NewMemoryBroker(MemoryBrokerOptions{})
+	require.NoError(t, b.Subscribe("ch"))
+	require.NoError(t, b.Unsubscribe("ch"))
+
+	mb := b.(*memoryBroker)
+	mb.mu.RLock()
+	_, ok := mb.history["ch"]
+	mb.mu.RUnlock()
+	assert.False(t, ok, "empty history entry should be removed from the map")
+}
+
+func TestMemoryBroker_History_KeptWhileSubscribersRemain(t *testing.T) {
+	b := NewMemoryBroker(MemoryBrokerOptions{})
+	require.NoError(t, b.Subscribe("ch"))
+	require.NoError(t, b.Subscribe("ch"))
+	_, err := b.Publish("ch", []byte("x"), false)
+	require.NoError(t, err)
+
+	require.NoError(t, b.Unsubscribe("ch"))
+	pubs, err := b.History("ch", 0, 0)
+	require.NoError(t, err)
+	assert.Len(t, pubs, 1, "history must remain while subscribers are still present")
+
+	require.NoError(t, b.Unsubscribe("ch"))
+	pubs, err = b.History("ch", 0, 0)
+	require.NoError(t, err)
+	assert.Len(t, pubs, 1, "history remains for recovery even after the last subscriber leaves")
+}
+
+func TestMemoryBroker_ConcurrentPublishUnsubscribe(t *testing.T) {
+	b := NewMemoryBroker(MemoryBrokerOptions{})
+	const n = 50
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		ch := fmt.Sprintf("ch-%d", i)
+		require.NoError(t, b.Subscribe(ch))
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			_, _ = b.Publish(ch, []byte("x"), false)
+		}()
+		go func() {
+			defer wg.Done()
+			_ = b.Unsubscribe(ch)
+		}()
+	}
+	wg.Wait()
 }
 
 func TestMemoryBroker_Start_BlocksUntilCtxDone(t *testing.T) {

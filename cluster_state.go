@@ -220,6 +220,21 @@ func (n *Node) deleteClusterSessionState(ctx context.Context, sessionID string) 
 	}
 
 	directory := n.clusterSessionDirectory()
+
+	// Ownership check: only delete state that this node incarnation owns, or
+	// whose lease is already gone/expired. A fresh lease identifying another
+	// node incarnation means the session is still being served there, and the
+	// state must be left intact.
+	lease, err := directory.GetSessionLease(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if lease != nil && lease.ExpiresAt.After(time.Now()) &&
+		(lease.NodeID != "" || lease.IncarnationID != "") &&
+		(lease.NodeID != n.ClusterNodeID() || lease.IncarnationID != n.ClusterIncarnationID()) {
+		return nil
+	}
+
 	if err := directory.DeleteSessionLease(ctx, sessionID); err != nil {
 		return err
 	}

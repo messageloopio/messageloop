@@ -52,6 +52,12 @@ func main() {
 		}
 		node.SetBroker(broker)
 
+		// In cluster mode the health endpoint probes Redis connectivity;
+		// wire the broker's ping as that probe when the broker supports it.
+		if pinger, ok := broker.(interface{ Ping(context.Context) error }); ok {
+			node.SetHealthCheck(pinger.Ping)
+		}
+
 		if err = setupProxy(cfg, node); err != nil {
 			return err
 		}

@@ -79,7 +79,7 @@ import (
 
 ### Error Handling
 
-- Use typed `Disconnect` errors for intentional disconnection with codes (3000-3509 range)
+- Use typed `Disconnect` errors for intentional disconnection with codes (3000-3512 range)
 - Wrap errors with `fmt.Errorf("context: %w", err)` for error chaining
 - Use `errors.As()` for type assertion on error types
 - Use `errors.Is()` for sentinel error comparison
