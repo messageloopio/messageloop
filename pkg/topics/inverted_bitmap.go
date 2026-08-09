@@ -28,15 +28,17 @@ func NewInvertedBitmapMatcher(topicSpace []string) Matcher {
 }
 
 func (b *invertedBitmapMatcher) Subscribe(topic string, sub Subscriber) (*Subscription, error) {
+	b.mu.Lock()
 	var (
-		pos       = b.subPos
+		pos       uint32
 		reclaimed = false
 	)
-	b.mu.Lock()
 	if len(b.deletedPositions) > 0 {
 		pos = b.deletedPositions[0]
 		b.deletedPositions = b.deletedPositions[1:]
 		reclaimed = true
+	} else {
+		pos = b.subPos
 	}
 
 	match := false

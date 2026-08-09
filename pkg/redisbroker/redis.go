@@ -110,6 +110,24 @@ func (b *redisBroker) Publish(ch string, payload []byte, isText bool) (uint64, e
 	return offset, nil
 }
 
+// PublishTransient broadcasts via Pub/Sub only, without writing to the Redis
+// Stream, so the publication never appears in History. The offset is always
+// 0: no stream entry means there is no history offset to report.
+func (b *redisBroker) PublishTransient(ch string, payload []byte, isText bool) (uint64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	msg := &redisMessage{Type: messageTypePublication, Channel: ch, Payload: payload, IsText: isText, Epoch: b.epoch}
+	pubSubData, err := serializeMessage(msg)
+	if err != nil {
+		return 0, err
+	}
+	if err := b.client.Publish(ctx, b.opts.PubSubPrefix+ch, pubSubData).Err(); err != nil {
+		return 0, err
+	}
+	return 0, nil
+}
+
 // History returns publications stored for ch with offset >= sinceOffset.
 func (b *redisBroker) History(ch string, sinceOffset uint64, limit int) ([]*messageloop.Publication, error) {
 	return b.getHistory(ch, sinceOffset, limit)
@@ -120,4 +138,10 @@ var _ messageloop.Broker = (*redisBroker)(nil)
 // Epoch returns the broker's epoch identifier.
 func (b *redisBroker) Epoch() string {
 	return b.epoch
+}
+
+// Ping verifies connectivity to the backing Redis instance. It is exposed
+// for the node's health endpoint, which probes Redis in cluster mode.
+func (b *redisBroker) Ping(ctx context.Context) error {
+	return b.client.Ping(ctx).Err()
 }

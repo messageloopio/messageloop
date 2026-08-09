@@ -70,21 +70,30 @@ func (b *optimizedInvertedBitmapMatcher) Subscribe(topic string, sub Subscriber)
 	if uint(len(constituents)) > b.maxConstituents {
 		return nil, ErrBadTopic
 	}
+	for _, constituent := range constituents {
+		if constituent == empty {
+			// Reject explicit empty segments (e.g. "a.", ".a", "a..b") to stay
+			// consistent with the other matchers. Trailing padding with empty
+			// segments is applied below and is unrelated to this check.
+			return nil, ErrBadTopic
+		}
+	}
 
+	b.mu.Lock()
 	var (
 		i           int
 		constituent string
-		pos         = b.subPos
+		pos         uint32
 	)
 
 	if len(b.deletedPositions) > 0 {
 		pos = b.deletedPositions[0]
 		b.deletedPositions = b.deletedPositions[1:]
 	} else {
+		pos = b.subPos
 		b.subPos++
 	}
 
-	b.mu.Lock()
 	for i, constituent = range constituents {
 		b.constituentBitmaps[i].index(constituent, pos)
 	}
@@ -119,6 +128,13 @@ func (b *optimizedInvertedBitmapMatcher) Lookup(topic string) []Subscriber {
 	constituents := strings.Split(topic, delimiter)
 	if uint(len(constituents)) > b.maxConstituents {
 		return nil
+	}
+	for _, constituent := range constituents {
+		if constituent == empty {
+			// Topics with explicit empty segments (e.g. "a.", ".a", "a..b")
+			// never match, consistent with the other matchers.
+			return nil
+		}
 	}
 
 	bitmaps := make([]*roaring.Bitmap, b.maxConstituents)

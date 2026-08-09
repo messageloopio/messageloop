@@ -32,6 +32,13 @@ func (c *RawCodec) Unmarshal(data []byte, v interface{}) error {
 	return proto.Unmarshal(data, vv)
 }
 
+// Name returns the codec name used as the gRPC content-subtype. The name is
+// package-prefixed instead of the default "proto" so that this codec is never
+// registered in the process-global codec registry under the default name
+// (which would override the standard proto codec for every gRPC connection in
+// the process). The codec is wired per-server via ForceServerCodec in
+// prepareServer, so the name is only a protocol label; it must match the
+// codec name used by the Go SDK client.
 func (c *RawCodec) Name() string {
-	return "proto"
+	return "messageloop-proto"
 }

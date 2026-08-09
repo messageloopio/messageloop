@@ -1,12 +1,17 @@
 package grpcstream
 
 import (
+	"context"
 	"testing"
 
 	"github.com/messageloopio/messageloop"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
 	serverpb "github.com/messageloopio/messageloop/shared/genproto/server/v1"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 func TestPrepareClientServer_RegistersOnlyMessageLoopService(t *testing.T) {
@@ -38,4 +43,43 @@ func TestPrepareClientServer_RejectsPartialTLSConfig(t *testing.T) {
 		TLSCertFile: "./testdata/server.crt",
 	}, node)
 	require.EqualError(t, err, "grpc-client-server tls cert_file and key_file must both be set")
+}
+
+func TestAdminAuthInterceptor(t *testing.T) {
+	const token = "super-secret-token"
+	handler := func(ctx context.Context, req any) (any, error) { return "ok", nil }
+	interceptor := adminAuthInterceptor(token)
+
+	t.Run("valid token", func(t *testing.T) {
+		ctx := metadata.NewIncomingContext(context.Background(),
+			metadata.Pairs("authorization", "Bearer "+token))
+		resp, err := interceptor(ctx, nil, &grpc.UnaryServerInfo{}, handler)
+		require.NoError(t, err)
+		require.Equal(t, "ok", resp)
+	})
+
+	t.Run("invalid token", func(t *testing.T) {
+		ctx := metadata.NewIncomingContext(context.Background(),
+			metadata.Pairs("authorization", "Bearer wrong-token"))
+		_, err := interceptor(ctx, nil, &grpc.UnaryServerInfo{}, handler)
+		require.Equal(t, codes.Unauthenticated, status.Code(err))
+	})
+
+	t.Run("missing metadata", func(t *testing.T) {
+		_, err := interceptor(context.Background(), nil, &grpc.UnaryServerInfo{}, handler)
+		require.Equal(t, codes.Unauthenticated, status.Code(err))
+	})
+
+	t.Run("missing authorization header", func(t *testing.T) {
+		ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-other", "v"))
+		_, err := interceptor(ctx, nil, &grpc.UnaryServerInfo{}, handler)
+		require.Equal(t, codes.Unauthenticated, status.Code(err))
+	})
+
+	t.Run("invalid authorization format", func(t *testing.T) {
+		ctx := metadata.NewIncomingContext(context.Background(),
+			metadata.Pairs("authorization", "Token "+token))
+		_, err := interceptor(ctx, nil, &grpc.UnaryServerInfo{}, handler)
+		require.Equal(t, codes.Unauthenticated, status.Code(err))
+	})
 }

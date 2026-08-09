@@ -1,3 +1,13 @@
+// Package redisbroker provides Redis-backed implementations of the broker,
+// presence store, and cluster control-plane adapters.
+//
+// Trust boundary: cluster commands travel over Redis Pub/Sub with no
+// signature or sender authentication — any process that can write to the
+// Redis instance can inject disconnect/takeover/publish commands. Redis
+// network isolation is therefore the security prerequisite for a cluster
+// deployment. Commands carry an IssuedBy audit field (sender NodeID) so
+// operators can trace command origin in logs, but the field is
+// informational only; sender signature verification is future work.
 package redisbroker
 
 import (
@@ -23,6 +33,29 @@ const (
 	clusterCommandReplyKey      = "reply_channel"
 	defaultCommandTimeout       = 5 * time.Second
 	defaultCommandStateTTL      = 10 * time.Minute
+)
+
+// Command bus tunables are variables (not constants) so tests can shorten
+// them; the documented production defaults are set below.
+var (
+	// clusterCommandHandlerConcurrency bounds the number of cluster command
+	// handlers running concurrently per node. The reader loop blocks on this
+	// semaphore before dispatching, so at most this many commands run at
+	// once and no command is dropped when the bus is saturated.
+	clusterCommandHandlerConcurrency = 128
+	// clusterCommandClaimLeaseTTL is the TTL of a pending command claim.
+	// A crashed owner's claim expires within this window, after which a
+	// later sender can re-claim the command instead of being locked in
+	// pending for the full terminal-state TTL (defaultCommandStateTTL).
+	clusterCommandClaimLeaseTTL = 30 * time.Second
+	// clusterCommandClaimRenewInterval is how often an in-flight owner
+	// renews its claim lease while the handler is still running.
+	clusterCommandClaimRenewInterval = 10 * time.Second
+	// clusterCommandHandlerTimeout bounds each handler execution. A stuck
+	// handler (e.g. a blocked survey write) produces a terminal
+	// CLUSTER_COMMAND_TIMEOUT result instead of pinning the command in
+	// pending forever.
+	clusterCommandHandlerTimeout = 10 * time.Second
 )
 
 type redisClusterCommandBus struct {
@@ -88,13 +121,19 @@ func (b *redisClusterCommandBus) Start(ctx context.Context) error {
 	b.cancel = busCancel
 	b.pubsub = pubsub
 	b.start = true
+	// Bound concurrent command handling: the reader blocks on the semaphore
+	// before dispatching, so at most clusterCommandHandlerConcurrency
+	// commands run at once and none is dropped under load.
+	sem := make(chan struct{}, clusterCommandHandlerConcurrency)
 	b.readerWG.Add(1)
 	go func() {
 		defer b.readerWG.Done()
 		for message := range pubsub.Channel() {
+			sem <- struct{}{}
 			b.handlerWG.Add(1)
 			go func(payload string) {
 				defer b.handlerWG.Done()
+				defer func() { <-sem }()
 				b.handleMessage(busCtx, payload)
 			}(message.Payload)
 		}
@@ -147,6 +186,10 @@ func (b *redisClusterCommandBus) SendCommand(ctx context.Context, cmd *messagelo
 		return nil, nil
 	}
 
+	// Stamp the sender identity for audit; see the package trust-boundary
+	// comment — this is not a security mechanism.
+	cmd.IssuedBy = b.nodeID
+
 	commandCtx, cancel := ensureCommandTimeout(ctx)
 	defer cancel()
 
@@ -180,21 +223,36 @@ func (b *redisClusterCommandBus) SendCommand(ctx context.Context, cmd *messagelo
 		return nil, err
 	}
 
-	select {
-	case <-commandCtx.Done():
-		if errors.Is(commandCtx.Err(), context.DeadlineExceeded) {
-			b.recordCommandTimeout(commandCtx, cmd)
+	return b.waitForReply(commandCtx, cmd, pubsub.Channel())
+}
+
+// waitForReply drains the reply channel until a result whose CommandID matches
+// the command arrives. Mismatched replies are logged and skipped as defense in
+// depth; the wait still ends at the command deadline.
+func (b *redisClusterCommandBus) waitForReply(ctx context.Context, cmd *messageloop.ClusterCommand, replies <-chan *redis.Message) (*messageloop.ClusterCommandResult, error) {
+	for {
+		select {
+		case <-ctx.Done():
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				b.recordCommandTimeout(ctx, cmd)
+			}
+			return b.resolveTimedOutCommand(ctx, cmd)
+		case reply, ok := <-replies:
+			if !ok {
+				return nil, fmt.Errorf("cluster command reply channel closed")
+			}
+			result := &messageloop.ClusterCommandResult{}
+			if err := json.Unmarshal([]byte(reply.Payload), result); err != nil {
+				return nil, err
+			}
+			if result.CommandID == cmd.CommandID {
+				return result, nil
+			}
+			log.WarnContext(ctx, "cluster command reply command id mismatch, continuing to wait",
+				"expected_command_id", cmd.CommandID,
+				"received_command_id", result.CommandID,
+			)
 		}
-		return b.resolveTimedOutCommand(commandCtx, cmd)
-	case reply, ok := <-pubsub.Channel():
-		if !ok {
-			return nil, fmt.Errorf("cluster command reply channel closed")
-		}
-		result := &messageloop.ClusterCommandResult{}
-		if err := json.Unmarshal([]byte(reply.Payload), result); err != nil {
-			return nil, err
-		}
-		return result, nil
 	}
 }
 
@@ -202,6 +260,9 @@ func (b *redisClusterCommandBus) BroadcastCommand(ctx context.Context, cmd *mess
 	if cmd == nil {
 		return nil, nil
 	}
+	// Stamp the sender identity for audit; the per-goroutine copies below
+	// inherit it. See the package trust-boundary comment.
+	cmd.IssuedBy = b.nodeID
 	if cmd.TargetNodeID != "" && cmd.TargetIncarnationID != "" {
 		result, err := b.SendCommand(ctx, cmd)
 		if result == nil || err != nil {
@@ -236,7 +297,11 @@ func (b *redisClusterCommandBus) BroadcastCommand(ctx context.Context, cmd *mess
 		wg.Add(1)
 		go func(lease *messageloop.ClusterNodeLease) {
 			defer wg.Done()
+			// Deep-copy Metadata: every goroutine mutates its own copy inside
+			// SendCommand (e.g. the reply_channel key), and sharing the map
+			// between goroutines would race with concurrent map writes.
 			copyCommand := *cmd
+			copyCommand.Metadata = cloneCommandMetadata(cmd.Metadata)
 			copyCommand.CommandID = uuid.NewString()
 			copyCommand.TargetNodeID = lease.NodeID
 			copyCommand.TargetIncarnationID = lease.IncarnationID
@@ -295,6 +360,17 @@ func (b *redisClusterCommandBus) handleMessage(ctx context.Context, payload stri
 		command.CommandID = uuid.NewString()
 	}
 
+	// Audit trail: record who issued the command. IssuedBy is filled by the
+	// sending bus and is informational only (see the package trust-boundary
+	// comment); an empty value means the sender was an older or direct
+	// caller that did not stamp it.
+	log.DebugContext(ctx, "cluster command received",
+		"command_id", command.CommandID,
+		"command_type", command.Type,
+		"issued_by", command.IssuedBy,
+		"node_id", b.nodeID,
+	)
+
 	result := &messageloop.ClusterCommandResult{
 		CommandID:     command.CommandID,
 		SessionID:     command.SessionID,
@@ -336,15 +412,34 @@ func (b *redisClusterCommandBus) handleMessage(ctx context.Context, payload stri
 		return
 	}
 
+	// Claimed. Hold a short owner lease on the pending state and renew it
+	// while the handler runs. If this process dies mid-handling, the lease
+	// expires within clusterCommandClaimLeaseTTL and a later sender can
+	// re-claim the command instead of being locked in pending for the
+	// 10-minute terminal-state TTL.
+	renewCtx, stopRenew := context.WithCancel(ctx)
+	defer stopRenew()
+	go b.renewClaimLease(renewCtx, b.commandStateKey(command.CommandID))
+
 	b.mu.RLock()
 	handler := b.handler
 	b.mu.RUnlock()
 	if handler != nil {
-		handledResult, err := b.executeHandler(ctx, handler, command)
+		// Bound each handler execution with a per-command deadline: a
+		// handler that blocks (e.g. a stuck survey write) must not pin the
+		// command in pending forever.
+		handlerCtx, cancel := context.WithTimeout(ctx, clusterCommandHandlerTimeout)
+		handledResult, err := b.executeHandlerBounded(handlerCtx, handler, command)
+		cancel()
 		if err != nil {
 			result.Status = messageloop.ClusterCommandStatusFailed
-			result.ErrorCode = "CLUSTER_COMMAND_HANDLER_FAILED"
-			result.ErrorMessage = err.Error()
+			if errors.Is(err, context.DeadlineExceeded) {
+				result.ErrorCode = "CLUSTER_COMMAND_TIMEOUT"
+				result.ErrorMessage = "cluster command handler exceeded its execution deadline"
+			} else {
+				result.ErrorCode = "CLUSTER_COMMAND_HANDLER_FAILED"
+				result.ErrorMessage = err.Error()
+			}
 		} else if handledResult != nil {
 			result = handledResult
 		}
@@ -371,6 +466,10 @@ func (b *redisClusterCommandBus) handleMessage(ctx context.Context, payload stri
 		result.ErrorMessage = fmt.Sprintf("cluster command completed but terminal result could not be persisted: %v", storeErr)
 		b.recordUnknownFinalState(ctx, command, result.ErrorMessage)
 	}
+	// The terminal state is persisted with its own long TTL; stop renewing
+	// the pending claim lease so it never shortens the terminal result's
+	// lifetime.
+	stopRenew()
 	b.publishCommandResult(ctx, command, result)
 }
 
@@ -414,7 +513,10 @@ func (b *redisClusterCommandBus) claimCommandExecution(ctx context.Context, comm
 	if err != nil {
 		return false, nil, err
 	}
-	claimed, err := b.client.SetNX(ctx, b.commandStateKey(command.CommandID), encodedPending, defaultCommandStateTTL).Result() //nolint:staticcheck // SetNX is the clearest API for this pattern
+	// Claim with a short lease TTL (not the 10-minute terminal TTL): the
+	// owner renews the lease while handling, so a crash is recovered once
+	// the lease expires instead of locking the command in pending.
+	claimed, err := b.client.SetNX(ctx, b.commandStateKey(command.CommandID), encodedPending, clusterCommandClaimLeaseTTL).Result() //nolint:staticcheck // SetNX is the clearest API for this pattern
 	if err != nil {
 		return false, nil, err
 	}
@@ -428,7 +530,7 @@ func (b *redisClusterCommandBus) claimCommandExecution(ctx context.Context, comm
 	if storedResult != nil {
 		return false, storedResult, nil
 	}
-	claimed, err = b.client.SetNX(ctx, b.commandStateKey(command.CommandID), encodedPending, defaultCommandStateTTL).Result() //nolint:staticcheck
+	claimed, err = b.client.SetNX(ctx, b.commandStateKey(command.CommandID), encodedPending, clusterCommandClaimLeaseTTL).Result() //nolint:staticcheck
 	if err != nil {
 		return false, nil, err
 	}
@@ -491,6 +593,48 @@ func (b *redisClusterCommandBus) executeHandler(ctx context.Context, handler mes
 		}
 	}()
 	return handler(ctx, command)
+}
+
+// executeHandlerBounded runs handler under a per-command deadline. A handler
+// that does not return before ctx expires (e.g. it ignores its context) is
+// abandoned: a terminal context.DeadlineExceeded error is returned and the
+// still-running goroutine's eventual result is discarded, so a stuck handler
+// cannot wedge the command bus.
+func (b *redisClusterCommandBus) executeHandlerBounded(ctx context.Context, handler messageloop.ClusterCommandHandler, command *messageloop.ClusterCommand) (result *messageloop.ClusterCommandResult, err error) {
+	type outcome struct {
+		result *messageloop.ClusterCommandResult
+		err    error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		result, err := b.executeHandler(ctx, handler, command)
+		done <- outcome{result: result, err: err}
+	}()
+	select {
+	case o := <-done:
+		return o.result, o.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// renewClaimLease extends the pending claim's TTL while the handler runs so
+// a long-running command is not stolen by a duplicate sender. It stops when
+// ctx is cancelled, which happens once the terminal state has been persisted
+// or handleMessage exits.
+func (b *redisClusterCommandBus) renewClaimLease(ctx context.Context, key string) {
+	ticker := time.NewTicker(clusterCommandClaimRenewInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := b.client.Expire(ctx, key, clusterCommandClaimLeaseTTL).Err(); err != nil {
+				log.WarnContext(ctx, "failed to renew cluster command claim lease", "key", key, "error", err)
+			}
+		}
+	}
 }
 
 func (b *redisClusterCommandBus) resolveTimedOutCommand(ctx context.Context, command *messageloop.ClusterCommand) (*messageloop.ClusterCommandResult, error) {
@@ -567,6 +711,17 @@ func (b *redisClusterCommandBus) recordUnknownFinalState(ctx context.Context, cm
 		"target_incarnation_id", cmd.TargetIncarnationID,
 		"reason", reason,
 	)
+}
+
+func cloneCommandMetadata(metadata map[string]string) map[string]string {
+	if metadata == nil {
+		return nil
+	}
+	clone := make(map[string]string, len(metadata))
+	for key, value := range metadata {
+		clone[key] = value
+	}
+	return clone
 }
 
 func cloneClusterCommandResult(result *messageloop.ClusterCommandResult) *messageloop.ClusterCommandResult {

@@ -2,6 +2,7 @@ package grpcstream
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"net"
@@ -13,7 +14,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/encoding"
 	_ "google.golang.org/grpc/encoding/gzip"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
@@ -26,14 +26,6 @@ type Options struct {
 	TLSKeyFile     string
 	AdminAuthToken string // Bearer token for admin API authentication
 	MaxRecvMsgSize int    // Max inbound message size in bytes (0 = gRPC default)
-}
-
-var registerRawCodecOnce sync.Once
-
-func registerRawCodec() {
-	registerRawCodecOnce.Do(func() {
-		encoding.RegisterCodec(&RawCodec{})
-	})
 }
 
 func validateOptions(name string, opts Options) error {
@@ -51,9 +43,13 @@ func prepareServer(name string, opts Options, register func(*grpc.Server), extra
 		return nil, err
 	}
 
-	registerRawCodec()
-
 	grpcOpts := append([]grpc.ServerOption{}, extraOpts...)
+	// Wire the package RawCodec per-server instead of registering it globally:
+	// a global registration under the default "proto" name would override the
+	// standard codec for every gRPC connection in the process. RawCodec also
+	// handles regular proto messages, so non-streaming services on this server
+	// (e.g. the admin API) are unaffected.
+	grpcOpts = append(grpcOpts, grpc.ForceServerCodec(&RawCodec{}))
 	if opts.MaxRecvMsgSize > 0 {
 		grpcOpts = append(grpcOpts, grpc.MaxRecvMsgSize(opts.MaxRecvMsgSize))
 	}
@@ -97,7 +93,9 @@ func adminAuthInterceptor(token string) grpc.UnaryServerInterceptor {
 		if len(authHeader) <= len(bearerPrefix) || authHeader[:len(bearerPrefix)] != bearerPrefix {
 			return nil, status.Error(codes.Unauthenticated, "invalid authorization format")
 		}
-		if authHeader[len(bearerPrefix):] != token {
+		// Constant-time comparison so token timing cannot leak the expected value.
+		// ConstantTimeCompare is length-safe: mismatched lengths return 0.
+		if subtle.ConstantTimeCompare([]byte(authHeader[len(bearerPrefix):]), []byte(token)) != 1 {
 			return nil, status.Error(codes.Unauthenticated, "invalid authorization token")
 		}
 		return handler(ctx, req)

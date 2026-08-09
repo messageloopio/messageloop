@@ -1,6 +1,7 @@
 package grpcstream
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -9,7 +10,13 @@ import (
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 )
+
+// ErrTransportClosed is returned by WriteMany after the transport has been closed.
+var ErrTransportClosed = errors.New("grpc transport is closed")
+
+const defaultWriteTimeout = 10 * time.Second
 
 type sendRequest struct {
 	msg   rawFrame
@@ -32,21 +39,14 @@ func (t *Transport) Write(message []byte) error {
 }
 
 func (t *Transport) WriteMany(messages ...[]byte) error {
-	// Check if closed using a read lock
-	t.mu.RLock()
-	if t.closed {
-		t.mu.RUnlock()
-		return nil
-	}
-	t.mu.RUnlock()
-
 	for i := 0; i < len(messages); i++ {
-		// Double-check after acquiring the read lock for each send
+		// Check if closed before enqueueing; the same lock is used by Close
+		// to mark the transport closed, so a write cannot sneak past it.
 		t.mu.RLock()
 		closed := t.closed
 		t.mu.RUnlock()
 		if closed {
-			return nil
+			return ErrTransportClosed
 		}
 		// Copy the message bytes because the caller may reuse the underlying
 		// buffer (e.g. sync.Pool) after Write returns, while gRPC's transport
@@ -61,22 +61,23 @@ func (t *Transport) WriteMany(messages ...[]byte) error {
 }
 
 func (t *Transport) sendWithTimeout(msg rawFrame) error {
-	if t.writeTimeout <= 0 {
-		return t.stream.SendMsg(msg)
+	timeout := t.writeTimeout
+	if timeout <= 0 {
+		timeout = defaultWriteTimeout
 	}
 	errCh := make(chan error, 1)
-	timer := time.NewTimer(t.writeTimeout)
+	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	select {
 	case t.sendCh <- sendRequest{msg: msg, errCh: errCh}:
 	case <-timer.C:
-		return fmt.Errorf("write timeout after %v", t.writeTimeout)
+		return fmt.Errorf("write timeout after %v", timeout)
 	}
 	select {
 	case err := <-errCh:
 		return err
 	case <-timer.C:
-		return fmt.Errorf("write timeout after %v", t.writeTimeout)
+		return fmt.Errorf("write timeout after %v", timeout)
 	}
 }
 
@@ -84,20 +85,25 @@ func (t *Transport) Close(disconnect messageloop.Disconnect) error {
 	var err error
 	t.closeOnce.Do(func() {
 		t.mu.Lock()
-		defer t.mu.Unlock()
 		if t.closed {
-			err = nil
+			t.mu.Unlock()
 			return
 		}
-		t.writeError(int32(disconnect.Code), disconnect.Reason)
-		close(t.closeCh)
-		close(t.sendCh)
 		t.closed = true
+		t.mu.Unlock()
+
+		// Queue the disconnect error frame through the send channel so it is
+		// serialized with in-flight sends and delivered by the worker before
+		// the worker is told to exit.
+		if writeErr := t.writeError(int32(disconnect.Code), disconnect.Reason); writeErr != nil {
+			err = writeErr
+		}
+		close(t.closeCh)
 	})
 	return err
 }
 
-func (t *Transport) writeError(code int32, reason string) {
+func (t *Transport) writeError(code int32, reason string) error {
 	msg := messageloop.MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_Error{
 			Error: &sharedpb.Error{
@@ -107,7 +113,11 @@ func (t *Transport) writeError(code int32, reason string) {
 			},
 		}
 	})
-	_ = t.stream.Send(msg)
+	frame, err := proto.Marshal(msg)
+	if err != nil {
+		return err
+	}
+	return t.sendWithTimeout(rawFrame(frame))
 }
 
 var _ messageloop.Transport = new(Transport)
@@ -124,10 +134,16 @@ func newGRPCTransport(
 		writeTimeout: writeTimeout,
 		sendCh:       make(chan sendRequest, 64),
 	}
-	// Single worker goroutine serializes all sends to the gRPC stream.
+	// Single worker goroutine serializes all sends to the gRPC stream. It is
+	// shut down via closeCh; sendCh is never closed.
 	go func() {
-		for req := range t.sendCh {
-			req.errCh <- t.stream.SendMsg(req.msg)
+		for {
+			select {
+			case req := <-t.sendCh:
+				req.errCh <- t.stream.SendMsg(req.msg)
+			case <-t.closeCh:
+				return
+			}
 		}
 	}()
 	return t

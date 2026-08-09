@@ -2,6 +2,7 @@ package redisbroker
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"sync/atomic"
 	"testing"
@@ -125,6 +126,31 @@ func TestClusterCommandBus_ReturnsUnknownFinalStateAfterTimeout(t *testing.T) {
 	close(releaseHandler)
 }
 
+// TestClusterCommandBus_SendCommandFillsIssuedBy verifies P1-9: the command
+// bus stamps each command with the sender's NodeID for audit purposes before
+// delivering it to the target node's handler.
+func TestClusterCommandBus_SendCommandFillsIssuedBy(t *testing.T) {
+	redisCfg := requireCommandBusRedis(t)
+	ctx := context.Background()
+
+	receiver := newTestClusterCommandBus(t, redisCfg, "node-a", "inc-a")
+	sender := newTestClusterCommandBus(t, redisCfg, "node-b", "inc-b")
+
+	var issuedBy atomic.Value
+	receiver.SetHandler(func(_ context.Context, cmd *messageloop.ClusterCommand) (*messageloop.ClusterCommandResult, error) {
+		issuedBy.Store(cmd.IssuedBy)
+		return &messageloop.ClusterCommandResult{Status: messageloop.ClusterCommandStatusSucceeded}, nil
+	})
+	receiver.start(t, ctx)
+
+	result, err := sender.SendCommand(ctx, testClusterCommand("issued-by", "node-a", "inc-a"))
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, messageloop.ClusterCommandStatusSucceeded, result.Status)
+	require.Equal(t, "node-b", issuedBy.Load(),
+		"the target handler must observe the sender's NodeID in IssuedBy")
+}
+
 type testClusterCommandBus struct {
 	*redisClusterCommandBus
 }
@@ -192,6 +218,70 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// TestClusterCommandBus_CloneCommandMetadataIsIndependent verifies that the
+// metadata map copied for each BroadcastCommand goroutine is not shared with
+// the caller's map.
+func TestClusterCommandBus_CloneCommandMetadataIsIndependent(t *testing.T) {
+	source := map[string]string{"exclude_self": "true", "k": "v"}
+	clone := cloneCommandMetadata(source)
+
+	clone["reply_channel"] = "ml:cluster:cmd:reply:test"
+	require.Len(t, source, 2)
+	require.NotContains(t, source, "reply_channel")
+	require.Equal(t, "ml:cluster:cmd:reply:test", clone["reply_channel"])
+	require.Nil(t, cloneCommandMetadata(nil))
+}
+
+// TestClusterCommandBus_WaitsForMatchingReply verifies that SendCommand's reply
+// wait skips results whose CommandID does not match and keeps waiting for the
+// matching result instead of returning a cross-wired reply.
+func TestClusterCommandBus_WaitsForMatchingReply(t *testing.T) {
+	bus := &redisClusterCommandBus{}
+	cmd := &messageloop.ClusterCommand{CommandID: "expected-command"}
+
+	mismatched, err := json.Marshal(&messageloop.ClusterCommandResult{CommandID: "other-command"})
+	require.NoError(t, err)
+	matching, err := json.Marshal(&messageloop.ClusterCommandResult{
+		CommandID: "expected-command",
+		Status:    messageloop.ClusterCommandStatusSucceeded,
+	})
+	require.NoError(t, err)
+
+	replies := make(chan *redis.Message, 2)
+	replies <- &redis.Message{Payload: string(mismatched)}
+	replies <- &redis.Message{Payload: string(matching)}
+	close(replies)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	result, err := bus.waitForReply(ctx, cmd, replies)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "expected-command", result.CommandID)
+	require.Equal(t, messageloop.ClusterCommandStatusSucceeded, result.Status)
+}
+
+// TestClusterCommandBus_ReplyWaitTimesOutOnOnlyMismatchedReplies verifies the
+// reply wait ends at the command deadline when no matching reply arrives.
+func TestClusterCommandBus_ReplyWaitTimesOutOnOnlyMismatchedReplies(t *testing.T) {
+	bus := &redisClusterCommandBus{client: redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"})}
+	cmd := &messageloop.ClusterCommand{CommandID: "expected-command"}
+
+	mismatched, err := json.Marshal(&messageloop.ClusterCommandResult{CommandID: "other-command"})
+	require.NoError(t, err)
+
+	replies := make(chan *redis.Message, 1)
+	replies <- &redis.Message{Payload: string(mismatched)}
+	close(replies)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	_, err = bus.waitForReply(ctx, cmd, replies)
+	require.Error(t, err, "expected the reply wait to end with an error at the deadline")
 }
 
 func TestClusterCommandBus_ResolveTimedOutCommandPrefersTerminalResult(t *testing.T) {
@@ -262,4 +352,172 @@ func TestClusterCommandBus_RecordsMetricsForTimeoutAndUnknownFinalState(t *testi
 	require.Equal(t, messageloop.ClusterCommandStatusUnknownFinalState, result.Status)
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.ClusterCommandTimeouts))
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.ClusterCommandUnknownFinalState))
+}
+
+// TestClusterCommandBus_ReclaimsAfterClaimLeaseExpiry verifies P2-2 fix 2:
+// a command whose owner died mid-handling (simulated by a hung handler with
+// lease renewal disabled) is re-claimable once the claim lease expires,
+// instead of being locked in pending for the full terminal-state TTL.
+func TestClusterCommandBus_ReclaimsAfterClaimLeaseExpiry(t *testing.T) {
+	originalLeaseTTL := clusterCommandClaimLeaseTTL
+	originalRenewInterval := clusterCommandClaimRenewInterval
+	clusterCommandClaimLeaseTTL = 300 * time.Millisecond
+	clusterCommandClaimRenewInterval = time.Hour // disabled: simulate a crashed owner
+	t.Cleanup(func() {
+		clusterCommandClaimLeaseTTL = originalLeaseTTL
+		clusterCommandClaimRenewInterval = originalRenewInterval
+	})
+
+	redisCfg := requireCommandBusRedis(t)
+	ctx := context.Background()
+
+	receiver := newTestClusterCommandBus(t, redisCfg, "node-a", "inc-a")
+	sender := newTestClusterCommandBus(t, redisCfg, "node-b", "inc-b")
+
+	var handledCount atomic.Int32
+	releaseHandler := make(chan struct{})
+	receiver.SetHandler(func(context.Context, *messageloop.ClusterCommand) (*messageloop.ClusterCommandResult, error) {
+		handledCount.Add(1)
+		<-releaseHandler
+		return &messageloop.ClusterCommandResult{Status: messageloop.ClusterCommandStatusSucceeded}, nil
+	})
+	receiver.start(t, ctx)
+
+	firstCtx, firstCancel := context.WithTimeout(ctx, 1*time.Second)
+	defer firstCancel()
+	firstResult, err := sender.SendCommand(firstCtx, testClusterCommand("lease-reclaim", "node-a", "inc-a"))
+	require.NoError(t, err)
+	require.NotNil(t, firstResult)
+	require.Equal(t, messageloop.ClusterCommandStatusUnknownFinalState, firstResult.Status,
+		"sender must observe the pending command timing out")
+
+	// Wait for the claim lease to expire (no renewal, so the pending state
+	// vanishes instead of persisting for the 10-minute terminal TTL).
+	time.Sleep(500 * time.Millisecond)
+
+	secondResultCh := make(chan *messageloop.ClusterCommandResult, 1)
+	secondErrCh := make(chan error, 1)
+	go func() {
+		result, err := sender.SendCommand(ctx, testClusterCommand("lease-reclaim", "node-a", "inc-a"))
+		secondResultCh <- result
+		secondErrCh <- err
+	}()
+
+	// The re-sent command must be re-claimed and reach the handler again.
+	deadline := time.Now().Add(2 * time.Second)
+	for handledCount.Load() < 2 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	require.EqualValues(t, 2, handledCount.Load(),
+		"the command must be re-claimed and handled again after the lease expires")
+
+	close(releaseHandler)
+	require.NoError(t, <-secondErrCh)
+	secondResult := <-secondResultCh
+	require.NotNil(t, secondResult)
+	require.Equal(t, messageloop.ClusterCommandStatusSucceeded, secondResult.Status)
+}
+
+// TestClusterCommandBus_BoundedHandlerConcurrency verifies P2-2 fix 1: at
+// most clusterCommandHandlerConcurrency commands are handled concurrently,
+// and a saturated bus queues commands instead of dropping them.
+func TestClusterCommandBus_BoundedHandlerConcurrency(t *testing.T) {
+	originalConcurrency := clusterCommandHandlerConcurrency
+	clusterCommandHandlerConcurrency = 1
+	t.Cleanup(func() { clusterCommandHandlerConcurrency = originalConcurrency })
+
+	redisCfg := requireCommandBusRedis(t)
+	ctx := context.Background()
+
+	receiver := newTestClusterCommandBus(t, redisCfg, "node-a", "inc-a")
+	sender := newTestClusterCommandBus(t, redisCfg, "node-b", "inc-b")
+
+	var handledCount atomic.Int32
+	firstStarted := make(chan struct{}, 1)
+	releaseFirst := make(chan struct{})
+	receiver.SetHandler(func(context.Context, *messageloop.ClusterCommand) (*messageloop.ClusterCommandResult, error) {
+		handledCount.Add(1)
+		if handledCount.Load() == 1 {
+			select {
+			case firstStarted <- struct{}{}:
+			default:
+			}
+			<-releaseFirst
+		}
+		return &messageloop.ClusterCommandResult{Status: messageloop.ClusterCommandStatusSucceeded}, nil
+	})
+	receiver.start(t, ctx)
+
+	firstResultCh := make(chan *messageloop.ClusterCommandResult, 1)
+	firstErrCh := make(chan error, 1)
+	go func() {
+		result, err := sender.SendCommand(ctx, testClusterCommand("sem-1", "node-a", "inc-a"))
+		firstResultCh <- result
+		firstErrCh <- err
+	}()
+
+	select {
+	case <-firstStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for first command to reach handler")
+	}
+
+	secondResultCh := make(chan *messageloop.ClusterCommandResult, 1)
+	secondErrCh := make(chan error, 1)
+	go func() {
+		result, err := sender.SendCommand(ctx, testClusterCommand("sem-2", "node-a", "inc-a"))
+		secondResultCh <- result
+		secondErrCh <- err
+	}()
+
+	// With concurrency 1, the second command must not be dispatched while
+	// the first handler is still running.
+	time.Sleep(300 * time.Millisecond)
+	require.EqualValues(t, 1, handledCount.Load(),
+		"second command must wait for the semaphore slot")
+
+	close(releaseFirst)
+	require.NoError(t, <-firstErrCh)
+	firstResult := <-firstResultCh
+	require.NotNil(t, firstResult)
+	require.Equal(t, messageloop.ClusterCommandStatusSucceeded, firstResult.Status)
+
+	require.NoError(t, <-secondErrCh)
+	secondResult := <-secondResultCh
+	require.NotNil(t, secondResult)
+	require.Equal(t, messageloop.ClusterCommandStatusSucceeded, secondResult.Status)
+	require.EqualValues(t, 2, handledCount.Load())
+}
+
+// TestClusterCommandBus_HandlerTimeoutWritesTerminalError verifies P2-3
+// fix 2: a handler that exceeds its execution deadline produces a terminal
+// CLUSTER_COMMAND_TIMEOUT result instead of pinning the command pending.
+func TestClusterCommandBus_HandlerTimeoutWritesTerminalError(t *testing.T) {
+	originalTimeout := clusterCommandHandlerTimeout
+	clusterCommandHandlerTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { clusterCommandHandlerTimeout = originalTimeout })
+
+	redisCfg := requireCommandBusRedis(t)
+	ctx := context.Background()
+
+	receiver := newTestClusterCommandBus(t, redisCfg, "node-a", "inc-a")
+	sender := newTestClusterCommandBus(t, redisCfg, "node-b", "inc-b")
+
+	releaseHandler := make(chan struct{})
+	receiver.SetHandler(func(context.Context, *messageloop.ClusterCommand) (*messageloop.ClusterCommandResult, error) {
+		<-releaseHandler
+		return &messageloop.ClusterCommandResult{Status: messageloop.ClusterCommandStatusSucceeded}, nil
+	})
+	receiver.start(t, ctx)
+
+	sendCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	result, err := sender.SendCommand(sendCtx, testClusterCommand("handler-timeout", "node-a", "inc-a"))
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, messageloop.ClusterCommandStatusFailed, result.Status)
+	require.Equal(t, "CLUSTER_COMMAND_TIMEOUT", result.ErrorCode)
+
+	close(releaseHandler)
 }

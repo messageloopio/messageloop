@@ -69,11 +69,11 @@ func BenchmarkNaiveMatcherUnsubscribe(b *testing.B) {
 		m  = NewNaiveMatcher()
 		s0 = 0
 	)
-	id, _ := m.Subscribe("foo.*.baz.qux.quux", s0)
 	populateMatcher(m, 1000, 5)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
+		id, _ := m.Subscribe("foo.*.baz.qux.quux", s0)
 		m.Unsubscribe(id)
 	}
 }
@@ -109,10 +109,10 @@ func BenchmarkNaiveMatcherUnsubscribeCold(b *testing.B) {
 		m  = NewNaiveMatcher()
 		s0 = 0
 	)
-	id, _ := m.Subscribe("foo.*.baz.qux.quux", s0)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
+		id, _ := m.Subscribe("foo.*.baz.qux.quux", s0)
 		m.Unsubscribe(id)
 	}
 }
@@ -158,7 +158,7 @@ func BenchmarkMultithreaded8Thread5050Naive(b *testing.B) {
 	numItems := 1000
 	numThreads := 8
 	benchmark5050(b, numItems, numThreads, func(items [][]string) Matcher {
-		return NewTrieMatcher()
+		return NewNaiveMatcher()
 	})
 }
 
@@ -166,7 +166,7 @@ func BenchmarkMultithreaded12Thread5050Naive(b *testing.B) {
 	numItems := 1000
 	numThreads := 12
 	benchmark5050(b, numItems, numThreads, func(items [][]string) Matcher {
-		return NewTrieMatcher()
+		return NewNaiveMatcher()
 	})
 }
 
@@ -206,7 +206,7 @@ func BenchmarkMultithreaded8Thread9010Naive(b *testing.B) {
 	numItems := 1000
 	numThreads := 8
 	benchmark9010(b, numItems, numThreads, func(items [][]string) Matcher {
-		return NewTrieMatcher()
+		return NewNaiveMatcher()
 	})
 }
 
@@ -214,7 +214,7 @@ func BenchmarkMultithreaded12Thread9010Naive(b *testing.B) {
 	numItems := 1000
 	numThreads := 12
 	benchmark9010(b, numItems, numThreads, func(items [][]string) Matcher {
-		return NewTrieMatcher()
+		return NewNaiveMatcher()
 	})
 }
 

@@ -25,14 +25,7 @@ func (b *redisBroker) getHistory(ch string, sinceOffset uint64, limit int) ([]*m
 	}
 
 	// Build start ID. Use exclusive form "(ts-seq" so we start AFTER sinceOffset.
-	var start string
-	if sinceOffset == 0 {
-		start = "0"
-	} else {
-		ts := sinceOffset / 1000
-		seq := sinceOffset % 1000
-		start = fmt.Sprintf("(%d-%d", ts, seq)
-	}
+	start := streamStartID(sinceOffset)
 
 	messages, err := b.client.XRangeN(ctx, stream, start, "+", int64(limit)).Result()
 	if err != nil && !errors.Is(err, redis.Nil) {
@@ -60,9 +53,24 @@ func (b *redisBroker) getHistory(ch string, sinceOffset uint64, limit int) ([]*m
 	return pubs, nil
 }
 
+// streamStartID builds the exclusive Redis Stream start ID ("(ts-seq") for the
+// given offset, so the range starts AFTER the message at sinceOffset.
+// The zero offset maps to "0", i.e. the beginning of the stream.
+func streamStartID(sinceOffset uint64) string {
+	if sinceOffset == 0 {
+		return "0"
+	}
+	ts := sinceOffset >> 20
+	seq := sinceOffset & 0xFFFFF
+	return fmt.Sprintf("(%d-%d", ts, seq)
+}
+
 // parseStreamOffset converts a Redis Stream ID ("ts-seq") into a uint64 offset.
-// Encoding: offset = ts*1000 + seq. Lossless as long as seq < 1000 per ms,
-// which is guaranteed in practice since Redis resets seq per millisecond.
+// Encoding: offset = ts<<20 | seq, i.e. ts = offset>>20 and seq = offset&0xFFFFF.
+// The seq field occupies the low 20 bits, so up to 2^20-1 (~1M) messages per
+// millisecond are representable without colliding with the next millisecond.
+// NOTE: this encoding is NOT compatible with the previous offset = ts*1000 + seq
+// scheme; offsets persisted under the old encoding do not decode correctly.
 func parseStreamOffset(id string) uint64 {
 	parts := strings.SplitN(id, "-", 2)
 	if len(parts) != 2 {
@@ -76,5 +84,5 @@ func parseStreamOffset(id string) uint64 {
 	if err != nil {
 		return 0
 	}
-	return ts*1000 + seq
+	return ts<<20 | seq
 }

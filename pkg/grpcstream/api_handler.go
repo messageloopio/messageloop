@@ -9,6 +9,8 @@ import (
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
 	serverpb "github.com/messageloopio/messageloop/shared/genproto/server/v1"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type apiServiceHandler struct {
@@ -23,6 +25,19 @@ func NewAPIServiceHandler(node *messageloop.Node) serverpb.APIServiceServer {
 func (h *apiServiceHandler) Publish(ctx context.Context, req *serverpb.PublishRequest) (*serverpb.PublishResponse, error) {
 	log.InfoContext(ctx, "server side API Publish", "request_id", req.RequestId)
 
+	// add_history is not implemented; surface it explicitly instead of
+	// silently ignoring the option.
+	for _, pub := range req.Publications {
+		if opts := pub.GetOptions(); opts != nil && opts.AddHistory {
+			return nil, status.Error(codes.Unimplemented, "add_history is not implemented")
+		}
+	}
+
+	// PublishResponse has no per-publication result fields, so failures are
+	// reported with partial-success semantics: every failure is logged, and
+	// when all publications fail the RPC returns an error.
+	attempted := 0
+	failed := 0
 	for _, pub := range req.Publications {
 		// Extract data from Payload
 		var data []byte
@@ -32,7 +47,14 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverpb.PublishRe
 			case *sharedpb.Payload_Binary:
 				data = p.Binary
 			case *sharedpb.Payload_Json:
-				data = []byte(p.Json.String())
+				jsonData, err := messageloop.MarshalJSONStruct(p.Json)
+				if err != nil {
+					log.ErrorContext(ctx, "failed to marshal JSON payload", err, "publication_id", pub.Id)
+					attempted++
+					failed++
+					continue
+				}
+				data = jsonData
 				isText = true
 			case *sharedpb.Payload_Text:
 				data = []byte(p.Text)
@@ -42,49 +64,45 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverpb.PublishRe
 
 		// Get destination
 		dest := pub.GetDestination()
-		if dest == nil {
+		if dest == nil || (len(dest.Sessions) == 0 && len(dest.Channels) == 0) {
+			log.WarnContext(ctx, "publication has no destination", "publication_id", pub.Id)
+			attempted++
+			failed++
 			continue
 		}
 
-		// Get options
-		opts := pub.GetOptions()
-		addHistory := false
-		if opts != nil {
-			addHistory = opts.AddHistory
-		}
-
 		// Session-based publication
-		if len(dest.Sessions) > 0 {
-			for _, sessionID := range dest.Sessions {
-				// Create OutboundMessage with Payload
-				msg := &clientpb.Message{
-					Channel: "", // Session-based, no channel
-					Id:      pub.Id,
-					Payload: pub.Payload, // sharedpb.Payload is same type
-				}
+		for _, sessionID := range dest.Sessions {
+			attempted++
+			// Create OutboundMessage with Payload
+			msg := &clientpb.Message{
+				Channel: "", // Session-based, no channel
+				Id:      pub.Id,
+				Payload: pub.Payload, // sharedpb.Payload is same type
+			}
 
-				ok, err := h.node.PublishToSession(ctx, sessionID, msg)
-				if err != nil {
-					log.ErrorContext(ctx, "failed to send to session", err)
-				} else if !ok {
-					log.DebugContext(ctx, "session not found, skipping", "session_id", sessionID)
-				}
+			ok, err := h.node.PublishToSession(ctx, sessionID, msg)
+			if err != nil {
+				log.ErrorContext(ctx, "failed to send to session", err, "session_id", sessionID)
+				failed++
+			} else if !ok {
+				log.DebugContext(ctx, "session not found, skipping", "session_id", sessionID)
 			}
 		}
 
 		// Channel-based publication
-		if len(dest.Channels) > 0 {
-			for _, channel := range dest.Channels {
-				if addHistory {
-					log.DebugContext(ctx, "add_history option set but not yet implemented", "channel", channel)
-				}
-				if err := h.node.Publish(channel, data, isText); err != nil {
-					log.ErrorContext(ctx, "failed to publish to channel", err)
-				}
+		for _, channel := range dest.Channels {
+			attempted++
+			if _, err := h.node.Publish(channel, data, isText); err != nil {
+				log.ErrorContext(ctx, "failed to publish to channel", err, "channel", channel)
+				failed++
 			}
 		}
 	}
 
+	if attempted > 0 && failed == attempted {
+		return nil, status.Errorf(codes.Internal, "all %d delivery attempt(s) failed", failed)
+	}
 	return &serverpb.PublishResponse{}, nil
 }
 
@@ -92,7 +110,11 @@ func (h *apiServiceHandler) Survey(ctx context.Context, req *serverpb.SurveyRequ
 	log.InfoContext(ctx, "server side API Survey", "channel", req.Channel, "request_id", req.RequestId)
 
 	timeout := time.Duration(req.TimeoutMs) * time.Millisecond
-	results, err := h.node.Survey(ctx, req.Channel, payloadBytes(req.Payload), timeout)
+	payload, err := payloadBytes(req.Payload)
+	if err != nil {
+		return nil, err
+	}
+	results, err := h.node.Survey(ctx, req.Channel, payload, timeout)
 	if err != nil {
 		return nil, err
 	}
@@ -252,18 +274,18 @@ func (h *apiServiceHandler) GetChannels(ctx context.Context, req *serverpb.GetCh
 	return &serverpb.GetChannelsResponse{Channels: channels}, nil
 }
 
-func payloadBytes(payload *sharedpb.Payload) []byte {
+func payloadBytes(payload *sharedpb.Payload) ([]byte, error) {
 	if payload == nil {
-		return nil
+		return nil, nil
 	}
 	switch data := payload.Data.(type) {
 	case *sharedpb.Payload_Binary:
-		return data.Binary
+		return data.Binary, nil
 	case *sharedpb.Payload_Json:
-		return []byte(data.Json.String())
+		return messageloop.MarshalJSONStruct(data.Json)
 	case *sharedpb.Payload_Text:
-		return []byte(data.Text)
+		return []byte(data.Text), nil
 	default:
-		return nil
+		return nil, nil
 	}
 }

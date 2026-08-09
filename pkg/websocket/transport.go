@@ -59,7 +59,7 @@ func (t *Transport) Close(disconnect messageloop.Disconnect) error {
 	deadline := time.Now().Add(5 * time.Second)
 	err := t.conn.WriteControl(
 		websocket.CloseMessage,
-		websocket.FormatCloseMessage(int(disconnect.Code), disconnect.Reason),
+		websocket.FormatCloseMessage(closeCode(disconnect), disconnect.Reason),
 		deadline,
 	)
 	t.writeMu.Unlock()
@@ -91,3 +91,14 @@ func (t *Transport) Close(disconnect messageloop.Disconnect) error {
 }
 
 var _ messageloop.Transport = (*Transport)(nil)
+
+// closeCode returns the WebSocket close code for the given Disconnect.
+// A zero Code is reserved by RFC 6455 ("no status code") but is used for
+// normal closures by the server core, so it falls back to 1000
+// (CloseNormalClosure) to keep the reason string deliverable.
+func closeCode(disconnect messageloop.Disconnect) int {
+	if disconnect.Code == 0 {
+		return websocket.CloseNormalClosure
+	}
+	return int(disconnect.Code)
+}

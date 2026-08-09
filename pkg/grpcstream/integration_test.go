@@ -2,6 +2,7 @@ package grpcstream_test
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 const bufSize = 1024 * 1024
@@ -146,7 +148,8 @@ func TestGRPC_AdminAPI_GetHistory(t *testing.T) {
 
 	// Publish some messages to build history
 	for i := 0; i < 3; i++ {
-		require.NoError(t, node.Publish("history-ch", []byte("msg"), false))
+		_, err := node.Publish("history-ch", []byte("msg"), false)
+		require.NoError(t, err)
 	}
 
 	// Small delay for broker to process
@@ -161,4 +164,40 @@ func TestGRPC_AdminAPI_GetHistory(t *testing.T) {
 	require.Len(t, resp.Publications, 3)
 	require.Equal(t, uint64(1), resp.Publications[0].Offset)
 	require.Equal(t, uint64(3), resp.Publications[2].Offset)
+}
+
+// TestGRPC_AdminAPI_Publish_JSONPayload verifies that a Payload_Json published
+// through the admin API is stored as valid JSON (P0-3).
+func TestGRPC_AdminAPI_Publish_JSONPayload(t *testing.T) {
+	ctx := t.Context()
+	node := messageloop.NewNode(nil)
+	require.NoError(t, node.Run(ctx))
+
+	api := startTestGRPCServer(t, node)
+
+	payloadStruct, err := structpb.NewStruct(map[string]interface{}{
+		"hello": "world",
+		"n":     float64(7),
+	})
+	require.NoError(t, err)
+
+	_, err = api.Publish(ctx, &serverpb.PublishRequest{
+		RequestId: "req-1",
+		Publications: []*serverpb.Publication{{
+			Id:          "pub-1",
+			Destination: &serverpb.Publication_Destination{Channels: []string{"json-admin"}},
+			Payload:     &sharedpb.Payload{Data: &sharedpb.Payload_Json{Json: payloadStruct}},
+		}},
+	})
+	require.NoError(t, err)
+
+	pubs, err := node.Broker().History("json-admin", 0, 0)
+	require.NoError(t, err)
+	require.Len(t, pubs, 1)
+	require.True(t, pubs[0].IsText)
+
+	var decoded map[string]interface{}
+	require.NoError(t, json.Unmarshal(pubs[0].Payload, &decoded))
+	require.Equal(t, "world", decoded["hello"])
+	require.Equal(t, float64(7), decoded["n"])
 }

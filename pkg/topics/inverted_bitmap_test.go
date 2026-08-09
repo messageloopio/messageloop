@@ -1,10 +1,19 @@
 package topics
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
+
+func TestInvertedBitmapMatcherConcurrentSubscribe(t *testing.T) {
+	topics := make([]string, 64)
+	for i := range topics {
+		topics[i] = fmt.Sprintf("%d.%d.%d", i, i, i)
+	}
+	testMatcherConcurrentSubscribe(t, NewInvertedBitmapMatcher(topics), topics)
+}
 
 func TestInvertedBitmapMatcher(t *testing.T) {
 	assert := assert.New(t)
@@ -100,11 +109,11 @@ func BenchmarkInvertedBitmapMatcherUnsubscribe(b *testing.B) {
 		ib = NewInvertedBitmapMatcher(topics)
 		s0 = 0
 	)
-	id, _ := ib.Subscribe("foo.*.baz.qux.quux", s0)
 	populateMatcher(ib, 1000, 5)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
+		id, _ := ib.Subscribe("foo.*.baz.qux.quux", s0)
 		ib.Unsubscribe(id)
 	}
 }
@@ -170,10 +179,10 @@ func BenchmarkInvertedBitmapMatcherUnsubscribeCold(b *testing.B) {
 		ib = NewInvertedBitmapMatcher(topics)
 		s0 = 0
 	)
-	id, _ := ib.Subscribe("foo.*.baz.qux.quux", s0)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
+		id, _ := ib.Subscribe("foo.*.baz.qux.quux", s0)
 		ib.Unsubscribe(id)
 	}
 }

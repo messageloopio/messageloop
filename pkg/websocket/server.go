@@ -59,6 +59,12 @@ func (s *Server) Init(ctx lynx.AppContext) error {
 	s.s = &http.Server{
 		Addr:    s.opts.Addr,
 		Handler: s.mux,
+		// ReadHeaderTimeout mitigates slowloris-style header attacks.
+		// IdleTimeout is intentionally not set: WebSocket connections are
+		// long-lived and the timeout does not apply after upgrade anyway,
+		// but keeping it unset avoids any surprise on pre-upgrade keep-alive
+		// connections.
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 	return nil
 }

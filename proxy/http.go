@@ -12,7 +12,16 @@ import (
 
 	"github.com/lynx-go/x/log"
 	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v1"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 )
+
+// notificationErrorResponse is the JSON wire format of the notification
+// endpoint responses (OnConnected/OnSubscribed/OnUnsubscribed/OnDisconnected).
+// The protobuf notification response messages carry no fields, so the optional
+// backend error must be parsed from the raw JSON body.
+type notificationErrorResponse struct {
+	Error *sharedpb.Error `json:"error"`
+}
 
 // HTTPProxy implements Proxy using HTTP transport.
 type HTTPProxy struct {
@@ -115,6 +124,8 @@ func (p *HTTPProxy) Authenticate(ctx context.Context, req *AuthenticateProxyRequ
 		"client_id":   protoReq.ClientId,
 		"token":       protoReq.Token,
 		"client_type": protoReq.ClientType,
+		"session_id":  protoReq.SessionId,
+		"remote_addr": protoReq.RemoteAddr,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
@@ -147,8 +158,10 @@ func (p *HTTPProxy) SubscribeAcl(ctx context.Context, req *SubscribeAclProxyRequ
 
 	protoReq := req.ToProtoRequest()
 	body, err := json.Marshal(map[string]any{
-		"channel": protoReq.Channel,
-		"token":   protoReq.Token,
+		"channel":    protoReq.Channel,
+		"token":      protoReq.Token,
+		"user_id":    protoReq.UserId,
+		"session_id": protoReq.SessionId,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
@@ -181,8 +194,10 @@ func (p *HTTPProxy) PublishAcl(ctx context.Context, req *PublishAclProxyRequest)
 
 	protoReq := req.ToProtoRequest()
 	body, err := json.Marshal(map[string]any{
-		"channel": protoReq.Channel,
-		"token":   protoReq.Token,
+		"channel":    protoReq.Channel,
+		"token":      protoReq.Token,
+		"user_id":    protoReq.UserId,
+		"session_id": protoReq.SessionId,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
@@ -229,7 +244,11 @@ func (p *HTTPProxy) OnConnected(ctx context.Context, req *OnConnectedProxyReques
 
 	result, err := p.doRequest(ctx, httpReq, "OnConnected", req.SessionID, "",
 		func(respBody []byte) (any, error) {
-			return FromProtoOnConnectedResponse(nil), nil
+			var payload notificationErrorResponse
+			if err := json.Unmarshal(respBody, &payload); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+			}
+			return &OnConnectedProxyResponse{Error: payload.Error}, nil
 		},
 	)
 	if err != nil {
@@ -260,7 +279,11 @@ func (p *HTTPProxy) OnSubscribed(ctx context.Context, req *OnSubscribedProxyRequ
 
 	result, err := p.doRequest(ctx, httpReq, "OnSubscribed", req.SessionID, req.Channel,
 		func(respBody []byte) (any, error) {
-			return FromProtoOnSubscribedResponse(nil), nil
+			var payload notificationErrorResponse
+			if err := json.Unmarshal(respBody, &payload); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+			}
+			return &OnSubscribedProxyResponse{Error: payload.Error}, nil
 		},
 	)
 	if err != nil {
@@ -291,7 +314,11 @@ func (p *HTTPProxy) OnUnsubscribed(ctx context.Context, req *OnUnsubscribedProxy
 
 	result, err := p.doRequest(ctx, httpReq, "OnUnsubscribed", req.SessionID, req.Channel,
 		func(respBody []byte) (any, error) {
-			return FromProtoOnUnsubscribedResponse(nil), nil
+			var payload notificationErrorResponse
+			if err := json.Unmarshal(respBody, &payload); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+			}
+			return &OnUnsubscribedProxyResponse{Error: payload.Error}, nil
 		},
 	)
 	if err != nil {
@@ -321,7 +348,11 @@ func (p *HTTPProxy) OnDisconnected(ctx context.Context, req *OnDisconnectedProxy
 
 	result, err := p.doRequest(ctx, httpReq, "OnDisconnected", req.SessionID, "",
 		func(respBody []byte) (any, error) {
-			return FromProtoOnDisconnectedResponse(nil), nil
+			var payload notificationErrorResponse
+			if err := json.Unmarshal(respBody, &payload); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+			}
+			return &OnDisconnectedProxyResponse{Error: payload.Error}, nil
 		},
 	)
 	if err != nil {

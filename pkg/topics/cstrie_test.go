@@ -69,11 +69,11 @@ func BenchmarkCSTrieMatcherUnsubscribe(b *testing.B) {
 		m  = NewCSTrieMatcher()
 		s0 = 0
 	)
-	id, _ := m.Subscribe("foo.*.baz.qux.quux", s0)
 	populateMatcher(m, 1000, 5)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
+		id, _ := m.Subscribe("foo.*.baz.qux.quux", s0)
 		m.Unsubscribe(id)
 	}
 }
@@ -109,10 +109,10 @@ func BenchmarkCSTrieMatcherUnsubscribeCold(b *testing.B) {
 		m  = NewCSTrieMatcher()
 		s0 = 0
 	)
-	id, _ := m.Subscribe("foo.*.baz.qux.quux", s0)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
+		id, _ := m.Subscribe("foo.*.baz.qux.quux", s0)
 		m.Unsubscribe(id)
 	}
 }

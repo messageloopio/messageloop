@@ -16,6 +16,72 @@ func assertEqual(assert *assert.Assertions, expected, actual []Subscriber) {
 	}
 }
 
+func testMatcherConcurrentSubscribe(t *testing.T, m Matcher, topics []string) {
+	assert := assert.New(t)
+
+	subs := make([]*Subscription, len(topics))
+	var wg sync.WaitGroup
+	for i := range topics {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			sub, err := m.Subscribe(topics[i], Subscriber(i))
+			assert.NoError(err)
+			subs[i] = sub
+		}(i)
+	}
+	wg.Wait()
+
+	assertSubscriptionIDsUnique(assert, subs)
+	for i, topic := range topics {
+		assert.Contains(m.Lookup(topic), Subscriber(i))
+	}
+
+	for i := range subs {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			m.Unsubscribe(subs[i])
+		}(i)
+	}
+	wg.Wait()
+
+	for _, topic := range topics {
+		assert.Empty(m.Lookup(topic))
+	}
+
+	// Re-subscribe concurrently; reclaimed positions must not be handed out twice.
+	subs = make([]*Subscription, len(topics))
+	for i := range topics {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			sub, err := m.Subscribe(topics[i], Subscriber(i))
+			assert.NoError(err)
+			subs[i] = sub
+		}(i)
+	}
+	wg.Wait()
+
+	assertSubscriptionIDsUnique(assert, subs)
+	for i, topic := range topics {
+		assert.Contains(m.Lookup(topic), Subscriber(i))
+	}
+}
+
+func assertSubscriptionIDsUnique(assert *assert.Assertions, subs []*Subscription) {
+	ids := make(map[uint32]int, len(subs))
+	for i, sub := range subs {
+		if !assert.NotNil(sub) {
+			continue
+		}
+		if first, dup := ids[sub.ID]; dup {
+			assert.Failf("duplicate subscription ID", "ID %d shared by subscriptions %d and %d", sub.ID, first, i)
+		}
+		ids[sub.ID] = i
+	}
+}
+
 func populateMatcher(m Matcher, num, topicSize int) {
 	for i := 0; i < num; i++ {
 		prefix := ""

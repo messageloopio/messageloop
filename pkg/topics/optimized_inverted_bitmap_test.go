@@ -1,10 +1,19 @@
 package topics
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
+
+func TestOptimizedInvertedBitmapMatcherConcurrentSubscribe(t *testing.T) {
+	topics := make([]string, 64)
+	for i := range topics {
+		topics[i] = fmt.Sprintf("%d.%d.%d", i, i, i)
+	}
+	testMatcherConcurrentSubscribe(t, NewOptimizedInvertedBitmapMatcher(3), topics)
+}
 
 func TestOptimizedInvertedBitmapMatcher(t *testing.T) {
 	assert := assert.New(t)
@@ -51,6 +60,44 @@ func TestOptimizedInvertedBitmapMatcher(t *testing.T) {
 	assertEqual(assert, []Subscriber{}, ib.Lookup("trade"))
 }
 
+func TestOptimizedInvertedBitmapMatcherRejectsEmptySegments(t *testing.T) {
+	assert := assert.New(t)
+	ib := NewOptimizedInvertedBitmapMatcher(5)
+
+	for _, topic := range []string{"a.", ".a", "a..b"} {
+		_, err := ib.Subscribe(topic, 0)
+		assert.ErrorIs(err, ErrBadTopic, "topic %q", topic)
+	}
+
+	assert.Empty(ib.Lookup("a."))
+	assert.Empty(ib.Lookup(".a"))
+	assert.Empty(ib.Lookup("a..b"))
+	assert.Empty(ib.Lookup("."))
+}
+
+func TestOptimizedInvertedBitmapMatcherPaddingSemantics(t *testing.T) {
+	assert := assert.New(t)
+	ib := NewOptimizedInvertedBitmapMatcher(5)
+
+	sub0, err := ib.Subscribe("a", 0)
+	assert.NoError(err)
+	assertEqual(assert, []Subscriber{0}, ib.Lookup("a"))
+	// Trailing padding (empty segments) keeps matching exact-length only:
+	// "a" matches "a" but not longer topics like "a.b".
+	assert.Empty(ib.Lookup("a.b"))
+
+	sub1, err := ib.Subscribe("a.b", 1)
+	assert.NoError(err)
+	assertEqual(assert, []Subscriber{1}, ib.Lookup("a.b"))
+	assertEqual(assert, []Subscriber{0}, ib.Lookup("a"))
+	assert.Empty(ib.Lookup("a.b.c"))
+
+	ib.Unsubscribe(sub0)
+	ib.Unsubscribe(sub1)
+	assert.Empty(ib.Lookup("a"))
+	assert.Empty(ib.Lookup("a.b"))
+}
+
 func BenchmarkOptimizedInvertedBitmapMatcherSubscribe(b *testing.B) {
 	var (
 		ib = NewOptimizedInvertedBitmapMatcher(5)
@@ -69,11 +116,11 @@ func BenchmarkOptimizedInvertedBitmapMatcherUnsubscribe(b *testing.B) {
 		ib = NewOptimizedInvertedBitmapMatcher(5)
 		s0 = 0
 	)
-	id, _ := ib.Subscribe("foo.*.baz.qux.quux", s0)
 	populateMatcher(ib, 1000, 5)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
+		id, _ := ib.Subscribe("foo.*.baz.qux.quux", s0)
 		ib.Unsubscribe(id)
 	}
 }
@@ -109,10 +156,10 @@ func BenchmarkOptimizedInvertedBitmapMatcherUnsubscribeCold(b *testing.B) {
 		ib = NewOptimizedInvertedBitmapMatcher(5)
 		s0 = 0
 	)
-	id, _ := ib.Subscribe("foo.*.baz.qux.quux", s0)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
+		id, _ := ib.Subscribe("foo.*.baz.qux.quux", s0)
 		ib.Unsubscribe(id)
 	}
 }

@@ -2,6 +2,7 @@ package grpcstream
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -9,8 +10,39 @@ import (
 	serverpb "github.com/messageloopio/messageloop/shared/genproto/server/v1"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 )
+
+// failPublishBroker is a Broker whose Publish fails. When failChannel is set,
+// only publications to that channel fail; otherwise every Publish fails.
+type failPublishBroker struct {
+	failChannel string
+}
+
+func (b *failPublishBroker) Start(ctx context.Context, handler messageloop.PublicationHandler) error {
+	<-ctx.Done()
+	return nil
+}
+
+func (b *failPublishBroker) Subscribe(ch string) error   { return nil }
+func (b *failPublishBroker) Unsubscribe(ch string) error { return nil }
+
+func (b *failPublishBroker) Publish(ch string, payload []byte, isText bool) (uint64, error) {
+	if b.failChannel == "" || ch == b.failChannel {
+		return 0, errors.New("broker unavailable")
+	}
+	return 1, nil
+}
+
+func (b *failPublishBroker) PublishTransient(ch string, payload []byte, isText bool) (uint64, error) {
+	return 0, nil
+}
+
+func (b *failPublishBroker) History(ch string, sinceOffset uint64, limit int) ([]*messageloop.Publication, error) {
+	return nil, nil
+}
 
 // mockTransport is a simple transport for testing
 type mockTransport struct {
@@ -126,8 +158,86 @@ func TestAPIServiceHandler_PublishToChannels(t *testing.T) {
 						Binary: []byte("test payload"),
 					},
 				},
+			},
+		},
+	}
+
+	resp, err := handler.Publish(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+}
+
+func TestAPIServiceHandler_PublishAddHistoryUnimplemented(t *testing.T) {
+	ctx := context.Background()
+	node := messageloop.NewNode(nil)
+	handler := NewAPIServiceHandler(node)
+
+	req := &serverpb.PublishRequest{
+		RequestId: uuid.NewString(),
+		Publications: []*serverpb.Publication{
+			{
+				Id: uuid.NewString(),
+				Destination: &serverpb.Publication_Destination{
+					Channels: []string{"test-channel"},
+				},
+				Payload: &sharedpb.Payload{
+					Data: &sharedpb.Payload_Text{Text: "hello"},
+				},
 				Options: &serverpb.Publication_Options{
 					AddHistory: true,
+				},
+			},
+		},
+	}
+
+	_, err := handler.Publish(ctx, req)
+	require.Error(t, err)
+	require.Equal(t, codes.Unimplemented, status.Code(err))
+}
+
+func TestAPIServiceHandler_PublishBrokerFailureReturnsError(t *testing.T) {
+	ctx := context.Background()
+	node := messageloop.NewNode(nil)
+	node.SetBroker(&failPublishBroker{})
+	handler := NewAPIServiceHandler(node)
+
+	req := &serverpb.PublishRequest{
+		RequestId: uuid.NewString(),
+		Publications: []*serverpb.Publication{
+			{
+				Id: uuid.NewString(),
+				Destination: &serverpb.Publication_Destination{
+					Channels: []string{"broken-channel"},
+				},
+				Payload: &sharedpb.Payload{
+					Data: &sharedpb.Payload_Text{Text: "hello"},
+				},
+			},
+		},
+	}
+
+	resp, err := handler.Publish(ctx, req)
+	require.Error(t, err)
+	require.Equal(t, codes.Internal, status.Code(err))
+	require.Nil(t, resp)
+}
+
+func TestAPIServiceHandler_PublishPartialFailureSucceeds(t *testing.T) {
+	ctx := context.Background()
+	node := messageloop.NewNode(nil)
+	node.SetBroker(&failPublishBroker{failChannel: "broken-channel"})
+	handler := NewAPIServiceHandler(node)
+
+	req := &serverpb.PublishRequest{
+		RequestId: uuid.NewString(),
+		Publications: []*serverpb.Publication{
+			{
+				Id: uuid.NewString(),
+				Destination: &serverpb.Publication_Destination{
+					Channels: []string{"ok-channel", "broken-channel"},
+				},
+				Payload: &sharedpb.Payload{
+					Data: &sharedpb.Payload_Text{Text: "hello"},
 				},
 			},
 		},
