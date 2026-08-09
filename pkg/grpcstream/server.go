@@ -131,7 +131,7 @@ func (s *Server) Addr() string {
 	return ""
 }
 
-func (s *Server) Init(lynx.Lynx) error {
+func (s *Server) Init(lynx.AppContext) error {
 	return nil
 }
 
@@ -140,9 +140,9 @@ func (s *Server) Start(ctx context.Context) error {
 	return s.grpc.Serve(s.conn)
 }
 
-func (s *Server) Stop(ctx context.Context) {
+func (s *Server) Stop(ctx context.Context) error {
 	log.InfoContext(ctx, "stopping gRPC server", "name", s.name, "addr", s.Addr())
-	_ = s.close(true)
+	return s.close(true)
 }
 
 func (s *Server) Close() error {
@@ -165,4 +165,4 @@ func (s *Server) close(graceful bool) error {
 	return s.closeErr
 }
 
-var _ lynx.Component = new(Server)
+var _ lynx.Service = new(Server)

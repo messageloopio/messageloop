@@ -12,7 +12,6 @@ import (
 	lynxhttp "github.com/lynx-go/lynx/server/http"
 	"github.com/messageloopio/messageloop"
 	"github.com/messageloopio/messageloop/config"
-	"github.com/messageloopio/messageloop/pkg/grpcstream"
 	"github.com/messageloopio/messageloop/pkg/redisbroker"
 	"github.com/messageloopio/messageloop/pkg/websocket"
 	proxyproxy "github.com/messageloopio/messageloop/proxy"
@@ -26,20 +25,10 @@ var (
 )
 
 func main() {
-	opts := lynx.NewOptions(
-		lynx.WithName("MessageLoop"),
-		lynx.WithVersion(version),
-		lynx.WithSetFlagsFunc(func(f *pflag.FlagSet) {
-			f.String("config", "./config.yaml", "config file path")
-			f.String("log-level", "info", "log level, default info")
-		}),
-		lynx.WithBindConfigFunc(lynx.DefaultBindConfigFunc),
-		lynx.WithShutdownTimeout(30*time.Second),
-	)
-	app := lynx.New(opts, func(ctx context.Context, app lynx.Lynx) error {
+	runner := lynx.NewRunner(func(app lynx.App) error {
 		app.SetLogger(zap.MustNewLogger(app))
 		cfg := &config.Config{}
-		if err := app.Config().Unmarshal(cfg, lynx.TagNameJSON); err != nil {
+		if err := app.Config().Unmarshal(cfg); err != nil {
 			return err
 		}
 		if err := cfg.Validate(); err != nil {
@@ -67,12 +56,7 @@ func main() {
 			return err
 		}
 
-		var grpcClientServer, grpcAdminServer *grpcstream.Server
-		grpcClientServer, err = newGRPCClientServer(cfg, node)
-		if err != nil {
-			return err
-		}
-		grpcAdminServer, err = newGRPCAdminServer(cfg, node)
+		grpcServers, err := prepareGRPCServers(cfg, node)
 		if err != nil {
 			return err
 		}
@@ -80,22 +64,29 @@ func main() {
 		wsServer := newWebSocketServer(cfg, node, app.Logger())
 		adminServer := newAdminServer(cfg, node, reg)
 
-		if err := app.Hooks(lynx.OnStart(node.Run)); err != nil {
-			return err
-		}
-		components := []lynx.Component{wsServer, adminServer, grpcClientServer, grpcAdminServer}
-		if err := app.Hooks(lynx.Components(components...), lynx.OnStop(func(ctx context.Context) error {
+		app.OnStart(node.Run)
+		components := []lynx.Service{wsServer, adminServer}
+		components = append(components, grpcServers.Components()...)
+		app.Register(components...)
+		app.OnStop(func(ctx context.Context) error {
 			// Drain all client connections before shutting down.
 			node.Shutdown()
 			return nil
-		})); err != nil {
-			return err
-		}
+		})
 
 		return nil
-	})
+	},
+		lynx.WithName("MessageLoop"),
+		lynx.WithVersion(version),
+		lynx.WithSetFlagsFunc(func(f *pflag.FlagSet) {
+			f.String("config", "./config.yaml", "config file path")
+			f.String("log-level", "info", "log level, default info")
+		}),
+		lynx.WithBindConfigFunc(lynx.DefaultBindConfigFunc),
+		lynx.WithShutdownTimeout(30*time.Second),
+	)
 
-	app.Run()
+	runner.Run()
 }
 
 // setupCluster creates and wires the cluster based on the provided config.

@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
@@ -11,7 +12,7 @@ import (
 )
 
 type Server struct {
-	lx   lynx.Lynx
+	lx   lynx.AppContext
 	mux  *http.ServeMux
 	opts *Options
 	s    *http.Server
@@ -53,8 +54,8 @@ func (s *Server) Name() string {
 	return "websocket"
 }
 
-func (s *Server) Init(lx lynx.Lynx) error {
-	s.lx = lx
+func (s *Server) Init(ctx lynx.AppContext) error {
+	s.lx = ctx
 	s.s = &http.Server{
 		Addr:    s.opts.Addr,
 		Handler: s.mux,
@@ -71,11 +72,13 @@ func (s *Server) Start(ctx context.Context) error {
 	return s.s.ListenAndServe()
 }
 
-func (s *Server) Stop(ctx context.Context) {
+func (s *Server) Stop(ctx context.Context) error {
 	log.InfoContext(ctx, "stopping websocket server", "addr", s.opts.Addr)
-	if err := s.s.Shutdown(ctx); err != nil {
+	if err := s.s.Shutdown(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.ErrorContext(ctx, "shutting down websocket server failed", err)
+		return err
 	}
+	return nil
 }
 
-var _ lynx.Component = new(Server)
+var _ lynx.Service = new(Server)

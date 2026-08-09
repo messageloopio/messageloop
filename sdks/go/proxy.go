@@ -361,7 +361,7 @@ func NewProxyServer(opts ProxyServerOptions, handler proxypb.ProxyServiceServer)
 }
 
 // ProxyServer wraps a gRPC server that hosts the ProxyService.
-// It implements the lynx.Component interface for lifecycle management.
+// It implements the lynx.Service interface for lifecycle management.
 type ProxyServer struct {
 	grpc *grpc.Server
 	conn net.Listener

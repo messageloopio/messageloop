@@ -94,61 +94,61 @@ func FromProtoReply(reply *proxypb.RPCResponse) (*RPCProxyResponse, error) {
 // ProxyConfig is the configuration for a single proxy instance.
 type ProxyConfig struct {
 	// Name is a unique identifier for this proxy.
-	Name string `yaml:"name" json:"name"`
+	Name string `yaml:"name" json:"name" mapstructure:"name"`
 
 	// Endpoint is the backend service endpoint URL.
 	// For HTTP: "http://localhost:8001/rpc" or "https://service.example.com/api"
 	// For gRPC: "localhost:9001" or "service.example.com:9001"
-	Endpoint string `yaml:"endpoint" json:"endpoint"`
+	Endpoint string `yaml:"endpoint" json:"endpoint" mapstructure:"endpoint"`
 
 	// Timeout is the request timeout for this proxy.
 	// If zero, the default timeout is used.
-	Timeout time.Duration `yaml:"timeout" json:"timeout"`
+	Timeout time.Duration `yaml:"timeout" json:"timeout" mapstructure:"timeout"`
 
 	// HTTP configures HTTP-specific settings.
-	HTTP *HTTPProxyConfig `yaml:"http" json:"http"`
+	HTTP *HTTPProxyConfig `yaml:"http" json:"http" mapstructure:"http"`
 
 	// GRPC configures gRPC-specific settings.
-	GRPC *GRPCProxyConfig `yaml:"grpc" json:"grpc"`
+	GRPC *GRPCProxyConfig `yaml:"grpc" json:"grpc" mapstructure:"grpc"`
 
 	// Routes defines which requests should be routed to this proxy.
-	Routes []RouteConfig `yaml:"routes" json:"routes"`
+	Routes []RouteConfig `yaml:"routes" json:"routes" mapstructure:"routes"`
 }
 
 // HTTPProxyConfig contains HTTP-specific proxy settings.
 type HTTPProxyConfig struct {
 	// TLS configures HTTPS settings.
-	TLS *TLSConfig `yaml:"tls" json:"tls"`
+	TLS *TLSConfig `yaml:"tls" json:"tls" mapstructure:"tls"`
 
 	// Headers are additional headers to include in requests.
-	Headers map[string]string `yaml:"headers" json:"headers"`
+	Headers map[string]string `yaml:"headers" json:"headers" mapstructure:"headers"`
 }
 
 // TLSConfig contains TLS configuration for HTTP proxies.
 type TLSConfig struct {
 	// InsecureSkipVerify disables TLS certificate verification.
-	InsecureSkipVerify bool `yaml:"insecure_skip_verify" json:"insecure_skip_verify"`
+	InsecureSkipVerify bool `yaml:"insecure_skip_verify" json:"insecure_skip_verify" mapstructure:"insecure_skip_verify"`
 
 	// ServerName is the expected server name.
-	ServerName string `yaml:"server_name" json:"server_name"`
+	ServerName string `yaml:"server_name" json:"server_name" mapstructure:"server_name"`
 }
 
 // GRPCProxyConfig contains gRPC-specific proxy settings.
 type GRPCProxyConfig struct {
 	// Insecure disables TLS for gRPC connections.
-	Insecure bool `yaml:"insecure" json:"insecure"`
+	Insecure bool `yaml:"insecure" json:"insecure" mapstructure:"insecure"`
 }
 
 // RouteConfig defines a routing rule for the proxy.
 type RouteConfig struct {
 	// Channel is the channel pattern to match. Supports glob wildcards.
 	// Example: "chat.*" matches "chat.messages", "chat.presence", etc.
-	Channel string `yaml:"channel" json:"channel"`
+	Channel string `yaml:"channel" json:"channel" mapstructure:"channel"`
 
 	// Method is the method pattern to match. Supports glob wildcards.
 	// Example: "user.*" matches "user.get", "user.set", etc.
 	// Use "*" to match all methods.
-	Method string `yaml:"method" json:"method"`
+	Method string `yaml:"method" json:"method" mapstructure:"method"`
 }
 
 // DefaultRPCTimeout is the default timeout for RPC proxy requests.
