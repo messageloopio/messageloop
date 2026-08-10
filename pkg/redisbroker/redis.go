@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,7 +22,9 @@ type redisBroker struct {
 	client  *redis.Client
 	opts    *Options
 	handler messageloop.PublicationHandler
-	epoch   string
+	// epoch is set by initEpoch during Start and read concurrently by
+	// Publish/PublishTransient/Epoch, so it is guarded by atomic.Value.
+	epoch atomic.Value
 
 	// Subscription bookkeeping. Exact channels and wildcard patterns are
 	// reference counted: the hub removes a broker subscription whenever any
@@ -42,7 +45,6 @@ func New(cfg config.RedisConfig) messageloop.Broker {
 	return &redisBroker{
 		client:     newRedisClient(opts),
 		opts:       opts,
-		epoch:      uuid.NewString(),
 		subscribed: make(map[string]int),
 		wcCounts:   make(map[string]int),
 		wcHandles:  make(map[string]*topics.Subscription),
@@ -50,8 +52,9 @@ func New(cfg config.RedisConfig) messageloop.Broker {
 	}
 }
 
-// Start verifies the Redis connection and then runs the Pub/Sub consumer loop
-// until ctx is cancelled. Intended to be called as: go broker.Start(ctx, handler).
+// Start verifies the Redis connection, initializes the cluster-wide epoch,
+// and then runs the Pub/Sub consumer loop until ctx is cancelled. Intended to
+// be called as: go broker.Start(ctx, handler).
 func (b *redisBroker) Start(ctx context.Context, handler messageloop.PublicationHandler) error {
 	b.handler = handler
 
@@ -60,9 +63,30 @@ func (b *redisBroker) Start(ctx context.Context, handler messageloop.Publication
 	if err := b.client.Ping(pingCtx).Err(); err != nil {
 		return fmt.Errorf("redis broker: connect: %w", err)
 	}
+	if err := b.initEpoch(ctx); err != nil {
+		return fmt.Errorf("redis broker: init epoch: %w", err)
+	}
 
 	defer func() { _ = b.client.Close() }()
 	return b.runPubSubWithRetry(ctx)
+}
+
+// initEpoch derives the cluster-wide epoch from a fixed Redis key: the first
+// node to start creates it (SET NX) and every node (including restarts of the
+// same deployment) reuses the stored value, so a node restart does not
+// invalidate client offsets and force a full recovery.
+func (b *redisBroker) initEpoch(ctx context.Context) error {
+	c, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if _, err := b.client.SetNX(c, b.opts.EpochKey, uuid.NewString(), 0).Result(); err != nil {
+		return err
+	}
+	epoch, err := b.client.Get(c, b.opts.EpochKey).Result()
+	if err != nil {
+		return err
+	}
+	b.epoch.Store(epoch)
+	return nil
 }
 
 // isWildcardChannel reports whether ch is a wildcard pattern, consistent
@@ -138,7 +162,7 @@ func (b *redisBroker) Publish(ch string, payload []byte, isText bool) (uint64, e
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	msg := &redisMessage{Type: messageTypePublication, Channel: ch, Payload: payload, IsText: isText, Epoch: b.epoch}
+	msg := &redisMessage{Type: messageTypePublication, Channel: ch, Payload: payload, IsText: isText, Epoch: b.epochString()}
 
 	// First, write to stream to get the offset.
 	streamData, err := serializeMessage(msg)
@@ -181,7 +205,7 @@ func (b *redisBroker) PublishTransient(ch string, payload []byte, isText bool) (
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	msg := &redisMessage{Type: messageTypePublication, Channel: ch, Payload: payload, IsText: isText, Epoch: b.epoch}
+	msg := &redisMessage{Type: messageTypePublication, Channel: ch, Payload: payload, IsText: isText, Epoch: b.epochString()}
 	pubSubData, err := serializeMessage(msg)
 	if err != nil {
 		return 0, err
@@ -199,9 +223,22 @@ func (b *redisBroker) History(ch string, sinceOffset uint64, limit int) ([]*mess
 
 var _ messageloop.Broker = (*redisBroker)(nil)
 
-// Epoch returns the broker's epoch identifier.
+// Epoch returns the broker's epoch identifier. It is empty until Start has
+// initialized it; consumers treat an empty epoch conservatively (full
+// recovery).
 func (b *redisBroker) Epoch() string {
-	return b.epoch
+	if v := b.epoch.Load(); v != nil {
+		return v.(string)
+	}
+	return ""
+}
+
+// epochString returns the current epoch (empty before Start initializes it).
+func (b *redisBroker) epochString() string {
+	if v := b.epoch.Load(); v != nil {
+		return v.(string)
+	}
+	return ""
 }
 
 // Ping verifies connectivity to the backing Redis instance. It is exposed

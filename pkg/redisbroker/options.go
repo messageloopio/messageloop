@@ -15,6 +15,7 @@ const (
 	defaultClusterSessionLeasePrefix    = "ml:cluster:session:lease:"
 	defaultClusterSessionSnapshotPrefix = "ml:cluster:session:snapshot:"
 	defaultClusterChannelPrefix         = "ml:cluster:channel:"
+	defaultEpochKey                     = "ml:broker:epoch"
 	defaultStreamMaxLength              = 10000
 	defaultHistoryTTL                   = 24 * time.Hour
 	defaultPresenceTTL                  = 60 * time.Second
@@ -49,6 +50,8 @@ type Options struct {
 	ClusterSessionLeasePrefix    string
 	ClusterSessionSnapshotPrefix string
 	ClusterChannelPrefix         string
+	// EpochKey is the Redis key holding the cluster-wide broker epoch.
+	EpochKey string
 }
 
 // NewOptions creates Options from config.RedisConfig.
@@ -75,6 +78,7 @@ func NewOptions(cfg config.RedisConfig) *Options {
 		ClusterSessionLeasePrefix:    defaultClusterSessionLeasePrefix,
 		ClusterSessionSnapshotPrefix: defaultClusterSessionSnapshotPrefix,
 		ClusterChannelPrefix:         defaultClusterChannelPrefix,
+		EpochKey:                     defaultEpochKey,
 	}
 
 	if cfg.PoolSize > 0 {
