@@ -71,6 +71,12 @@ func (s *projectionQueryStore) ListChannels(context.Context) ([]ClusterChannelIn
 	}
 	return info, nil
 }
+func (s *projectionQueryStore) ListNodeProjections(context.Context) ([]ClusterNodeProjection, error) {
+	return nil, nil
+}
+func (s *projectionQueryStore) DeleteNodeProjection(context.Context, string, string) error {
+	return nil
+}
 
 func TestNode_EvictSessionForTakeover_RollsBackPartiallyRemovedChannels(t *testing.T) {
 	broker := &evictTestBroker{failUnsubCh: "evict.ch.2", subscribed: make(map[string]bool)}

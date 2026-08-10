@@ -137,6 +137,14 @@ func (noopClusterQueryStore) ListChannels(context.Context) ([]ClusterChannelInfo
 	return nil, nil
 }
 
+func (noopClusterQueryStore) ListNodeProjections(context.Context) ([]ClusterNodeProjection, error) {
+	return nil, nil
+}
+
+func (noopClusterQueryStore) DeleteNodeProjection(context.Context, string, string) error {
+	return nil
+}
+
 // SessionDirectory returns the cluster session directory adapter.
 func (r *Cluster) SessionDirectory() SessionDirectory {
 	if r == nil {

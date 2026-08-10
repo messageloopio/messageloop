@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 	"sort"
+	"strings"
 	"strconv"
 	"time"
 
@@ -150,6 +151,35 @@ func (s *redisClusterQueryStore) ListChannels(ctx context.Context) ([]messageloo
 		return channels[i].Name < channels[j].Name
 	})
 	return channels, nil
+}
+
+// ListNodeProjections returns the node:incarnation pairs that have owner
+// projections stored.
+func (s *redisClusterQueryStore) ListNodeProjections(ctx context.Context) ([]messageloop.ClusterNodeProjection, error) {
+	keys, err := scanKeys(ctx, s.client, s.opts.ClusterChannelPrefix+"owner:*")
+	if err != nil {
+		return nil, err
+	}
+	projections := make([]messageloop.ClusterNodeProjection, 0, len(keys))
+	prefix := s.opts.ClusterChannelPrefix + "owner:"
+	for _, key := range keys {
+		rest := strings.TrimPrefix(key, prefix)
+		parts := strings.SplitN(rest, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		projections = append(projections, messageloop.ClusterNodeProjection{NodeID: parts[0], IncarnationID: parts[1]})
+	}
+	return projections, nil
+}
+
+// DeleteNodeProjection removes the owner projection of node:incarnation.
+func (s *redisClusterQueryStore) DeleteNodeProjection(ctx context.Context, nodeID, incarnationID string) error {
+	if nodeID == "" || incarnationID == "" {
+		return nil
+	}
+	key := s.opts.ClusterChannelPrefix + "owner:" + nodeID + ":" + incarnationID
+	return s.client.Del(ctx, key).Err()
 }
 
 func scanKeys(ctx context.Context, client *redis.Client, pattern string) ([]string, error) {

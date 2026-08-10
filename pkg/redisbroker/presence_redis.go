@@ -37,6 +37,8 @@ func (s *redisPresenceStore) memberKey(ch, clientID string) string {
 }
 
 // Add records or refreshes the client's presence with an independent TTL.
+// The index key shares the member TTL so stale indexes cannot outlive their
+// members.
 func (s *redisPresenceStore) Add(ctx context.Context, ch string, info *messageloop.PresenceInfo) error {
 	data, err := json.Marshal(info)
 	if err != nil {
@@ -45,18 +47,28 @@ func (s *redisPresenceStore) Add(ctx context.Context, ch string, info *messagelo
 	pipe := s.client.Pipeline()
 	pipe.Set(ctx, s.memberKey(ch, info.ClientID), data, s.opts.PresenceTTL)
 	pipe.SAdd(ctx, s.indexKey(ch), info.ClientID)
-	pipe.Expire(ctx, s.indexKey(ch), s.opts.PresenceTTL*2)
+	pipe.Expire(ctx, s.indexKey(ch), s.opts.PresenceTTL)
 	_, err = pipe.Exec(ctx)
 	return err
 }
 
 // Remove deletes a client's membership entry and channel index reference.
+// An index left empty is removed entirely.
 func (s *redisPresenceStore) Remove(ctx context.Context, ch, clientID string) error {
 	pipe := s.client.Pipeline()
 	pipe.Del(ctx, s.memberKey(ch, clientID))
 	pipe.SRem(ctx, s.indexKey(ch), clientID)
-	_, err := pipe.Exec(ctx)
-	return err
+	if _, err := pipe.Exec(ctx); err != nil {
+		return err
+	}
+	count, err := s.client.SCard(ctx, s.indexKey(ch)).Result()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return s.client.Del(ctx, s.indexKey(ch)).Err()
+	}
+	return nil
 }
 
 // Get returns all currently present clients in ch.

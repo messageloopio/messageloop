@@ -123,6 +123,38 @@ func (r *clusterProjectionRepairer) repairOnce(ctx context.Context) error {
 	if r.node.metrics != nil {
 		r.node.metrics.ClusterProjectionRepairs.Inc()
 	}
+
+	// Reap owner projections whose node lease has expired: without this they
+	// linger until the projection TTL (10m) and keep phantom channels visible.
+	projections, err := r.store.ListNodeProjections(ctx)
+	if err != nil {
+		log.WarnContext(ctx, "failed to list node projections for reaping", err)
+		return nil
+	}
+	directory := r.node.clusterSessionDirectory()
+	for _, projection := range projections {
+		if projection.NodeID == r.node.ClusterNodeID() && projection.IncarnationID == r.node.ClusterIncarnationID() {
+			// The node's own projection is refreshed above; never reap it.
+			continue
+		}
+		lease, err := directory.GetNodeLease(ctx, projection.NodeID, projection.IncarnationID)
+		if err != nil {
+			log.WarnContext(ctx, "failed to check node lease for projection reaping",
+				err, "node_id", projection.NodeID, "incarnation_id", projection.IncarnationID)
+			continue
+		}
+		if lease != nil {
+			continue
+		}
+		if err := r.store.DeleteNodeProjection(ctx, projection.NodeID, projection.IncarnationID); err != nil {
+			log.WarnContext(ctx, "failed to reap dead owner projection",
+				err, "node_id", projection.NodeID, "incarnation_id", projection.IncarnationID)
+			continue
+		}
+		log.DebugContext(ctx, "reaped dead owner projection",
+			"node_id", projection.NodeID, "incarnation_id", projection.IncarnationID)
+	}
+
 	log.DebugContext(ctx, "cluster projection repair applied", "channels", len(counts))
 	return nil
 }

@@ -83,6 +83,14 @@ func (c *trackingClusterComponent) ListChannels(context.Context) ([]ClusterChann
 	return nil, nil
 }
 
+func (c *trackingClusterComponent) ListNodeProjections(context.Context) ([]ClusterNodeProjection, error) {
+	return nil, nil
+}
+
+func (c *trackingClusterComponent) DeleteNodeProjection(context.Context, string, string) error {
+	return nil
+}
+
 // failingClusterComponent fails its Start call exactly once, on the call
 // whose startCount equals failOn.
 type failingClusterComponent struct {

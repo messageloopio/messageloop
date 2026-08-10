@@ -360,6 +360,10 @@ When the server closes a connection, it sends a disconnect with a numeric code. 
 - Wildcard subscriptions use `*` to match a single level (e.g., `chat.*` matches `chat.general` but not `chat.rooms.1`).
 - Channel names are case-sensitive.
 
+## Presence
+
+Presence is tracked per subscribed channel (subscriptions with `ephemeral: true` are excluded). Presence join/leave events are published transiently on the internal `<channel>/__presence` channel (never written to history). Note: the `__presence` sub-channel currently has **no consumer** — presence state is served via the admin `GetPresence` API (backed by the presence store), not via pub/sub delivery. Clients that want realtime presence notifications must subscribe to the presence channel explicitly.
+
 ## Server-Side Admin API
 
 The gRPC admin API (`messageloop.server.v1.APIService`) provides server-side management:

@@ -17,6 +17,7 @@ type Metrics struct {
 	ClusterCommandUnknownFinalState prometheus.Counter
 	ClusterProjectionRepairs        prometheus.Counter
 	ClusterProjectionRepairFailures prometheus.Counter
+	PresencePublishFailures         prometheus.Counter
 }
 
 // NewMetrics creates and registers all Prometheus metrics.
@@ -89,6 +90,11 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name:      "cluster_projection_repair_failures_total",
 			Help:      "Total number of failed cluster projection repair passes.",
 		}),
+		PresencePublishFailures: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "messageloop",
+			Name:      "presence_publish_failures_total",
+			Help:      "Total number of failed presence join/leave event publications.",
+		}),
 	}
 	reg.MustRegister(
 		m.ConnectionsTotal,
@@ -104,6 +110,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.ClusterCommandUnknownFinalState,
 		m.ClusterProjectionRepairs,
 		m.ClusterProjectionRepairFailures,
+		m.PresencePublishFailures,
 	)
 	return m
 }

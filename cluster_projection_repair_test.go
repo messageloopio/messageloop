@@ -14,6 +14,10 @@ import (
 type repairTestQueryStore struct {
 	err      error
 	channels map[string]int64
+
+	// projection reaping bookkeeping (Task 13d).
+	projections []ClusterNodeProjection
+	deleted     []ClusterNodeProjection
 }
 
 func (s *repairTestQueryStore) Start(context.Context) error    { return nil }
@@ -33,6 +37,13 @@ func (s *repairTestQueryStore) ReplaceNodeChannels(_ context.Context, channels m
 }
 func (s *repairTestQueryStore) ListChannels(context.Context) ([]ClusterChannelInfo, error) {
 	return nil, nil
+}
+func (s *repairTestQueryStore) ListNodeProjections(context.Context) ([]ClusterNodeProjection, error) {
+	return s.projections, nil
+}
+func (s *repairTestQueryStore) DeleteNodeProjection(_ context.Context, nodeID, incarnationID string) error {
+	s.deleted = append(s.deleted, ClusterNodeProjection{NodeID: nodeID, IncarnationID: incarnationID})
+	return nil
 }
 
 func TestClusterProjectionRepairer_RecordsSuccessfulRepairMetrics(t *testing.T) {
@@ -64,4 +75,37 @@ func TestClusterProjectionRepairer_RecordsFailureMetrics(t *testing.T) {
 	require.EqualError(t, err, "repair failed")
 	require.Equal(t, float64(0), testutil.ToFloat64(node.metrics.ClusterProjectionRepairs))
 	require.Equal(t, float64(1), testutil.ToFloat64(node.metrics.ClusterProjectionRepairFailures))
+}
+
+// Task 13d: owner projections whose node lease has expired are reaped
+// immediately instead of lingering until the projection TTL.
+func TestClusterProjectionRepairer_ReapsDeadOwnerProjections(t *testing.T) {
+	directory := &fakeSessionDirectory{nodeLeases: map[string]*ClusterNodeLease{
+		"node-live:inc-live": {NodeID: "node-live", IncarnationID: "inc-live"},
+		"node-self:inc-self": {NodeID: "node-self", IncarnationID: "inc-self"},
+	}}
+	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-self", IncarnationID: "inc-self", Backend: "memory"}, ClusterDependencies{
+		SessionDirectory: directory,
+		CommandBus:       &fakeClusterCommandBus{},
+		QueryStore:       fakeQueryStore{},
+	})
+	require.NoError(t, err)
+
+	node := NewNode(nil)
+	node.SetCluster(runtime)
+	store := &repairTestQueryStore{projections: []ClusterNodeProjection{
+		{NodeID: "node-live", IncarnationID: "inc-live"},
+		{NodeID: "node-dead", IncarnationID: "inc-dead"},
+		{NodeID: "node-self", IncarnationID: "inc-self"},
+	}}
+	repairer := NewClusterProjectionRepairer(node, store, ClusterProjectionRepairerConfig{}).(*clusterProjectionRepairer)
+
+	require.NoError(t, repairer.repairOnce(context.Background()))
+
+	require.Contains(t, store.deleted, ClusterNodeProjection{NodeID: "node-dead", IncarnationID: "inc-dead"},
+		"owner projection without a node lease must be reaped")
+	require.NotContains(t, store.deleted, ClusterNodeProjection{NodeID: "node-live", IncarnationID: "inc-live"},
+		"owner projection with a live node lease must be kept")
+	require.NotContains(t, store.deleted, ClusterNodeProjection{NodeID: "node-self", IncarnationID: "inc-self"},
+		"the node's own projection must never be reaped")
 }

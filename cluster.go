@@ -81,12 +81,23 @@ type ClusterCommandBus interface {
 	BroadcastCommand(ctx context.Context, cmd *ClusterCommand) ([]*ClusterCommandResult, error)
 }
 
+// ClusterNodeProjection identifies one node's owner projection key.
+type ClusterNodeProjection struct {
+	NodeID        string
+	IncarnationID string
+}
+
 // ClusterQueryStore stores cluster-visible query projections.
 type ClusterQueryStore interface {
 	ClusterLifecycle
 	AdjustChannelSubscriptions(ctx context.Context, channel string, delta int64, ttl time.Duration) error
 	ReplaceNodeChannels(ctx context.Context, channels map[string]int64, ttl time.Duration) error
 	ListChannels(ctx context.Context) ([]ClusterChannelInfo, error)
+	// ListNodeProjections returns the node:incarnation pairs with stored
+	// owner projections.
+	ListNodeProjections(ctx context.Context) ([]ClusterNodeProjection, error)
+	// DeleteNodeProjection removes the owner projection of node:incarnation.
+	DeleteNodeProjection(ctx context.Context, nodeID, incarnationID string) error
 }
 
 // ClusterNodeLeaseManager renews cluster node liveness.

@@ -13,6 +13,8 @@ type fakeSessionDirectory struct {
 	lease     *ClusterSessionLease
 	snapshot  *ClusterSessionSnapshot
 	nodeLease *ClusterNodeLease
+	// nodeLeases overrides nodeLease lookups keyed by "nodeID:incarnationID".
+	nodeLeases map[string]*ClusterNodeLease
 
 	// CAS bookkeeping (see CompareAndSwapSessionLease).
 	casCalls     int
@@ -29,7 +31,10 @@ func (f *fakeSessionDirectory) Shutdown(context.Context) error { return nil }
 func (f *fakeSessionDirectory) PutNodeLease(context.Context, *ClusterNodeLease, time.Duration) error {
 	return nil
 }
-func (f *fakeSessionDirectory) GetNodeLease(context.Context, string, string) (*ClusterNodeLease, error) {
+func (f *fakeSessionDirectory) GetNodeLease(_ context.Context, nodeID, incarnationID string) (*ClusterNodeLease, error) {
+	if f.nodeLeases != nil {
+		return f.nodeLeases[nodeID+":"+incarnationID], nil
+	}
 	return f.nodeLease, nil
 }
 func (f *fakeSessionDirectory) PutSessionLease(context.Context, *ClusterSessionLease, time.Duration) error {
@@ -112,6 +117,10 @@ func (fakeQueryStore) ReplaceNodeChannels(context.Context, map[string]int64, tim
 	return nil
 }
 func (fakeQueryStore) ListChannels(context.Context) ([]ClusterChannelInfo, error) { return nil, nil }
+func (fakeQueryStore) ListNodeProjections(context.Context) ([]ClusterNodeProjection, error) {
+	return nil, nil
+}
+func (fakeQueryStore) DeleteNodeProjection(context.Context, string, string) error { return nil }
 
 type noopTransport struct{}
 
