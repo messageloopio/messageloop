@@ -13,7 +13,8 @@ import (
 )
 
 // getHistory retrieves publications from the Redis Stream for ch with
-// offset >= sinceOffset. limit <= 0 returns all available entries.
+// offset >= sinceOffset, matching the Broker.History contract (broker.go).
+// limit <= 0 returns all available entries.
 func (b *redisBroker) getHistory(ch string, sinceOffset uint64, limit int) ([]*messageloop.Publication, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -24,7 +25,8 @@ func (b *redisBroker) getHistory(ch string, sinceOffset uint64, limit int) ([]*m
 		limit = messageloop.DefaultHistoryLimit
 	}
 
-	// Build start ID. Use exclusive form "(ts-seq" so we start AFTER sinceOffset.
+	// Build start ID. Use the inclusive form "ts-seq" so the range starts AT
+	// sinceOffset: the Broker contract is offset >= sinceOffset.
 	start := streamStartID(sinceOffset)
 
 	messages, err := b.client.XRangeN(ctx, stream, start, "+", int64(limit)).Result()
@@ -53,8 +55,9 @@ func (b *redisBroker) getHistory(ch string, sinceOffset uint64, limit int) ([]*m
 	return pubs, nil
 }
 
-// streamStartID builds the exclusive Redis Stream start ID ("(ts-seq") for the
-// given offset, so the range starts AFTER the message at sinceOffset.
+// streamStartID builds the inclusive Redis Stream start ID ("ts-seq") for the
+// given offset, so the range starts AT the message at sinceOffset (matching
+// the Broker.History contract: offset >= sinceOffset).
 // The zero offset maps to "0", i.e. the beginning of the stream.
 func streamStartID(sinceOffset uint64) string {
 	if sinceOffset == 0 {
@@ -62,7 +65,7 @@ func streamStartID(sinceOffset uint64) string {
 	}
 	ts := sinceOffset >> 20
 	seq := sinceOffset & 0xFFFFF
-	return fmt.Sprintf("(%d-%d", ts, seq)
+	return fmt.Sprintf("%d-%d", ts, seq)
 }
 
 // parseStreamOffset converts a Redis Stream ID ("ts-seq") into a uint64 offset.

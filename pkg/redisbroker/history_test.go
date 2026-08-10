@@ -56,9 +56,9 @@ func TestStreamStartID(t *testing.T) {
 		want        string
 	}{
 		{name: "zero offset", sinceOffset: 0, want: "0"},
-		{name: "first message", sinceOffset: ts << 20, want: "(1750000000000-0"},
-		{name: "seq above 1000", sinceOffset: ts<<20 | 1000, want: "(1750000000000-1000"},
-		{name: "seq near cap", sinceOffset: ts<<20 | 0xFFFFF, want: "(1750000000000-1048575"},
+		{name: "first message", sinceOffset: ts << 20, want: "1750000000000-0"},
+		{name: "seq above 1000", sinceOffset: ts<<20 | 1000, want: "1750000000000-1000"},
+		{name: "seq near cap", sinceOffset: ts<<20 | 0xFFFFF, want: "1750000000000-1048575"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -77,7 +77,41 @@ func TestStreamOffsetFullRoundTrip(t *testing.T) {
 	}
 	for _, id := range ids {
 		offset := parseStreamOffset(id)
-		// The exclusive start ID must reconstruct the same (ts-seq) pair.
-		require.Equal(t, "("+id, streamStartID(offset), "id %q", id)
+		// The inclusive start ID must reconstruct the same (ts-seq) pair.
+		require.Equal(t, id, streamStartID(offset), "id %q", id)
 	}
+}
+
+// TestRedisBroker_History_InclusiveSinceOffset verifies that History honors
+// the Broker contract (offset >= sinceOffset) against real Redis: recovering
+// from o2 must return o2 and o3, not just o3.
+func TestRedisBroker_History_InclusiveSinceOffset(t *testing.T) {
+	redisCfg := requireCommandBusRedis(t)
+	broker := New(redisCfg).(*redisBroker)
+	t.Cleanup(func() { _ = broker.client.Close() })
+
+	ch := "history-inclusive"
+	offsets := make([]uint64, 0, 3)
+	for i := 0; i < 3; i++ {
+		offset, err := broker.Publish(ch, []byte("msg-"+string(rune('a'+i))), false)
+		require.NoError(t, err)
+		require.NotZero(t, offset)
+		offsets = append(offsets, offset)
+	}
+	o1, o2, o3 := offsets[0], offsets[1], offsets[2]
+	require.Less(t, o1, o2)
+	require.Less(t, o2, o3)
+
+	// Recovery from o2 must include o2 itself and o3 (exclusive behavior
+	// would only return o3).
+	pubs, err := broker.History(ch, o2, 0)
+	require.NoError(t, err)
+	require.Len(t, pubs, 2, "History(ch, o2) must return o2 and o3")
+	require.Equal(t, o2, pubs[0].Offset)
+	require.Equal(t, o3, pubs[1].Offset)
+
+	// Full scan regression: from the beginning all three must be returned.
+	all, err := broker.History(ch, 0, 0)
+	require.NoError(t, err)
+	require.Len(t, all, 3, "History(ch, 0) must return all entries")
 }
