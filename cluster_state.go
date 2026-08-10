@@ -300,7 +300,11 @@ func (n *Node) clusterSessionSnapshot(client *Client) *ClusterSessionSnapshot {
 	sort.Strings(channels)
 	subscriptions := make([]ClusterSubscriptionSnapshot, 0, len(channels))
 	for _, channel := range channels {
-		subscriptions = append(subscriptions, ClusterSubscriptionSnapshot{Channel: channel})
+		ephemeral := false
+		if sub, ok := n.hub.LookupSubscriber(channel, client); ok {
+			ephemeral = sub.Ephemeral
+		}
+		subscriptions = append(subscriptions, ClusterSubscriptionSnapshot{Channel: channel, Ephemeral: ephemeral})
 	}
 
 	return &ClusterSessionSnapshot{

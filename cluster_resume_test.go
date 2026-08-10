@@ -344,3 +344,25 @@ func TestClient_RemoteResume_RestoreFailureRollsBackSession(t *testing.T) {
 	require.True(t, directory.deletedLease, "lease must be cleaned up")
 	require.True(t, directory.deletedSnapshot, "snapshot must be cleaned up")
 }
+// Task 13e: session snapshots must preserve the per-subscription ephemeral
+// flag so a cross-node resume does not turn ephemeral subscriptions into
+// permanent ones (which would trigger presence join/leave).
+func TestNode_ClusterSessionSnapshot_PreservesEphemeral(t *testing.T) {
+	node := NewNode(nil)
+	client, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
+	require.NoError(t, err)
+	client.ForceTestIDs("sess-ephemeral", "user-ephemeral", "client-ephemeral")
+	require.NoError(t, node.AddClient(client))
+
+	require.NoError(t, node.AddSubscription(context.Background(), "ephemeral.ch", NewSubscriber(client, true)))
+	require.NoError(t, node.AddSubscription(context.Background(), "normal.ch", NewSubscriber(client, false)))
+
+	snapshot := node.clusterSessionSnapshot(client)
+	require.Len(t, snapshot.Subscriptions, 2)
+	byChannel := make(map[string]bool, len(snapshot.Subscriptions))
+	for _, sub := range snapshot.Subscriptions {
+		byChannel[sub.Channel] = sub.Ephemeral
+	}
+	require.True(t, byChannel["ephemeral.ch"], "ephemeral subscription must stay ephemeral in the snapshot")
+	require.False(t, byChannel["normal.ch"], "permanent subscription must stay non-ephemeral in the snapshot")
+}
