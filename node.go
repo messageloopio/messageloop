@@ -846,6 +846,9 @@ func (n *Node) PublishPresenceJoin(channel, clientID, userID string) {
 	if err != nil {
 		log.WarnContext(context.Background(), "failed to publish presence join event",
 			err, "channel", channel, "client_id", clientID)
+		if n.metrics != nil {
+			n.metrics.PresencePublishFailures.Inc()
+		}
 	}
 }
 
@@ -862,5 +865,8 @@ func (n *Node) PublishPresenceLeave(channel, clientID, userID string) {
 	if err != nil {
 		log.WarnContext(context.Background(), "failed to publish presence leave event",
 			err, "channel", channel, "client_id", clientID)
+		if n.metrics != nil {
+			n.metrics.PresencePublishFailures.Inc()
+		}
 	}
 }

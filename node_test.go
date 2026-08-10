@@ -910,3 +910,38 @@ func TestNode_ClusterPublishCommand_MessagesDeliveredMetric(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.MessagesDelivered))
 }
+// failTransientBroker fails every transient publish so presence events fail.
+type failTransientBroker struct{}
+
+func (failTransientBroker) Start(context.Context, PublicationHandler) error { return nil }
+func (failTransientBroker) Subscribe(string) error                          { return nil }
+func (failTransientBroker) Unsubscribe(string) error                        { return nil }
+func (failTransientBroker) Publish(string, *Publication) (uint64, error)    { return 0, nil }
+func (failTransientBroker) PublishTransient(string, *Publication) error {
+	return errors.New("injected transient failure")
+}
+func (failTransientBroker) History(string, uint64, int) ([]*Publication, error) { return nil, nil }
+
+// Task 13d follow-up (P1): presence publish failures must increment the
+// PresencePublishFailures gauge, and successful publishes must not.
+func TestNode_PublishPresenceFailure_IncrementsMetric(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	metrics := NewMetrics(reg)
+	node := NewNode(nil)
+	node.SetMetrics(metrics)
+	node.SetBroker(failTransientBroker{})
+
+	node.PublishPresenceJoin("chat", "c1", "u1")
+	node.PublishPresenceLeave("chat", "c1", "u1")
+	require.Equal(t, float64(2), testutil.ToFloat64(metrics.PresencePublishFailures),
+		"failed presence publishes must be counted")
+
+	// Successful publishes (memory broker, no handler) must not count.
+	okReg := prometheus.NewRegistry()
+	okMetrics := NewMetrics(okReg)
+	okNode := NewNode(nil)
+	okNode.SetMetrics(okMetrics)
+	okNode.PublishPresenceJoin("chat", "c2", "u2")
+	okNode.PublishPresenceLeave("chat", "c2", "u2")
+	require.Equal(t, float64(0), testutil.ToFloat64(okMetrics.PresencePublishFailures))
+}
