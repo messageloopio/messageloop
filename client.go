@@ -323,6 +323,12 @@ func (c *Client) HandleMessage(ctx context.Context, in *clientpb.InboundMessage)
 }
 
 func (c *Client) handleMessage(ctx context.Context, in *clientpb.InboundMessage) error {
+	// Every inbound message except Connect requires an authenticated
+	// session. Anonymous mode still authenticates through Connect (it simply
+	// has no token), so this cannot reject anonymous clients.
+	if _, isConnect := in.Envelope.(*clientpb.InboundMessage_Connect); !isConnect && !c.Authenticated() {
+		return DisconnectInvalidToken
+	}
 
 	switch msg := in.Envelope.(type) {
 	case *clientpb.InboundMessage_Connect:
@@ -343,8 +349,10 @@ func (c *Client) handleMessage(ctx context.Context, in *clientpb.InboundMessage)
 		return c.handleSurvey(ctx, in, msg.SurveyRequest)
 	case *clientpb.InboundMessage_SurveyReply:
 		return c.handleSurveyReply(ctx, in, msg.SurveyReply)
+	default:
+		// Unknown or empty envelope: reject instead of silently dropping.
+		return DisconnectBadRequest
 	}
-	return nil
 }
 
 const (
@@ -1246,13 +1254,16 @@ func (c *Client) ResetActivity() {
 	c.lastActivity = time.Now()
 }
 
-// ForceTestIDs overrides the session, user, and client IDs for testing purposes.
+// ForceTestIDs overrides the session, user, and client IDs for testing
+// purposes. It also marks the client authenticated so test clients that are
+// wired directly (bypassing Connect) can still exercise message handlers.
 func (c *Client) ForceTestIDs(sessionID, userID, clientID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.session = sessionID
 	c.user = userID
 	c.client = clientID
+	c.authenticated = true
 	if c.clusterLeaseVersion == 0 {
 		c.clusterLeaseVersion = 1
 	}

@@ -340,6 +340,19 @@ func TestClientSession_HandleMessage_Ping(t *testing.T) {
 		t.Fatalf("NewClient() error = %v", err)
 	}
 
+	// First authenticate (all non-connect messages require authentication).
+	connectMsg := &clientpb.InboundMessage{
+		Id: "msg-0",
+		Envelope: &clientpb.InboundMessage_Connect{
+			Connect: &clientpb.Connect{},
+		},
+	}
+	err = client.HandleMessage(ctx, connectMsg)
+	if err != nil {
+		t.Fatalf("HandleMessage() Connect error = %v", err)
+	}
+	transport.messages = nil
+
 	msg := &clientpb.InboundMessage{
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_Ping{
@@ -688,6 +701,79 @@ func TestClientSession_Send_TransportError(t *testing.T) {
 	if err == nil {
 		t.Error("Send() should return error when transport write fails")
 	}
+}
+
+// assertDisconnectBeforeAuth handles a message before Connect and asserts the
+// client is disconnected with DisconnectInvalidToken.
+func assertDisconnectBeforeAuth(t *testing.T, msg *clientpb.InboundMessage) {
+	t.Helper()
+	ctx := context.Background()
+	node := NewNode(nil)
+	transport := &capturingTransport{}
+
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	err = client.HandleMessage(ctx, msg)
+	if err != nil {
+		t.Fatalf("HandleMessage() should not return error for disconnect, got %v", err)
+	}
+
+	if !transport.isClosed() {
+		t.Error("Transport should be closed after message before auth")
+	}
+
+	reason := transport.getCloseReason()
+	if reason.Code != DisconnectInvalidToken.Code {
+		t.Errorf("Close code should be %d (invalid token), got %d", DisconnectInvalidToken.Code, reason.Code)
+	}
+}
+
+func TestClientSession_HandleMessage_Subscribe_BeforeAuth(t *testing.T) {
+	assertDisconnectBeforeAuth(t, &clientpb.InboundMessage{
+		Id: "msg-1",
+		Envelope: &clientpb.InboundMessage_Subscribe{
+			Subscribe: &clientpb.Subscribe{
+				Subscriptions: []*clientpb.Subscription{{Channel: "channel-1"}},
+			},
+		},
+	})
+}
+
+func TestClientSession_HandleMessage_RPC_BeforeAuth(t *testing.T) {
+	assertDisconnectBeforeAuth(t, &clientpb.InboundMessage{
+		Id: "msg-1",
+		Envelope: &clientpb.InboundMessage_RpcRequest{
+			RpcRequest: &clientpb.RpcRequest{Channel: "channel-1", Method: "echo"},
+		},
+	})
+}
+
+func TestClientSession_HandleMessage_Unsubscribe_BeforeAuth(t *testing.T) {
+	assertDisconnectBeforeAuth(t, &clientpb.InboundMessage{
+		Id: "msg-1",
+		Envelope: &clientpb.InboundMessage_Unsubscribe{
+			Unsubscribe: &clientpb.Unsubscribe{
+				Subscriptions: []*clientpb.Subscription{{Channel: "channel-1"}},
+			},
+		},
+	})
+}
+
+func TestClientSession_HandleMessage_Ping_BeforeAuth(t *testing.T) {
+	assertDisconnectBeforeAuth(t, &clientpb.InboundMessage{
+		Id:       "msg-1",
+		Envelope: &clientpb.InboundMessage_Ping{Ping: &clientpb.Ping{}},
+	})
+}
+
+func TestClientSession_HandleMessage_SubRefresh_BeforeAuth(t *testing.T) {
+	assertDisconnectBeforeAuth(t, &clientpb.InboundMessage{
+		Id:       "msg-1",
+		Envelope: &clientpb.InboundMessage_SubRefresh{SubRefresh: &clientpb.SubRefresh{}},
+	})
 }
 
 func TestClientSession_HandleMessage_Unsupported(t *testing.T) {
