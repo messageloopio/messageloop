@@ -158,6 +158,15 @@ func TestRedisBroker_Reconnect_CatchesUpMissedMessages(t *testing.T) {
 	}
 	brokerA.pubsubMu.Unlock()
 
+	// Wait until the consumer has actually torn down the subscription before
+	// publishing the missed messages, so they cannot be delivered live by the
+	// old connection (which would make the catch-up path nondeterministic).
+	require.Eventually(t, func() bool {
+		brokerA.pubsubMu.Lock()
+		defer brokerA.pubsubMu.Unlock()
+		return brokerA.activePubSub == nil
+	}, 5*time.Second, 25*time.Millisecond)
+
 	// Publish two more messages while the consumer is disconnected.
 	for i := 0; i < 2; i++ {
 		offset, err := brokerB.Publish("catchup-ch", &messageloop.Publication{Payload: []byte("missed"), Kind: messageloop.PayloadKindBinary})

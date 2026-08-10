@@ -80,13 +80,6 @@ func (b *redisBroker) runPubSub(ctx context.Context) error {
 				continue
 			}
 
-			// Deduplicate against the catch-up window: after a reconnect the
-			// live stream may deliver a message that catchUpMissed already
-			// replayed (or vice versa).
-			if b.offsetDelivered(channelName, redisMsg.Offset) {
-				continue
-			}
-
 			pub := &messageloop.Publication{
 				Channel:     channelName,
 				Offset:      redisMsg.Offset,
@@ -101,10 +94,7 @@ func (b *redisBroker) runPubSub(ctx context.Context) error {
 			if pub.Time == 0 {
 				pub.Time = time.Now().UnixMilli()
 			}
-			if b.handler != nil {
-				_ = b.handler(channelName, pub)
-			}
-			b.recordDeliveredOffset(channelName, redisMsg.Offset)
+			b.deliverOnce(channelName, pub)
 		}
 	}
 }
@@ -146,13 +136,9 @@ func (b *redisBroker) catchUpMissed(ctx context.Context) {
 			if err != nil || redisMsg.Type != messageTypePublication {
 				continue
 			}
-			offset := parseStreamOffset(m.ID)
-			if b.offsetDelivered(ch, offset) {
-				continue
-			}
 			pub := &messageloop.Publication{
 				Channel:     ch,
-				Offset:      offset,
+				Offset:      parseStreamOffset(m.ID),
 				Epoch:       redisMsg.Epoch,
 				Payload:     redisMsg.Payload,
 				Kind:        redisMsg.Kind,
@@ -164,36 +150,42 @@ func (b *redisBroker) catchUpMissed(ctx context.Context) {
 			if pub.Time == 0 {
 				pub.Time = time.Now().UnixMilli()
 			}
-			if b.handler != nil {
-				_ = b.handler(ch, pub)
-			}
-			b.recordDeliveredOffset(ch, offset)
+			b.deliverOnce(ch, pub)
 		}
 	}
 }
 
-// offsetDelivered reports whether the given channel offset was already
-// delivered (i.e. it is at or below the recorded last offset).
-func (b *redisBroker) offsetDelivered(channel string, offset uint64) bool {
-	if offset == 0 {
-		return false
-	}
-	b.subMu.RLock()
-	defer b.subMu.RUnlock()
-	last, ok := b.lastOffsets[channel]
-	return ok && last >= offset
-}
-
-// recordDeliveredOffset advances the per-channel last offset when offset is
-// newer than the recorded one.
-func (b *redisBroker) recordDeliveredOffset(channel string, offset uint64) {
-	if offset == 0 {
+// deliverOnce hands a publication to the handler exactly once per channel
+// offset. The duplicate check, the lastOffset advance and the delivery run
+// inside one critical section, so live delivery and reconnect catch-up can
+// never double-deliver regardless of how they interleave: the second
+// deliverer always observes the offset as already recorded.
+func (b *redisBroker) deliverOnce(channel string, pub *messageloop.Publication) {
+	if pub.Offset == 0 {
+		// Transient publications have no stream offset and cannot be
+		// deduplicated; deliver unconditionally.
+		if b.handler != nil {
+			_ = b.handler(channel, pub)
+		}
 		return
 	}
+
+	b.deliverMu.Lock()
+	defer b.deliverMu.Unlock()
+
+	b.subMu.RLock()
+	last, ok := b.lastOffsets[channel]
+	b.subMu.RUnlock()
+	if ok && last >= pub.Offset {
+		return
+	}
+
 	b.subMu.Lock()
-	defer b.subMu.Unlock()
-	if last, ok := b.lastOffsets[channel]; !ok || offset > last {
-		b.lastOffsets[channel] = offset
+	b.lastOffsets[channel] = pub.Offset
+	b.subMu.Unlock()
+
+	if b.handler != nil {
+		_ = b.handler(channel, pub)
 	}
 }
 

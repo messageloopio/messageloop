@@ -47,6 +47,11 @@ type redisBroker struct {
 	// replayed delivery. Guarded by subMu.
 	lastOffsets map[string]uint64
 
+	// deliverMu serializes check+record+deliver for a single offset so live
+	// delivery and catch-up can never double-deliver, no matter the
+	// interleaving between the two paths.
+	deliverMu sync.Mutex
+
 	// activePubSub is the live pub/sub subscription; tests close it to
 	// simulate a disconnect. Guarded by pubsubMu.
 	pubsubMu     sync.Mutex
