@@ -559,7 +559,16 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 	}
 	if resumeSnapshot != nil {
 		if err := c.node.restoreSessionSubscriptions(ctx, c, resumeSnapshot.Subscriptions); err != nil {
-			return err
+			// Roll back the partially restored session: remove the hub
+			// registration and the cluster lease/snapshot, then disconnect
+			// the new connection. Without this the session lingers as a
+			// zombie that cannot be resumed.
+			c.node.hub.RemoveSession(c.SessionID())
+			if delErr := c.node.deleteClusterSessionState(context.Background(), c.SessionID()); delErr != nil {
+				log.WarnContext(ctx, "failed to clean cluster session state after restore failure",
+					"session", c.SessionID(), "error", delErr)
+			}
+			return DisconnectStale
 		}
 	}
 

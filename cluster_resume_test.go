@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/messageloopio/messageloop/config"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -264,4 +266,75 @@ func TestResumeRemoteSession_CASConflictAborts(t *testing.T) {
 	require.False(t, resumed)
 	require.Empty(t, bus.commands, "no takeover command may be issued after a CAS conflict")
 	require.False(t, client.hasSubscription("news"), "no subscriptions may be restored after a CAS conflict")
+}
+// failSubscribeBroker fails every Subscribe so remote subscription restore
+// aborts midway.
+type failSubscribeBroker struct{}
+
+func (b *failSubscribeBroker) Start(context.Context, PublicationHandler) error { return nil }
+func (b *failSubscribeBroker) Subscribe(ch string) error                        { return errors.New("injected subscribe failure") }
+func (b *failSubscribeBroker) Unsubscribe(ch string) error                      { return nil }
+func (b *failSubscribeBroker) Publish(string, *Publication) (uint64, error)     { return 0, nil }
+func (b *failSubscribeBroker) PublishTransient(string, *Publication) error      { return nil }
+func (b *failSubscribeBroker) History(string, uint64, int) ([]*Publication, error) {
+	return nil, nil
+}
+
+// Task 13b: when restoring a remote session's subscriptions fails, the
+// partially restored session must be rolled back: no zombie session in the
+// hub and no leftover lease/snapshot.
+func TestClient_RemoteResume_RestoreFailureRollsBackSession(t *testing.T) {
+	ctx := context.Background()
+	directory := &recordingSessionDirectory{fakeSessionDirectory: &fakeSessionDirectory{
+		lease: &ClusterSessionLease{
+			SessionID:     "sess-remote",
+			NodeID:        "node-b",
+			IncarnationID: "inc-b",
+			LeaseVersion:  3,
+			ExpiresAt:     time.Now().Add(time.Hour),
+		},
+		snapshot: &ClusterSessionSnapshot{
+			SessionID:     "sess-remote",
+			UserID:        "user-1",
+			ClientID:      "client-1",
+			Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "news"}},
+		},
+	}}
+	bus := &fakeClusterCommandBus{result: &ClusterCommandResult{Status: ClusterCommandStatusSucceeded}}
+	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-a", IncarnationID: "inc-a", Backend: "memory"}, ClusterDependencies{
+		SessionDirectory: directory,
+		CommandBus:       bus,
+		QueryStore:       fakeQueryStore{},
+	})
+	require.NoError(t, err)
+
+	node := NewNode(&config.Server{RequireAuth: true})
+	node.SetCluster(runtime)
+	node.SetBroker(&failSubscribeBroker{})
+	authProxy := &connectAuthProxyStub{userID: "user-1"}
+	require.NoError(t, node.AddProxy(authProxy, "", SystemMethodAuthenticate))
+
+	transport := &capturingTransport{}
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
+	require.NoError(t, err)
+
+	resumeMsg := &clientpb.InboundMessage{
+		Id: "msg-1",
+		Envelope: &clientpb.InboundMessage_Connect{
+			Connect: &clientpb.Connect{
+				ClientId:  "client-1",
+				Token:     "ok-token",
+				SessionId: "sess-remote",
+			},
+		},
+	}
+	require.NoError(t, client.HandleMessage(ctx, resumeMsg))
+
+	// The new connection is closed...
+	require.True(t, transport.isClosed(), "the new connection must be disconnected")
+
+	// ...and no zombie session or cluster state remains.
+	require.Nil(t, node.Hub().LookupSession("sess-remote"), "no zombie session in the hub")
+	require.True(t, directory.deletedLease, "lease must be cleaned up")
+	require.True(t, directory.deletedSnapshot, "snapshot must be cleaned up")
 }
