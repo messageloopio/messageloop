@@ -194,7 +194,7 @@ func TestMemoryBroker_Publish_CallsHandler(t *testing.T) {
 	}
 }
 
-func TestMemoryBroker_Publish_IsText(t *testing.T) {
+func TestMemoryBroker_Publish_Kind(t *testing.T) {
 	b, cp, cancel := newTestBroker(t, MemoryBrokerOptions{})
 	defer cancel()
 
