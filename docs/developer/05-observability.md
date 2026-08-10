@@ -4,7 +4,7 @@
 
 MessageLoop 服务器在进程内提供三类可观测性出口：
 
-- **管理面 HTTP 服务器**：监听 `server.http.addr`（默认为 `127.0.0.1:8080`，为空时回退到该值，见[《配置参考》](configuration.md)的 server 节），只挂载两个端点：
+- **管理面 HTTP 服务器**：监听 `server.http.addr`（默认为 `127.0.0.1:8080`，为空时回退到该值，见[《配置参考》](02-configuration.md)的 server 节），只挂载两个端点：
   - `GET /health` —— 健康检查，返回 JSON 状态；
   - `GET /metrics` —— Prometheus 指标，文本格式。
 - **结构化日志**：由 lynx 框架输出（`cmd/server/main.go` 中 `app.SetLogger(zap.MustNewLogger(app))`，日志后端为 zap），核心包通过 `github.com/lynx-go/x/log` 写入带上下文的键值对日志。
@@ -166,7 +166,7 @@ curl -s http://127.0.0.1:8080/metrics | grep '^messageloop_'
 
 - 3510 在代码中未定义；
 - 收到 35xx 终态码时，除 3503 外均可在修正根因后重连；重连策略与错误展示的协议细节见 [../protocol.md](../protocol.md) 的 Error Codes 与 Disconnect Codes 章节；
-- 服务端目前**没有**按断连码输出的指标，按码统计断连数需要从客户端侧聚合断连事件（SDK 在收到断开通知时可上报，见 [sdk-go.md](sdk-go.md)、[sdk-ts.md](sdk-ts.md)）。
+- 服务端目前**没有**按断连码输出的指标，按码统计断连数需要从客户端侧聚合断连事件（SDK 在收到断开通知时可上报，见[《Go SDK 指南》](07-sdk-go.md)、[《TypeScript SDK 指南》](08-sdk-ts.md)）。
 
 ## 6. 监控建议
 
@@ -178,7 +178,7 @@ curl -s http://127.0.0.1:8080/metrics | grep '^messageloop_'
 | 投递失败率上升 | `messageloop_delivery_failures_total` 与 `messageloop_messages_delivered_total` 的速率比 | 比率持续 > 1%：慢消费者或传输写失败（参见日志 `send publication error`） |
 | RPC 延迟劣化 | `messageloop_rpc_duration_seconds` 的 P99（`histogram_quantile`） | 与 `server.rpc_timeout`（默认 30s）对比；P99 接近超时值即应告警，同时观察 `RPC request timeout` 日志 |
 | 发布延迟劣化 | `messageloop_message_publish_duration_seconds` 的 P99 | 内存 broker 下应远小于毫秒级；偏高说明广播扇出大或订阅者写阻塞 |
-| 集群节点离线 | 外部探测：每个节点的 `/health`；集群节点数与租约状态见 [cluster.md](cluster.md) | 节点 `/health` 连续 N 次 503 即告警；注意非集群模式下 `/health` 不会探测 Redis，`redis` 字段为 `not applicable` |
+| 集群节点离线 | 外部探测：每个节点的 `/health`；集群节点数与租约状态见[《分布式集群指南》](04-cluster.md) | 节点 `/health` 连续 N 次 503 即告警；注意非集群模式下 `/health` 不会探测 Redis，`redis` 字段为 `not applicable` |
 | 集群命令健康 | `messageloop_cluster_command_timeouts_total`、`messageloop_cluster_command_unknown_final_state_total` | 两者速率 > 0 即排查：Redis 延迟、命令总线故障、节点租约丢失 |
 | 投影修复失败 | `messageloop_cluster_projection_repair_failures_total` | 速率 > 0 即告警：查询投影与真实状态不一致的风险 |
 | 心跳超时断连 | 无专用指标：用日志（`idle timeout` 相关）或客户端侧 3511 断连码计数 | 大量 3511 说明客户端未按时 Ping，检查客户端保活逻辑 |
@@ -196,8 +196,8 @@ curl -s http://127.0.0.1:8080/metrics | grep '^messageloop_'
 | 症状 | 检查步骤 | 可能根因 |
 | --- | --- | --- |
 | 客户端频繁断连 | 1) 客户端侧记录断连码（§5）；2) 以 Debug 级别查服务端日志；3) 检查 `messageloop_connections_total` 是否抖动 | 3511 心跳超时（客户端未 Ping）；3512 慢消费者（频道吞吐超客户端消费能力）；3504/3505 连接/订阅超限；3500 token 失效或 `require_auth` 配置 |
-| RPC 超时 | 1) 查 `messageloop_rpc_duration_seconds` P99 与 `RPC request timeout` 日志；2) 核对 `server.rpc_timeout` 与各代理 `proxy[].timeout`（三层超时见[《架构指南》](architecture.md)与[《配置参考》](configuration.md)）；3) 直接调用代理后端测量延迟 | 代理后端变慢或不可达；超时配置过短；路由未命中（此时表现为 echo 回显而非超时，见 [../protocol.md](../protocol.md)） |
-| 集群不生效 | 1) 核对 `cluster.enabled`、`cluster.node_id`、`broker.type=redis`（集群要求 Redis broker，配置校验见[《配置参考》](configuration.md)）；2) 查 `messageloop_cluster_command_timeouts_total` 与 `cluster node lease renewal failed` 日志；3) 调 `/health` 看 `redis` 字段；4) 确认各节点 `node_id` 唯一 | Redis 不可达/延迟高；`node_id` 冲突导致租约抖动；命令总线故障（见 [cluster.md](cluster.md) 与 [../deployment.md](../deployment.md) 的多节点章节） |
-| 消息丢失或延迟 | 1) 对比 `messageloop_messages_published_total` 与 `messageloop_messages_delivered_total` 速率；2) 查 `messageloop_delivery_failures_total` 与 `send publication error` 日志；3) 检查 `messageloop_active_channels` 是否符合预期 | 慢消费者写阻塞（3512）；订阅未建立（查 `messageloop_subscriptions_total`）；通配订阅匹配问题（见[《架构指南》](architecture.md)的 topic matcher 章节） |
+| RPC 超时 | 1) 查 `messageloop_rpc_duration_seconds` P99 与 `RPC request timeout` 日志；2) 核对 `server.rpc_timeout` 与各代理 `proxy[].timeout`（三层超时见[《架构指南》](01-architecture.md)与[《配置参考》](02-configuration.md)）；3) 直接调用代理后端测量延迟 | 代理后端变慢或不可达；超时配置过短；路由未命中（此时表现为 echo 回显而非超时，见 [../protocol.md](../protocol.md)） |
+| 集群不生效 | 1) 核对 `cluster.enabled`、`cluster.node_id`、`broker.type=redis`（集群要求 Redis broker，配置校验见[《配置参考》](02-configuration.md)）；2) 查 `messageloop_cluster_command_timeouts_total` 与 `cluster node lease renewal failed` 日志；3) 调 `/health` 看 `redis` 字段；4) 确认各节点 `node_id` 唯一 | Redis 不可达/延迟高；`node_id` 冲突导致租约抖动；命令总线故障（见[《分布式集群指南》](04-cluster.md) 与[《部署指南》](../deployment.md) 的多节点章节） |
+| 消息丢失或延迟 | 1) 对比 `messageloop_messages_published_total` 与 `messageloop_messages_delivered_total` 速率；2) 查 `messageloop_delivery_failures_total` 与 `send publication error` 日志；3) 检查 `messageloop_active_channels` 是否符合预期 | 慢消费者写阻塞（3512）；订阅未建立（查 `messageloop_subscriptions_total`）；通配订阅匹配问题（见[《架构指南》](01-architecture.md)的 topic matcher 章节） |
 | `/health` 返回 503 | 1) 读响应体：`broker` 字段为 `not ready` 还是 `redis` 字段为 `unreachable`；2) 前者等 broker 就绪（启动早期正常），后者检查 Redis 连通性 | 启动阶段 broker 未就绪；集群模式下 Redis 不可达（探测 2 秒超时） |
 | 管理 API 或监控端无响应 | 1) 确认 `server.http.addr` 端口可达（默认 `127.0.0.1:8080`，仅回环）；2) 确认与客户端监听端口区分开（见 [../deployment.md](../deployment.md) 的 Listener Model） | 端口未绑定或绑定到回环导致外部不可达；进程崩溃（配合 `messageloop_connections_total` 归零确认） |

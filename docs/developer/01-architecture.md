@@ -2,7 +2,7 @@
 
 本文档描述 MessageLoop 服务器的总体架构与核心组件设计，面向希望理解或修改服务端代码的开发者。文中所有类型名、方法名、常量与行为均以仓库源码为准。
 
-配套文档：《配置参考》(configuration.md)、《管理 API 参考》(admin-api.md)、《分布式集群指南》(cluster.md)、《可观测性指南》(observability.md)、《开发指南》(development.md)、[《客户端协议参考》](../protocol.md) 与 [《部署指南》](../deployment.md)。
+配套文档：[《配置参考》](02-configuration.md)、[《管理 API 参考》](03-admin-api.md)、[《分布式集群指南》](04-cluster.md)、[《可观测性指南》](05-observability.md)、[《开发指南》](06-development.md)、[《客户端协议参考》](../protocol.md) 与[《部署指南》](../deployment.md)。
 
 ## 1. 概述
 
@@ -49,8 +49,8 @@ MessageLoop 的核心设计目标可以归纳为四点：
 | `Survey` | survey.go、node.go | 向频道订阅者广播请求并带超时收集响应 |
 | `ACL` | acl.go | 基于频道 glob 模式与用户白名单的访问控制 |
 | `Proxy` | proxy/ | RPC 转发与鉴权/ACL/生命周期钩子的后端集成 |
-| `Cluster` | cluster.go、cluster_*.go | 可选的 Redis 支撑分布式控制面（详见 cluster.md） |
-| `Metrics` | metrics.go | Prometheus 指标收集（详见 observability.md） |
+| `Cluster` | cluster.go、cluster_*.go | 可选的 Redis 支撑分布式控制面（详见[《分布式集群指南》](04-cluster.md)） |
+| `Metrics` | metrics.go | Prometheus 指标收集（详见[《可观测性指南》](05-observability.md)） |
 
 ## 3. 核心组件
 
@@ -426,7 +426,7 @@ Hub 的 `wcSubs` 记录每个通配符订阅（键 `sessionID:channel`），广�
 
 集群模式是可选的 Redis 支撑分布式控制面：节点间通过 Redis 共享会话目录、命令总线与查询投影，支持跨节点会话恢复、远程订阅/退订/断开、远程发布与集群级 Survey，并由节点租约与投影修复机制维护最终一致。注意集群模式要求 `broker.type=redis`（配置校验强制）。
 
-本文档不展开集群细节；设计、拓扑与运维说明见《分布式集群指南》(cluster.md)。
+本文档不展开集群细节；设计、拓扑与运维说明见[《分布式集群指南》](04-cluster.md)。
 
 ## 10. 模块布局
 

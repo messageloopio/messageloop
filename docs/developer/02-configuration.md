@@ -1,6 +1,6 @@
 # 配置参考
 
-本文档是 MessageLoop 配置项的逐字段权威参考。所有字段名、类型、默认值与校验规则均对照源码核实（`config/config.go`、`defaults.go`、`cmd/server/main.go`、`cmd/server/runtime.go`、`pkg/redisbroker/`、`proxy/`、`pkg/websocket/`、`pkg/grpcstream/`）。协议与部署层面的说明见 [../protocol.md](../protocol.md) 与 [../deployment.md](../deployment.md)。
+本文档是 MessageLoop 配置项的逐字段权威参考。所有字段名、类型、默认值与校验规则均对照源码核实（`config/config.go`、`defaults.go`、`cmd/server/main.go`、`cmd/server/runtime.go`、`pkg/redisbroker/`、`proxy/`、`pkg/websocket/`、`pkg/grpcstream/`）。协议与部署层面的说明见[《客户端协议参考》](../protocol.md) 与[《部署指南》](../deployment.md)。
 
 ## 概述
 
@@ -96,8 +96,8 @@ server:
 
 | 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `server.http.addr` | string | `127.0.0.1:8080` | 管理 HTTP 监听地址，暴露 `/health` 与 `/metrics`（`cmd/server/main.go:217-225`）。为空时回退到 `127.0.0.1:8080`。集群模式下 `/health` 会附带探测 Redis 连通性（`cmd/server/main.go:57-59`）。指标说明见 [observability.md](observability.md) |
-| `server.grpc_admin.addr` | string | 未设置 | 管理 gRPC API 监听地址（`serverpb.APIService`）。启动时必须有效：`prepareGRPCServers` 会无条件预绑定该监听器（见 [启动要求](#启动要求)）。接口清单见 [admin-api.md](admin-api.md) |
+| `server.http.addr` | string | `127.0.0.1:8080` | 管理 HTTP 监听地址，暴露 `/health` 与 `/metrics`（`cmd/server/main.go:217-225`）。为空时回退到 `127.0.0.1:8080`。集群模式下 `/health` 会附带探测 Redis 连通性（`cmd/server/main.go:57-59`）。指标说明见[《可观测性指南》](05-observability.md) |
+| `server.grpc_admin.addr` | string | 未设置 | 管理 gRPC API 监听地址（`serverpb.APIService`）。启动时必须有效：`prepareGRPCServers` 会无条件预绑定该监听器（见 [启动要求](#启动要求)）。接口清单见[《管理 API 参考》](03-admin-api.md) |
 | `server.grpc_admin.tls.cert_file` / `.key_file` | string | 未设置 | 管理 gRPC 的 TLS 证书与私钥，二者必须成对设置（`Config.Validate()` 规则 3）。设置后经 `credentials.NewServerTLSFromFile` 加载（`pkg/grpcstream/server.go:56-62`） |
 | `server.grpc_admin.auth_token` | string | 未设置 | 管理 API 的 Bearer token，通过 `authorization: Bearer <token>` 头传递，采用常量时间比较（`pkg/grpcstream/server.go:81-103`）。为空则不启用鉴权拦截器（`pkg/grpcstream/admin_server.go:12-14`），生产环境不建议留空 |
 | `server.heartbeat.idle_timeout` | string | 未设置 | 客户端心跳空闲超时。**字段为空 = 完全禁用心跳**（`node.go:82-90`，不创建 `HeartbeatManager`）；非空时解析失败回退到 `DefaultHeartbeatIdleTimeout`（300s）。启用后每个客户端会话在 `idle_timeout` 内无任何活动即被断开（`DisconnectIdleTimeout`，`heartbeat.go:38-60`），对 WebSocket 与 gRPC 传输同时生效。WebSocket 读超时与其联动，见 [transport.websocket 节](#transportwebsocket-节) |
@@ -259,7 +259,7 @@ cluster:
 
 启用 Redis 集群时，控制面组件与 broker 共用同一个 `broker.redis` 配置（`cmd/server/main.go:116-131`），并使用 `ml:cluster:` 前缀的键。另外集群模式下 `/health` 端点会附带 Redis 连通性探测（`cmd/server/main.go:57-59`）。
 
-拓扑、会话迁移与故障转移语义见 [cluster.md](cluster.md)。
+拓扑、会话迁移与故障转移语义见[《分布式集群指南》](04-cluster.md)。
 
 ## proxy 节
 
@@ -437,4 +437,4 @@ proxy:
 - **共享同一套 Redis 设置**：集群控制面与 broker 共用 `broker.redis` 段（`addr` / `password` / `db`，`cmd/server/main.go:116-131`），各节点必须指向同一 Redis 实例与数据库，才能共享会话目录、命令总线与查询投影。键空间通过 `ml:` 前缀隔离，无需额外配置；
 - **`cluster.node_id` 必须全局唯一**：它是节点租约、命令路由与会话所有权的标识（`cluster.go:27-30`），重复的 `node_id` 会导致租约冲突与命令投递错乱；
 - 各节点面向客户端的监听地址（`transport.websocket.addr` / `transport.grpc.addr`）与 `server.http.addr` / `server.grpc_admin.addr` 应各不相同（负载均衡器对外暴露，节点间不直接互连）；
-- 管理面与客户端面的端口分离语义见 [architecture.md](architecture.md)；完整的集群拓扑、会话迁移与故障恢复说明见 [cluster.md](cluster.md)。
+- 管理面与客户端面的端口分离语义见[《架构指南》](01-architecture.md)；完整的集群拓扑、会话迁移与故障恢复说明见[《分布式集群指南》](04-cluster.md)。

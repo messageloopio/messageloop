@@ -2,7 +2,7 @@
 
 本文档描述 MessageLoop 的分布式集群（distributed cluster）机制：多个服务端节点如何通过共享的 Redis 构成一个逻辑集群，以及会话归属、远端接管、集群级 Survey、投影修复、Presence 聚合等集群特有行为的原理与运维要点。文中所有类型名、方法名、Redis 键前缀、默认值与行为均以仓库源码为准。
 
-配套文档：《架构指南》[architecture.md](architecture.md)（通用架构）、《配置参考》[configuration.md](configuration.md)（全部配置字段）、《管理 API 参考》[admin-api.md](admin-api.md)、《可观测性指南》[observability.md](observability.md)、《开发指南》[development.md](development.md)，以及 [《客户端协议参考》](../protocol.md) 与 [《部署指南》](../deployment.md)。
+配套文档：[《架构指南》](01-architecture.md)（通用架构）、[《配置参考》](02-configuration.md)（全部配置字段）、[《管理 API 参考》](03-admin-api.md)、[《可观测性指南》](05-observability.md)、[《开发指南》](06-development.md)，以及[《客户端协议参考》](../protocol.md) 与[《部署指南》](../deployment.md)。
 
 ## 1. 概述
 
@@ -292,7 +292,7 @@ hash 的字段是频道名、值是本节点在该频道的订阅者计数。增
 
 - 发布路径（`redis.go` 的 `Publish`）：先 `XADD` 写入 `ml:stream:<channel>`（`StreamMaxLength` 默认 10000 条、`StreamApproximate` 默认 true，`HistoryTTL` 默认 24 小时），从 Stream ID 解析出 offset；再 `PUBLISH` 到 `ml:pubsub:<channel>` 做实时分发。任意节点发布，全部节点共享同一份历史。
 - 消费路径（`pubsub.go`）：每个节点 `PSUBSCRIBE ml:pubsub:*` 模式订阅，只处理本节点登记过兴趣（`Subscribe`）的频道；断线以指数退避重连（1 秒起、上限 30 秒）。
-- **offset 语义**：offset 由 Stream ID 编码而来，`offset = ts<<20 | seq`（毫秒时间戳与序列号拼入 uint64，`history.go`）。历史查询 `History(ch, sinceOffset, limit)` 用**排他**起始 ID（`"(ts-seq"`，`streamStartID`）——即 Redis broker 下 `since_offset` 是**不包含**（exclusive）语义，返回 `offset > since_offset`；`limit <= 0` 时上限为 `DefaultHistoryLimit`（1000 条）。内存 broker 的 `since_offset` 则是包含（inclusive）语义（见 [admin-api.md](admin-api.md) 的 GetHistory 一节）。
+- **offset 语义**：offset 由 Stream ID 编码而来，`offset = ts<<20 | seq`（毫秒时间戳与序列号拼入 uint64，`history.go`）。历史查询 `History(ch, sinceOffset, limit)` 用**排他**起始 ID（`"(ts-seq"`，`streamStartID`）——即 Redis broker 下 `since_offset` 是**不包含**（exclusive）语义，返回 `offset > since_offset`；`limit <= 0` 时上限为 `DefaultHistoryLimit`（1000 条）。内存 broker 的 `since_offset` 则是包含（inclusive）语义（见[《管理 API 参考》](03-admin-api.md) 的 GetHistory 一节）。
 - 由于历史与 offset 都来自共享的 Redis Stream，跨节点查询历史得到的是同一份数据；但跨节点**恢复**时的 offset 校验受各节点 broker epoch 不同的影响（见 4.4）。
 - 瞬时消息（`PublishTransient`，presence 事件等）不写 Stream，offset 恒为 0，永不进入历史。
 
@@ -340,11 +340,11 @@ hash 的字段是频道名、值是本节点在该频道的订阅者计数。增
 
 集群模式下健康端点（`/health`，`server.http.addr`）附加 Redis 连通性探测：以 2 秒超时调用 broker 的 `Ping`，失败时返回 503、JSON 中 `status: "not ready"`、`redis: "unreachable"`（`health.go`）。关键日志关键字：`cluster command received`（含 `command_id`、`issued_by`）、`cluster command dedupe hit`、`cluster command timed out waiting for reply`、`cluster projection repair applied`（debug 级）。
 
-指标采集、暴露与告警建议见《可观测性指南》[observability.md](observability.md)。
+指标采集、暴露与告警建议见[《可观测性指南》](05-observability.md)。
 
 ## 11. 管理 API 的集群感知行为
 
-管理 API（`messageloop.server.v1.APIService`，详见 [admin-api.md](admin-api.md)）在集群模式下行为变化，概览如下：
+管理 API（`messageloop.server.v1.APIService`，详见[《管理 API 参考》](03-admin-api.md)）在集群模式下行为变化，概览如下：
 
 | 操作 | 集群模式下的行为 |
 | --- | --- |
@@ -355,4 +355,4 @@ hash 的字段是频道名、值是本节点在该频道的订阅者计数。增
 | `GetPresence` | Presence 存储为 Redis 实现，返回全集群在线成员 |
 | `GetHistory` | 从共享 Redis Stream 读取，`since_offset` 为不包含（exclusive）语义，跨节点数据一致 |
 
-非集群模式下上述操作只作用于本节点。完整语义、请求/响应格式与示例见 [admin-api.md](admin-api.md) 的「集群感知行为」一节。
+非集群模式下上述操作只作用于本节点。完整语义、请求/响应格式与示例见[《管理 API 参考》](03-admin-api.md) 的「集群感知行为」一节。

@@ -199,7 +199,7 @@ go run cmd/server/main.go --config ./config.yaml
 - `--config <path>`：配置文件路径，默认 `./config.yaml`。
 - `--log-level <level>`：日志级别，默认 `info`。
 
-默认监听端口（可通过配置覆盖，详见 `configuration.md`）：
+默认监听端口（可通过配置覆盖，详见[《配置参考》](02-configuration.md)）：
 
 | 监听器 | 配置键 | 默认值 |
 | --- | --- | --- |
@@ -231,7 +231,7 @@ npm run lint       # ESLint 检查 src/
 - `tsconfig.json`：ES2020 目标、`strict` 开启，输出 `dist/esm`；`tsconfig.node.json` 负责 CJS 输出。
 - 测试由 `jest.config.js` 配置，preset 为 `ts-jest`，环境 `node`，roots 为 `test/`。
 - `src/proto/` 下为 buf 生成的代码，不要手工编辑（见[Protobuf 工作流](#protobuf-工作流)）；手写封装位于 `src/client/`、`src/message/`、`src/transport/`。
-- 详细用法见 `sdk-ts.md`。
+- 详细用法见[《TypeScript SDK 指南》](08-sdk-ts.md)。
 
 ## 发布流程
 
@@ -246,13 +246,13 @@ CI 在 push/PR 合并前自动执行构建、vet、带竞态与覆盖率的测�
 
 ## 交叉链接
 
-- 部署：`../deployment.md`
-- 协议定义：`../protocol.md`
-- 架构：`architecture.md`
-- 配置：`configuration.md`
-- 管理 API：`admin-api.md`
-- 集群：`cluster.md`
-- 可观测性：`observability.md`
-- Go SDK：`sdk-go.md`
-- TypeScript SDK：`sdk-ts.md`
-- 文档总览：`index.md`
+- 部署：[《部署指南》](../deployment.md)
+- 协议定义：[《客户端协议参考》](../protocol.md)
+- 架构：[《架构指南》](01-architecture.md)
+- 配置：[《配置参考》](02-configuration.md)
+- 管理 API：[《管理 API 参考》](03-admin-api.md)
+- 集群：[《分布式集群指南》](04-cluster.md)
+- 可观测性：[《可观测性指南》](05-observability.md)
+- Go SDK：[《Go SDK 指南》](07-sdk-go.md)
+- TypeScript SDK：[《TypeScript SDK 指南》](08-sdk-ts.md)
+- 文档总览：[《开发者文档》](README.md)

@@ -1,6 +1,6 @@
 # Go SDK 指南
 
-本文介绍官方 Go 客户端 SDK 的安装与使用。SDK 位于仓库 `sdks/go/` 目录，是一个独立的 Go module，包含客户端（WebSocket / gRPC 两种传输）、消息类型以及代理（proxy）后端支持。协议层面的细节（子协议、消息信封、断连码）请参阅《客户端协议参考》（[../protocol.md](../protocol.md)），本文不再重复。
+本文介绍官方 Go 客户端 SDK 的安装与使用。SDK 位于仓库 `sdks/go/` 目录，是一个独立的 Go module，包含客户端（WebSocket / gRPC 两种传输）、消息类型以及代理（proxy）后端支持。协议层面的细节（子协议、消息信封、断连码）请参阅[《客户端协议参考》](../protocol.md)，本文不再重复。
 
 ## 概述
 
@@ -13,7 +13,7 @@
   - 心跳（ping/pong）；
   - 代理后端支持：在业务服务中以 gRPC 实现 RPC 处理、认证、ACL 与生命周期钩子，供服务端回调。
 - **依赖**：`gorilla/websocket`、`google.golang.org/grpc`、`google.golang.org/protobuf`、`github.com/google/uuid`，以及同仓库的 `github.com/messageloopio/messageloop/shared`（生成代码与序列化器）。仓库内通过 `replace github.com/messageloopio/messageloop/shared => ./../../shared` 指向本地目录。
-- **与其他 SDK 的关系**：TypeScript SDK 提供等价能力，API 设计与本文描述的概念一一对应，参见《TypeScript SDK 指南》（[sdk-ts.md](./sdk-ts.md)）。
+- **与其他 SDK 的关系**：TypeScript SDK 提供等价能力，API 设计与本文描述的概念一一对应，参见[《TypeScript SDK 指南》](08-sdk-ts.md)。
 
 ## 安装
 
@@ -29,7 +29,7 @@ go get github.com/messageloopio/messageloop/sdks/go
 import messageloopgo "github.com/messageloopio/messageloop/sdks/go"
 ```
 
-发布版本遵循 `sdks/go/vX.Y.Z` 形式的模块标签（见《开发指南》[development.md](./development.md) 的发布流程一节）。仓库内开发时，SDK 通过 `replace` 指令直接引用本地的 `shared` 模块。
+发布版本遵循 `sdks/go/vX.Y.Z` 形式的模块标签（见[《开发指南》](06-development.md) 的发布流程一节）。仓库内开发时，SDK 通过 `replace` 指令直接引用本地的 `shared` 模块。
 
 ## 快速开始
 
@@ -305,7 +305,7 @@ proxy, err := messageloopgo.NewProxyServer(
 // proxy 实现 lynx.Service 生命周期接口：Start(ctx) / Stop(ctx)
 ```
 
-`NewProxyServer(opts ProxyServerOptions, handler proxypb.ProxyServiceServer) (*ProxyServer, error)` 创建 gRPC 代理服务；`Insecure` 为 true 时使用明文凭据（开发默认）。服务端侧的代理集成（路由、超时）见《架构文档》[architecture.md](./architecture.md) 与配置文档 [configuration.md](./configuration.md)。
+`NewProxyServer(opts ProxyServerOptions, handler proxypb.ProxyServiceServer) (*ProxyServer, error)` 创建 gRPC 代理服务；`Insecure` 为 true 时使用明文凭据（开发默认）。服务端侧的代理集成（路由、超时）见[《架构指南》](01-architecture.md) 与[《配置参考》](02-configuration.md)。
 
 ### RPCMux：RPC 路由与中间件
 
@@ -322,7 +322,7 @@ proxy, err := messageloopgo.NewProxyServer(
 
 - 运行时错误通过 `OnError(fn func(error))` 回调下发。服务端返回的错误信封（非 RPC 场景）转为 `server error: <message> (code: <code>)` 形式。
 - 挂起 RPC 的错误信封按 ID 路由到对应 `RPC` 调用，使其快速失败（见上文）。
-- 服务端主动断开连接时使用**数字断连码**（disconnect code），各码值的语义与客户端应如何解读见《客户端协议参考》[../protocol.md](../protocol.md) 的 Disconnect Codes 一节（例如 3503 `DisconnectForceNoReconnect` 表示服务端要求不要重连）。断连码全集与定义见《架构文档》[architecture.md](./architecture.md)。
+- 服务端主动断开连接时使用**数字断连码**（disconnect code），各码值的语义与客户端应如何解读见[《客户端协议参考》](../protocol.md) 的 Disconnect Codes 一节（例如 3503 `DisconnectForceNoReconnect` 表示服务端要求不要重连）。断连码全集与定义见[《架构指南》](01-architecture.md)。
 - 重连策略：默认关闭；开启后按「重连与会话恢复」一节所述退避重试，达到 `ReconnectMaxAttempts` 后调用 `OnError` 上报最终失败。服务端要求不重连（force no-reconnect）时，客户端行为与协议约定保持一致即可——SDK 目前不依据断连码区分重连决策。
 
 ## 示例清单
@@ -352,4 +352,4 @@ go build ./...
 go test ./...
 ```
 
-测试套件包含 `client_test.go`、`message_test.go`、`proxy_test.go` 等（重连、RPC 竞态、处理器覆盖等场景）。环境要求、仓库模块划分与发布流程（`sdks/go/vX.Y.Z` 标签）见《开发指南》[development.md](./development.md)。
+测试套件包含 `client_test.go`、`message_test.go`、`proxy_test.go` 等（重连、RPC 竞态、处理器覆盖等场景）。环境要求、仓库模块划分与发布流程（`sdks/go/vX.Y.Z` 标签）见[《开发指南》](06-development.md)。

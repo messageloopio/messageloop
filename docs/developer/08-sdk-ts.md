@@ -9,15 +9,15 @@
 - WebSocket 客户端（浏览器原生 `WebSocket` 与 Node.js 双环境）
 - 消息构造辅助：JSON、文本（text）、二进制（binary）三种载荷
 - 频道订阅、取消订阅与发布
-- RPC 请求/回复（`client.rpc`，服务端经 proxy 转发，见 [architecture.md](architecture.md)）
-- 心跳（Ping/Pong）与断线自动重连、会话恢复（offset + epoch 语义，见 [architecture.md](architecture.md) 第 3.4 节）
+- RPC 请求/回复（`client.rpc`，服务端经 proxy 转发，见[《架构指南》](01-architecture.md)）
+- 心跳（Ping/Pong）与断线自动重连、会话恢复（offset + epoch 语义，见[《架构指南》](01-architecture.md) 第 3.4 节）
 - JSON 与 protobuf 两种线上编码
 
 **不支持 Survey**：`parseOutboundMessage` 虽能识别 `surveyRequest` / `surveyReply` 信封，但 `MessageLoopClient` 不处理这两种消息，SDK 也未暴露 survey 相关 API。
 
 包同时输出 ESM（`dist/esm`）、CommonJS（`dist/cjs`）与类型声明（`dist/types`），并在 `exports` 中按 `import` / `require` 条件分发。运行时依赖仅 `@bufbuild/protobuf`（`^2.0.0`）。
 
-与 [Go SDK 指南](sdk-go.md) 对应：两者共享同一份 `shared/genproto` 协议定义与线上协议（见 [../protocol.md](../protocol.md)）；本 SDK 目前仅实现 WebSocket 传输，不暴露 gRPC 传输。
+与 [Go SDK 指南](07-sdk-go.md) 对应：两者共享同一份 `shared/genproto` 协议定义与线上协议（见[《客户端协议参考》](../protocol.md)）；本 SDK 目前仅实现 WebSocket 传输，不暴露 gRPC 传输。
 
 ## 2. 安装
 
@@ -294,19 +294,19 @@ interface Transport {
 | `JSONCodec`（`jsonCodec` 单例） | `messageloop+json` | 文本帧 | proto3 JSON 映射：入站用蛇形字段名（如 `subscribe_ack`），出站做 `envelope.case` ↔ 字段名转换；`BigInt` 序列化为字符串 |
 | `ProtobufCodec`（`protobufCodec` 单例） | `messageloop+proto` | 二进制帧（`useBytes()` 为 `true`） | 基于 `@bufbuild/protobuf` 的 `toBinary()` / `fromBinary()` |
 
-编码通过 `setEncoding("json" | "proto")` 选择，默认 `"json"`。`codec.name()` 会作为 WebSocket 子协议在握手时协商（`Sec-WebSocket-Protocol`），与服务端子协议 `messageloop+json` / `messageloop+proto` 对应，见 [../protocol.md](../protocol.md) 的「传输协商」一节。
+编码通过 `setEncoding("json" | "proto")` 选择，默认 `"json"`。`codec.name()` 会作为 WebSocket 子协议在握手时协商（`Sec-WebSocket-Protocol`），与服务端子协议 `messageloop+json` / `messageloop+proto` 对应，见[《客户端协议参考》](../protocol.md) 的「传输协商」一节。
 
 ### 心跳与会话恢复（`src/client/client.ts`）
 
 - **心跳**：连接建立后按 `pingInterval` 发送 `Ping`，等待 `Pong`；超过 `pingTimeout` 未收到即触发错误并关闭连接（进而走重连）。
 - **重连**：断连后按指数退避（`reconnectInitialDelay * 2^attempts`，封顶 `reconnectMaxDelay`）自动重连，`reconnectMaxAttempts` 为 `0` 时无限重试。
-- **会话恢复**：重连时的 `Connect` 会携带原 `sessionId`、当前 `epoch` 与各频道最后收到的 `offset`（`recover: true`）。服务端 `Connected` 回复 `resumed` 为 `false` 时，SDK 会对 `subscribedChannels` 全部重新订阅。offset/epoch 的语义与恢复边界见 [architecture.md](architecture.md) 第 3.4 节。
+- **会话恢复**：重连时的 `Connect` 会携带原 `sessionId`、当前 `epoch` 与各频道最后收到的 `offset`（`recover: true`）。服务端 `Connected` 回复 `resumed` 为 `false` 时，SDK 会对 `subscribedChannels` 全部重新订阅。offset/epoch 的语义与恢复边界见[《架构指南》](01-architecture.md) 第 3.4 节。
 
 ## 8. 浏览器使用
 
 - **打包方式**：包发布 ESM 与 CJS 双格式（`exports` 按 `import`/`require` 分发），推荐经 bundler（Vite、webpack、Rollup 等）引入 `@messageloop/sdk`。仓库示例为免构建的用法：以 `<script type="module">` 直接引用构建产物 `dist/esm/index.js`（见 `sdks/ts/examples/browser/index.html`），使用前需先 `npm run build`。
 - **WebSocket 实现**：浏览器使用原生 `WebSocket`（`globalThis.WebSocket`），无需安装 `ws`。
-- **连接地址**：示例连到 `ws://localhost:9080/ws`，端口为服务端 `transport.websocket.addr`（见 [configuration.md](configuration.md)）。
+- **连接地址**：示例连到 `ws://localhost:9080/ws`，端口为服务端 `transport.websocket.addr`（见[《配置参考》](02-configuration.md)）。
 - **与 Node 的差异**：浏览器环境受限于原生 WebSocket（不支持自定义 header）；`crypto.randomUUID()` 需要安全上下文（HTTPS 或 localhost）；`ReceivedMessage.offset` 为 `bigint`，JSON 编码下会被序列化为字符串。
 
 ## 9. 错误处理
@@ -320,7 +320,7 @@ SDK 层的错误形态均为原生 `Error`，来源与附加信息如下（`src/
 
 连接期间发生的错误默认不会终止客户端：`onError` 触发后，若处于 `connected` 状态且开启自动重连，会进入重连流程；应用可调用 `disableAutoReconnect()` 停止重试，或 `close()` 彻底关闭。
 
-**断开码（disconnect code）**：服务端关闭连接时以 WebSocket close 帧携带数字断开码（如 `3000` ConnectionClosed、`3503` ForceNoReconnect、`3500` InvalidToken 等，完整表见 [../protocol.md](../protocol.md) 的「Disconnect Codes」一节）。SDK 不把 close code 映射为类型化错误，也不会依据断开码调整重连策略；若服务端强制断开（如令牌失效），需应用层自行通过 `onClosed` / `addStateChangeHandler` 感知并决定是否 `disableAutoReconnect()`。
+**断开码（disconnect code）**：服务端关闭连接时以 WebSocket close 帧携带数字断开码（如 `3000` ConnectionClosed、`3503` ForceNoReconnect、`3500` InvalidToken 等，完整表见[《客户端协议参考》](../protocol.md) 的「Disconnect Codes」一节）。SDK 不把 close code 映射为类型化错误，也不会依据断开码调整重连策略；若服务端强制断开（如令牌失效），需应用层自行通过 `onClosed` / `addStateChangeHandler` 感知并决定是否 `disableAutoReconnect()`。
 
 ## 10. 构建与测试
 
@@ -333,8 +333,8 @@ npm run lint      # ESLint 检查 src/
 
 - 构建由三个 `tsc` 调用完成：`build:esm`、`build:cjs`、`build:types`。
 - 测试用 Jest（preset `ts-jest`，roots 为 `test/`），目前覆盖客户端选项构造（`test/client.test.ts`）与编解码（`test/codec.test.ts`）两组用例。
-- `src/proto/` 下的代码由 buf 生成，不要手工编辑；开发流程与 Protobuf 工作流见 [development.md](development.md) 的「TypeScript SDK 开发」与「Protobuf 工作流」两节。
+- `src/proto/` 下的代码由 buf 生成，不要手工编辑；开发流程与 Protobuf 工作流见[《开发指南》](06-development.md) 的「TypeScript SDK 开发」与「Protobuf 工作流」两节。
 
 ## 11. 发布
 
-执行 `task release-sdk-ts`：清理 `dist` → `npm run build` → `npm publish --access public`（发布到 `https://registry.npmjs.org/`）。npm 包版本（`package.json` 的 `version`）独立于 Go 侧的 git 标签，需要手动递增，详见 [development.md](development.md) 的「发布流程」一节。
+执行 `task release-sdk-ts`：清理 `dist` → `npm run build` → `npm publish --access public`（发布到 `https://registry.npmjs.org/`）。npm 包版本（`package.json` 的 `version`）独立于 Go 侧的 git 标签，需要手动递增，详见[《开发指南》](06-development.md) 的「发布流程」一节。

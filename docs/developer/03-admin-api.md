@@ -10,7 +10,7 @@
 messageloop.server.v1.APIService
 ```
 
-所有 RPC 均为普通一元调用（unary call），不涉及流式传输。管理 API 监听在独立的端口上，地址由配置项 `server.grpc_admin.addr` 指定（见《配置参考》[configuration.md](configuration.md)）。在进程内部，管理 API 的处理器与客户端流共享同一个 `Node` 实例，因此管理操作直接作用于在线客户端会话。
+所有 RPC 均为普通一元调用（unary call），不涉及流式传输。管理 API 监听在独立的端口上，地址由配置项 `server.grpc_admin.addr` 指定（见[《配置参考》](02-configuration.md)）。在进程内部，管理 API 的处理器与客户端流共享同一个 `Node` 实例，因此管理操作直接作用于在线客户端会话。
 
 服务共声明 8 个 RPC：
 
@@ -55,7 +55,7 @@ authorization: Bearer <token>
 
 ### TLS
 
-当 `server.grpc_admin.tls.cert_file` 与 `server.grpc_admin.tls.key_file` 成对设置时，管理服务器以 TLS 方式服务；二者必须同时设置或同时留空（配置校验见《配置参考》[configuration.md](configuration.md)）。
+当 `server.grpc_admin.tls.cert_file` 与 `server.grpc_admin.tls.key_file` 成对设置时，管理服务器以 TLS 方式服务；二者必须同时设置或同时留空（配置校验见《配置参考》[02-configuration.md](02-configuration.md)）。
 
 ### grpcurl 调用
 
@@ -108,7 +108,7 @@ grpcurl \
 语义：
 
 - 载荷转换：`binary` 直接使用原始字节；`text` 按 UTF-8 字节发送；`json` 会被序列化为 JSON 字节后按文本发送。载荷为 nil 时发送空载荷。
-- 频道投递：通过 broker 的 `Publish` 路径发布，与客户端发布走同一管道（见《架构指南》[architecture.md](architecture.md)）。
+- 频道投递：通过 broker 的 `Publish` 路径发布，与客户端发布走同一管道（见[《架构指南》](01-architecture.md)）。
 - 会话投递：向目标会话直接发送一条 `publication` 信封，消息的 `channel` 字段为空字符串（会话定向消息没有频道），`id` 为 `Publication.id`。目标会话不存在时**跳过**该投递，不报错、不计入失败（仅记录 debug 日志）。
 - 部分失败语义：由于 `PublishResponse` 没有按条目返回的字段，失败只能通过整体结果表达。每条失败投递（目标会话发送失败、目标频道发布失败、载荷序列化失败、缺少 destination）都会记录错误日志；仅当**所有**投递尝试全部失败时，RPC 返回状态码 `Internal`（错误信息形如 `all N delivery attempt(s) failed`）；只要有一条成功，RPC 就返回空响应。
 - destination 为 nil 或 `sessions`、`channels` 均为空时，该条出版物视为失败。
@@ -138,7 +138,7 @@ grpcurl \
 语义：
 
 - 对列表中的每个会话逐一执行断开。每个会话独立得到一个布尔结果：会话存在且断开成功为 `true`；会话不存在或断开过程出错为 `false`。RPC 本身不会因为个别会话失败而返回错误。
-- 服务端会以指定的 `code` 与 `reason` 构造 `Disconnect` 并关闭客户端连接，客户端在协议层收到对应的断开通知（见 [../protocol.md](../protocol.md) 中的断开码一节）。`code` 由调用方决定，服务端不做合法性校验；源码中内置的常量定义于 `disconnect.go`，例如：
+- 服务端会以指定的 `code` 与 `reason` 构造 `Disconnect` 并关闭客户端连接，客户端在协议层收到对应的断开通知（见[《客户端协议参考》](../protocol.md) 中的 Disconnect Codes 一节）。`code` 由调用方决定，服务端不做合法性校验；源码中内置的常量定义于 `disconnect.go`，例如：
 
 | 常量 | code | reason |
 | --- | --- | --- |
@@ -356,7 +356,7 @@ message Error {
 }
 ```
 
-注意：`errors.proto` 中**没有枚举**——`code`、`type` 都是自由字符串（free-form string），`metadata` 为任意结构化数据。这与客户端协议中的错误信封是一致的（见 [../protocol.md](../protocol.md) 的错误码一节），但取值上不共享同一个受控词汇表。
+注意：`errors.proto` 中**没有枚举**——`code`、`type` 都是自由字符串（free-form string），`metadata` 为任意结构化数据。这与客户端协议中的错误信封是一致的（见[《客户端协议参考》](../protocol.md) 的 Error Codes 一节），但取值上不共享同一个受控词汇表。
 
 `Error` 消息在当前管理 API 中只出现于 `SurveyResult.error`，且 `code` 固定为 `SURVEY_FAILED`；`type` 与 `metadata` 未被填充。其余管理 RPC 不通过 `Error` 消息报告失败，而是直接使用 gRPC 状态码。
 
@@ -540,7 +540,7 @@ grpcurl \
 
 ## 集群感知行为
 
-启用集群（`cluster.enabled: true`，要求 `broker.type: redis`）后，部分管理操作的行为发生变化。集群架构与配置详见《分布式集群指南》[cluster.md](cluster.md)。
+启用集群（`cluster.enabled: true`，要求 `broker.type: redis`）后，部分管理操作的行为发生变化。集群架构与配置详见[《分布式集群指南》](04-cluster.md)。
 
 | 操作 | 集群模式下的行为 |
 | --- | --- |
@@ -559,6 +559,6 @@ grpcurl \
 - **监听器预绑定**：两个 gRPC 监听器都在启动预检阶段（`node.Run` 之前）完成 `net.Listen`，任一监听失败都不会留下已启动的 Node 副作用；两个监听器的组件名分别为 `grpc-client-server` 与 `grpc-admin-server`。
 - **RawCodec**：两个 gRPC 服务器都通过 `grpc.ForceServerCodec` 装配名为 `messageloop-proto` 的 `RawCodec`（`pkg/grpcstream/codec.go`）。该 codec 对普通 proto 消息仍使用标准 `proto.Marshal`/`proto.Unmarshal`，因此管理 API 的线上编码与标准 protobuf gRPC 完全兼容（这是 `grpcurl -proto` 方式可以正常调用的原因）；流式路径额外支持免二次编解码的原始帧（raw frame）优化。codec 按服务器注册而不是全局注册，避免覆盖进程内其他 gRPC 连接的默认 codec。
 - **压缩**：gRPC 的 gzip 压缩编解码器已在服务器侧注册，客户端可在请求中声明 `grpc-accept-encoding: gzip`。
-- **管理服务器未设置 `MaxRecvMsgSize`**：管理服务器使用 gRPC 默认的最大接收消息大小（4 MiB）；客户端流服务器则应用 `limits.max_message_size`（默认 64 KiB，见《配置参考》[configuration.md](configuration.md)）。
-- **调用方客户端**：Go 与 TypeScript SDK 的后端集成均通过本管理 API 与服务端通信（见 [sdk-go.md](sdk-go.md)、[sdk-ts.md](sdk-ts.md)）；SDK 生成的桩代码依赖 `server/v1/api.proto`，调用前请确保协议版本与服务器一致。
-- **运维**：健康检查与指标走独立的 HTTP 管理面（`server.http.addr`），不属于本 API 范围（见 [observability.md](observability.md)）。
+- **管理服务器未设置 `MaxRecvMsgSize`**：管理服务器使用 gRPC 默认的最大接收消息大小（4 MiB）；客户端流服务器则应用 `limits.max_message_size`（默认 64 KiB，见[《配置参考》](02-configuration.md)）。
+- **调用方客户端**：Go 与 TypeScript SDK 的后端集成均通过本管理 API 与服务端通信（见[《Go SDK 指南》](07-sdk-go.md)、[《TypeScript SDK 指南》](08-sdk-ts.md)）；SDK 生成的桩代码依赖 `server/v1/api.proto`，调用前请确保协议版本与服务器一致。
+- **运维**：健康检查与指标走独立的 HTTP 管理面（`server.http.addr`），不属于本 API 范围（见[《可观测性指南》](05-observability.md)）。
