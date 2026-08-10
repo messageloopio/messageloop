@@ -53,6 +53,30 @@ func (n *Node) resumeRemoteSession(ctx context.Context, client *Client, sessionI
 		return nil, false, nil
 	}
 
+	// Claim the lease atomically with CompareAndSwapSessionLease: another
+	// node may have taken over the session while this resume was in flight.
+	// A failed CAS aborts the resume without issuing a takeover command or
+	// restoring any subscription state.
+	desired := &ClusterSessionLease{
+		SessionID:      lease.SessionID,
+		NodeID:         n.ClusterNodeID(),
+		IncarnationID:  n.ClusterIncarnationID(),
+		UserID:         lease.UserID,
+		ClientID:       lease.ClientID,
+		LeaseVersion:   lease.LeaseVersion + 1,
+		Authenticated:  lease.Authenticated,
+		ConnectedAt:    lease.ConnectedAt,
+		LastActivityAt: time.Now().UnixMilli(),
+		ExpiresAt:      time.Now().Add(defaultClusterSessionLeaseTTL),
+	}
+	claimed, err := directory.CompareAndSwapSessionLease(ctx, lease, desired, defaultClusterSessionLeaseTTL)
+	if err != nil {
+		return nil, false, err
+	}
+	if !claimed {
+		return nil, false, DisconnectStale
+	}
+
 	if lease.NodeID != "" && lease.IncarnationID != "" && (lease.NodeID != n.ClusterNodeID() || lease.IncarnationID != n.ClusterIncarnationID()) {
 		if err := n.requestSessionTakeover(ctx, lease); err != nil {
 			nodeLease, leaseErr := directory.GetNodeLease(ctx, lease.NodeID, lease.IncarnationID)

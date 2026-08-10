@@ -13,9 +13,13 @@ import (
 const (
 	defaultClusterNodeLeaseTTL           = 90 * time.Second
 	defaultClusterNodeLeaseRenewInterval = 30 * time.Second
-	defaultClusterSessionLeaseTTL        = 90 * time.Second
-	defaultClusterSessionSnapshotTTL     = 24 * time.Hour
-	defaultClusterQueryProjectionTTL     = 10 * time.Minute
+	// defaultClusterSessionLeaseTTL must cover DefaultHeartbeatIdleTimeout
+	// (300s) with headroom: the owning node renews the lease only on client
+	// pings (throttled to every 10s), so a lease shorter than the idle
+	// timeout would let a live but idle session be taken over.
+	defaultClusterSessionLeaseTTL    = 600 * time.Second
+	defaultClusterSessionSnapshotTTL = 24 * time.Hour
+	defaultClusterQueryProjectionTTL = 10 * time.Minute
 )
 
 var (

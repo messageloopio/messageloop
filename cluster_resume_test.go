@@ -180,3 +180,88 @@ func TestNode_RestoreSessionSubscriptions_AdjustsSharedProjection(t *testing.T) 
 	assert.True(t, client.hasSubscription("news"))
 	assert.True(t, client.hasSubscription("sports"))
 }
+
+// Task 10: remote resume must claim the session lease via CAS with the old
+// lease version as the expected value.
+func TestResumeRemoteSession_UsesCAS(t *testing.T) {
+	directory := &fakeSessionDirectory{
+		lease: &ClusterSessionLease{
+			SessionID:     "sess-remote",
+			NodeID:        "node-b",
+			IncarnationID: "inc-b",
+			LeaseVersion:  7,
+			ExpiresAt:     time.Now().Add(time.Hour),
+		},
+		snapshot: &ClusterSessionSnapshot{
+			SessionID:     "sess-remote",
+			UserID:        "user-1",
+			ClientID:      "client-1",
+			Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "news"}},
+		},
+	}
+	bus := &fakeClusterCommandBus{result: &ClusterCommandResult{Status: ClusterCommandStatusSucceeded}}
+	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-a", IncarnationID: "inc-a", Backend: "memory"}, ClusterDependencies{
+		SessionDirectory: directory,
+		CommandBus:       bus,
+		QueryStore:       fakeQueryStore{},
+	})
+	require.NoError(t, err)
+
+	node := NewNode(nil)
+	node.SetCluster(runtime)
+	client, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
+	require.NoError(t, err)
+
+	snapshot, resumed, err := node.resumeRemoteSession(context.Background(), client, "sess-remote")
+	require.NoError(t, err)
+	require.True(t, resumed)
+	require.NotNil(t, snapshot)
+	require.GreaterOrEqual(t, directory.casCalls, 1, "resume must claim the lease via CAS")
+	require.Equal(t, uint64(7), directory.casExpected.LeaseVersion, "CAS expected value must be the old lease version")
+	require.Equal(t, uint64(8), directory.casDesired.LeaseVersion, "CAS desired value must bump the lease version")
+	require.Equal(t, "node-a", directory.casDesired.NodeID)
+	require.Equal(t, "inc-a", directory.casDesired.IncarnationID)
+}
+
+// Task 10: when the CAS fails (another node already took over the session),
+// the resume must abort: no takeover command, no state inheritance, and the
+// new connection is rejected with a disconnect.
+func TestResumeRemoteSession_CASConflictAborts(t *testing.T) {
+	directory := &fakeSessionDirectory{
+		lease: &ClusterSessionLease{
+			SessionID:     "sess-remote",
+			NodeID:        "node-b",
+			IncarnationID: "inc-b",
+			LeaseVersion:  7,
+			ExpiresAt:     time.Now().Add(time.Hour),
+		},
+		snapshot: &ClusterSessionSnapshot{
+			SessionID:     "sess-remote",
+			UserID:        "user-1",
+			ClientID:      "client-1",
+			Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "news"}},
+		},
+		forceCasFail: true,
+	}
+	bus := &fakeClusterCommandBus{result: &ClusterCommandResult{Status: ClusterCommandStatusSucceeded}}
+	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-a", IncarnationID: "inc-a", Backend: "memory"}, ClusterDependencies{
+		SessionDirectory: directory,
+		CommandBus:       bus,
+		QueryStore:       fakeQueryStore{},
+	})
+	require.NoError(t, err)
+
+	node := NewNode(nil)
+	node.SetCluster(runtime)
+	client, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
+	require.NoError(t, err)
+
+	_, resumed, err := node.resumeRemoteSession(context.Background(), client, "sess-remote")
+	require.Error(t, err)
+	var dis Disconnect
+	require.True(t, errors.As(err, &dis), "resume conflict must surface as a disconnect")
+	require.Equal(t, DisconnectStale.Code, dis.Code)
+	require.False(t, resumed)
+	require.Empty(t, bus.commands, "no takeover command may be issued after a CAS conflict")
+	require.False(t, client.hasSubscription("news"), "no subscriptions may be restored after a CAS conflict")
+}

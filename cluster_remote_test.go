@@ -13,6 +13,12 @@ type fakeSessionDirectory struct {
 	lease     *ClusterSessionLease
 	snapshot  *ClusterSessionSnapshot
 	nodeLease *ClusterNodeLease
+
+	// CAS bookkeeping (see CompareAndSwapSessionLease).
+	casCalls       int
+	casExpected    *ClusterSessionLease
+	casDesired     *ClusterSessionLease
+	forceCasFail   bool
 }
 
 func (f *fakeSessionDirectory) Start(context.Context) error    { return nil }
@@ -26,9 +32,38 @@ func (f *fakeSessionDirectory) GetNodeLease(context.Context, string, string) (*C
 func (f *fakeSessionDirectory) PutSessionLease(context.Context, *ClusterSessionLease, time.Duration) error {
 	return nil
 }
-func (f *fakeSessionDirectory) CompareAndSwapSessionLease(context.Context, *ClusterSessionLease, *ClusterSessionLease, time.Duration) (bool, error) {
+
+// CompareAndSwapSessionLease simulates version-based CAS semantics: the swap
+// only succeeds when the current lease matches the expected one.
+func (f *fakeSessionDirectory) CompareAndSwapSessionLease(_ context.Context, expected, desired *ClusterSessionLease, _ time.Duration) (bool, error) {
+	f.casCalls++
+	f.casExpected = expected
+	f.casDesired = desired
+	if f.forceCasFail {
+		return false, nil
+	}
+	if f.lease == nil {
+		return false, nil
+	}
+	if !fakeLeaseEqual(f.lease, expected) {
+		return false, nil
+	}
+	f.lease = desired
 	return true, nil
 }
+
+// fakeLeaseEqual mirrors the redis session directory's lease comparison
+// (SessionID/NodeID/IncarnationID/LeaseVersion).
+func fakeLeaseEqual(left, right *ClusterSessionLease) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return left.SessionID == right.SessionID &&
+		left.NodeID == right.NodeID &&
+		left.IncarnationID == right.IncarnationID &&
+		left.LeaseVersion == right.LeaseVersion
+}
+
 func (f *fakeSessionDirectory) GetSessionLease(context.Context, string) (*ClusterSessionLease, error) {
 	return f.lease, nil
 }
