@@ -3,6 +3,7 @@ package redisbroker
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/lynx-go/x/log"
 	"github.com/messageloopio/messageloop"
 	"github.com/messageloopio/messageloop/config"
+	"github.com/messageloopio/messageloop/pkg/topics"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -21,8 +23,16 @@ type redisBroker struct {
 	handler messageloop.PublicationHandler
 	epoch   string
 
+	// Subscription bookkeeping. Exact channels and wildcard patterns are
+	// reference counted: the hub removes a broker subscription whenever any
+	// wildcard subscriber leaves (hub.removeWildcardSub always reports
+	// last=true), so the broker must keep the interest until the count
+	// reaches zero.
 	subMu      sync.RWMutex
-	subscribed map[string]struct{}
+	subscribed map[string]int                 // exact channel -> refcount
+	wcCounts   map[string]int                 // wildcard pattern -> refcount
+	wcHandles  map[string]*topics.Subscription // pattern -> matcher handle
+	matcher    topics.Matcher                 // wildcard pattern matching
 }
 
 // New creates a new Redis-backed Broker.
@@ -33,7 +43,10 @@ func New(cfg config.RedisConfig) messageloop.Broker {
 		client:     newRedisClient(opts),
 		opts:       opts,
 		epoch:      uuid.NewString(),
-		subscribed: make(map[string]struct{}),
+		subscribed: make(map[string]int),
+		wcCounts:   make(map[string]int),
+		wcHandles:  make(map[string]*topics.Subscription),
+		matcher:    topics.NewCSTrieMatcher(),
 	}
 }
 
@@ -52,20 +65,71 @@ func (b *redisBroker) Start(ctx context.Context, handler messageloop.Publication
 	return b.runPubSubWithRetry(ctx)
 }
 
-// Subscribe registers interest in ch on this node.
+// isWildcardChannel reports whether ch is a wildcard pattern, consistent
+// with the hub's isWildcard (strings.Contains(ch, "*")).
+func isWildcardChannel(ch string) bool {
+	return strings.Contains(ch, "*")
+}
+
+// Subscribe registers interest in ch on this node. Wildcard patterns are
+// matched against incoming pub/sub channels via the topic matcher; both
+// exact channels and patterns are reference counted so the underlying
+// interest is kept until every subscriber has left.
 func (b *redisBroker) Subscribe(ch string) error {
 	b.subMu.Lock()
-	b.subscribed[ch] = struct{}{}
-	b.subMu.Unlock()
+	defer b.subMu.Unlock()
+	if isWildcardChannel(ch) {
+		b.wcCounts[ch]++
+		if b.wcCounts[ch] == 1 {
+			sub, err := b.matcher.Subscribe(ch, ch)
+			if err != nil {
+				delete(b.wcCounts, ch)
+				return err
+			}
+			b.wcHandles[ch] = sub
+		}
+		return nil
+	}
+	b.subscribed[ch]++
 	return nil
 }
 
-// Unsubscribe removes interest in ch on this node.
+// Unsubscribe removes interest in ch on this node, keeping the interest
+// while the reference count is still above zero.
 func (b *redisBroker) Unsubscribe(ch string) error {
 	b.subMu.Lock()
-	delete(b.subscribed, ch)
-	b.subMu.Unlock()
+	defer b.subMu.Unlock()
+	if isWildcardChannel(ch) {
+		if b.wcCounts[ch] > 0 {
+			b.wcCounts[ch]--
+			if b.wcCounts[ch] == 0 {
+				delete(b.wcCounts, ch)
+				if sub, ok := b.wcHandles[ch]; ok {
+					b.matcher.Unsubscribe(sub)
+					delete(b.wcHandles, ch)
+				}
+			}
+		}
+		return nil
+	}
+	if b.subscribed[ch] > 0 {
+		b.subscribed[ch]--
+		if b.subscribed[ch] == 0 {
+			delete(b.subscribed, ch)
+		}
+	}
 	return nil
+}
+
+// interested reports whether this node wants messages for the given concrete
+// channel: exact subscriptions or any wildcard pattern that matches it.
+func (b *redisBroker) interested(channel string) bool {
+	b.subMu.RLock()
+	defer b.subMu.RUnlock()
+	if b.subscribed[channel] > 0 {
+		return true
+	}
+	return len(b.matcher.Lookup(channel)) > 0
 }
 
 // Publish writes payload to the Redis Stream (for history) and broadcasts via

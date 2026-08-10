@@ -52,10 +52,7 @@ func (b *redisBroker) runPubSub(ctx context.Context) error {
 			}
 			channelName := strings.TrimPrefix(msg.Channel, b.opts.PubSubPrefix)
 
-			b.subMu.RLock()
-			_, interested := b.subscribed[channelName]
-			b.subMu.RUnlock()
-			if !interested {
+			if !b.interested(channelName) {
 				continue
 			}
 
