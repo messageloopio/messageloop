@@ -383,6 +383,7 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 	// authentication, so it is set here. Takeover and state inheritance only
 	// run after authentication succeeds: an unauthenticated connect must not
 	// be able to evict a session that is still being served.
+	originalSessionID := c.session
 	if connect.SessionId != "" {
 		c.mu.Lock()
 		c.session = connect.SessionId
@@ -459,13 +460,26 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 		}
 	}
 
+	// Resumption is only permitted when real authentication happened
+	// (require_auth + a verified token via the auth proxy). In anonymous mode
+	// a session id cannot be trusted — anyone could guess it — so it is
+	// ignored and the connect starts a fresh session.
+	resumeAllowed := c.node.requireAuth && p != nil
+	if connect.SessionId != "" && !resumeAllowed {
+		c.mu.Lock()
+		c.session = originalSessionID
+		c.mu.Unlock()
+		log.WarnContext(ctx, "session takeover rejected: connect not authenticated, ignoring session id",
+			"session", c.session, "provided_session", connect.SessionId)
+	}
+
 	// Check if this is a resumption attempt. Takeover and state inheritance
 	// (writes to user/client/subscribedChannels) happen only after a successful
 	// authentication, so a failed connect cannot evict or delete the session.
 	resumed := false
 	resumedLocal := false
 	var resumeSnapshot *ClusterSessionSnapshot
-	if connect.SessionId != "" {
+	if connect.SessionId != "" && resumeAllowed {
 		// Try to find the old session
 		oldSession := c.node.hub.LookupSession(connect.SessionId)
 		if oldSession != nil {
@@ -482,6 +496,7 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 			oldUser := oldSession.user
 			oldClient := oldSession.client
 			oldLeaseVersion := oldSession.clusterLeaseVersion
+			oldMetricsCharged := oldSession.metricsCharged
 			oldSession.mu.Unlock()
 
 			// 2. Set inherited state on the new session
@@ -489,6 +504,10 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 			c.user = oldUser
 			c.client = oldClient
 			c.subscribedChannels = oldChannels
+			// Transfer the connection gauge count from the old client: the old
+			// client is closed quietly (no decrement) and the new client was
+			// not counted by AddClient, so the gauge stays balanced.
+			c.metricsCharged = oldMetricsCharged
 			if oldLeaseVersion > 0 {
 				c.clusterLeaseVersion = oldLeaseVersion + 1
 			}
@@ -498,7 +517,9 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 			oldSession.closeQuiet()
 
 			// 4. Replace session references in hub (sessions map + subShards)
-			c.node.hub.ReplaceSession(connect.SessionId, c)
+			if err := c.node.hub.ReplaceSession(connect.SessionId, c); err != nil {
+				return err
+			}
 		} else {
 			var err error
 			resumeSnapshot, resumed, err = c.node.resumeRemoteSession(ctx, c, connect.SessionId)

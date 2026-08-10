@@ -230,7 +230,9 @@ func TestClientSession_HandleMessage_Connect_SubscriptionLimit(t *testing.T) {
 
 func TestClientSession_HandleMessage_Connect_SubscriptionLimitWithResume(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode(&config.Server{Limits: config.Limits{MaxSubscriptionsPerClient: 3}})
+	node := NewNode(&config.Server{RequireAuth: true, Limits: config.Limits{MaxSubscriptionsPerClient: 3}})
+	authProxy := &connectAuthProxyStub{userID: "user-1"}
+	require.NoError(t, node.AddProxy(authProxy, "", SystemMethodAuthenticate))
 	transport := &capturingTransport{}
 
 	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
@@ -239,7 +241,7 @@ func TestClientSession_HandleMessage_Connect_SubscriptionLimitWithResume(t *test
 	// Connect without subscriptions.
 	connectMsg := &clientpb.InboundMessage{
 		Id:       "msg-1",
-		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: "client-1"}},
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: "client-1", Token: "t"}},
 	}
 	require.NoError(t, client.HandleMessage(ctx, connectMsg))
 	sessionID := client.SessionID()
@@ -270,6 +272,7 @@ func TestClientSession_HandleMessage_Connect_SubscriptionLimitWithResume(t *test
 		Envelope: &clientpb.InboundMessage_Connect{
 			Connect: &clientpb.Connect{
 				ClientId:  "client-1",
+				Token:     "t",
 				SessionId: sessionID,
 				Subscriptions: []*clientpb.Subscription{
 					{Channel: "ch3"},
@@ -529,7 +532,7 @@ func TestClientSession_HandleMessage_Connect_ResumeRemoteSendsTakeover(t *testin
 	})
 	require.NoError(t, err)
 
-	node := NewNode(nil)
+	node := NewNode(&config.Server{RequireAuth: true})
 	node.SetCluster(runtime)
 
 	authProxy := &connectAuthProxyStub{userID: "user-1"}
@@ -955,4 +958,86 @@ func TestClient_Connect_RecoveryFromOffsetWhenEpochMatches(t *testing.T) {
 	msgs := connected.GetPublications()[0].GetMessages()
 	require.Len(t, msgs, 1)
 	assert.Equal(t, uint64(3), msgs[0].GetOffset())
+}
+
+// Task 9: anonymous mode must not be able to take over a session by guessing
+// its SessionId: the session id is ignored and a fresh session is created.
+func TestClientSession_AnonymousResumeRejected(t *testing.T) {
+	ctx := context.Background()
+	node := NewNode(nil) // requireAuth=false
+
+	transportA := &capturingTransport{}
+	clientA, _, err := NewClient(ctx, node, transportA, JSONMarshaler{})
+	require.NoError(t, err)
+	connectA := &clientpb.InboundMessage{
+		Id: "msg-1",
+		Envelope: &clientpb.InboundMessage_Connect{
+			Connect: &clientpb.Connect{ClientId: "client-a"},
+		},
+	}
+	require.NoError(t, clientA.HandleMessage(ctx, connectA))
+	sessionA := clientA.SessionID()
+	require.NotEmpty(t, sessionA)
+	transportA.messages = nil
+
+	// Client B presents the captured session id in anonymous mode.
+	transportB := &capturingTransport{}
+	clientB, _, err := NewClient(ctx, node, transportB, JSONMarshaler{})
+	require.NoError(t, err)
+	connectB := &clientpb.InboundMessage{
+		Id: "msg-2",
+		Envelope: &clientpb.InboundMessage_Connect{
+			Connect: &clientpb.Connect{ClientId: "client-b", SessionId: sessionA},
+		},
+	}
+	require.NoError(t, clientB.HandleMessage(ctx, connectB))
+
+	// B must not take over the session: it gets a fresh session id...
+	require.NotEqual(t, sessionA, clientB.SessionID(), "anonymous resume must be rejected")
+	// ...and A stays registered in the hub.
+	assert.Same(t, clientA, node.Hub().LookupSession(sessionA), "session A must not be evicted")
+}
+
+// Task 9: a local resume must not leak the ConnectionsTotal gauge: the old
+// client was counted once, the new client takes over that count (still one),
+// and closing the resumed client returns the gauge to zero.
+func TestClientSession_LocalResume_MetricsBalanced(t *testing.T) {
+	ctx := context.Background()
+	reg := prometheus.NewRegistry()
+	metrics := NewMetrics(reg)
+	node := NewNode(&config.Server{RequireAuth: true})
+	node.SetMetrics(metrics)
+	authProxy := &connectAuthProxyStub{userID: "user-1"}
+	require.NoError(t, node.AddProxy(authProxy, "", SystemMethodAuthenticate))
+
+	transportA := &capturingTransport{}
+	clientA, _, err := NewClient(ctx, node, transportA, JSONMarshaler{})
+	require.NoError(t, err)
+	connectA := &clientpb.InboundMessage{
+		Id: "msg-1",
+		Envelope: &clientpb.InboundMessage_Connect{
+			Connect: &clientpb.Connect{ClientId: "client-a", Token: "t"},
+		},
+	}
+	require.NoError(t, clientA.HandleMessage(ctx, connectA))
+	sessionA := clientA.SessionID()
+	require.NoError(t, err)
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.ConnectionsTotal))
+
+	// Resume the session locally (same node, same user, valid token).
+	transportB := &capturingTransport{}
+	clientB, _, err := NewClient(ctx, node, transportB, JSONMarshaler{})
+	require.NoError(t, err)
+	connectB := &clientpb.InboundMessage{
+		Id: "msg-2",
+		Envelope: &clientpb.InboundMessage_Connect{
+			Connect: &clientpb.Connect{ClientId: "client-a", Token: "t", SessionId: sessionA},
+		},
+	}
+	require.NoError(t, clientB.HandleMessage(ctx, connectB))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.ConnectionsTotal), "resume must not double count")
+
+	// Closing the resumed client balances the gauge back to zero.
+	require.NoError(t, clientB.Close(Disconnect{}))
+	require.Equal(t, float64(0), testutil.ToFloat64(metrics.ConnectionsTotal))
 }

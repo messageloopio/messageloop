@@ -871,7 +871,8 @@ func TestHub_ReplaceSession_MigratesWildcardSubscription(t *testing.T) {
 	_, err := h.addSub("chat.*", Subscriber{Client: oldClient, Ephemeral: false})
 	require.NoError(t, err)
 
-	h.ReplaceSession("session-1", newClient)
+	err = h.ReplaceSession("session-1", newClient)
+	require.NoError(t, err)
 
 	err = h.broadcastPublication("chat.x", newTestPublication("chat.x", 1))
 	require.NoError(t, err)
@@ -884,4 +885,24 @@ func TestHub_ReplaceSession_MigratesWildcardSubscription(t *testing.T) {
 	sub, ok := h.LookupSubscriber("chat.*", newClient)
 	require.True(t, ok)
 	assert.Same(t, newClient, sub.Client)
+}
+
+func TestHub_ReplaceSession_EnforcesMaxConnsPerUser(t *testing.T) {
+	h := newHub(0, 1) // 1 connection per user
+
+	// user-a owns session-1; user-b already occupies its single slot.
+	clientA := newTestClientWithTransport(t, "session-1", "user-a", &mockTransport{})
+	require.NoError(t, h.add(clientA))
+	clientB := newTestClientWithTransport(t, "session-2", "user-b", &mockTransport{})
+	require.NoError(t, h.add(clientB))
+
+	// Replacing session-1 with a user-b client must hit the connection limit.
+	replacement := newTestClientWithTransport(t, "session-1", "user-b", &mockTransport{})
+	err := h.ReplaceSession("session-1", replacement)
+	require.Error(t, err, "ReplaceSession must enforce maxConnsPerUser")
+	assert.ErrorIs(t, err, DisconnectConnectionLimit)
+
+	// Same-user replacement stays within the limit and succeeds.
+	sameUser := newTestClientWithTransport(t, "session-1", "user-a", &mockTransport{})
+	require.NoError(t, h.ReplaceSession("session-1", sameUser))
 }

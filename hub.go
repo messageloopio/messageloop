@@ -665,14 +665,30 @@ func (h *Hub) GetActiveChannels() []ChannelInfo {
 }
 
 // ReplaceSession atomically replaces a session's client reference in the sessions map
-// and all subscription shards. Used for session resumption.
-func (h *Hub) ReplaceSession(sessionID string, newClient *Client) {
+// and all subscription shards. Used for session resumption. It enforces the same
+// per-user connection limit as addWithLimit: replacing with a client of a different
+// user that already sits at the limit fails with DisconnectConnectionLimit.
+func (h *Hub) ReplaceSession(sessionID string, newClient *Client) error {
 	h.mu.Lock()
 	oldClient, exists := h.sessions[sessionID]
 	if !exists {
 		h.mu.Unlock()
-		return
+		return nil
 	}
+
+	// Per-user connection limit: a same-user replacement keeps the user's
+	// connection count unchanged; a different user must have room.
+	if h.maxConnsPerUser > 0 && oldClient.UserID() != newClient.UserID() {
+		shard := h.connShards[index(newClient.UserID(), numHubShards)]
+		shard.mu.RLock()
+		userConns := len(shard.users[newClient.UserID()])
+		shard.mu.RUnlock()
+		if userConns >= h.maxConnsPerUser {
+			h.mu.Unlock()
+			return DisconnectConnectionLimit
+		}
+	}
+
 	h.sessions[sessionID] = newClient
 	h.mu.Unlock()
 
@@ -725,4 +741,5 @@ func (h *Hub) ReplaceSession(sessionID string, newClient *Client) {
 		h.wcSubs[key] = newSub
 	}
 	h.wcSubsMu.Unlock()
+	return nil
 }

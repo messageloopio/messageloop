@@ -14,6 +14,7 @@ import (
 	"github.com/messageloopio/messageloop"
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/pkg/redisbroker"
+	"github.com/messageloopio/messageloop/proxy"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	"github.com/redis/go-redis/v9"
@@ -21,6 +22,46 @@ import (
 )
 
 const clusterRedisIntegrationDB = 15
+
+// integrationAuthProxy authenticates any token as a fixed user.
+type integrationAuthProxy struct {
+	userID string
+}
+
+func (m *integrationAuthProxy) RPC(context.Context, *proxy.RPCProxyRequest) (*proxy.RPCProxyResponse, error) {
+	return nil, nil
+}
+
+func (m *integrationAuthProxy) Authenticate(context.Context, *proxy.AuthenticateProxyRequest) (*proxy.AuthenticateProxyResponse, error) {
+	return &proxy.AuthenticateProxyResponse{UserInfo: &proxy.UserInfo{ID: m.userID}}, nil
+}
+
+func (m *integrationAuthProxy) SubscribeAcl(context.Context, *proxy.SubscribeAclProxyRequest) (*proxy.SubscribeAclProxyResponse, error) {
+	return &proxy.SubscribeAclProxyResponse{}, nil
+}
+
+func (m *integrationAuthProxy) PublishAcl(context.Context, *proxy.PublishAclProxyRequest) (*proxy.PublishAclProxyResponse, error) {
+	return &proxy.PublishAclProxyResponse{}, nil
+}
+
+func (m *integrationAuthProxy) OnConnected(context.Context, *proxy.OnConnectedProxyRequest) (*proxy.OnConnectedProxyResponse, error) {
+	return &proxy.OnConnectedProxyResponse{}, nil
+}
+
+func (m *integrationAuthProxy) OnSubscribed(context.Context, *proxy.OnSubscribedProxyRequest) (*proxy.OnSubscribedProxyResponse, error) {
+	return &proxy.OnSubscribedProxyResponse{}, nil
+}
+
+func (m *integrationAuthProxy) OnUnsubscribed(context.Context, *proxy.OnUnsubscribedProxyRequest) (*proxy.OnUnsubscribedProxyResponse, error) {
+	return &proxy.OnUnsubscribedProxyResponse{}, nil
+}
+
+func (m *integrationAuthProxy) OnDisconnected(context.Context, *proxy.OnDisconnectedProxyRequest) (*proxy.OnDisconnectedProxyResponse, error) {
+	return &proxy.OnDisconnectedProxyResponse{}, nil
+}
+
+func (m *integrationAuthProxy) Name() string { return "integration-auth-stub" }
+func (m *integrationAuthProxy) Close() error { return nil }
 
 type integrationCapturingTransport struct {
 	mu          sync.Mutex
@@ -168,6 +209,10 @@ func TestClusterRedis_RemoteResumeTakeover(t *testing.T) {
 
 	nodeA := newClusterRedisTestNode(t, ctx, redisCfg, "node-a")
 	nodeB := newClusterRedisTestNode(t, ctx, redisCfg, "node-b")
+	authA := &integrationAuthProxy{userID: "user-old"}
+	authB := &integrationAuthProxy{userID: "user-old"}
+	require.NoError(t, nodeA.AddProxy(authA, "", messageloop.SystemMethodAuthenticate))
+	require.NoError(t, nodeB.AddProxy(authB, "", messageloop.SystemMethodAuthenticate))
 
 	oldTransport := &integrationCapturingTransport{}
 	oldClient, _, err := messageloop.NewClient(ctx, nodeA, oldTransport, messageloop.JSONMarshaler{})
@@ -176,7 +221,7 @@ func TestClusterRedis_RemoteResumeTakeover(t *testing.T) {
 	connectMsg := &clientpb.InboundMessage{
 		Id: "connect-old",
 		Envelope: &clientpb.InboundMessage_Connect{
-			Connect: &clientpb.Connect{ClientId: "client-old"},
+			Connect: &clientpb.Connect{ClientId: "client-old", Token: "token"},
 		},
 	}
 	require.NoError(t, oldClient.HandleMessage(ctx, connectMsg))
@@ -198,7 +243,7 @@ func TestClusterRedis_RemoteResumeTakeover(t *testing.T) {
 	resumeMsg := &clientpb.InboundMessage{
 		Id: "connect-new",
 		Envelope: &clientpb.InboundMessage_Connect{
-			Connect: &clientpb.Connect{ClientId: "client-new", SessionId: oldSessionID},
+			Connect: &clientpb.Connect{ClientId: "client-new", Token: "token", SessionId: oldSessionID},
 		},
 	}
 	require.NoError(t, newClient.HandleMessage(ctx, resumeMsg))
@@ -426,7 +471,9 @@ func requireClusterRedis(t *testing.T, db int) config.RedisConfig {
 func newClusterRedisTestNode(t *testing.T, parent context.Context, redisCfg config.RedisConfig, nodeID string) *messageloop.Node {
 	t.Helper()
 
-	node := messageloop.NewNode(nil)
+	// Cluster test nodes require authentication: session takeover/resume is
+	// only allowed for authenticated connects (see Task 9).
+	node := messageloop.NewNode(&config.Server{RequireAuth: true})
 	node.SetBroker(redisbroker.New(redisCfg))
 	node.SetPresenceStore(redisbroker.NewPresenceStore(redisCfg))
 
