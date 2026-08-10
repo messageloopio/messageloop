@@ -3,7 +3,8 @@ server:
     addr: "127.0.0.1:8080"   # Admin HTTP server exposing /health and /metrics
   grpc_admin:
     addr: "127.0.0.1:9091"   # Server-side gRPC admin API; keep this on a private interface
-    auth_token: ""            # Required bearer token for admin API; leave empty to disable auth (NOT recommended in production)
+    auth_token: "change-me"  # Required bearer token for admin API (mandatory unless allow_insecure: true)
+    # allow_insecure: true   # Explicitly run the admin API WITHOUT authentication (NOT recommended)
     # tls:
     #   cert_file: "./certs/admin.crt"
     #   key_file: "./certs/admin.key"

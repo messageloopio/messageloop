@@ -61,6 +61,10 @@ type GRPCAdmin struct {
 	Addr      string    `yaml:"addr" json:"addr" mapstructure:"addr"`
 	TLS       TLSConfig `yaml:"tls" json:"tls" mapstructure:"tls"`
 	AuthToken string    `yaml:"auth_token" json:"auth_token" mapstructure:"auth_token"` // Required bearer token for admin API calls
+	// AllowInsecure explicitly opts out of the mandatory auth_token: the
+	// admin API is served without authentication and a WARN is logged at
+	// startup. Only for controlled environments.
+	AllowInsecure bool `yaml:"allow_insecure" json:"allow_insecure" mapstructure:"allow_insecure"`
 }
 
 type Heartbeat struct {
@@ -175,6 +179,13 @@ func (c *Config) Validate() error {
 		if (entry.tls.CertFile == "") != (entry.tls.KeyFile == "") {
 			return fmt.Errorf("%s: cert_file and key_file must both be set or both be empty", entry.name)
 		}
+	}
+
+	// Admin gRPC must be authenticated unless allow_insecure is explicit:
+	// serving the admin API without any credential would expose session
+	// takeover, publish, and disconnect capabilities to anyone on the wire.
+	if c.Server.GRPCAdmin.Addr != "" && c.Server.GRPCAdmin.AuthToken == "" && !c.Server.GRPCAdmin.AllowInsecure {
+		return fmt.Errorf("server.grpc_admin requires auth_token, or set allow_insecure: true to explicitly run without authentication")
 	}
 
 	// Validate broker config.

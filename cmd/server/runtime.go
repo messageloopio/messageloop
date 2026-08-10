@@ -55,10 +55,11 @@ func newGRPCClientServer(cfg *config.Config, node *messageloop.Node) (*grpcstrea
 
 func newGRPCAdminServer(cfg *config.Config, node *messageloop.Node) (*grpcstream.Server, error) {
 	return grpcstream.PrepareAdminServer(grpcstream.Options{
-		Addr:           cfg.Server.GRPCAdmin.Addr,
-		TLSCertFile:    cfg.Server.GRPCAdmin.TLS.CertFile,
-		TLSKeyFile:     cfg.Server.GRPCAdmin.TLS.KeyFile,
-		AdminAuthToken: cfg.Server.GRPCAdmin.AuthToken,
+		Addr:               cfg.Server.GRPCAdmin.Addr,
+		TLSCertFile:        cfg.Server.GRPCAdmin.TLS.CertFile,
+		TLSKeyFile:         cfg.Server.GRPCAdmin.TLS.KeyFile,
+		AdminAuthToken:     cfg.Server.GRPCAdmin.AuthToken,
+		AdminAllowInsecure: cfg.Server.GRPCAdmin.AllowInsecure,
 	}, node)
 }
 

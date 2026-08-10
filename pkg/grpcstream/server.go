@@ -25,7 +25,10 @@ type Options struct {
 	TLSCertFile    string
 	TLSKeyFile     string
 	AdminAuthToken string // Bearer token for admin API authentication
-	MaxRecvMsgSize int    // Max inbound message size in bytes (0 = gRPC default)
+	// AdminAllowInsecure serves the admin API without authentication
+	// (requires config server.grpc_admin.allow_insecure: true).
+	AdminAllowInsecure bool
+	MaxRecvMsgSize     int // Max inbound message size in bytes (0 = gRPC default)
 }
 
 func validateOptions(name string, opts Options) error {

@@ -1,6 +1,9 @@
 package grpcstream
 
 import (
+	"context"
+
+	"github.com/lynx-go/x/log"
 	"github.com/messageloopio/messageloop"
 	serverpb "github.com/messageloopio/messageloop/shared/genproto/server/v1"
 	"google.golang.org/grpc"
@@ -11,6 +14,8 @@ func PrepareAdminServer(opts Options, node *messageloop.Node) (*Server, error) {
 	var extraOpts []grpc.ServerOption
 	if opts.AdminAuthToken != "" {
 		extraOpts = append(extraOpts, grpc.UnaryInterceptor(adminAuthInterceptor(opts.AdminAuthToken)))
+	} else if opts.AdminAllowInsecure {
+		log.WarnContext(context.Background(), "admin gRPC running WITHOUT authentication (allow_insecure)")
 	}
 	return prepareServer("grpc-admin-server", opts, func(grpcServer *grpc.Server) {
 		serverpb.RegisterAPIServiceServer(grpcServer, NewAPIServiceHandler(node))

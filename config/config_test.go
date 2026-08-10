@@ -88,3 +88,22 @@ func TestValidate_ValidRedisCluster(t *testing.T) {
 	}
 	assert.NoError(t, cfg.Validate())
 }
+
+func TestValidate_AdminRequiresAuthToken(t *testing.T) {
+	cfg := &Config{
+		Transport: Transport{
+			WebSocket: WebSocketTransport{Addr: ":9080"},
+		},
+		Server: Server{
+			GRPCAdmin: GRPCAdmin{Addr: "127.0.0.1:9091"},
+		},
+	}
+	assert.Error(t, cfg.Validate(), "empty admin auth token must fail validation")
+
+	cfg.Server.GRPCAdmin.AllowInsecure = true
+	assert.NoError(t, cfg.Validate(), "allow_insecure must bypass the auth token check")
+
+	cfg.Server.GRPCAdmin.AllowInsecure = false
+	cfg.Server.GRPCAdmin.AuthToken = "secret"
+	assert.NoError(t, cfg.Validate(), "a configured auth token must pass validation")
+}
