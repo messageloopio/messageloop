@@ -125,7 +125,7 @@ func TestNode_HandlePublication(t *testing.T) {
 	_ = node.AddSubscription(ctx, "test-channel", Subscriber{Client: client, Ephemeral: false})
 
 	// Publish via the broker so the internal handler is triggered.
-	_, err = node.Publish("test-channel", []byte("test payload"), false)
+	_, err = node.Publish("test-channel", publishPub([]byte("test payload"), false))
 	if err != nil {
 		t.Fatalf("Publish() error = %v", err)
 	}
@@ -143,7 +143,7 @@ func TestNode_HandlePublication_NoSubscribers(t *testing.T) {
 	_ = node.Run(ctx)
 
 	// Publish to a channel with no subscribers — should not error.
-	_, err := node.Publish("empty-channel", []byte("test payload"), false)
+	_, err := node.Publish("empty-channel", publishPub([]byte("test payload"), false))
 	if err != nil {
 		t.Fatalf("Publish() to empty channel error = %v", err)
 	}
@@ -171,7 +171,7 @@ func TestNode_Publish(t *testing.T) {
 	// Clear transport messages from subscription
 	transport.messages = nil
 
-	_, err = node.Publish("test-channel", []byte("test payload"), false)
+	_, err = node.Publish("test-channel", publishPub([]byte("test payload"), false))
 	if err != nil {
 		t.Fatalf("Publish() error = %v", err)
 	}
@@ -186,7 +186,7 @@ func TestNode_Publish_WithOptions(t *testing.T) {
 	node := NewNode(nil)
 	_ = node.Run(context.Background())
 
-	_, err := node.Publish("test-channel", []byte("test payload"), false)
+	_, err := node.Publish("test-channel", publishPub([]byte("test payload"), false))
 	if err != nil {
 		t.Fatalf("Publish() error = %v", err)
 	}
@@ -207,7 +207,7 @@ func TestNode_PresenceEventsNotInHistory(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, pubs, "presence join/leave events must not appear in history")
 
-	_, err = node.Broker().Publish(ch, []byte("normal"), true)
+	_, err = node.Broker().Publish(ch, publishPub([]byte("normal"), true))
 	require.NoError(t, err)
 	pubs, err = node.Broker().History(ch, 0, 0)
 	require.NoError(t, err)
@@ -618,7 +618,7 @@ func TestNode_ConcurrentPublish(t *testing.T) {
 		go func(n int) {
 			defer wg.Done()
 			payload := []byte(string(rune('a' + (n % 26))))
-			_, _ = node.Publish("test-channel", payload, false)
+			_, _ = node.Publish("test-channel", publishPub(payload, false))
 		}(i)
 	}
 
@@ -721,7 +721,7 @@ func TestNode_Publish_MultipleChannels(t *testing.T) {
 	transport2.messages = nil
 
 	// Publish to channel-1
-	_, _ = node.Publish("channel-1", []byte("payload-1"), false)
+	_, _ = node.Publish("channel-1", publishPub([]byte("payload-1"), false))
 
 	// Only client1 should receive
 	if transport1.getMessageCount() != 1 {
@@ -809,7 +809,7 @@ func BenchmarkNode_Publish(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = node.Publish("test-channel", payload, false)
+		_, _ = node.Publish("test-channel", publishPub(payload, false))
 	}
 }
 

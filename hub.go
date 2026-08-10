@@ -305,29 +305,21 @@ func (h *subShard) broadcastPublication(channel string, pub *Publication) error 
 
 	ctx := context.Background()
 
-	// Create Payload from publication data
-	var payload *sharedpb.Payload
-	if len(pub.Payload) > 0 {
-		if pub.IsText {
-			payload = &sharedpb.Payload{
-				Data: &sharedpb.Payload_Text{
-					Text: string(pub.Payload),
-				},
-			}
-		} else {
-			payload = &sharedpb.Payload{
-				Data: &sharedpb.Payload_Binary{
-					Binary: pub.Payload,
-				},
-			}
-		}
-	}
+	// Create Payload from publication data, preserving the original
+	// oneof variant (Binary/Text/JSON).
+	payload := pub.PayloadProto()
 
 	msg := &clientpb.Message{
 		Channel: channel,
 		Id:      publicationMessageID(channel, pub.Offset),
 		Offset:  pub.Offset,
 		Payload: payload,
+		Metadata: func() *sharedpb.Metadata {
+			if len(pub.Metadata) == 0 {
+				return nil
+			}
+			return &sharedpb.Metadata{Entries: pub.Metadata}
+		}(),
 	}
 
 	out := MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
@@ -427,21 +419,21 @@ func (h *Hub) broadcastPublication(ch string, pub *Publication) error {
 
 	ctx := context.Background()
 
-	// Create Payload from publication data.
-	var payload *sharedpb.Payload
-	if len(pub.Payload) > 0 {
-		if pub.IsText {
-			payload = &sharedpb.Payload{Data: &sharedpb.Payload_Text{Text: string(pub.Payload)}}
-		} else {
-			payload = &sharedpb.Payload{Data: &sharedpb.Payload_Binary{Binary: pub.Payload}}
-		}
-	}
+	// Create Payload from publication data, preserving the original
+	// oneof variant (Binary/Text/JSON).
+	payload := pub.PayloadProto()
 
 	msg := &clientpb.Message{
 		Channel: ch,
 		Id:      publicationMessageID(ch, pub.Offset),
 		Offset:  pub.Offset,
 		Payload: payload,
+		Metadata: func() *sharedpb.Metadata {
+			if len(pub.Metadata) == 0 {
+				return nil
+			}
+			return &sharedpb.Metadata{Entries: pub.Metadata}
+		}(),
 	}
 
 	out := MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {

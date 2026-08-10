@@ -88,12 +88,18 @@ func (b *redisBroker) runPubSub(ctx context.Context) error {
 			}
 
 			pub := &messageloop.Publication{
-				Channel: channelName,
-				Offset:  redisMsg.Offset,
-				Epoch:   redisMsg.Epoch,
-				Payload: redisMsg.Payload,
-				IsText:  redisMsg.IsText,
-				Time:    time.Now().UnixMilli(),
+				Channel:     channelName,
+				Offset:      redisMsg.Offset,
+				Epoch:       redisMsg.Epoch,
+				Payload:     redisMsg.Payload,
+				Kind:        redisMsg.Kind,
+				ContentType: redisMsg.ContentType,
+				Id:          redisMsg.Id,
+				Metadata:    redisMsg.Metadata,
+				Time:        redisMsg.Time,
+			}
+			if pub.Time == 0 {
+				pub.Time = time.Now().UnixMilli()
 			}
 			if b.handler != nil {
 				_ = b.handler(channelName, pub)
@@ -145,12 +151,18 @@ func (b *redisBroker) catchUpMissed(ctx context.Context) {
 				continue
 			}
 			pub := &messageloop.Publication{
-				Channel: ch,
-				Offset:  offset,
-				Epoch:   redisMsg.Epoch,
-				Payload: redisMsg.Payload,
-				IsText:  redisMsg.IsText,
-				Time:    time.Now().UnixMilli(),
+				Channel:     ch,
+				Offset:      offset,
+				Epoch:       redisMsg.Epoch,
+				Payload:     redisMsg.Payload,
+				Kind:        redisMsg.Kind,
+				ContentType: redisMsg.ContentType,
+				Id:          redisMsg.Id,
+				Metadata:    redisMsg.Metadata,
+				Time:        redisMsg.Time,
+			}
+			if pub.Time == 0 {
+				pub.Time = time.Now().UnixMilli()
 			}
 			if b.handler != nil {
 				_ = b.handler(ch, pub)

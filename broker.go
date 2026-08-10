@@ -1,16 +1,72 @@
 package messageloop
 
-import "context"
+import (
+	"context"
+	"encoding/json"
+
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	"google.golang.org/protobuf/types/known/structpb"
+)
+
+// PayloadKind identifies the original Payload oneof variant of a publication.
+type PayloadKind int
+
+const (
+	// PayloadKindBinary marks a binary payload.
+	PayloadKindBinary PayloadKind = iota
+	// PayloadKindText marks a text payload.
+	PayloadKindText
+	// PayloadKindJSON marks a JSON payload (Payload_Payload_Json on the wire).
+	PayloadKindJSON
+)
 
 // Publication is a message published to a channel.
 // Offset is 0 when history is disabled for the channel.
 type Publication struct {
-	Channel string
-	Offset  uint64
-	Epoch   string
-	Payload []byte
-	IsText  bool
-	Time    int64
+	Channel     string
+	Payload     []byte // payload bytes (JSON text for JSON kind)
+	Kind        PayloadKind
+	ContentType string // MIME content type, may be empty
+	Id          string // publisher-provided message id, may be empty
+	Metadata    map[string]string
+	Offset      uint64
+	Time        int64 // Unix milliseconds
+	Epoch       string
+}
+
+// PayloadProto rebuilds the shared Payload message from the publication,
+// preserving the original oneof variant (Binary/Text/JSON).
+func (p *Publication) PayloadProto() *sharedpb.Payload {
+	if p == nil || len(p.Payload) == 0 {
+		return nil
+	}
+	switch p.Kind {
+	case PayloadKindText:
+		return &sharedpb.Payload{
+			ContentType: p.ContentType,
+			Data:        &sharedpb.Payload_Text{Text: string(p.Payload)},
+		}
+	case PayloadKindJSON:
+		var object map[string]any
+		if err := json.Unmarshal(p.Payload, &object); err == nil {
+			if st, err := structpb.NewStruct(object); err == nil {
+				return &sharedpb.Payload{
+					ContentType: p.ContentType,
+					Data:        &sharedpb.Payload_Json{Json: st},
+				}
+			}
+		}
+		// Not valid JSON after all: degrade to text and let the caller log.
+		return &sharedpb.Payload{
+			ContentType: p.ContentType,
+			Data:        &sharedpb.Payload_Text{Text: string(p.Payload)},
+		}
+	default:
+		return &sharedpb.Payload{
+			ContentType: p.ContentType,
+			Data:        &sharedpb.Payload_Binary{Binary: p.Payload},
+		}
+	}
 }
 
 // PublicationHandler is called by the broker for each incoming publication
@@ -36,15 +92,15 @@ type Broker interface {
 	Unsubscribe(ch string) error
 
 	// Publish sends payload to all subscribers of ch.
-	// Returns the offset assigned to this publication (0 if history is disabled).
-	Publish(ch string, payload []byte, isText bool) (uint64, error)
+	// Returns the offset assigned to this publication (0 if history is
+	// disabled). The assigned offset is also written back to pub.Offset.
+	Publish(ch string, pub *Publication) (uint64, error)
 
 	// PublishTransient delivers payload to all subscribers of ch in real
 	// time without writing history, so the publication never appears in
-	// History. The returned offset is always 0 because no history entry is
-	// assigned. Used for events (e.g. presence join/leave) that must not
+	// History. Used for events (e.g. presence join/leave) that must not
 	// leak into the recovery message stream.
-	PublishTransient(ch string, payload []byte, isText bool) (uint64, error)
+	PublishTransient(ch string, pub *Publication) error
 
 	// History returns publications stored for ch with offset >= sinceOffset.
 	// limit <= 0 uses DefaultHistoryLimit as a safety cap.

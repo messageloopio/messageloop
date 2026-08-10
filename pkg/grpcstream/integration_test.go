@@ -148,7 +148,7 @@ func TestGRPC_AdminAPI_GetHistory(t *testing.T) {
 
 	// Publish some messages to build history
 	for i := 0; i < 3; i++ {
-		_, err := node.Publish("history-ch", []byte("msg"), false)
+		_, err := node.Publish("history-ch", &messageloop.Publication{Payload: []byte("msg"), Kind: messageloop.PayloadKindBinary})
 		require.NoError(t, err)
 	}
 
@@ -194,7 +194,7 @@ func TestGRPC_AdminAPI_Publish_JSONPayload(t *testing.T) {
 	pubs, err := node.Broker().History("json-admin", 0, 0)
 	require.NoError(t, err)
 	require.Len(t, pubs, 1)
-	require.True(t, pubs[0].IsText)
+	require.Equal(t, messageloop.PayloadKindJSON, pubs[0].Kind)
 
 	var decoded map[string]interface{}
 	require.NoError(t, json.Unmarshal(pubs[0].Payload, &decoded))

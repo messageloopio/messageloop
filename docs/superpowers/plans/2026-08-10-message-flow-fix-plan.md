@@ -1033,7 +1033,7 @@ git commit -m "feat(broker)!: preserve payload kind/content_type/id/metadata thr
 | 9 | 匿名模式禁止会话接管,断线丢订阅/offset | 匿名模式用户 | 9 |
 | 10 | 会话 lease 90s→600s,节点崩溃后接管延迟变长 | 集群 failover 时间 | 10 |
 | 11 | PUBLISH 失败回滚 stream;启动等待 Redis 就绪;重连回补(精确 channel) | 集群可靠性 | 11 |
-| 12 | `Payload_Json` 全链路保留(订阅端收到 json 而非 text);id/metadata/content_type 透传;`Broker.Publish` 签名变更(破坏性) | 订阅端客户端 + 外部 Broker 实现者 | 12 |
+| 12 | `Payload_Json` 全链路保留(订阅端收到 json 而非 text);id/metadata/content_type 透传;`Broker.Publish` 签名变更(破坏性,`PublishTransient` 不再返回 offset) | 订阅端客户端 + 外部 Broker 实现者 | 12 |
 | 13 | Admin 操作受 ACL 约束;指标口径修正 | Admin 调用方 | 13 |
 
 ## 已知限制(本方案不解决,需文档化)

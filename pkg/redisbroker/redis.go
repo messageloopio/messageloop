@@ -182,11 +182,21 @@ func (b *redisBroker) interested(channel string) bool {
 
 // Publish writes payload to the Redis Stream (for history) and broadcasts via
 // Pub/Sub (for real-time delivery). Returns the stream offset assigned.
-func (b *redisBroker) Publish(ch string, payload []byte, isText bool) (uint64, error) {
+func (b *redisBroker) Publish(ch string, pub *messageloop.Publication) (uint64, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	msg := &redisMessage{Type: messageTypePublication, Channel: ch, Payload: payload, IsText: isText, Epoch: b.epochString()}
+	msg := &redisMessage{
+		Type:        messageTypePublication,
+		Channel:     ch,
+		Payload:     pub.Payload,
+		Kind:        pub.Kind,
+		ContentType: pub.ContentType,
+		Id:          pub.Id,
+		Metadata:    pub.Metadata,
+		Time:        time.Now().UnixMilli(),
+		Epoch:       b.epochString(),
+	}
 
 	// First, write to stream to get the offset.
 	streamData, err := serializeMessage(msg)
@@ -208,9 +218,12 @@ func (b *redisBroker) Publish(ch string, payload []byte, isText bool) (uint64, e
 	}
 
 	offset := parseStreamOffset(id)
+	msg.Offset = offset
+	msg.Time = time.Now().UnixMilli()
+	pub.Offset = offset
+	pub.Time = msg.Time
 
 	// Serialize again with offset included for pub/sub delivery.
-	msg.Offset = offset
 	pubSubData, err := serializeMessage(msg)
 	if err != nil {
 		return 0, err
@@ -233,19 +246,26 @@ func (b *redisBroker) Publish(ch string, payload []byte, isText bool) (uint64, e
 // PublishTransient broadcasts via Pub/Sub only, without writing to the Redis
 // Stream, so the publication never appears in History. The offset is always
 // 0: no stream entry means there is no history offset to report.
-func (b *redisBroker) PublishTransient(ch string, payload []byte, isText bool) (uint64, error) {
+func (b *redisBroker) PublishTransient(ch string, pub *messageloop.Publication) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	msg := &redisMessage{Type: messageTypePublication, Channel: ch, Payload: payload, IsText: isText, Epoch: b.epochString()}
+	msg := &redisMessage{
+		Type:        messageTypePublication,
+		Channel:     ch,
+		Payload:     pub.Payload,
+		Kind:        pub.Kind,
+		ContentType: pub.ContentType,
+		Id:          pub.Id,
+		Metadata:    pub.Metadata,
+		Time:        time.Now().UnixMilli(),
+		Epoch:       b.epochString(),
+	}
 	pubSubData, err := serializeMessage(msg)
 	if err != nil {
-		return 0, err
+		return err
 	}
-	if err := b.client.Publish(ctx, b.opts.PubSubPrefix+ch, pubSubData).Err(); err != nil {
-		return 0, err
-	}
-	return 0, nil
+	return b.client.Publish(ctx, b.opts.PubSubPrefix+ch, pubSubData).Err()
 }
 
 // History returns publications stored for ch with offset >= sinceOffset.

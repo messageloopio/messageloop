@@ -101,7 +101,7 @@ func TestRedisBroker_WildcardReceivesPublication_Redis(t *testing.T) {
 	var first string
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		_, err := brokerB.Publish("forex.eur", []byte("tick-1"), false)
+		_, err := brokerB.Publish("forex.eur", &messageloop.Publication{Payload: []byte("tick-1"), Kind: messageloop.PayloadKindBinary})
 		require.NoError(t, err)
 		select {
 		case first = <-received:
@@ -117,7 +117,7 @@ func TestRedisBroker_WildcardReceivesPublication_Redis(t *testing.T) {
 
 	// Unsubscribe once: refcount stays above zero, interest must remain.
 	require.NoError(t, brokerA.Unsubscribe("forex.*"))
-	_, err := brokerB.Publish("forex.eur", []byte("tick-2"), false)
+	_, err := brokerB.Publish("forex.eur", &messageloop.Publication{Payload: []byte("tick-2"), Kind: messageloop.PayloadKindBinary})
 	require.NoError(t, err)
 	select {
 	case ch := <-received:
@@ -128,7 +128,7 @@ func TestRedisBroker_WildcardReceivesPublication_Redis(t *testing.T) {
 
 	// Unsubscribe again: refcount reaches zero, interest must be dropped.
 	require.NoError(t, brokerA.Unsubscribe("forex.*"))
-	_, err = brokerB.Publish("forex.eur", []byte("tick-3"), false)
+	_, err = brokerB.Publish("forex.eur", &messageloop.Publication{Payload: []byte("tick-3"), Kind: messageloop.PayloadKindBinary})
 	require.NoError(t, err)
 	select {
 	case ch := <-received:

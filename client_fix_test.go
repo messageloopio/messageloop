@@ -134,7 +134,7 @@ func TestClientSession_HandleMessage_Publish_JSONPayload(t *testing.T) {
 	pubs, err := node.Broker().History("json-ch", 0, 0)
 	require.NoError(t, err)
 	require.Len(t, pubs, 1)
-	require.True(t, pubs[0].IsText)
+	require.Equal(t, PayloadKindJSON, pubs[0].Kind)
 
 	var decoded map[string]interface{}
 	require.NoError(t, json.Unmarshal(pubs[0].Payload, &decoded))
@@ -851,12 +851,12 @@ func (f *fakeEpochHistoryBroker) Start(ctx context.Context, handler PublicationH
 func (f *fakeEpochHistoryBroker) Subscribe(string) error   { return nil }
 func (f *fakeEpochHistoryBroker) Unsubscribe(string) error { return nil }
 
-func (f *fakeEpochHistoryBroker) Publish(ch string, payload []byte, isText bool) (uint64, error) {
+func (f *fakeEpochHistoryBroker) Publish(ch string, pub *Publication) (uint64, error) {
 	return 0, nil
 }
 
-func (f *fakeEpochHistoryBroker) PublishTransient(ch string, payload []byte, isText bool) (uint64, error) {
-	return 0, nil
+func (f *fakeEpochHistoryBroker) PublishTransient(ch string, pub *Publication) error {
+	return nil
 }
 
 func (f *fakeEpochHistoryBroker) History(ch string, sinceOffset uint64, limit int) ([]*Publication, error) {
@@ -1040,4 +1040,50 @@ func TestClientSession_LocalResume_MetricsBalanced(t *testing.T) {
 	// Closing the resumed client balances the gauge back to zero.
 	require.NoError(t, clientB.Close(Disconnect{}))
 	require.Equal(t, float64(0), testutil.ToFloat64(metrics.ConnectionsTotal))
+}
+// Task 12: connect-time recovery must preserve the original payload type: a
+// text message recovered from history arrives as Payload_Text, not Binary.
+func TestClient_Recovery_PreservesPayloadType(t *testing.T) {
+	ctx := context.Background()
+	node := NewNode(nil)
+	_ = node.Run(ctx)
+
+	transport := &capturingTransport{}
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
+	require.NoError(t, err)
+
+	// Publish two text messages; recovery from offset 1 must return the
+	// second one (sinceOffset = 2). The client must present the broker epoch
+	// or recovery falls back to the beginning by design.
+	first, err := node.Publish("recovery.types", &Publication{Payload: []byte("m1"), Kind: PayloadKindText})
+	require.NoError(t, err)
+	_, err = node.Publish("recovery.types", &Publication{Payload: []byte("m2"), Kind: PayloadKindText})
+	require.NoError(t, err)
+	epocher, ok := node.Broker().(interface{ Epoch() string })
+	require.True(t, ok)
+
+	msg := &clientpb.InboundMessage{
+		Id: "msg-1",
+		Envelope: &clientpb.InboundMessage_Connect{
+			Connect: &clientpb.Connect{
+				ClientId: "client-1",
+				Subscriptions: []*clientpb.Subscription{
+					{Channel: "recovery.types", Recover: true, Offset: first, Epoch: epocher.Epoch()},
+				},
+			},
+		},
+	}
+	require.NoError(t, client.HandleMessage(ctx, msg))
+
+	var out clientpb.OutboundMessage
+	require.NoError(t, JSONMarshaler{}.Unmarshal(transport.getLastMessage(), &out))
+	connected := out.GetConnected()
+	require.NotNil(t, connected)
+	require.Len(t, connected.GetPublications(), 1)
+	msgs := connected.GetPublications()[0].GetMessages()
+	require.Len(t, msgs, 1)
+	payload := msgs[0].GetPayload()
+	require.NotNil(t, payload)
+	require.IsType(t, &sharedpb.Payload_Text{}, payload.Data, "recovered payload must keep the text variant")
+	require.Equal(t, "m2", payload.GetText())
 }

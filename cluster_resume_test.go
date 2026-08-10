@@ -38,8 +38,8 @@ func (b *evictTestBroker) Unsubscribe(ch string) error {
 	delete(b.subscribed, ch)
 	return nil
 }
-func (b *evictTestBroker) Publish(string, []byte, bool) (uint64, error)        { return 0, nil }
-func (b *evictTestBroker) PublishTransient(string, []byte, bool) (uint64, error) { return 0, nil }
+func (b *evictTestBroker) Publish(string, *Publication) (uint64, error) { return 0, nil }
+func (b *evictTestBroker) PublishTransient(string, *Publication) error { return nil }
 func (b *evictTestBroker) History(string, uint64, int) ([]*Publication, error) { return nil, nil }
 
 // projectionQueryStore accumulates shared channel projection deltas and lists

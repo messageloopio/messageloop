@@ -21,10 +21,8 @@ type fakeBrokerNoReady struct{}
 func (fakeBrokerNoReady) Start(context.Context, PublicationHandler) error { return nil }
 func (fakeBrokerNoReady) Subscribe(string) error                          { return nil }
 func (fakeBrokerNoReady) Unsubscribe(string) error                        { return nil }
-func (fakeBrokerNoReady) Publish(string, []byte, bool) (uint64, error)    { return 0, nil }
-func (fakeBrokerNoReady) PublishTransient(string, []byte, bool) (uint64, error) {
-	return 0, nil
-}
+func (fakeBrokerNoReady) Publish(string, *Publication) (uint64, error) { return 0, nil }
+func (fakeBrokerNoReady) PublishTransient(string, *Publication) error  { return nil }
 func (fakeBrokerNoReady) History(string, uint64, int) ([]*Publication, error) {
 	return nil, nil
 }

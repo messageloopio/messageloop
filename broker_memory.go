@@ -109,7 +109,7 @@ func (b *memoryBroker) Unsubscribe(ch string) error {
 	return nil
 }
 
-func (b *memoryBroker) Publish(ch string, payload []byte, isText bool) (uint64, error) {
+func (b *memoryBroker) Publish(ch string, pub *Publication) (uint64, error) {
 	b.mu.Lock()
 	h, ok := b.history[ch]
 	if !ok {
@@ -121,47 +121,42 @@ func (b *memoryBroker) Publish(ch string, payload []byte, isText bool) (uint64, 
 	h.mu.Lock()
 	h.nextOff++
 	offset := h.nextOff
-	pub := &Publication{
-		Channel: ch,
-		Offset:  offset,
-		Epoch:   b.epoch,
-		Payload: payload,
-		IsText:  isText,
-		Time:    time.Now().UnixMilli(),
-	}
+	stored := *pub
+	stored.Channel = ch
+	stored.Offset = offset
+	stored.Epoch = b.epoch
+	stored.Time = time.Now().UnixMilli()
+	pub.Offset = offset
 	slot := (h.head + h.count) % b.historySize
 	if h.count == b.historySize {
 		// Buffer full: overwrite oldest entry and advance head.
-		h.entries[h.head] = pub
+		h.entries[h.head] = &stored
 		h.head = (h.head + 1) % b.historySize
 	} else {
-		h.entries[slot] = pub
+		h.entries[slot] = &stored
 		h.count++
 	}
 	h.mu.Unlock()
 
 	if h := b.handler.Load(); h != nil {
-		return offset, (*h)(ch, pub)
+		return offset, (*h)(ch, &stored)
 	}
 	return offset, nil
 }
 
 // PublishTransient delivers payload to subscribers in real time without
-// writing history. The returned offset is always 0 because transient
-// publications have no history entry.
-func (b *memoryBroker) PublishTransient(ch string, payload []byte, isText bool) (uint64, error) {
-	pub := &Publication{
-		Channel: ch,
-		Offset:  0,
-		Epoch:   b.epoch,
-		Payload: payload,
-		IsText:  isText,
-		Time:    time.Now().UnixMilli(),
-	}
+// writing history. The offset is always 0 because transient publications
+// have no history entry.
+func (b *memoryBroker) PublishTransient(ch string, pub *Publication) error {
+	stored := *pub
+	stored.Channel = ch
+	stored.Offset = 0
+	stored.Epoch = b.epoch
+	stored.Time = time.Now().UnixMilli()
 	if h := b.handler.Load(); h != nil {
-		return 0, (*h)(ch, pub)
+		return (*h)(ch, &stored)
 	}
-	return 0, nil
+	return nil
 }
 
 func (b *memoryBroker) History(ch string, sinceOffset uint64, limit int) ([]*Publication, error) {

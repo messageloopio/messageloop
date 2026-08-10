@@ -39,7 +39,7 @@ func TestRedisBroker_Publish_PubSubFailureRollsBackStream(t *testing.T) {
 	broker.client.AddHook(failPublishHook{})
 
 	ch := "publish-rollback"
-	_, err := broker.Publish(ch, []byte("msg"), false)
+	_, err := broker.Publish(ch, &messageloop.Publication{Payload: []byte("msg"), Kind: messageloop.PayloadKindBinary})
 	require.Error(t, err, "publish must fail when the pub/sub delivery fails")
 
 	stream := broker.opts.StreamPrefix + ch
@@ -144,7 +144,7 @@ func TestRedisBroker_Reconnect_CatchesUpMissedMessages(t *testing.T) {
 	// Warm the subscription with three live messages.
 	var offsets []uint64
 	for i := 0; i < 3; i++ {
-		offset, err := brokerB.Publish("catchup-ch", []byte("live"), false)
+		offset, err := brokerB.Publish("catchup-ch", &messageloop.Publication{Payload: []byte("live"), Kind: messageloop.PayloadKindBinary})
 		require.NoError(t, err)
 		offsets = append(offsets, offset)
 	}
@@ -160,7 +160,7 @@ func TestRedisBroker_Reconnect_CatchesUpMissedMessages(t *testing.T) {
 
 	// Publish two more messages while the consumer is disconnected.
 	for i := 0; i < 2; i++ {
-		offset, err := brokerB.Publish("catchup-ch", []byte("missed"), false)
+		offset, err := brokerB.Publish("catchup-ch", &messageloop.Publication{Payload: []byte("missed"), Kind: messageloop.PayloadKindBinary})
 		require.NoError(t, err)
 		offsets = append(offsets, offset)
 	}

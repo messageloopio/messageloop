@@ -84,7 +84,7 @@ func TestMemoryBroker_Subscribe_Unsubscribe(t *testing.T) {
 func TestMemoryBroker_History_RetainedAfterLastUnsubscribe(t *testing.T) {
 	b := NewMemoryBroker(MemoryBrokerOptions{})
 	require.NoError(t, b.Subscribe("ch"))
-	_, err := b.Publish("ch", []byte("x"), false)
+	_, err := b.Publish("ch", publishPub([]byte("x"), false))
 	require.NoError(t, err)
 
 	pubs, err := b.History("ch", 0, 0)
@@ -116,7 +116,7 @@ func TestMemoryBroker_History_KeptWhileSubscribersRemain(t *testing.T) {
 	b := NewMemoryBroker(MemoryBrokerOptions{})
 	require.NoError(t, b.Subscribe("ch"))
 	require.NoError(t, b.Subscribe("ch"))
-	_, err := b.Publish("ch", []byte("x"), false)
+	_, err := b.Publish("ch", publishPub([]byte("x"), false))
 	require.NoError(t, err)
 
 	require.NoError(t, b.Unsubscribe("ch"))
@@ -140,7 +140,7 @@ func TestMemoryBroker_ConcurrentPublishUnsubscribe(t *testing.T) {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			_, _ = b.Publish(ch, []byte("x"), false)
+			_, _ = b.Publish(ch, publishPub([]byte("x"), false))
 		}()
 		go func() {
 			defer wg.Done()
@@ -172,7 +172,7 @@ func TestMemoryBroker_Publish_CallsHandler(t *testing.T) {
 	b, cp, cancel := newTestBroker(t, MemoryBrokerOptions{})
 	defer cancel()
 
-	offset, err := b.Publish("ch", []byte("hello"), false)
+	offset, err := b.Publish("ch", publishPub([]byte("hello"), false))
 	if err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -198,13 +198,13 @@ func TestMemoryBroker_Publish_IsText(t *testing.T) {
 	b, cp, cancel := newTestBroker(t, MemoryBrokerOptions{})
 	defer cancel()
 
-	_, _ = b.Publish("ch", []byte("text"), true)
-	if pub := cp.last(); !pub.IsText {
-		t.Error("IsText should be true")
+	_, _ = b.Publish("ch", publishPub([]byte("text"), true))
+	if pub := cp.last(); pub.Kind != PayloadKindText {
+		t.Error("Kind should be Text")
 	}
-	_, _ = b.Publish("ch", []byte("bin"), false)
-	if pub := cp.last(); pub.IsText {
-		t.Error("IsText should be false")
+	_, _ = b.Publish("ch", publishPub([]byte("bin"), false))
+	if pub := cp.last(); pub.Kind != PayloadKindBinary {
+		t.Error("Kind should be Binary")
 	}
 }
 
@@ -213,7 +213,7 @@ func TestMemoryBroker_Publish_TimeSet(t *testing.T) {
 	defer cancel()
 
 	before := time.Now().UnixMilli()
-	_, _ = b.Publish("ch", []byte("x"), false)
+	_, _ = b.Publish("ch", publishPub([]byte("x"), false))
 	after := time.Now().UnixMilli()
 
 	pub := cp.last()
@@ -224,7 +224,7 @@ func TestMemoryBroker_Publish_TimeSet(t *testing.T) {
 
 func TestMemoryBroker_Publish_NoHandler(t *testing.T) {
 	b := NewMemoryBroker(MemoryBrokerOptions{})
-	offset, err := b.Publish("ch", []byte("x"), false)
+	offset, err := b.Publish("ch", publishPub([]byte("x"), false))
 	if err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -238,7 +238,7 @@ func TestMemoryBroker_Publish_HandlerError(t *testing.T) {
 	defer cancel()
 
 	cp.err = DisconnectBadRequest
-	_, err := b.Publish("ch", []byte("x"), false)
+	_, err := b.Publish("ch", publishPub([]byte("x"), false))
 	if err != DisconnectBadRequest {
 		t.Errorf("expected DisconnectBadRequest, got %v", err)
 	}
@@ -249,7 +249,7 @@ func TestMemoryBroker_Publish_MultipleChannels(t *testing.T) {
 	defer cancel()
 
 	for _, ch := range []string{"a", "b", "c"} {
-		_, _ = b.Publish(ch, []byte(ch), false)
+		_, _ = b.Publish(ch, publishPub([]byte(ch), false))
 	}
 	if cp.count() != 3 {
 		t.Errorf("got %d publications, want 3", cp.count())
@@ -266,7 +266,7 @@ func TestMemoryBroker_Publish_ConcurrentSafe(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _ = b.Publish("ch", []byte("x"), false)
+			_, _ = b.Publish("ch", publishPub([]byte("x"), false))
 		}()
 	}
 	wg.Wait()
@@ -282,7 +282,7 @@ func TestMemoryBroker_Offset_Monotonic(t *testing.T) {
 	b := NewMemoryBroker(MemoryBrokerOptions{})
 	var prev uint64
 	for i := 0; i < 10; i++ {
-		off, _ := b.Publish("ch", []byte("x"), false)
+		off, _ := b.Publish("ch", publishPub([]byte("x"), false))
 		if off <= prev {
 			t.Errorf("offset[%d]=%d is not > prev=%d", i, off, prev)
 		}
@@ -292,8 +292,8 @@ func TestMemoryBroker_Offset_Monotonic(t *testing.T) {
 
 func TestMemoryBroker_Offset_PerChannel(t *testing.T) {
 	b := NewMemoryBroker(MemoryBrokerOptions{})
-	offA, _ := b.Publish("a", []byte("x"), false)
-	offB, _ := b.Publish("b", []byte("x"), false)
+	offA, _ := b.Publish("a", publishPub([]byte("x"), false))
+	offB, _ := b.Publish("b", publishPub([]byte("x"), false))
 	if offA != 1 {
 		t.Errorf("channel a: offset = %d, want 1", offA)
 	}
@@ -318,7 +318,7 @@ func TestMemoryBroker_History_Empty(t *testing.T) {
 func TestMemoryBroker_History_All(t *testing.T) {
 	b := NewMemoryBroker(MemoryBrokerOptions{})
 	for i := 0; i < 5; i++ {
-		_, _ = b.Publish("ch", []byte{byte(i)}, false)
+		_, _ = b.Publish("ch", publishPub([]byte{byte(i)}, false))
 	}
 	pubs, err := b.History("ch", 0, 0)
 	if err != nil {
@@ -337,7 +337,7 @@ func TestMemoryBroker_History_All(t *testing.T) {
 func TestMemoryBroker_History_SinceOffset(t *testing.T) {
 	b := NewMemoryBroker(MemoryBrokerOptions{})
 	for i := 0; i < 6; i++ {
-		_, _ = b.Publish("ch", []byte{byte(i)}, false)
+		_, _ = b.Publish("ch", publishPub([]byte{byte(i)}, false))
 	}
 	// offsets 1-6; since=4 returns 4,5,6
 	pubs, err := b.History("ch", 4, 0)
@@ -355,7 +355,7 @@ func TestMemoryBroker_History_SinceOffset(t *testing.T) {
 func TestMemoryBroker_History_Limit(t *testing.T) {
 	b := NewMemoryBroker(MemoryBrokerOptions{})
 	for i := 0; i < 10; i++ {
-		_, _ = b.Publish("ch", []byte{byte(i)}, false)
+		_, _ = b.Publish("ch", publishPub([]byte{byte(i)}, false))
 	}
 	pubs, err := b.History("ch", 0, 3)
 	if err != nil {
@@ -370,7 +370,7 @@ func TestMemoryBroker_History_RingBuffer(t *testing.T) {
 	const size = 4
 	b := NewMemoryBroker(MemoryBrokerOptions{HistorySize: size})
 	for i := 0; i < 7; i++ {
-		_, _ = b.Publish("ch", []byte{byte(i)}, false)
+		_, _ = b.Publish("ch", publishPub([]byte{byte(i)}, false))
 	}
 	// offsets 1-7; ring of 4 retains 4,5,6,7
 	pubs, err := b.History("ch", 0, 0)
@@ -390,9 +390,9 @@ func TestMemoryBroker_History_RingBuffer(t *testing.T) {
 
 func TestMemoryBroker_History_MultiChannel_Isolated(t *testing.T) {
 	b := NewMemoryBroker(MemoryBrokerOptions{})
-	_, _ = b.Publish("a", []byte("a1"), false)
-	_, _ = b.Publish("b", []byte("b1"), false)
-	_, _ = b.Publish("a", []byte("a2"), false)
+	_, _ = b.Publish("a", publishPub([]byte("a1"), false))
+	_, _ = b.Publish("b", publishPub([]byte("b1"), false))
+	_, _ = b.Publish("a", publishPub([]byte("a2"), false))
 
 	pufsA, _ := b.History("a", 0, 0)
 	pufsB, _ := b.History("b", 0, 0)
@@ -436,7 +436,7 @@ func BenchmarkMemoryBroker_Publish(b *testing.B) {
 	payload := []byte("bench payload")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = broker.Publish("ch", payload, false)
+		_, _ = broker.Publish("ch", publishPub(payload, false))
 	}
 }
 
@@ -450,7 +450,36 @@ func BenchmarkMemoryBroker_ConcurrentPublish(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			_, _ = broker.Publish("ch", payload, false)
+			_, _ = broker.Publish("ch", publishPub(payload, false))
 		}
 	})
+}
+
+// Task 12: the Publication model must preserve kind/content_type/id/metadata
+// through publish and history reads.
+func TestMemoryBroker_Publish_PreservesKindAndMetadata(t *testing.T) {
+	b, _, cancel := newTestBroker(t, MemoryBrokerOptions{})
+	defer cancel()
+
+	pub := &Publication{
+		Payload:     []byte(`{"k":"v"}`),
+		Kind:        PayloadKindJSON,
+		ContentType: "application/json",
+		Id:          "m-1",
+		Metadata:    map[string]string{"a": "b"},
+	}
+	offset, err := b.Publish("ch", pub)
+	require.NoError(t, err)
+	require.NotZero(t, offset)
+
+	history, err := b.History("ch", 0, 0)
+	require.NoError(t, err)
+	require.Len(t, history, 1)
+	h := history[0]
+	require.Equal(t, PayloadKindJSON, h.Kind)
+	require.Equal(t, "application/json", h.ContentType)
+	require.Equal(t, "m-1", h.Id)
+	require.Equal(t, map[string]string{"a": "b"}, h.Metadata)
+	require.Greater(t, h.Time, int64(0))
+	require.Equal(t, offset, h.Offset)
 }

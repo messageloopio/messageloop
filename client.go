@@ -652,19 +652,19 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 						"channel", sub.Channel, "limit", MaxRecoveredPublications)
 					break
 				}
-				payload := &sharedpb.Payload{}
-				if len(pub.Payload) > 0 {
-					payload.Data = &sharedpb.Payload_Binary{
-						Binary: pub.Payload,
-					}
-				}
 				pubs = append(pubs, &clientpb.Publication{
 					Messages: []*clientpb.Message{
 						{
 							Id:      publicationID(sub.Channel, pub.Offset),
 							Channel: sub.Channel,
 							Offset:  pub.Offset,
-							Payload: payload,
+							Payload: pub.PayloadProto(),
+							Metadata: func() *sharedpb.Metadata {
+								if len(pub.Metadata) == 0 {
+									return nil
+								}
+								return &sharedpb.Metadata{Entries: pub.Metadata}
+							}(),
 						},
 					},
 				})
@@ -944,29 +944,33 @@ func (c *Client) handlePublish(ctx context.Context, in *clientpb.InboundMessage,
 		}
 	}
 
-	// Extract data from Payload
-	var data []byte
-	var isText bool
-	var err error
+	// Extract data from Payload, preserving the original oneof variant.
+	pub := &Publication{}
 	if publish.Payload != nil {
+		pub.ContentType = publish.Payload.ContentType
 		switch p := publish.Payload.Data.(type) {
 		case *sharedpb.Payload_Json:
-			// JSON data - marshal to bytes
-			data, err = MarshalJSONStruct(p.Json)
+			// JSON data - marshal to bytes.
+			data, err := MarshalJSONStruct(p.Json)
 			if err != nil {
 				return err
 			}
-			isText = true
+			pub.Payload = data
+			pub.Kind = PayloadKindJSON
 		case *sharedpb.Payload_Binary:
-			data = p.Binary
-			isText = false
+			pub.Payload = p.Binary
+			pub.Kind = PayloadKindBinary
 		case *sharedpb.Payload_Text:
-			data = []byte(p.Text)
-			isText = true
+			pub.Payload = []byte(p.Text)
+			pub.Kind = PayloadKindText
 		}
 	}
+	if publish.Metadata != nil {
+		pub.Metadata = publish.Metadata.Entries
+	}
+	pub.Id = in.Id
 
-	offset, err := c.node.Publish(channel, data, isText)
+	offset, err := c.node.Publish(channel, pub)
 	if err != nil {
 		return err
 	}

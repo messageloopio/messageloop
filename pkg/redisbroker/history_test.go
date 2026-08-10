@@ -3,6 +3,7 @@ package redisbroker
 import (
 	"testing"
 
+	"github.com/messageloopio/messageloop"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -93,7 +94,7 @@ func TestRedisBroker_History_InclusiveSinceOffset(t *testing.T) {
 	ch := "history-inclusive"
 	offsets := make([]uint64, 0, 3)
 	for i := 0; i < 3; i++ {
-		offset, err := broker.Publish(ch, []byte("msg-"+string(rune('a'+i))), false)
+		offset, err := broker.Publish(ch, &messageloop.Publication{Payload: []byte("msg-" + string(rune('a'+i))), Kind: messageloop.PayloadKindBinary})
 		require.NoError(t, err)
 		require.NotZero(t, offset)
 		offsets = append(offsets, offset)
@@ -114,4 +115,24 @@ func TestRedisBroker_History_InclusiveSinceOffset(t *testing.T) {
 	all, err := broker.History(ch, 0, 0)
 	require.NoError(t, err)
 	require.Len(t, all, 3, "History(ch, 0) must return all entries")
+}
+
+// Task 12: old stream entries written without the kind field must deserialize
+// with the kind inferred from isText (rolling-upgrade safety).
+func TestRedisBroker_Message_BackwardCompat(t *testing.T) {
+	textMsg, err := deserializeMessage([]byte(`{"t":"pub","ch":"x","p":"aGVsbG8=","isText":true,"off":5}`))
+	require.NoError(t, err)
+	require.Equal(t, messageloop.PayloadKindText, textMsg.Kind)
+
+	binaryMsg, err := deserializeMessage([]byte(`{"t":"pub","ch":"x","p":"Ymlu","off":6}`))
+	require.NoError(t, err)
+	require.Equal(t, messageloop.PayloadKindBinary, binaryMsg.Kind)
+
+	// New-format entries carry the kind explicitly.
+	jsonMsg, err := deserializeMessage([]byte(`{"t":"pub","ch":"x","p":"eyJhIjoxfQ==","kind":2,"ct":"application/json","id":"m-1","ts":1700000000000,"off":7}`))
+	require.NoError(t, err)
+	require.Equal(t, messageloop.PayloadKindJSON, jsonMsg.Kind)
+	require.Equal(t, "application/json", jsonMsg.ContentType)
+	require.Equal(t, "m-1", jsonMsg.Id)
+	require.Equal(t, int64(1700000000000), jsonMsg.Time)
 }

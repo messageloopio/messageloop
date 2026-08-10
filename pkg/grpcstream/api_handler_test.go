@@ -29,15 +29,15 @@ func (b *failPublishBroker) Start(ctx context.Context, handler messageloop.Publi
 func (b *failPublishBroker) Subscribe(ch string) error   { return nil }
 func (b *failPublishBroker) Unsubscribe(ch string) error { return nil }
 
-func (b *failPublishBroker) Publish(ch string, payload []byte, isText bool) (uint64, error) {
+func (b *failPublishBroker) Publish(ch string, pub *messageloop.Publication) (uint64, error) {
 	if b.failChannel == "" || ch == b.failChannel {
 		return 0, errors.New("broker unavailable")
 	}
 	return 1, nil
 }
 
-func (b *failPublishBroker) PublishTransient(ch string, payload []byte, isText bool) (uint64, error) {
-	return 0, nil
+func (b *failPublishBroker) PublishTransient(ch string, pub *messageloop.Publication) error {
+	return nil
 }
 
 func (b *failPublishBroker) History(ch string, sinceOffset uint64, limit int) ([]*messageloop.Publication, error) {
@@ -386,4 +386,43 @@ func TestAPIServiceHandler_UnsubscribeNonExistentSession(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	require.False(t, resp.Results["test-channel-1"])
+}
+
+// Task 12: admin Publish propagates id/metadata/content_type and GetHistory
+// returns them intact.
+func TestAPIServiceHandler_GetHistory_ReturnsContentTypeAndId(t *testing.T) {
+	ctx := context.Background()
+	node := messageloop.NewNode(nil)
+	_ = node.Run(ctx) // Start broker
+	handler := NewAPIServiceHandler(node)
+
+	req := &serverpb.PublishRequest{
+		RequestId: uuid.NewString(),
+		Publications: []*serverpb.Publication{
+			{
+				Id: "admin-m-1",
+				Destination: &serverpb.Publication_Destination{
+					Channels: []string{"history-meta"},
+				},
+				Payload: &sharedpb.Payload{
+					ContentType: "application/json",
+					Data:        &sharedpb.Payload_Text{Text: `{"k":"v"}`},
+				},
+				Metadata: &sharedpb.Metadata{Entries: map[string]string{"origin": "admin"}},
+			},
+		},
+	}
+	_, err := handler.Publish(ctx, req)
+	require.NoError(t, err)
+
+	resp, err := handler.GetHistory(ctx, &serverpb.GetHistoryRequest{Channel: "history-meta"})
+	require.NoError(t, err)
+	require.Len(t, resp.Publications, 1)
+	p := resp.Publications[0]
+	require.Equal(t, "admin-m-1", p.Id)
+	require.Equal(t, map[string]string{"origin": "admin"}, p.Metadata)
+	require.NotNil(t, p.Payload)
+	require.Equal(t, "application/json", p.Payload.ContentType)
+	require.Equal(t, `{"k":"v"}`, p.Payload.GetText())
+	require.NotZero(t, p.Time)
 }

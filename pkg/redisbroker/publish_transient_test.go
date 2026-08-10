@@ -3,6 +3,7 @@ package redisbroker
 import (
 	"testing"
 
+	"github.com/messageloopio/messageloop"
 	"github.com/stretchr/testify/require"
 )
 
@@ -17,15 +18,14 @@ func TestRedisBroker_PublishTransientSkipsHistory(t *testing.T) {
 
 	ch := "transient-hist"
 
-	offset, err := broker.PublishTransient(ch, []byte("join"), true)
+	err := broker.PublishTransient(ch, &messageloop.Publication{Payload: []byte("join"), Kind: messageloop.PayloadKindText})
 	require.NoError(t, err)
-	require.Zero(t, offset, "transient publications have no history offset")
 
 	pubs, err := broker.History(ch, 0, 0)
 	require.NoError(t, err)
 	require.Empty(t, pubs, "transient publications must not appear in history")
 
-	offset, err = broker.Publish(ch, []byte("normal"), true)
+	offset, err := broker.Publish(ch, &messageloop.Publication{Payload: []byte("normal"), Kind: messageloop.PayloadKindText})
 	require.NoError(t, err)
 	require.NotZero(t, offset)
 	pubs, err = broker.History(ch, 0, 0)

@@ -132,6 +132,8 @@ message HistoryPublication {
   messageloop.shared.v1.Payload payload = 2;
   bool is_text = 3;
   int64 time = 4;
+  string id = 5;
+  map<string, string> metadata = 6;
 }
 
 // --- GetChannels ---

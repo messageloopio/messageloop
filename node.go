@@ -465,12 +465,12 @@ func (n *Node) Channels(ctx context.Context) ([]ChannelInfo, error) {
 
 // Publish sends payload to ch via the broker.
 // Returns the offset assigned to the publication by the broker (0 if history is disabled).
-func (n *Node) Publish(ch string, payload []byte, isText bool) (uint64, error) {
+func (n *Node) Publish(ch string, pub *Publication) (uint64, error) {
 	if n.metrics != nil {
 		timer := prometheus.NewTimer(n.metrics.PublishDuration)
 		defer timer.ObserveDuration()
 	}
-	offset, err := n.broker.Publish(ch, payload, isText)
+	offset, err := n.broker.Publish(ch, pub)
 	if err == nil && n.metrics != nil {
 		n.metrics.MessagesPublished.Inc()
 	}
@@ -480,12 +480,12 @@ func (n *Node) Publish(ch string, payload []byte, isText bool) (uint64, error) {
 // PublishTransient delivers payload to ch in real time without writing
 // broker history. Used for events (e.g. presence join/leave) that must not
 // appear in the recovery message stream.
-func (n *Node) PublishTransient(ch string, payload []byte, isText bool) error {
+func (n *Node) PublishTransient(ch string, pub *Publication) error {
 	if n.metrics != nil {
 		timer := prometheus.NewTimer(n.metrics.PublishDuration)
 		defer timer.ObserveDuration()
 	}
-	_, err := n.broker.PublishTransient(ch, payload, isText)
+	err := n.broker.PublishTransient(ch, pub)
 	if err == nil && n.metrics != nil {
 		n.metrics.MessagesPublished.Inc()
 	}
@@ -842,7 +842,11 @@ func (n *Node) PublishPresenceJoin(channel, clientID, userID string) {
 	if err != nil {
 		return
 	}
-	_ = n.PublishTransient(presenceChannel(channel), data, true)
+	err = n.PublishTransient(presenceChannel(channel), &Publication{Payload: data, Kind: PayloadKindText})
+	if err != nil {
+		log.WarnContext(context.Background(), "failed to publish presence join event",
+			err, "channel", channel, "client_id", clientID)
+	}
 }
 
 // PublishPresenceLeave publishes a presence leave event to the channel's presence sub-channel.
@@ -854,5 +858,9 @@ func (n *Node) PublishPresenceLeave(channel, clientID, userID string) {
 	if err != nil {
 		return
 	}
-	_ = n.PublishTransient(presenceChannel(channel), data, true)
+	err = n.PublishTransient(presenceChannel(channel), &Publication{Payload: data, Kind: PayloadKindText})
+	if err != nil {
+		log.WarnContext(context.Background(), "failed to publish presence leave event",
+			err, "channel", channel, "client_id", clientID)
+	}
 }

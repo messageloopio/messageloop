@@ -247,6 +247,18 @@ The `Payload` message supports three data formats:
 
 Optional `content_type` field can specify the MIME type (e.g., `application/json`).
 
+### Payload type preservation
+
+The server preserves the original `Payload` oneof variant end to end: a
+message published as `json` (or `text`/`binary`) is delivered to subscribers
+in real time, replayed during connect-time recovery, and returned by the
+admin `GetHistory` API in the same variant. Before this guarantee existed,
+`json` payloads were collapsed to `text` on the wire.
+
+Known limitation: JSON numbers larger than 2^53 lose precision at the
+ingress boundary (structpb conversion); the payload type is preserved, the
+exact numeric values are not.
+
 ## RPC
 
 ### Request

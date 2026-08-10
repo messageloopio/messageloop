@@ -39,13 +39,17 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverpb.PublishRe
 	attempted := 0
 	failed := 0
 	for _, pub := range req.Publications {
-		// Extract data from Payload
-		var data []byte
-		var isText bool
+		// Extract data from Payload, preserving the original oneof variant.
+		brokerPub := &messageloop.Publication{
+			Id:          pub.Id,
+			ContentType: pub.GetPayload().GetContentType(),
+			Metadata:    pub.GetMetadata().GetEntries(),
+		}
 		if pub.Payload != nil {
 			switch p := pub.Payload.Data.(type) {
 			case *sharedpb.Payload_Binary:
-				data = p.Binary
+				brokerPub.Payload = p.Binary
+				brokerPub.Kind = messageloop.PayloadKindBinary
 			case *sharedpb.Payload_Json:
 				jsonData, err := messageloop.MarshalJSONStruct(p.Json)
 				if err != nil {
@@ -54,11 +58,11 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverpb.PublishRe
 					failed++
 					continue
 				}
-				data = jsonData
-				isText = true
+				brokerPub.Payload = jsonData
+				brokerPub.Kind = messageloop.PayloadKindJSON
 			case *sharedpb.Payload_Text:
-				data = []byte(p.Text)
-				isText = true
+				brokerPub.Payload = []byte(p.Text)
+				brokerPub.Kind = messageloop.PayloadKindText
 			}
 		}
 
@@ -93,7 +97,7 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverpb.PublishRe
 		// Channel-based publication
 		for _, channel := range dest.Channels {
 			attempted++
-			if _, err := h.node.Publish(channel, data, isText); err != nil {
+			if _, err := h.node.Publish(channel, brokerPub); err != nil {
 				log.ErrorContext(ctx, "failed to publish to channel", err, "channel", channel)
 				failed++
 			}
@@ -237,19 +241,17 @@ func (h *apiServiceHandler) GetHistory(ctx context.Context, req *serverpb.GetHis
 
 	result := make([]*serverpb.HistoryPublication, 0, len(pubs))
 	for _, pub := range pubs {
-		var payload *sharedpb.Payload
-		if len(pub.Payload) > 0 {
-			if pub.IsText {
-				payload = &sharedpb.Payload{Data: &sharedpb.Payload_Text{Text: string(pub.Payload)}}
-			} else {
-				payload = &sharedpb.Payload{Data: &sharedpb.Payload_Binary{Binary: pub.Payload}}
-			}
+		metadata := pub.Metadata
+		if len(metadata) == 0 {
+			metadata = nil
 		}
 		result = append(result, &serverpb.HistoryPublication{
-			Offset:  pub.Offset,
-			Payload: payload,
-			IsText:  pub.IsText,
-			Time:    pub.Time,
+			Offset:   pub.Offset,
+			Payload:  pub.PayloadProto(),
+			IsText:   pub.Kind == messageloop.PayloadKindText || pub.Kind == messageloop.PayloadKindJSON,
+			Time:     pub.Time,
+			Id:       pub.Id,
+			Metadata: metadata,
 		})
 	}
 

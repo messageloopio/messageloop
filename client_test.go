@@ -1146,12 +1146,12 @@ func (f *fakeHistoryBroker) Start(ctx context.Context, handler PublicationHandle
 func (f *fakeHistoryBroker) Subscribe(string) error   { return nil }
 func (f *fakeHistoryBroker) Unsubscribe(string) error { return nil }
 
-func (f *fakeHistoryBroker) Publish(ch string, payload []byte, isText bool) (uint64, error) {
+func (f *fakeHistoryBroker) Publish(ch string, pub *Publication) (uint64, error) {
 	return 0, nil
 }
 
-func (f *fakeHistoryBroker) PublishTransient(ch string, payload []byte, isText bool) (uint64, error) {
-	return 0, nil
+func (f *fakeHistoryBroker) PublishTransient(ch string, pub *Publication) error {
+	return nil
 }
 
 func (f *fakeHistoryBroker) History(ch string, sinceOffset uint64, limit int) ([]*Publication, error) {
@@ -1200,7 +1200,7 @@ func TestNode_Connect_RecoveryIDsMatchRealtime(t *testing.T) {
 	// Publish 3 messages and capture the realtime IDs per offset.
 	realtimeIDs := make(map[uint64]string)
 	for i := 0; i < 3; i++ {
-		_, err := node.Broker().Publish("recovery.ch", []byte(fmt.Sprintf("m%d", i+1)), false)
+		_, err := node.Broker().Publish("recovery.ch", publishPub([]byte(fmt.Sprintf("m%d", i+1)), false))
 		require.NoError(t, err)
 	}
 	require.Equal(t, 3, transport1.getMessageCount())
@@ -1315,7 +1315,7 @@ func TestClientSession_PublishAck_Offset(t *testing.T) {
 	require.NoError(t, client.HandleMessage(ctx, connectMsg))
 
 	// Seed the channel through the broker so the ack offset is deterministic.
-	seedOffset, err := node.Broker().Publish("ack-ch", []byte("seed"), false)
+	seedOffset, err := node.Broker().Publish("ack-ch", publishPub([]byte("seed"), false))
 	require.NoError(t, err)
 	require.Equal(t, uint64(1), seedOffset)
 

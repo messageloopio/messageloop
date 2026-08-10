@@ -44,12 +44,20 @@ func (b *redisBroker) getHistory(ch string, sinceOffset uint64, limit int) ([]*m
 		if err != nil || redisMsg.Type != messageTypePublication {
 			continue
 		}
+		pubTime := redisMsg.Time
+		if pubTime == 0 {
+			pubTime = time.Now().UnixMilli()
+		}
 		pubs = append(pubs, &messageloop.Publication{
-			Channel: ch,
-			Offset:  parseStreamOffset(m.ID),
-			Payload: redisMsg.Payload,
-			IsText:  redisMsg.IsText,
-			Time:    time.Now().UnixMilli(),
+			Channel:     ch,
+			Offset:      parseStreamOffset(m.ID),
+			Payload:     redisMsg.Payload,
+			Kind:        redisMsg.Kind,
+			ContentType: redisMsg.ContentType,
+			Id:          redisMsg.Id,
+			Metadata:    redisMsg.Metadata,
+			Time:        pubTime,
+			Epoch:       redisMsg.Epoch,
 		})
 	}
 	return pubs, nil

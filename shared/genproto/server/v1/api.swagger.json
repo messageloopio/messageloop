@@ -189,6 +189,15 @@
         "time": {
           "type": "string",
           "format": "int64"
+        },
+        "id": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
         }
       }
     },

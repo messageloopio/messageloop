@@ -938,6 +938,8 @@ type HistoryPublication struct {
 	Payload       *v1.Payload            `protobuf:"bytes,2,opt,name=payload,proto3" json:"payload,omitempty"`
 	IsText        bool                   `protobuf:"varint,3,opt,name=is_text,json=isText,proto3" json:"is_text,omitempty"`
 	Time          int64                  `protobuf:"varint,4,opt,name=time,proto3" json:"time,omitempty"`
+	Id            string                 `protobuf:"bytes,5,opt,name=id,proto3" json:"id,omitempty"`
+	Metadata      map[string]string      `protobuf:"bytes,6,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -998,6 +1000,20 @@ func (x *HistoryPublication) GetTime() int64 {
 		return x.Time
 	}
 	return 0
+}
+
+func (x *HistoryPublication) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *HistoryPublication) GetMetadata() map[string]string {
+	if x != nil {
+		return x.Metadata
+	}
+	return nil
 }
 
 type GetChannelsRequest struct {
@@ -1311,12 +1327,17 @@ const file_server_v1_api_proto_rawDesc = "" +
 	"\fsince_offset\x18\x02 \x01(\x04R\vsinceOffset\x12\x14\n" +
 	"\x05limit\x18\x03 \x01(\x05R\x05limit\"c\n" +
 	"\x12GetHistoryResponse\x12M\n" +
-	"\fpublications\x18\x01 \x03(\v2).messageloop.server.v1.HistoryPublicationR\fpublications\"\x93\x01\n" +
+	"\fpublications\x18\x01 \x03(\v2).messageloop.server.v1.HistoryPublicationR\fpublications\"\xb5\x02\n" +
 	"\x12HistoryPublication\x12\x16\n" +
 	"\x06offset\x18\x01 \x01(\x04R\x06offset\x128\n" +
 	"\apayload\x18\x02 \x01(\v2\x1e.messageloop.shared.v1.PayloadR\apayload\x12\x17\n" +
 	"\ais_text\x18\x03 \x01(\bR\x06isText\x12\x12\n" +
-	"\x04time\x18\x04 \x01(\x03R\x04time\"\x14\n" +
+	"\x04time\x18\x04 \x01(\x03R\x04time\x12\x0e\n" +
+	"\x02id\x18\x05 \x01(\tR\x02id\x12S\n" +
+	"\bmetadata\x18\x06 \x03(\v27.messageloop.server.v1.HistoryPublication.MetadataEntryR\bmetadata\x1a;\n" +
+	"\rMetadataEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x14\n" +
 	"\x12GetChannelsRequest\"U\n" +
 	"\x13GetChannelsResponse\x12>\n" +
 	"\bchannels\x18\x01 \x03(\v2\".messageloop.server.v1.ChannelInfoR\bchannels\"C\n" +
@@ -1348,7 +1369,7 @@ func file_server_v1_api_proto_rawDescGZIP() []byte {
 	return file_server_v1_api_proto_rawDescData
 }
 
-var file_server_v1_api_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
+var file_server_v1_api_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
 var file_server_v1_api_proto_goTypes = []any{
 	(*Publication)(nil),             // 0: messageloop.server.v1.Publication
 	(*PublishRequest)(nil),          // 1: messageloop.server.v1.PublishRequest
@@ -1377,51 +1398,53 @@ var file_server_v1_api_proto_goTypes = []any{
 	nil,                             // 24: messageloop.server.v1.SubscribeResponse.ResultsEntry
 	nil,                             // 25: messageloop.server.v1.UnsubscribeResponse.ResultsEntry
 	nil,                             // 26: messageloop.server.v1.GetPresenceResponse.ClientsEntry
-	(*v1.Payload)(nil),              // 27: messageloop.shared.v1.Payload
-	(*v1.Metadata)(nil),             // 28: messageloop.shared.v1.Metadata
-	(*v1.Error)(nil),                // 29: messageloop.shared.v1.Error
+	nil,                             // 27: messageloop.server.v1.HistoryPublication.MetadataEntry
+	(*v1.Payload)(nil),              // 28: messageloop.shared.v1.Payload
+	(*v1.Metadata)(nil),             // 29: messageloop.shared.v1.Metadata
+	(*v1.Error)(nil),                // 30: messageloop.shared.v1.Error
 }
 var file_server_v1_api_proto_depIdxs = []int32{
 	22, // 0: messageloop.server.v1.Publication.destination:type_name -> messageloop.server.v1.Publication.Destination
 	21, // 1: messageloop.server.v1.Publication.options:type_name -> messageloop.server.v1.Publication.Options
-	27, // 2: messageloop.server.v1.Publication.payload:type_name -> messageloop.shared.v1.Payload
-	28, // 3: messageloop.server.v1.Publication.metadata:type_name -> messageloop.shared.v1.Metadata
+	28, // 2: messageloop.server.v1.Publication.payload:type_name -> messageloop.shared.v1.Payload
+	29, // 3: messageloop.server.v1.Publication.metadata:type_name -> messageloop.shared.v1.Metadata
 	0,  // 4: messageloop.server.v1.PublishRequest.publications:type_name -> messageloop.server.v1.Publication
-	27, // 5: messageloop.server.v1.SurveyRequest.payload:type_name -> messageloop.shared.v1.Payload
-	28, // 6: messageloop.server.v1.SurveyRequest.metadata:type_name -> messageloop.shared.v1.Metadata
+	28, // 5: messageloop.server.v1.SurveyRequest.payload:type_name -> messageloop.shared.v1.Payload
+	29, // 6: messageloop.server.v1.SurveyRequest.metadata:type_name -> messageloop.shared.v1.Metadata
 	5,  // 7: messageloop.server.v1.SurveyResponse.results:type_name -> messageloop.server.v1.SurveyResult
-	27, // 8: messageloop.server.v1.SurveyResult.payload:type_name -> messageloop.shared.v1.Payload
-	28, // 9: messageloop.server.v1.SurveyResult.metadata:type_name -> messageloop.shared.v1.Metadata
-	29, // 10: messageloop.server.v1.SurveyResult.error:type_name -> messageloop.shared.v1.Error
+	28, // 8: messageloop.server.v1.SurveyResult.payload:type_name -> messageloop.shared.v1.Payload
+	29, // 9: messageloop.server.v1.SurveyResult.metadata:type_name -> messageloop.shared.v1.Metadata
+	30, // 10: messageloop.server.v1.SurveyResult.error:type_name -> messageloop.shared.v1.Error
 	23, // 11: messageloop.server.v1.DisconnectResponse.results:type_name -> messageloop.server.v1.DisconnectResponse.ResultsEntry
 	24, // 12: messageloop.server.v1.SubscribeResponse.results:type_name -> messageloop.server.v1.SubscribeResponse.ResultsEntry
 	25, // 13: messageloop.server.v1.UnsubscribeResponse.results:type_name -> messageloop.server.v1.UnsubscribeResponse.ResultsEntry
 	26, // 14: messageloop.server.v1.GetPresenceResponse.clients:type_name -> messageloop.server.v1.GetPresenceResponse.ClientsEntry
 	17, // 15: messageloop.server.v1.GetHistoryResponse.publications:type_name -> messageloop.server.v1.HistoryPublication
-	27, // 16: messageloop.server.v1.HistoryPublication.payload:type_name -> messageloop.shared.v1.Payload
-	20, // 17: messageloop.server.v1.GetChannelsResponse.channels:type_name -> messageloop.server.v1.ChannelInfo
-	14, // 18: messageloop.server.v1.GetPresenceResponse.ClientsEntry.value:type_name -> messageloop.server.v1.PresenceInfo
-	1,  // 19: messageloop.server.v1.APIService.Publish:input_type -> messageloop.server.v1.PublishRequest
-	6,  // 20: messageloop.server.v1.APIService.Disconnect:input_type -> messageloop.server.v1.DisconnectRequest
-	8,  // 21: messageloop.server.v1.APIService.Subscribe:input_type -> messageloop.server.v1.SubscribeRequest
-	10, // 22: messageloop.server.v1.APIService.Unsubscribe:input_type -> messageloop.server.v1.UnsubscribeRequest
-	3,  // 23: messageloop.server.v1.APIService.Survey:input_type -> messageloop.server.v1.SurveyRequest
-	12, // 24: messageloop.server.v1.APIService.GetPresence:input_type -> messageloop.server.v1.GetPresenceRequest
-	15, // 25: messageloop.server.v1.APIService.GetHistory:input_type -> messageloop.server.v1.GetHistoryRequest
-	18, // 26: messageloop.server.v1.APIService.GetChannels:input_type -> messageloop.server.v1.GetChannelsRequest
-	2,  // 27: messageloop.server.v1.APIService.Publish:output_type -> messageloop.server.v1.PublishResponse
-	7,  // 28: messageloop.server.v1.APIService.Disconnect:output_type -> messageloop.server.v1.DisconnectResponse
-	9,  // 29: messageloop.server.v1.APIService.Subscribe:output_type -> messageloop.server.v1.SubscribeResponse
-	11, // 30: messageloop.server.v1.APIService.Unsubscribe:output_type -> messageloop.server.v1.UnsubscribeResponse
-	4,  // 31: messageloop.server.v1.APIService.Survey:output_type -> messageloop.server.v1.SurveyResponse
-	13, // 32: messageloop.server.v1.APIService.GetPresence:output_type -> messageloop.server.v1.GetPresenceResponse
-	16, // 33: messageloop.server.v1.APIService.GetHistory:output_type -> messageloop.server.v1.GetHistoryResponse
-	19, // 34: messageloop.server.v1.APIService.GetChannels:output_type -> messageloop.server.v1.GetChannelsResponse
-	27, // [27:35] is the sub-list for method output_type
-	19, // [19:27] is the sub-list for method input_type
-	19, // [19:19] is the sub-list for extension type_name
-	19, // [19:19] is the sub-list for extension extendee
-	0,  // [0:19] is the sub-list for field type_name
+	28, // 16: messageloop.server.v1.HistoryPublication.payload:type_name -> messageloop.shared.v1.Payload
+	27, // 17: messageloop.server.v1.HistoryPublication.metadata:type_name -> messageloop.server.v1.HistoryPublication.MetadataEntry
+	20, // 18: messageloop.server.v1.GetChannelsResponse.channels:type_name -> messageloop.server.v1.ChannelInfo
+	14, // 19: messageloop.server.v1.GetPresenceResponse.ClientsEntry.value:type_name -> messageloop.server.v1.PresenceInfo
+	1,  // 20: messageloop.server.v1.APIService.Publish:input_type -> messageloop.server.v1.PublishRequest
+	6,  // 21: messageloop.server.v1.APIService.Disconnect:input_type -> messageloop.server.v1.DisconnectRequest
+	8,  // 22: messageloop.server.v1.APIService.Subscribe:input_type -> messageloop.server.v1.SubscribeRequest
+	10, // 23: messageloop.server.v1.APIService.Unsubscribe:input_type -> messageloop.server.v1.UnsubscribeRequest
+	3,  // 24: messageloop.server.v1.APIService.Survey:input_type -> messageloop.server.v1.SurveyRequest
+	12, // 25: messageloop.server.v1.APIService.GetPresence:input_type -> messageloop.server.v1.GetPresenceRequest
+	15, // 26: messageloop.server.v1.APIService.GetHistory:input_type -> messageloop.server.v1.GetHistoryRequest
+	18, // 27: messageloop.server.v1.APIService.GetChannels:input_type -> messageloop.server.v1.GetChannelsRequest
+	2,  // 28: messageloop.server.v1.APIService.Publish:output_type -> messageloop.server.v1.PublishResponse
+	7,  // 29: messageloop.server.v1.APIService.Disconnect:output_type -> messageloop.server.v1.DisconnectResponse
+	9,  // 30: messageloop.server.v1.APIService.Subscribe:output_type -> messageloop.server.v1.SubscribeResponse
+	11, // 31: messageloop.server.v1.APIService.Unsubscribe:output_type -> messageloop.server.v1.UnsubscribeResponse
+	4,  // 32: messageloop.server.v1.APIService.Survey:output_type -> messageloop.server.v1.SurveyResponse
+	13, // 33: messageloop.server.v1.APIService.GetPresence:output_type -> messageloop.server.v1.GetPresenceResponse
+	16, // 34: messageloop.server.v1.APIService.GetHistory:output_type -> messageloop.server.v1.GetHistoryResponse
+	19, // 35: messageloop.server.v1.APIService.GetChannels:output_type -> messageloop.server.v1.GetChannelsResponse
+	28, // [28:36] is the sub-list for method output_type
+	20, // [20:28] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_server_v1_api_proto_init() }
@@ -1435,7 +1458,7 @@ func file_server_v1_api_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_server_v1_api_proto_rawDesc), len(file_server_v1_api_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   27,
+			NumMessages:   28,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
