@@ -193,10 +193,13 @@ func newWebSocketServer(cfg *config.Config, node *messageloop.Node, logger *slog
 		TLSKeyFile:  cfg.Transport.WebSocket.TLS.KeyFile,
 		Compression: cfg.Transport.WebSocket.Compression,
 	}
-	if cfg.Transport.WebSocket.WriteTimeout != "" {
-		if d, err := time.ParseDuration(cfg.Transport.WebSocket.WriteTimeout); err == nil {
-			wsOpts.WriteTimeout = d
-		}
+	if cfg.Transport.WebSocket.WriteTimeout == "" {
+		// Unconfigured: keep the default 10s write timeout so slow consumers
+		// cannot block broadcasts indefinitely.
+		wsOpts.WriteTimeout = websocket.DefaultWSWriteTimeout
+	} else if d, err := time.ParseDuration(cfg.Transport.WebSocket.WriteTimeout); err == nil {
+		// Explicitly configured (including "0" to disable the timeout).
+		wsOpts.WriteTimeout = d
 	}
 	if cfg.Transport.WebSocket.AllowAllOrigins || cfg.Transport.WebSocket.CheckOrigin { //nolint:staticcheck // backward compat
 		logger.Info("setting websocket CheckOrigin to allow all origins")

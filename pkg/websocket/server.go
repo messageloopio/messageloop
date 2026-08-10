@@ -29,10 +29,16 @@ type Options struct {
 	Compression  bool
 }
 
+// DefaultWSWriteTimeout bounds each WebSocket write so a slow consumer
+// cannot block a broadcast indefinitely (aligned with the gRPC transport's
+// default write timeout). Set WriteTimeout to 0 to disable explicitly.
+const DefaultWSWriteTimeout = 10 * time.Second
+
 func DefaultOptions() Options {
 	return Options{
-		Addr:   ":9080",
-		WsPath: "/ws",
+		Addr:         ":9080",
+		WsPath:       "/ws",
+		WriteTimeout: DefaultWSWriteTimeout,
 	}
 }
 
