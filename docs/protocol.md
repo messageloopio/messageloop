@@ -315,23 +315,32 @@ Common error codes:
 | `ACL_DENIED` | `acl_error` | Operation blocked by ACL rule |
 | `ACL_ERROR` | `acl_error` | ACL proxy check failed |
 | `RATE_LIMITED` | `rate_limit` | Publish rate limit exceeded |
+| `RPC_TIMEOUT` | `timeout` | RPC forwarded to a proxy timed out |
+| `PROXY_ERROR` | `proxy_error` | Proxy call failed |
+| `AUTH_REQUIRED` | `auth_error` | Authentication required but no token (or no auth proxy) |
+| `INTERNAL_ERROR` | `server_error` | Internal server error while handling the request |
+| `BAD_REQUEST` | `client_error` | Frame could not be decoded |
 | `DISCONNECT_ERROR` | `transport_error` | Connection being terminated |
 
 ## Disconnect Codes
 
-When the server closes a connection, it sends a disconnect with a numeric code:
+When the server closes a connection, it sends a disconnect with a numeric code. Codes are defined in `disconnect.go`; the client should treat them as advisory (reconnect unless told not to):
 
 | Code | Name | Reconnect | Description |
 | --- | --- | --- | --- |
-| 3000 | BadRequest | Yes | Malformed message |
-| 3001 | ServerError | Yes | Internal server error |
-| 3003 | Stale | Yes | Unauthenticated or idle timeout |
-| 3005 | SlowConsumer | Yes | Client not reading fast enough |
-| 3008 | ForceNoReconnect | No | Server shutting down |
-| 3009 | ConnectionClosed | No | Connection already closed |
-| 3010 | InvalidToken | No | Authentication failed |
-| 3500 | ConnectionLimit | Yes | Per-user connection limit exceeded |
-| 3501 | ChannelLimit | Yes | Per-client subscription limit exceeded |
+| 3000 | ConnectionClosed | Yes | Clean disconnect or network loss; the server cannot distinguish the two |
+| 3500 | InvalidToken | Yes | Invalid token, or missing token when `require_auth` is enabled |
+| 3501 | BadRequest | Yes | Malformed protocol frame (e.g. second Connect on an authenticated connection) |
+| 3502 | Stale | Yes | Connection did not authenticate within the configured interval |
+| 3503 | ForceNoReconnect | No | Server requires the client not to reconnect (e.g. shutdown drain) |
+| 3504 | ConnectionLimit | Yes | Per-user connection limit exceeded |
+| 3505 | ChannelLimit | Yes | Per-client subscription limit exceeded |
+| 3506 | InappropriateProtocol | Yes | Transport cannot carry the data (e.g. binary data to a JSON client) |
+| 3507 | PermissionDenied | Yes | Not enough permissions |
+| 3508 | NotAvailable | Yes | Server cannot process the message type |
+| 3509 | TooManyErrors | Yes | Client produced too many errors |
+| 3511 | IdleTimeout | Yes | No activity within the heartbeat idle timeout |
+| 3512 | SlowConsumer | Yes | Client cannot consume messages fast enough |
 
 ## Channel Naming
 

@@ -352,6 +352,7 @@ npm test
 
 ## Repository Guide
 
+- [docs/developer](docs/developer/index.md): developer documentation suite (Chinese) — architecture, configuration reference, admin API, distributed cluster, observability, development workflow, and SDK guides
 - [config-example.yaml](config-example.yaml): fuller Redis and proxy example
 - [docs/deployment.md](docs/deployment.md): production deployment guide, TLS, Docker, multi-node
 - [docs/protocol.md](docs/protocol.md): client protocol reference with message formats
