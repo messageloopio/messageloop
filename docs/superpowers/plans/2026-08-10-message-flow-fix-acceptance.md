@@ -122,3 +122,21 @@ P1、P2 修复并提交(P3 可同批),`go test -race ./...`(含 Redis)+ `-count=
 | `MESSAGELOOP_TEST_REDIS_ADDR=127.0.0.1:6379 go test -race ./...` | PASS(Redis 实跑,无 skip) |
 
 请按"复审条件"复核: 全量验证 + `-count=20` 压测均已全绿,本验收可转为 **通过**。
+
+---
+
+## 复审结论(2026-08-10,验收人追加)
+
+**最终结论: 验收通过。**
+
+对修复回执逐项独立复核:
+
+| 项 | 复核结果 |
+|----|----------|
+| P1 指标接线 | 通过。`node.go:850,869` 失败路径递增指标且 `n.metrics != nil` 判空;新用例 `TestNode_PublishPresenceFailure_IncrementsMetric`(注入失败断言 join/leave 各计 1、成功不计)实测 PASS。 |
+| P2 重复投递 | 通过。根因分析成立(查重→投递→记录的非原子窗口 + 旧连接异步 teardown 的交错);修复 `deliverOnce`(`pkg/redisbroker/pubsub.go:186-218`)将"查重→记录→投递"收敛进 `deliverMu` 单一临界区且记录先行,任何交错下第二条路径必然观察到已记录而跳过;live 与回补统一入口;transient(offset=0)不查重维持原语义;测试加固用 `require.Eventually` 等断开生效,断言未放宽(仍"恰好 5 条")。压测 `-race -count=20` 由验收人独立重跑: **20/20 PASS(23.4s)**。 |
+| P3 命名残留 | 通过。`broker_memory_test.go:197` 已更名 `TestMemoryBroker_Publish_Kind`。 |
+
+全量验证(验收人独立重跑,`-count=1` 强制非缓存): `go build` / `go vet` / `MESSAGELOOP_TEST_REDIS_ADDR=127.0.0.1:6379 go test -race -count=1 ./...` **8 包全绿**。
+
+非阻塞观察(不修复,仅记录): `deliverOnce` 在 `deliverMu` 临界区内调用 handler,全局串行化所有 Redis 侧投递——换来的是 per-channel 严格顺序与无条件去重,语义正确;若未来 Redis 侧吞吐成为瓶颈,可评估"锁内记录、锁外投递"的优化(去重仍成立,仅极端场景顺序性略降)。
