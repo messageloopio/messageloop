@@ -15,10 +15,11 @@ import (
 // exercised by unit tests.
 func newTestRedisBroker() *redisBroker {
 	return &redisBroker{
-		subscribed: make(map[string]int),
-		wcCounts:   make(map[string]int),
-		wcHandles:  make(map[string]*topics.Subscription),
-		matcher:    topics.NewCSTrieMatcher(),
+		subscribed:  make(map[string]int),
+		wcCounts:    make(map[string]int),
+		wcHandles:   make(map[string]*topics.Subscription),
+		matcher:     topics.NewCSTrieMatcher(),
+		lastOffsets: make(map[string]uint64),
 	}
 }
 

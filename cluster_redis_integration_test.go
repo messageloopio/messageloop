@@ -508,3 +508,39 @@ func newClusterRedisTestNode(t *testing.T, parent context.Context, redisCfg conf
 	require.NoError(t, node.Run(ctx))
 	return node
 }
+
+// Task 11b: Node.Run must not return before the Redis broker signals ready.
+func TestClusterRedis_NodeRun_WaitsForBrokerReady(t *testing.T) {
+	redisCfg := requireClusterRedis(t, clusterRedisIntegrationDB)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	node := messageloop.NewNode(nil)
+	node.SetBroker(redisbroker.New(redisCfg))
+
+	done := make(chan error, 1)
+	go func() { done <- node.Run(ctx) }()
+
+	ready, ok := node.Broker().(interface{ Ready() <-chan struct{} })
+	require.True(t, ok, "redis broker must implement Ready")
+
+	// Invariant: Run must never return before Ready closes.
+	select {
+	case <-ready.Ready():
+	case err := <-done:
+		select {
+		case <-ready.Ready():
+		default:
+			t.Fatalf("Node.Run returned before broker ready: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("broker never became ready")
+	}
+
+	// Once ready, Run returns promptly.
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Node.Run did not return after broker ready")
+	}
+}

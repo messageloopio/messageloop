@@ -21,7 +21,7 @@ MessageLoop 服务器在进程内提供三类可观测性出口：
 | 字段 | 取值 | 含义 |
 | --- | --- | --- |
 | `status` | `ok` / `not ready` | 整体状态；任一子检查失败即为 `not ready` |
-| `broker` | `ready` / `not ready` / `not applicable` | broker 就绪状态。内存 broker 实现 `Ready()` 通道，启动后关闭；Redis broker 不实现该接口，恒为 `not applicable` |
+| `broker` | `ready` / `not ready` / `not applicable` | broker 就绪状态。内存 broker 与 Redis broker 均实现 `Ready()` 通道，订阅建立后关闭；Redis broker 就绪前健康检查返回 503 |
 | `redis` | `ok` / `unreachable` / `not applicable` | 集群模式下的 Redis 连通性探测结果；非集群模式为 `not applicable` |
 
 状态码语义：

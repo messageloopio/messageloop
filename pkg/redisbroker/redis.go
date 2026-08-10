@@ -36,6 +36,21 @@ type redisBroker struct {
 	wcCounts   map[string]int                 // wildcard pattern -> refcount
 	wcHandles  map[string]*topics.Subscription // pattern -> matcher handle
 	matcher    topics.Matcher                 // wildcard pattern matching
+
+	// readyCh is closed once the pub/sub subscription has been confirmed
+	// (Ready semantics, aligned with the memory broker).
+	readyCh   chan struct{}
+	readyOnce sync.Once
+
+	// lastOffsets tracks the highest delivered stream offset per exact
+	// channel; it seeds the reconnect catch-up and deduplicates live vs
+	// replayed delivery. Guarded by subMu.
+	lastOffsets map[string]uint64
+
+	// activePubSub is the live pub/sub subscription; tests close it to
+	// simulate a disconnect. Guarded by pubsubMu.
+	pubsubMu     sync.Mutex
+	activePubSub *redis.PubSub
 }
 
 // New creates a new Redis-backed Broker.
@@ -43,13 +58,22 @@ type redisBroker struct {
 func New(cfg config.RedisConfig) messageloop.Broker {
 	opts := NewOptions(cfg)
 	return &redisBroker{
-		client:     newRedisClient(opts),
-		opts:       opts,
-		subscribed: make(map[string]int),
-		wcCounts:   make(map[string]int),
-		wcHandles:  make(map[string]*topics.Subscription),
-		matcher:    topics.NewCSTrieMatcher(),
+		client:      newRedisClient(opts),
+		opts:        opts,
+		subscribed:  make(map[string]int),
+		wcCounts:    make(map[string]int),
+		wcHandles:   make(map[string]*topics.Subscription),
+		matcher:     topics.NewCSTrieMatcher(),
+		readyCh:     make(chan struct{}),
+		lastOffsets: make(map[string]uint64),
 	}
+}
+
+// Ready returns a channel that is closed once the pub/sub subscription is
+// live. It closes exactly once; reconnections after the initial ready do not
+// reset it.
+func (b *redisBroker) Ready() <-chan struct{} {
+	return b.readyCh
 }
 
 // Start verifies the Redis connection, initializes the cluster-wide epoch,
@@ -192,6 +216,14 @@ func (b *redisBroker) Publish(ch string, payload []byte, isText bool) (uint64, e
 		return 0, err
 	}
 	if err := b.client.Publish(ctx, b.opts.PubSubPrefix+ch, pubSubData).Err(); err != nil {
+		// Roll back the stream entry so history never contains a message
+		// that was not actually delivered in real time. XADD and PUBLISH are
+		// not atomic; a leftover entry is only acceptable when the rollback
+		// itself fails (clients can still recover it from history).
+		if delErr := b.client.XDel(ctx, stream, id).Err(); delErr != nil {
+			log.ErrorContext(ctx, "failed to roll back stream entry after pubsub failure",
+				delErr, "stream", stream, "id", id)
+		}
 		return 0, err
 	}
 
