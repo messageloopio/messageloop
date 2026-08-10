@@ -180,6 +180,9 @@ func (n *Node) restoreLocalSubscription(ctx context.Context, ch string, sub Subs
 			n.hub.removeSub(ch, sub.Client)
 			return err
 		}
+		if n.metrics != nil {
+			n.metrics.ActiveChannels.Inc()
+		}
 	}
 	sub.Client.mu.Lock()
 	sub.Client.subscribedChannels[ch] = struct{}{}
@@ -209,6 +212,9 @@ func (n *Node) removeLocalSubscriptionOnly(ch string, client *Client, updateMetr
 	if last {
 		if err := n.broker.Unsubscribe(ch); err != nil {
 			return true, err
+		}
+		if updateMetrics && n.metrics != nil {
+			n.metrics.ActiveChannels.Dec()
 		}
 	}
 	if updateMetrics && n.metrics != nil {

@@ -11,6 +11,8 @@ import (
 	"github.com/messageloopio/messageloop/proxy"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -834,4 +836,77 @@ func BenchmarkNode_SubLock(b *testing.B) {
 		ch := string(rune('a' + (i % 100)))
 		_ = node.subLock(ch)
 	}
+}
+
+// Task 13c: a failed AddClient (cluster sync error) must not count the
+// connection in ConnectionsTotal.
+func TestNode_AddClient_ClusterSyncFailure_NoGaugeIncrease(t *testing.T) {
+	directory := &fakeSessionDirectory{}
+	directory.putLeaseErr = errors.New("lease write failed")
+	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-a", IncarnationID: "inc-a", Backend: "memory"}, ClusterDependencies{
+		SessionDirectory: directory,
+		CommandBus:       &fakeClusterCommandBus{},
+		QueryStore:       fakeQueryStore{},
+	})
+	require.NoError(t, err)
+
+	reg := prometheus.NewRegistry()
+	metrics := NewMetrics(reg)
+	node := NewNode(nil)
+	node.SetCluster(runtime)
+	node.SetMetrics(metrics)
+
+	client, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
+	require.NoError(t, err)
+	client.ForceTestIDs("sess-metric", "user-metric", "client-metric")
+
+	err = node.AddClient(client)
+	require.Error(t, err)
+	require.Equal(t, float64(0), testutil.ToFloat64(metrics.ConnectionsTotal),
+		"failed AddClient must not count the connection")
+}
+
+// Task 13c: restoreLocalSubscription/removeLocalSubscriptionOnly must keep
+// ActiveChannels consistent with normal subscriptions.
+func TestNode_RestoreLocalSubscription_ActiveChannelsMetric(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	metrics := NewMetrics(reg)
+	node := NewNode(nil)
+	node.SetMetrics(metrics)
+
+	client, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
+	require.NoError(t, err)
+	client.ForceTestIDs("sess-metric2", "user-metric2", "client-metric2")
+
+	require.NoError(t, node.restoreLocalSubscription(context.Background(), "news", NewSubscriber(client, false)))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.ActiveChannels),
+		"restored subscription must count the channel")
+
+	removed, err := node.removeLocalSubscriptionOnly("news", client, true)
+	require.NoError(t, err)
+	require.True(t, removed)
+	require.Equal(t, float64(0), testutil.ToFloat64(metrics.ActiveChannels),
+		"removing the last subscription must release the channel")
+}
+
+// Task 13c: PublishToSession (cluster publish command) must count
+// MessagesDelivered like the hub broadcast path.
+func TestNode_ClusterPublishCommand_MessagesDeliveredMetric(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	metrics := NewMetrics(reg)
+	node := NewNode(nil)
+	node.SetMetrics(metrics)
+	_ = node.Run(context.Background())
+
+	transport := &capturingTransport{}
+	client, _, err := NewClient(context.Background(), node, transport, JSONMarshaler{})
+	require.NoError(t, err)
+	client.ForceTestIDs("sess-delivered", "user-delivered", "client-delivered")
+	require.NoError(t, node.AddClient(client))
+
+	msg := &clientpb.Message{Id: "m-1", Channel: "x", Payload: &sharedpb.Payload{Data: &sharedpb.Payload_Text{Text: "hi"}}}
+	ok, err := node.PublishToSession(context.Background(), "sess-delivered", msg)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.MessagesDelivered))
 }

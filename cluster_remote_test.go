@@ -15,10 +15,13 @@ type fakeSessionDirectory struct {
 	nodeLease *ClusterNodeLease
 
 	// CAS bookkeeping (see CompareAndSwapSessionLease).
-	casCalls       int
-	casExpected    *ClusterSessionLease
-	casDesired     *ClusterSessionLease
-	forceCasFail   bool
+	casCalls     int
+	casExpected  *ClusterSessionLease
+	casDesired   *ClusterSessionLease
+	forceCasFail bool
+
+	// putLeaseErr makes PutSessionLease fail (simulating a cluster sync error).
+	putLeaseErr error
 }
 
 func (f *fakeSessionDirectory) Start(context.Context) error    { return nil }
@@ -30,7 +33,7 @@ func (f *fakeSessionDirectory) GetNodeLease(context.Context, string, string) (*C
 	return f.nodeLease, nil
 }
 func (f *fakeSessionDirectory) PutSessionLease(context.Context, *ClusterSessionLease, time.Duration) error {
-	return nil
+	return f.putLeaseErr
 }
 
 // CompareAndSwapSessionLease simulates version-based CAS semantics: the swap

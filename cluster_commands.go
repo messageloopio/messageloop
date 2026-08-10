@@ -208,6 +208,11 @@ func (n *Node) handleClusterPublishCommand(ctx context.Context, cmd *ClusterComm
 		result.Status = ClusterCommandStatusFailed
 		result.ErrorCode = "SESSION_PUBLISH_FAILED"
 		result.ErrorMessage = err.Error()
+		if n.metrics != nil {
+			n.metrics.DeliveryFailures.Inc()
+		}
+	} else if n.metrics != nil {
+		n.metrics.MessagesDelivered.Inc()
 	}
 	return result
 }
