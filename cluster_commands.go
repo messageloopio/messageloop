@@ -53,8 +53,19 @@ func (n *Node) DisconnectSession(ctx context.Context, sessionID string, disconne
 	return clusterCommandSucceeded(result), err
 }
 
+// adminPrincipal is the fixed ACL identity used for admin API operations
+// (server-side gRPC API). The built-in ACL rules are user-ID based; admin
+// operations are evaluated against this well-known principal.
+const adminPrincipal = "admin"
+
 // SubscribeSession subscribes a local or remote session to a channel.
+// The channel is checked against the built-in ACL with the admin principal
+// before any command is dispatched; cluster command handlers trust the
+// initiating node's check.
 func (n *Node) SubscribeSession(ctx context.Context, sessionID, channel string) (bool, error) {
+	if !n.AdminCanSubscribe(channel) {
+		return false, fmt.Errorf("admin subscribe denied by ACL rule for channel %s", channel)
+	}
 	result, err := n.dispatchSessionCommand(ctx, sessionID, &ClusterCommand{
 		Type:      ClusterCommandSubscribe,
 		SessionID: sessionID,
@@ -65,12 +76,33 @@ func (n *Node) SubscribeSession(ctx context.Context, sessionID, channel string) 
 
 // UnsubscribeSession unsubscribes a local or remote session from a channel.
 func (n *Node) UnsubscribeSession(ctx context.Context, sessionID, channel string) (bool, error) {
+	if !n.AdminCanSubscribe(channel) {
+		return false, fmt.Errorf("admin unsubscribe denied by ACL rule for channel %s", channel)
+	}
 	result, err := n.dispatchSessionCommand(ctx, sessionID, &ClusterCommand{
 		Type:      ClusterCommandUnsubscribe,
 		SessionID: sessionID,
 		Channel:   channel,
 	})
 	return clusterCommandSucceeded(result), err
+}
+
+// AdminCanSubscribe reports whether the admin API may subscribe a session to
+// channel under the built-in ACL rules (no rules means allowed).
+func (n *Node) AdminCanSubscribe(channel string) bool {
+	if n.acl == nil {
+		return true
+	}
+	return n.acl.CanSubscribe(channel, adminPrincipal)
+}
+
+// AdminCanPublish reports whether the admin API may publish to channel under
+// the built-in ACL rules (no rules means allowed).
+func (n *Node) AdminCanPublish(channel string) bool {
+	if n.acl == nil {
+		return true
+	}
+	return n.acl.CanPublish(channel, adminPrincipal)
 }
 
 func (n *Node) dispatchSessionCommand(ctx context.Context, sessionID string, cmd *ClusterCommand) (*ClusterCommandResult, error) {

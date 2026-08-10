@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/config"
 	serverpb "github.com/messageloopio/messageloop/shared/genproto/server/v1"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	"github.com/stretchr/testify/require"
@@ -425,4 +426,55 @@ func TestAPIServiceHandler_GetHistory_ReturnsContentTypeAndId(t *testing.T) {
 	require.Equal(t, "application/json", p.Payload.ContentType)
 	require.Equal(t, `{"k":"v"}`, p.Payload.GetText())
 	require.NotZero(t, p.Time)
+}
+// Task 13a: admin subscribe/publish must respect the built-in ACL rules.
+func TestAPIServiceHandler_Subscribe_ACLDenied(t *testing.T) {
+	ctx := context.Background()
+	node := messageloop.NewNode(&config.Server{
+		ACL: config.ACLConfig{Rules: []config.ACLRule{
+			{ChannelPattern: "private.*", AllowSubscribe: []string{"alice"}},
+		}},
+	})
+	handler := NewAPIServiceHandler(node)
+
+	resp, err := handler.Subscribe(ctx, &serverpb.SubscribeRequest{
+		SessionId: "sess-1",
+		Channels:  []string{"private.room"},
+	})
+	require.NoError(t, err)
+	require.False(t, resp.Results["private.room"], "admin subscribe to an ACL-denied channel must be rejected")
+
+	// Without ACL rules the admin operation proceeds (session not found).
+	openNode := messageloop.NewNode(nil)
+	openHandler := NewAPIServiceHandler(openNode)
+	openResp, err := openHandler.Subscribe(ctx, &serverpb.SubscribeRequest{
+		SessionId: "sess-1",
+		Channels:  []string{"open.room"},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, openResp)
+}
+
+func TestAPIServiceHandler_Publish_ACLDenied(t *testing.T) {
+	ctx := context.Background()
+	node := messageloop.NewNode(&config.Server{
+		ACL: config.ACLConfig{Rules: []config.ACLRule{
+			{ChannelPattern: "private.*", AllowPublish: []string{"bob"}},
+		}},
+	})
+	handler := NewAPIServiceHandler(node)
+
+	_, err := handler.Publish(ctx, &serverpb.PublishRequest{
+		RequestId: uuid.NewString(),
+		Publications: []*serverpb.Publication{
+			{
+				Id: "admin-pub",
+				Destination: &serverpb.Publication_Destination{
+					Channels: []string{"private.room"},
+				},
+				Payload: &sharedpb.Payload{Data: &sharedpb.Payload_Text{Text: "x"}},
+			},
+		},
+	})
+	require.Error(t, err, "admin publish to an ACL-denied channel must fail")
 }

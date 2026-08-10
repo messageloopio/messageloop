@@ -97,6 +97,11 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverpb.PublishRe
 		// Channel-based publication
 		for _, channel := range dest.Channels {
 			attempted++
+			if !h.node.AdminCanPublish(channel) {
+				log.WarnContext(ctx, "admin publish denied by ACL rule", "channel", channel)
+				failed++
+				continue
+			}
 			if _, err := h.node.Publish(channel, brokerPub); err != nil {
 				log.ErrorContext(ctx, "failed to publish to channel", err, "channel", channel)
 				failed++
