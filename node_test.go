@@ -33,6 +33,18 @@ func TestNewNode(t *testing.T) {
 	}
 }
 
+func TestNewNode_HeartbeatDefaultIdleTimeout(t *testing.T) {
+	// No heartbeat configuration at all: the default idle timeout must be
+	// applied so idle connections are still disconnected.
+	node := NewNode(nil)
+	require.NotNil(t, node.heartbeatManager, "heartbeat manager must be created with the default idle timeout")
+	assert.Equal(t, DefaultHeartbeatIdleTimeout, node.GetHeartbeatIdleTimeout())
+
+	// An explicit configuration wins over the default.
+	explicit := NewNode(&config.Server{Heartbeat: config.Heartbeat{IdleTimeout: "45s"}})
+	assert.Equal(t, 45*time.Second, explicit.GetHeartbeatIdleTimeout())
+}
+
 func TestNode_Hub(t *testing.T) {
 	node := NewNode(nil)
 	hub := node.Hub()

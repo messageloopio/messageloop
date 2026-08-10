@@ -1027,7 +1027,7 @@ git commit -m "feat(broker)!: preserve payload kind/content_type/id/metadata thr
 | 3 | Redis 模式通配符订阅恢复可用 | 集群用户 | 3 |
 | 4 | 升级后客户端首次重连全量恢复一次(epoch 变更) | 集群用户,一次性 | 4 |
 | 5 | Admin gRPC 必须配置 `auth_token` 或显式 `allow_insecure: true`,否则启动失败 | 运维配置 | 5 |
-| 6 | 未配置心跳时启用默认 300s idle 断连 | 此前无 idle 检测的部署 | 6 |
+| 6 | 未配置心跳时启用默认 300s idle 断连;WS read deadline 由 60s 变 600s | 此前无 idle 检测的部署 | 6 |
 | 7 | WS 慢消费者 10s 写超时后被断开(此前无限阻塞) | 客户端 | 7 |
 | 8 | 未 Connect 的 Subscribe/RPC/Ping 等被拒绝 | 协议违规客户端 | 8 |
 | 9 | 匿名模式禁止会话接管,断线丢订阅/offset | 匿名模式用户 | 9 |

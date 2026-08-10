@@ -79,15 +79,20 @@ func NewNode(cfg *config.Server) *Node {
 		node.rpcTimeout = rpcTimeout
 	}
 
+	// Idle timeout detection is always on: an unconfigured heartbeat falls
+	// back to DefaultHeartbeatIdleTimeout (300s) so idle connections cannot
+	// linger forever when the operator forgets to configure it.
+	idleTimeout := DefaultHeartbeatIdleTimeout
 	if cfg != nil && cfg.Heartbeat.IdleTimeout != "" {
-		idleTimeout, err := time.ParseDuration(cfg.Heartbeat.IdleTimeout)
+		parsed, err := time.ParseDuration(cfg.Heartbeat.IdleTimeout)
 		if err != nil {
-			idleTimeout = DefaultHeartbeatIdleTimeout
+			parsed = DefaultHeartbeatIdleTimeout
 		}
-		node.heartbeatManager = NewHeartbeatManager(HeartbeatConfig{
-			IdleTimeout: idleTimeout,
-		})
+		idleTimeout = parsed
 	}
+	node.heartbeatManager = NewHeartbeatManager(HeartbeatConfig{
+		IdleTimeout: idleTimeout,
+	})
 
 	node.broker = NewMemoryBroker(MemoryBrokerOptions{})
 
