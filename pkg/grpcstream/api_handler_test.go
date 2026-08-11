@@ -168,32 +168,62 @@ func TestAPIServiceHandler_PublishToChannels(t *testing.T) {
 	require.NotNil(t, resp)
 }
 
-func TestAPIServiceHandler_PublishAddHistoryUnimplemented(t *testing.T) {
+func TestAPIServiceHandler_PublishAddHistory(t *testing.T) {
 	ctx := context.Background()
 	node := messageloop.NewNode(nil)
+	_ = node.Run(ctx)
 	handler := NewAPIServiceHandler(node)
 
 	req := &serverpb.PublishRequest{
 		RequestId: uuid.NewString(),
 		Publications: []*serverpb.Publication{
 			{
-				Id: uuid.NewString(),
+				Id: "admin-history-msg",
 				Destination: &serverpb.Publication_Destination{
-					Channels: []string{"test-channel"},
+					Channels: []string{"history-channel"},
 				},
-				Payload: &sharedpb.Payload{
-					Data: &sharedpb.Payload_Text{Text: "hello"},
-				},
-				Options: &serverpb.Publication_Options{
-					AddHistory: true,
-				},
+				Payload: &sharedpb.Payload{Data: &sharedpb.Payload_Text{Text: "hello history"}},
+				Options: &serverpb.Publication_Options{AddHistory: true},
 			},
 		},
 	}
 
-	_, err := handler.Publish(ctx, req)
-	require.Error(t, err)
-	require.Equal(t, codes.Unimplemented, status.Code(err))
+	resp, err := handler.Publish(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	history, err := handler.GetHistory(ctx, &serverpb.GetHistoryRequest{Channel: "history-channel"})
+	require.NoError(t, err)
+	require.Len(t, history.Publications, 1)
+	require.Equal(t, "hello history", history.Publications[0].Payload.GetText())
+}
+
+func TestAPIServiceHandler_PublishWithoutAddHistoryNotInHistory(t *testing.T) {
+	ctx := context.Background()
+	node := messageloop.NewNode(nil)
+	_ = node.Run(ctx)
+	handler := NewAPIServiceHandler(node)
+
+	req := &serverpb.PublishRequest{
+		RequestId: uuid.NewString(),
+		Publications: []*serverpb.Publication{
+			{
+				Id: "admin-transient-msg",
+				Destination: &serverpb.Publication_Destination{
+					Channels: []string{"no-history-channel"},
+				},
+				Payload: &sharedpb.Payload{Data: &sharedpb.Payload_Text{Text: "hello transient"}},
+			},
+		},
+	}
+
+	resp, err := handler.Publish(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	history, err := handler.GetHistory(ctx, &serverpb.GetHistoryRequest{Channel: "no-history-channel"})
+	require.NoError(t, err)
+	require.Len(t, history.Publications, 0)
 }
 
 func TestAPIServiceHandler_PublishBrokerFailureReturnsError(t *testing.T) {
@@ -213,6 +243,7 @@ func TestAPIServiceHandler_PublishBrokerFailureReturnsError(t *testing.T) {
 				Payload: &sharedpb.Payload{
 					Data: &sharedpb.Payload_Text{Text: "hello"},
 				},
+				Options: &serverpb.Publication_Options{AddHistory: true},
 			},
 		},
 	}
@@ -240,6 +271,7 @@ func TestAPIServiceHandler_PublishPartialFailureSucceeds(t *testing.T) {
 				Payload: &sharedpb.Payload{
 					Data: &sharedpb.Payload_Text{Text: "hello"},
 				},
+				Options: &serverpb.Publication_Options{AddHistory: true},
 			},
 		},
 	}
@@ -410,6 +442,7 @@ func TestAPIServiceHandler_GetHistory_ReturnsContentTypeAndId(t *testing.T) {
 					Data:        &sharedpb.Payload_Text{Text: `{"k":"v"}`},
 				},
 				Metadata: &sharedpb.Metadata{Entries: map[string]string{"origin": "admin"}},
+				Options:  &serverpb.Publication_Options{AddHistory: true},
 			},
 		},
 	}

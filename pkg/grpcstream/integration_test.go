@@ -187,6 +187,7 @@ func TestGRPC_AdminAPI_Publish_JSONPayload(t *testing.T) {
 			Id:          "pub-1",
 			Destination: &serverpb.Publication_Destination{Channels: []string{"json-admin"}},
 			Payload:     &sharedpb.Payload{Data: &sharedpb.Payload_Json{Json: payloadStruct}},
+			Options:     &serverpb.Publication_Options{AddHistory: true},
 		}},
 	})
 	require.NoError(t, err)

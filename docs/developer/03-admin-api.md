@@ -101,19 +101,22 @@ grpcurl \
 | `payload` | `shared.v1.Payload` | 消息载荷，支持 `text`、`binary`、`json` 三种形式 |
 | `metadata` | `shared.v1.Metadata` | 已声明但当前处理器未使用，会被忽略 |
 
-`Publication.Options.add_history`：控制是否写入历史。该选项**尚未实现**，请求中一旦有任意一条出版物将其设为 `true`，整个 RPC 立即返回 `Unimplemented`（错误信息为 `add_history is not implemented`）。
+`Publication.Options.add_history`：控制频道发布是否写入历史。
+- `true`：写入 broker 历史，后续可通过 `GetHistory` 补拉。
+- `false` 或未设置：以 transient 方式发布，不写历史。
+- 会话目标（`destination.sessions`）不受该选项影响，始终直接投递到会话。
 
 响应消息 `PublishResponse`：空消息，不返回任何字段。单条出版物的投递结果（例如 broker 分配的 offset）不会暴露给调用方。
 
 语义：
 
 - 载荷转换：`binary` 直接使用原始字节；`text` 按 UTF-8 字节发送；`json` 会被序列化为 JSON 字节后按文本发送。载荷为 nil 时发送空载荷。
-- 频道投递：通过 broker 的 `Publish` 路径发布，与客户端发布走同一管道（见[《架构指南》](01-architecture.md)）。
+- 频道投递：默认以 transient 方式发布，不写历史；仅当 `options.add_history` 为 `true` 时通过 broker 的 `Publish` 路径发布并写入历史，与客户端发布走同一管道（见[《架构指南》](01-architecture.md)）。
 - 会话投递：向目标会话直接发送一条 `publication` 信封，消息的 `channel` 字段为空字符串（会话定向消息没有频道），`id` 为 `Publication.id`。目标会话不存在时**跳过**该投递，不报错、不计入失败（仅记录 debug 日志）。
 - 部分失败语义：由于 `PublishResponse` 没有按条目返回的字段，失败只能通过整体结果表达。每条失败投递（目标会话发送失败、目标频道发布失败、载荷序列化失败、缺少 destination）都会记录错误日志；仅当**所有**投递尝试全部失败时，RPC 返回状态码 `Internal`（错误信息形如 `all N delivery attempt(s) failed`）；只要有一条成功，RPC 就返回空响应。
 - destination 为 nil 或 `sessions`、`channels` 均为空时，该条出版物视为失败。
 
-返回的错误码：`Unimplemented`、`Internal`。
+返回的错误码：`Internal`。
 
 集群感知：见 [集群感知行为](#集群感知行为)。
 
@@ -367,7 +370,6 @@ message Error {
 | gRPC 状态码 | 触发条件 |
 | --- | --- |
 | `Unauthenticated` | 鉴权拦截器判定失败：缺少 `authorization` 元数据、格式不是 `Bearer <token>`、或令牌不匹配 |
-| `Unimplemented` | `Publish` 请求中 `add_history` 被设置为 `true`（该选项尚未实现） |
 | `Internal` | `Publish` 请求中的所有投递尝试全部失败 |
 | `Unknown` | 其余错误：来自 Node 内部方法的错误（例如 `Survey` 调查注册表已满、presence/history 存储错误）原样透传，gRPC 框架将其映射为 `Unknown` |
 

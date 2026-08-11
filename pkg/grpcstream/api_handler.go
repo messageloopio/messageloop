@@ -25,14 +25,6 @@ func NewAPIServiceHandler(node *messageloop.Node) serverpb.APIServiceServer {
 func (h *apiServiceHandler) Publish(ctx context.Context, req *serverpb.PublishRequest) (*serverpb.PublishResponse, error) {
 	log.InfoContext(ctx, "server side API Publish", "request_id", req.RequestId)
 
-	// add_history is not implemented; surface it explicitly instead of
-	// silently ignoring the option.
-	for _, pub := range req.Publications {
-		if opts := pub.GetOptions(); opts != nil && opts.AddHistory {
-			return nil, status.Error(codes.Unimplemented, "add_history is not implemented")
-		}
-	}
-
 	// PublishResponse has no per-publication result fields, so failures are
 	// reported with partial-success semantics: every failure is logged, and
 	// when all publications fail the RPC returns an error.
@@ -102,9 +94,16 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverpb.PublishRe
 				failed++
 				continue
 			}
-			if _, err := h.node.Publish(channel, brokerPub); err != nil {
-				log.ErrorContext(ctx, "failed to publish to channel", err, "channel", channel)
-				failed++
+			if opts := pub.GetOptions(); opts != nil && opts.AddHistory {
+				if _, err := h.node.Publish(channel, brokerPub); err != nil {
+					log.ErrorContext(ctx, "failed to publish to channel", err, "channel", channel)
+					failed++
+				}
+			} else {
+				if err := h.node.PublishTransient(channel, brokerPub); err != nil {
+					log.ErrorContext(ctx, "failed to publish transient to channel", err, "channel", channel)
+					failed++
+				}
 			}
 		}
 	}
