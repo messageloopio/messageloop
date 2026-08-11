@@ -28,8 +28,9 @@ type Client interface {
 	Subscribe(channels ...string) error
 	// Unsubscribe unsubscribes from channels
 	Unsubscribe(channels ...string) error
-	// Publish publishes a message to a channel
-	Publish(channel string, msg *Message) error
+	// Publish publishes a message to a channel. Pass transient=true to skip
+	// persistence and only deliver to currently connected subscribers.
+	Publish(channel string, msg *Message, transient ...bool) error
 	// RPC sends an RPC request and waits for a response
 	RPC(ctx context.Context, channel, method string, req, resp *Message) error
 	// OnMessage sets the message handler
@@ -493,8 +494,9 @@ func (c *client) Unsubscribe(channels ...string) error {
 	return nil
 }
 
-// Publish publishes a message to a channel.
-func (c *client) Publish(channel string, msg *Message) error {
+// Publish publishes a message to a channel. The optional transient flag, when
+// true, skips persistence and only delivers to currently connected subscribers.
+func (c *client) Publish(channel string, msg *Message, transient ...bool) error {
 	if !c.connected.Load() {
 		return fmt.Errorf("not connected")
 	}
@@ -509,8 +511,9 @@ func (c *client) Publish(channel string, msg *Message) error {
 		Id: c.generateID(),
 		Envelope: &clientpb.InboundMessage_Publish{
 			Publish: &clientpb.Publish{
-				Channel: channel,
-				Payload: payload,
+				Channel:   channel,
+				Payload:   payload,
+				Transient: len(transient) > 0 && transient[0],
 			},
 		},
 	}
@@ -923,14 +926,17 @@ func BuildUnsubscribeMessage(channels ...string) *clientpb.InboundMessage {
 	}
 }
 
-// BuildPublishMessage builds a Publish message.
-func BuildPublishMessage(channel string, msg *Message) *clientpb.InboundMessage {
+// BuildPublishMessage builds a Publish message. The optional transient flag,
+// when true, skips persistence and only delivers to currently connected
+// subscribers.
+func BuildPublishMessage(channel string, msg *Message, transient ...bool) *clientpb.InboundMessage {
 	payload, _ := msg.ToPayload() // Ignore error for backward compatibility
 	return &clientpb.InboundMessage{
 		Envelope: &clientpb.InboundMessage_Publish{
 			Publish: &clientpb.Publish{
-				Channel: channel,
-				Payload: payload,
+				Channel:   channel,
+				Payload:   payload,
+				Transient: len(transient) > 0 && transient[0],
 			},
 		},
 	}

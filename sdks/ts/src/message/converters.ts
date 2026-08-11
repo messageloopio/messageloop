@@ -136,15 +136,18 @@ export function createUnsubscribeMessage(channels: string[]): InboundMessage {
 
 /**
  * Create an InboundMessage with Publish envelope.
+ * @param transient - When true, skip persistence and only deliver to currently connected subscribers.
  */
 export function createPublishMessage(
   channel: string,
-  msg: Message
+  msg: Message,
+  transient: boolean = false
 ): InboundMessage {
   const payload = messageToPayload(msg);
   const publish = create(PublishSchema, {
     channel,
     payload,
+    transient,
   });
   return create(InboundMessageSchema, {
     id: generateMessageId(),

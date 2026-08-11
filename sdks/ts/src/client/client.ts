@@ -581,9 +581,14 @@ export class MessageLoopClient {
 
   /**
    * Publish a message to a channel.
+   * @param transient - When true, skip persistence and only deliver to currently connected subscribers.
    */
-  async publish(channel: string, msg: Message): Promise<void> {
-    const pbMsg = createPublishMessage(channel, msg);
+  async publish(
+    channel: string,
+    msg: Message,
+    transient: boolean = false
+  ): Promise<void> {
+    const pbMsg = createPublishMessage(channel, msg, transient);
     await this.send(pbMsg);
   }
 

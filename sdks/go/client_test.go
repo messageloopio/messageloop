@@ -102,6 +102,50 @@ func (f *fakeTransport) pendingCount() int {
 	return len(f.recvBuf)
 }
 
+// TestClientPublish_Transient verifies that Publish forwards the transient
+// flag to the server-side Publish message, and that the flag defaults to
+// false when the variadic argument is omitted.
+func TestClientPublish_Transient(t *testing.T) {
+	trans := newFakeTransport()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	c := newClient(ctx, cancel, trans, defaultOptions())
+	c.connected.Store(true)
+
+	msg := NewMessageWithData("ch", NewTextData("hi"))
+	if err := c.Publish("ch", msg, true); err != nil {
+		t.Fatalf("Publish with transient failed: %v", err)
+	}
+
+	sent := trans.lastSent()
+	if sent == nil {
+		t.Fatal("no message was sent")
+	}
+	pub := sent.GetPublish()
+	if pub == nil {
+		t.Fatal("sent message is not a Publish envelope")
+	}
+	if !pub.GetTransient() {
+		t.Fatal("Transient flag was not forwarded")
+	}
+	if pub.GetChannel() != "ch" {
+		t.Fatalf("wrong channel: %q, want %q", pub.GetChannel(), "ch")
+	}
+
+	// Default (no variadic argument) must not set the transient flag.
+	if err := c.Publish("ch", msg); err != nil {
+		t.Fatalf("Publish without transient failed: %v", err)
+	}
+	sent = trans.lastSent()
+	if sent == nil || sent.GetPublish() == nil {
+		t.Fatal("second message was not sent as a Publish envelope")
+	}
+	if sent.GetPublish().GetTransient() {
+		t.Fatal("Transient flag should default to false")
+	}
+}
+
 // TestClientRPCCloseRace reproduces the P0-4 double close panic: an RPC
 // issued in a goroutine while the main goroutine immediately closes the
 // client. The RPC must return an error (not hang) and the process must not

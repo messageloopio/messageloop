@@ -13,6 +13,29 @@ import {
   buildClientOptions,
 } from "../src/client/options";
 
+import { MessageLoopClient } from "../src/client/client";
+import { createTextMessage } from "../src/message";
+
+describe("MessageLoopClient", () => {
+  it("publish passes transient flag", async () => {
+    const client = new (MessageLoopClient as any)(
+      buildClientOptions([])
+    ) as MessageLoopClient;
+    const send = jest.fn().mockResolvedValue(undefined);
+    (client as any).transport = { send };
+    (client as any).isConnectedFlag = true;
+
+    const msg = createTextMessage("messageloop.text", "hello");
+    await client.publish("ch1", msg, true);
+
+    expect(send).toHaveBeenCalledTimes(1);
+    const pbMsg = send.mock.calls[0][0];
+    expect(pbMsg.envelope.case).toBe("publish");
+    expect(pbMsg.envelope.value.channel).toBe("ch1");
+    expect(pbMsg.envelope.value.transient).toBe(true);
+  });
+});
+
 describe("Client Options", () => {
   describe("setEncoding", () => {
     it("should set encoding to proto", () => {
