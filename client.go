@@ -979,6 +979,20 @@ func (c *Client) handlePublish(ctx context.Context, in *clientpb.InboundMessage,
 	}
 	pub.Id = in.Id
 
+	if publish.Transient {
+		if err := c.node.PublishTransient(channel, pub); err != nil {
+			return err
+		}
+		return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+			out.Envelope = &clientpb.OutboundMessage_PublishAck{
+				PublishAck: &clientpb.PublishAck{
+					Id:     in.Id,
+					Offset: 0,
+				},
+			}
+		}))
+	}
+
 	offset, err := c.node.Publish(channel, pub)
 	if err != nil {
 		return err

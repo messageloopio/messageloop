@@ -31,6 +31,9 @@
         },
         "token": {
           "type": "string"
+        },
+        "transient": {
+          "type": "boolean"
         }
       }
     },

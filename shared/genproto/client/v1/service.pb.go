@@ -902,6 +902,7 @@ type Publish struct {
 	Payload       *v1.Payload            `protobuf:"bytes,2,opt,name=payload,proto3" json:"payload,omitempty"`
 	Metadata      *v1.Metadata           `protobuf:"bytes,3,opt,name=metadata,proto3" json:"metadata,omitempty"`
 	Token         string                 `protobuf:"bytes,4,opt,name=token,proto3" json:"token,omitempty"`
+	Transient     bool                   `protobuf:"varint,5,opt,name=transient,proto3" json:"transient,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -962,6 +963,13 @@ func (x *Publish) GetToken() string {
 		return x.Token
 	}
 	return ""
+}
+
+func (x *Publish) GetTransient() bool {
+	if x != nil {
+		return x.Transient
+	}
+	return false
 }
 
 type PublishAck struct {
@@ -1620,12 +1628,13 @@ const file_client_v1_service_proto_rawDesc = "" +
 	"\vUnsubscribe\x12I\n" +
 	"\rsubscriptions\x18\x01 \x03(\v2#.messageloop.client.v1.SubscriptionR\rsubscriptions\"[\n" +
 	"\x0eUnsubscribeAck\x12I\n" +
-	"\rsubscriptions\x18\x01 \x03(\v2#.messageloop.client.v1.SubscriptionR\rsubscriptions\"\xb0\x01\n" +
+	"\rsubscriptions\x18\x01 \x03(\v2#.messageloop.client.v1.SubscriptionR\rsubscriptions\"\xce\x01\n" +
 	"\aPublish\x12\x18\n" +
 	"\achannel\x18\x01 \x01(\tR\achannel\x128\n" +
 	"\apayload\x18\x02 \x01(\v2\x1e.messageloop.shared.v1.PayloadR\apayload\x12;\n" +
 	"\bmetadata\x18\x03 \x01(\v2\x1f.messageloop.shared.v1.MetadataR\bmetadata\x12\x14\n" +
-	"\x05token\x18\x04 \x01(\tR\x05token\"4\n" +
+	"\x05token\x18\x04 \x01(\tR\x05token\x12\x1c\n" +
+	"\ttransient\x18\x05 \x01(\bR\ttransient\"4\n" +
 	"\n" +
 	"PublishAck\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +

@@ -101,6 +101,7 @@ message Publish {
   messageloop.shared.v1.Payload payload = 2;
   messageloop.shared.v1.Metadata metadata = 3;
   string token = 4;
+  bool transient = 5;
 }
 
 message PublishAck {

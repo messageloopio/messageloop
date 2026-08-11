@@ -464,6 +464,55 @@ func TestClientSession_HandleMessage_Publish_AfterAuth(t *testing.T) {
 	}
 }
 
+func TestClientSession_HandleMessage_Publish_Transient(t *testing.T) {
+	ctx := context.Background()
+	node := NewNode(nil)
+	_ = node.Run(ctx)
+	transport := &capturingTransport{}
+
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
+	require.NoError(t, err)
+
+	// First authenticate
+	connectMsg := &clientpb.InboundMessage{
+		Id: "msg-1",
+		Envelope: &clientpb.InboundMessage_Connect{
+			Connect: &clientpb.Connect{},
+		},
+	}
+	require.NoError(t, client.HandleMessage(ctx, connectMsg))
+
+	// Reset transport messages
+	transport.messages = nil
+
+	// Now publish a transient message
+	pubMsg := &clientpb.InboundMessage{
+		Id: "msg-2",
+		Envelope: &clientpb.InboundMessage_Publish{
+			Publish: &clientpb.Publish{
+				Channel: "test-channel",
+				Payload: &sharedpb.Payload{
+					Data: &sharedpb.Payload_Binary{
+						Binary: []byte("test payload"),
+					},
+				},
+				Transient: true,
+			},
+		},
+	}
+	require.NoError(t, client.HandleMessage(ctx, pubMsg))
+
+	// Should have sent exactly one PublishAck
+	require.Equal(t, 1, transport.getMessageCount())
+
+	var out clientpb.OutboundMessage
+	require.NoError(t, JSONMarshaler{}.Unmarshal(transport.getLastMessage(), &out))
+	ack := out.GetPublishAck()
+	require.NotNil(t, ack, "envelope must be PublishAck")
+	assert.Equal(t, "msg-2", ack.GetId())
+	assert.Equal(t, uint64(0), ack.GetOffset(), "transient publish must ack with offset 0")
+}
+
 func TestClientSession_HandleMessage_Subscribe(t *testing.T) {
 	ctx := context.Background()
 	node := NewNode(nil)
