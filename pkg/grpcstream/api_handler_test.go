@@ -1,13 +1,17 @@
 package grpcstream
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/messageloopio/messageloop"
 	"github.com/messageloopio/messageloop/config"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
 	serverpb "github.com/messageloopio/messageloop/shared/genproto/server/v1"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	"github.com/stretchr/testify/require"
@@ -15,6 +19,32 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 )
+
+// captureTransport 捕获客户端写出的所有消息（会话组合用例用）。
+type captureTransport struct {
+	mu       sync.Mutex
+	messages [][]byte
+}
+
+func (t *captureTransport) Write(data []byte) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.messages = append(t.messages, append([]byte(nil), data...))
+	return nil
+}
+
+func (t *captureTransport) WriteMany(data ...[]byte) error {
+	for _, d := range data {
+		if err := t.Write(d); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (t *captureTransport) Close(messageloop.Disconnect) error { return nil }
+
+func (t *captureTransport) RemoteAddr() string { return "127.0.0.1:12345" }
 
 // failPublishBroker is a Broker whose Publish fails. When failChannel is set,
 // only publications to that channel fail; otherwise every Publish fails.
@@ -222,6 +252,94 @@ func TestAPIServiceHandler_PublishWithoutAddHistoryNotInHistory(t *testing.T) {
 	require.NotNil(t, resp)
 
 	history, err := handler.GetHistory(ctx, &serverpb.GetHistoryRequest{Channel: "no-history-channel"})
+	require.NoError(t, err)
+	require.Len(t, history.Publications, 0)
+}
+
+// TestAPIServiceHandler_PublishExplicitFalseAddHistoryNotInHistory：
+// add_history=false 显式值同样不落历史（与缺省 false 语义一致，防止默认值漂移）。
+func TestAPIServiceHandler_PublishExplicitFalseAddHistoryNotInHistory(t *testing.T) {
+	ctx := context.Background()
+	node := messageloop.NewNode(nil)
+	_ = node.Run(ctx)
+	handler := NewAPIServiceHandler(node)
+
+	req := &serverpb.PublishRequest{
+		RequestId: uuid.NewString(),
+		Publications: []*serverpb.Publication{
+			{
+				Id: "admin-explicit-transient-msg",
+				Destination: &serverpb.Publication_Destination{
+					Channels: []string{"explicit-no-history-channel"},
+				},
+				Payload: &sharedpb.Payload{Data: &sharedpb.Payload_Text{Text: "hello explicit transient"}},
+				Options: &serverpb.Publication_Options{AddHistory: false},
+			},
+		},
+	}
+
+	resp, err := handler.Publish(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	history, err := handler.GetHistory(ctx, &serverpb.GetHistoryRequest{Channel: "explicit-no-history-channel"})
+	require.NoError(t, err)
+	require.Len(t, history.Publications, 0)
+}
+
+// TestAPIServiceHandler_PublishSessionWithAddHistoryStaysSession：
+// session 目标带 add_history=true 仍走 PublishToSession（不落频道历史），
+// 且在线会话能实际收到消息（组合路径回归）。
+func TestAPIServiceHandler_PublishSessionWithAddHistoryStaysSession(t *testing.T) {
+	ctx := context.Background()
+	node := messageloop.NewNode(nil)
+	_ = node.Run(ctx)
+	handler := NewAPIServiceHandler(node)
+
+	// 注册一个真实客户端会话
+	transport := &captureTransport{}
+	client, closeFn, err := messageloop.NewClient(ctx, node, transport, messageloop.JSONMarshaler{})
+	require.NoError(t, err)
+	defer closeFn()
+	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
+		Id: "connect-1",
+		Envelope: &clientpb.InboundMessage_Connect{
+			Connect: &clientpb.Connect{},
+		},
+	}))
+	sessionID := client.SessionID()
+	require.NotEmpty(t, sessionID)
+
+	req := &serverpb.PublishRequest{
+		RequestId: uuid.NewString(),
+		Publications: []*serverpb.Publication{
+			{
+				Id: "session-history-msg",
+				Destination: &serverpb.Publication_Destination{
+					Sessions: []string{sessionID},
+				},
+				Payload: &sharedpb.Payload{Data: &sharedpb.Payload_Text{Text: "session hello"}},
+				Options: &serverpb.Publication_Options{AddHistory: true},
+			},
+		},
+	}
+
+	resp, err := handler.Publish(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// 会话应实际收到该消息（载荷文本出现在写出的 JSON 中即投递成功）
+	require.Eventually(t, func() bool {
+		for _, raw := range transport.messages {
+			if bytes.Contains(raw, []byte("session hello")) {
+				return true
+			}
+		}
+		return false
+	}, 2*time.Second, 20*time.Millisecond, "session must receive the publication")
+
+	// add_history 对 session 目标无效：不写频道历史
+	history, err := handler.GetHistory(ctx, &serverpb.GetHistoryRequest{Channel: ""})
 	require.NoError(t, err)
 	require.Len(t, history.Publications, 0)
 }

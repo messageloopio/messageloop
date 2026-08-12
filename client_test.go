@@ -485,9 +485,33 @@ func TestClientSession_HandleMessage_Publish_Transient(t *testing.T) {
 	// Reset transport messages
 	transport.messages = nil
 
+	// 先做一条非 transient 发布：隔离「历史本来就空」的假阳性，
+	// 确保断言的是「transient 不落历史」而非空历史。
+	regularMsg := &clientpb.InboundMessage{
+		Id: "msg-2",
+		Envelope: &clientpb.InboundMessage_Publish{
+			Publish: &clientpb.Publish{
+				Channel: "test-channel",
+				Payload: &sharedpb.Payload{
+					Data: &sharedpb.Payload_Binary{
+						Binary: []byte("regular payload"),
+					},
+				},
+			},
+		},
+	}
+	require.NoError(t, client.HandleMessage(ctx, regularMsg))
+
+	history, err := node.Broker().History("test-channel", 0, 100)
+	require.NoError(t, err)
+	require.Len(t, history, 1, "regular publish must be stored in history")
+
+	// Reset transport messages（regular 发布的 ack 不计入 transient 断言）
+	transport.messages = nil
+
 	// Now publish a transient message
 	pubMsg := &clientpb.InboundMessage{
-		Id: "msg-2",
+		Id: "msg-3",
 		Envelope: &clientpb.InboundMessage_Publish{
 			Publish: &clientpb.Publish{
 				Channel: "test-channel",
@@ -509,8 +533,14 @@ func TestClientSession_HandleMessage_Publish_Transient(t *testing.T) {
 	require.NoError(t, JSONMarshaler{}.Unmarshal(transport.getLastMessage(), &out))
 	ack := out.GetPublishAck()
 	require.NotNil(t, ack, "envelope must be PublishAck")
-	assert.Equal(t, "msg-2", ack.GetId())
+	assert.Equal(t, "msg-3", ack.GetId())
 	assert.Equal(t, uint64(0), ack.GetOffset(), "transient publish must ack with offset 0")
+
+	// Transient publish must NOT be stored in history (still exactly the
+	// single regular publication).
+	history, err = node.Broker().History("test-channel", 0, 100)
+	require.NoError(t, err)
+	require.Len(t, history, 1, "transient publish must not be stored in history")
 }
 
 func TestClientSession_HandleMessage_Subscribe(t *testing.T) {
