@@ -46,7 +46,7 @@ task lint  # golangci-lint run
 
 ### Run the server
 ```bash
-go run cmd/server/main.go --config ./config.yaml
+go run ./cmd/server --config ./config.yaml
 ```
 
 ### TypeScript SDK
@@ -187,6 +187,7 @@ Typed `Disconnect` errors (`disconnect.go`) signal intentional connection termin
 - **3500-3509** - Terminal errors: InvalidToken, BadRequest, Stale, ForceNoReconnect, ConnectionLimit, ChannelLimit, InappropriateProtocol, PermissionDenied, NotAvailable, TooManyErrors
 - **3511** - IdleTimeout (heartbeat detected inactivity)
 - **3512** - SlowConsumer (client can't keep up with messages)
+- **3513** - Internal (connect path internal error, e.g. cluster state sync failure; connection forced closed)
 
 ## Module Structure
 

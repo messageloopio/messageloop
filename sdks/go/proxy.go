@@ -91,10 +91,10 @@ type LifecycleHandler interface {
 	OnConnected(ctx context.Context, sessionID, username string) error
 	// OnDisconnected is called when a client disconnects.
 	OnDisconnected(ctx context.Context, sessionID, username string) error
-	// OnSubscribed is called when a client subscribes to channels.
-	OnSubscribed(ctx context.Context) error
-	// OnUnsubscribed is called when a client unsubscribes from channels.
-	OnUnsubscribed(ctx context.Context) error
+	// OnSubscribed is called when a client subscribes to a channel.
+	OnSubscribed(ctx context.Context, sessionID, channel, username string) error
+	// OnUnsubscribed is called when a client unsubscribes from a channel.
+	OnUnsubscribed(ctx context.Context, sessionID, channel, username string) error
 }
 
 // RPCHandlerImpl implements the RPCHandler interface.
@@ -139,11 +139,11 @@ func (h *LifecycleHandlerImpl) OnDisconnected(ctx context.Context, sessionID, us
 	return nil
 }
 
-func (h *LifecycleHandlerImpl) OnSubscribed(ctx context.Context) error {
+func (h *LifecycleHandlerImpl) OnSubscribed(ctx context.Context, sessionID, channel, username string) error {
 	return nil
 }
 
-func (h *LifecycleHandlerImpl) OnUnsubscribed(ctx context.Context) error {
+func (h *LifecycleHandlerImpl) OnUnsubscribed(ctx context.Context, sessionID, channel, username string) error {
 	return nil
 }
 
@@ -243,6 +243,14 @@ func (h *HandlerImpl) RPC(ctx context.Context, req *proxypb.RPCRequest) (*proxyp
 		}, nil
 	}
 
+	// A nil response would dereference below and panic inside the gRPC
+	// handler, crashing the whole proxy process. Surface it as a gRPC
+	// Internal error instead.
+	if resp == nil {
+		slog.ErrorContext(ctx, "RPC handler returned a nil response")
+		return nil, status.Error(codes.Internal, "RPC handler returned a nil response")
+	}
+
 	if resp.Error != nil {
 		slog.DebugContext(ctx, "RPC returned error",
 			"code", resp.Error.Code,
@@ -291,6 +299,13 @@ func (h *HandlerImpl) Authenticate(ctx context.Context, req *proxypb.Authenticat
 				Message: err.Error(),
 			},
 		}, nil
+	}
+
+	// A nil response would dereference below (resp.Error / resp.UserInfo) and
+	// panic inside the gRPC handler, crashing the whole proxy process.
+	if resp == nil {
+		slog.ErrorContext(ctx, "auth handler returned a nil response")
+		return nil, status.Error(codes.Internal, "auth handler returned a nil response")
 	}
 
 	return &proxypb.AuthenticateResponse{
@@ -346,9 +361,13 @@ func (h *HandlerImpl) OnConnected(ctx context.Context, req *proxypb.OnConnectedR
 
 // OnSubscribed implements ProxyServiceServer.OnSubscribed.
 func (h *HandlerImpl) OnSubscribed(ctx context.Context, req *proxypb.OnSubscribedRequest) (*proxypb.OnSubscribedResponse, error) {
-	slog.DebugContext(ctx, "received OnSubscribed hook")
+	slog.DebugContext(ctx, "received OnSubscribed hook",
+		"session_id", req.SessionId,
+		"channel", req.Channel,
+		"username", req.Username,
+	)
 
-	if err := h.lifecycleHandler().OnSubscribed(ctx); err != nil {
+	if err := h.lifecycleHandler().OnSubscribed(ctx, req.SessionId, req.Channel, req.Username); err != nil {
 		slog.ErrorContext(ctx, "OnSubscribed handler failed", "error", err)
 		return nil, status.Error(codes.Internal, err.Error())
 	}
@@ -358,9 +377,13 @@ func (h *HandlerImpl) OnSubscribed(ctx context.Context, req *proxypb.OnSubscribe
 
 // OnUnsubscribed implements ProxyServiceServer.OnUnsubscribed.
 func (h *HandlerImpl) OnUnsubscribed(ctx context.Context, req *proxypb.OnUnsubscribedRequest) (*proxypb.OnUnsubscribedResponse, error) {
-	slog.DebugContext(ctx, "received OnUnsubscribed hook")
+	slog.DebugContext(ctx, "received OnUnsubscribed hook",
+		"session_id", req.SessionId,
+		"channel", req.Channel,
+		"username", req.Username,
+	)
 
-	if err := h.lifecycleHandler().OnUnsubscribed(ctx); err != nil {
+	if err := h.lifecycleHandler().OnUnsubscribed(ctx, req.SessionId, req.Channel, req.Username); err != nil {
 		slog.ErrorContext(ctx, "OnUnsubscribed handler failed", "error", err)
 		return nil, status.Error(codes.Internal, err.Error())
 	}
@@ -394,6 +417,12 @@ type ProxyServerOptions struct {
 
 // NewProxyServer creates a new proxy gRPC server that integrates with the lynx framework.
 // The handler parameter should implement the ProxyServiceServer interface (or embed HandlerImpl).
+//
+// TLS: this constructor never installs TLS credentials. With Insecure=false
+// (the zero value) the server still listens in plaintext, so a MessageLoop
+// server configured to dial this proxy with TLS will fail the handshake.
+// Either set Insecure=true for explicit plaintext (development), or terminate
+// TLS in front of the proxy.
 func NewProxyServer(opts ProxyServerOptions, handler proxypb.ProxyServiceServer) (*ProxyServer, error) {
 	grpcOpts := []grpc.ServerOption{}
 	if opts.Insecure {
@@ -431,6 +460,12 @@ func (s *ProxyServer) Name() string {
 // Start starts the proxy server.
 func (s *ProxyServer) Start(ctx context.Context) error {
 	slog.InfoContext(ctx, "starting proxy gRPC server", "addr", s.opts.Addr)
+	if !s.opts.Insecure {
+		// The constructor never installs TLS credentials: with Insecure=false
+		// the listener still serves plaintext, which mismatches a TLS-dialing
+		// MessageLoop server. Warn so the misconfiguration is visible.
+		slog.WarnContext(ctx, "proxy server has no TLS credentials and will serve plaintext; set Insecure=true for explicit plaintext or terminate TLS in front of the proxy")
+	}
 	return s.grpc.Serve(s.conn)
 }
 

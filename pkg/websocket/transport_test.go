@@ -1,8 +1,14 @@
 package websocket
 
 import (
+	"bufio"
+	"crypto/sha1"
+	"encoding/base64"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +17,97 @@ import (
 	"github.com/messageloopio/messageloop"
 	"github.com/stretchr/testify/require"
 )
+
+// TestTransport_CloseClosesFDWhenPeerRST is the regression test for P1-B6: a
+// peer that resets the TCP connection (instead of closing cleanly) must not
+// leave the client-side fd open. Before the fix, Close returned as soon as
+// WriteControl failed and skipped conn.Close(), leaking the fd.
+func TestTransport_CloseClosesFDWhenPeerRST(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer ln.Close()
+
+	// A raw peer socket that answers the WebSocket client handshake so
+	// gorilla's NewClient returns a usable *websocket.Conn.
+	accepted := make(chan net.Conn, 1)
+	peerErr := make(chan error, 1)
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			peerErr <- err
+			return
+		}
+		accepted <- c
+		peerErr <- answerHandshake(c)
+	}()
+
+	clientSide, err := net.Dial("tcp", ln.Addr().String())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = clientSide.Close() })
+	peer := <-accepted
+
+	// NewClient sends the upgrade request and blocks for the 101; the peer
+	// goroutine answers it concurrently.
+	wsConn, _, err := websocket.NewClient(clientSide, &url.URL{Scheme: "ws", Host: "localhost"}, nil, 1024, 1024)
+	require.NoError(t, err)
+	require.NoError(t, <-peerErr)
+	transport := newTransport(wsConn, websocket.TextMessage, time.Second)
+
+	// RST the peer: SO_LINGER 0 followed by close aborts the connection
+	// instead of the normal FIN handshake.
+	tcpPeer := peer.(*net.TCPConn)
+	require.NoError(t, tcpPeer.SetLinger(0))
+	require.NoError(t, tcpPeer.Close())
+	// Give the RST a moment to reach the client socket.
+	time.Sleep(50 * time.Millisecond)
+
+	// Close must close the client-side fd on every path, including the
+	// WriteControl failure the reset socket triggers.
+	_ = transport.Close(messageloop.Disconnect{Code: 3500, Reason: "bye"})
+
+	// Reading must return net.ErrClosed — not a fresh "connection reset by
+	// peer" from an fd that is still open.
+	_, readErr := clientSide.Read(make([]byte, 1))
+	require.Error(t, readErr)
+	require.ErrorIs(t, readErr, net.ErrClosed, "fd must be closed even when the peer reset the connection")
+}
+
+// answerHandshake reads the WebSocket client upgrade request from c and
+// replies with a 101 response, so gorilla's NewClient completes its
+// handshake over c.
+func answerHandshake(c net.Conn) error {
+	reader := bufio.NewReader(c)
+	key := ""
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return err
+		}
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			break
+		}
+		if strings.HasPrefix(strings.ToLower(trimmed), "sec-websocket-key:") {
+			key = strings.TrimSpace(trimmed[len("sec-websocket-key:"):])
+		}
+	}
+	if key == "" {
+		return fmt.Errorf("no Sec-WebSocket-Key in handshake")
+	}
+	_, err := c.Write([]byte(
+		"HTTP/1.1 101 Switching Protocols\r\n" +
+			"Upgrade: websocket\r\n" +
+			"Connection: Upgrade\r\n" +
+			"Sec-WebSocket-Accept: " + websocketAccept(key) + "\r\n\r\n"))
+	return err
+}
+
+// websocketAccept computes the Sec-WebSocket-Accept value for a client key.
+func websocketAccept(key string) string {
+	h := sha1.New()
+	_, _ = h.Write([]byte(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
+	return base64.StdEncoding.EncodeToString(h.Sum(nil))
+}
 
 func TestCloseCode_FallsBackToNormalClosureWhenZero(t *testing.T) {
 	got := closeCode(messageloop.Disconnect{})

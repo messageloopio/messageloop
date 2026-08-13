@@ -65,5 +65,6 @@ export {
   setEphemeral,
   setAutoReconnect,
   setReconnectDelay,
+  setReconnectBackoff,
   setReconnectMaxAttempts,
 } from "./client/options";

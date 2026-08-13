@@ -6,6 +6,7 @@ import type { ClientOptions, ClientOption } from "./options";
 import type {
   ConnectionState,
   ConnectionStateChangeEvent,
+  IClient,
 } from "./types";
 
 import { WebSocketTransport } from "../transport/websocket";
@@ -25,7 +26,7 @@ import {
 /**
  * MessageLoop client for connecting to the messaging server.
  */
-export class MessageLoopClient {
+export class MessageLoopClient implements IClient {
   private transport: Transport | null = null;
   private codec: Codec;
   private options: ClientOptions;
@@ -37,6 +38,10 @@ export class MessageLoopClient {
   // Connection state
   private connectionState: ConnectionState = "disconnected";
   private autoReconnectEnabled = true;
+
+  // Connect waiters (waitForConnection), settled by Connected or error envelope
+  private connectWaitReject: ((err: Error) => void) | null = null;
+  private connectError: Error | null = null;
 
   // Multi-handler support using Sets
   private messageHandlers: Set<(messages: ReceivedMessage[]) => void> =
@@ -156,20 +161,37 @@ export class MessageLoopClient {
 
   /**
    * Wait for connection to be established.
+   * Rejected by the Connected state, an error envelope received while
+   * connecting, the client being closed, or the connect timeout.
    */
-  private async waitForConnection(): Promise<void> {
+  private waitForConnection(): Promise<void> {
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error("Connection timeout"));
-      }, this.options.connectTimeout);
+      let settled = false;
+      const settle = (fn: (...args: any[]) => void) => (...args: any[]) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        this.connectWaitReject = null;
+        fn(...args);
+      };
+
+      const timeout = setTimeout(
+        settle(() => reject(new Error("Connection timeout"))),
+        this.options.connectTimeout
+      );
+
+      this.connectWaitReject = settle((err: Error) => reject(err));
 
       const checkConnection = () => {
-        if (this.isConnectedFlag) {
-          clearTimeout(timeout);
-          resolve();
+        if (settled) return;
+        if (this.connectError) {
+          const err = this.connectError;
+          this.connectError = null;
+          settle(() => reject(err))();
+        } else if (this.isConnectedFlag) {
+          settle(() => resolve())();
         } else if (this.isClosedFlag) {
-          clearTimeout(timeout);
-          reject(new Error("Connection closed"));
+          settle(() => reject(new Error("Connection closed")))();
         } else {
           setTimeout(checkConnection, 100);
         }
@@ -193,6 +215,22 @@ export class MessageLoopClient {
         this.isConnectedFlag = true;
         this.reconnectAttempts = 0;
         this.isReconnecting = false;
+        this.connectWaitReject = null;
+        this.connectError = null;
+
+        // The server's Connected.subscriptions is authoritative: replace the
+        // local set unconditionally (even with an empty list) so channels
+        // dropped server-side are forgotten before resubscribeAllChannels.
+        const serverSubs: string[] = (parsed.data.subscriptions || [])
+          .map((sub: any) => sub && sub.channel)
+          .filter((ch: any) => typeof ch === "string" && ch.length > 0);
+        this.subscribedChannels = new Set(serverSubs);
+
+        // Deliver recovery messages carried in Connected.publications and
+        // update per-channel offsets so the next reconnect resumes past them.
+        for (const pub of parsed.data.publications || []) {
+          this.deliverMessages(pub.messages || []);
+        }
 
         // Update connection state
         const wasReconnecting = this.connectionState === "reconnecting";
@@ -214,36 +252,7 @@ export class MessageLoopClient {
       }
 
       case "publication": {
-        // Convert messages to ReceivedMessage format
-        const messages: ReceivedMessage[] = [];
-        const msgs = parsed.data.messages || [];
-        for (const m of msgs) {
-          // Track per-channel offsets for session resumption
-          if (m.offset && m.channel) {
-            this.channelOffsets.set(m.channel, BigInt(m.offset));
-          }
-          messages.push({
-            id: m.id,
-            channel: m.channel,
-            offset: m.offset,
-            message: m.payload ? payloadToMessage(m.payload, m.id) : createMessage("messageloop.message", { contentType: "", type: "binary" }),
-          });
-        }
-
-        if (messages.length > 0) {
-          // Notify legacy handler
-          if (this.messageHandler) {
-            this.messageHandler(messages);
-          }
-          // Notify all registered handlers
-          for (const handler of this.messageHandlers) {
-            try {
-              handler(messages);
-            } catch {
-              // Ignore handler errors
-            }
-          }
-        }
+        this.deliverMessages(parsed.data.messages || []);
         break;
       }
 
@@ -277,9 +286,86 @@ export class MessageLoopClient {
         const error = new Error(parsed.data.message || "Server error");
         (error as any).code = parsed.data.code;
         (error as any).type = parsed.data.type;
-        this.handleError(error);
+
+        // The server echoes the request id on error envelopes: route to the
+        // pending RPC so the caller fails fast instead of waiting for the
+        // rpcTimeout.
+        if (parsed.id) {
+          const pending = this.pendingRPC.get(parsed.id);
+          if (pending) {
+            this.pendingRPC.delete(parsed.id);
+            pending.reject(error);
+            break;
+          }
+        }
+
+        if (this.connectionState === "connecting") {
+          // Fail the pending connect with the real reason (e.g. invalid token)
+          // instead of a generic 30s "Connection timeout".
+          this.notifyError(error);
+          if (this.connectWaitReject) {
+            this.connectWaitReject(error);
+          } else {
+            this.connectError = error;
+          }
+          break;
+        }
+
+        // Connected state: this is an application-level error (ACL denial,
+        // server-side RPC failure, ...). Notify the handler but do not tear
+        // down the connection.
+        this.notifyError(error);
         break;
       }
+    }
+  }
+
+  /**
+   * Convert messages to ReceivedMessage format, track per-channel offsets for
+   * session resumption, and deliver them to all registered handlers.
+   */
+  private deliverMessages(msgs: Array<{
+    id: string;
+    channel: string;
+    offset: bigint;
+    payload?: any;
+  }>): void {
+    const messages: ReceivedMessage[] = [];
+    for (const m of msgs) {
+      // Track per-channel offsets for session resumption
+      if (m.offset && m.channel) {
+        this.channelOffsets.set(m.channel, BigInt(m.offset));
+      }
+      messages.push({
+        id: m.id,
+        channel: m.channel,
+        offset: m.offset,
+        message: m.payload ? payloadToMessage(m.payload, m.id) : createMessage("messageloop.message", { contentType: "", type: "binary" }),
+      });
+    }
+
+    if (messages.length > 0) {
+      // Notify legacy handler
+      if (this.messageHandler) {
+        this.messageHandler(messages);
+      }
+      // Notify all registered handlers
+      for (const handler of this.messageHandlers) {
+        try {
+          handler(messages);
+        } catch {
+          // Ignore handler errors
+        }
+      }
+    }
+  }
+
+  /**
+   * Notify the registered error handler only.
+   */
+  private notifyError(err: Error): void {
+    if (this.errorHandler) {
+      this.errorHandler(err);
     }
   }
 
@@ -287,9 +373,7 @@ export class MessageLoopClient {
    * Handle an error.
    */
   private handleError(err: Error): void {
-    if (this.errorHandler) {
-      this.errorHandler(err);
-    }
+    this.notifyError(err);
 
     // Trigger reconnection for connection errors
     if (
@@ -400,11 +484,20 @@ export class MessageLoopClient {
         timeout: this.options.connectTimeout,
       });
 
+      // The client may have been closed while dialing: do not resurrect it.
+      if (this.isClosedFlag) {
+        await transport.close();
+        this.isReconnecting = false;
+        return;
+      }
+
       this.transport = transport;
       this.startMessageLoop();
 
-      // Send connect message
+      // Send connect message and wait for Connected (with timeout); a missing
+      // reply falls through to the next retry instead of hanging forever.
       await this.connect();
+      await this.waitForConnection();
     } catch {
       this.isReconnecting = false;
       // Schedule next attempt
@@ -464,10 +557,13 @@ export class MessageLoopClient {
       const pingMsg = createPingMessage();
       await this.transport.send(pingMsg as any);
 
-      // Set up pong timeout
+      // Set up pong timeout: a missed pong means the connection is dead, but
+      // the client must survive via reconnection — never close() it (that
+      // would set the closed flag and kill the reconnect machinery).
       this.pingTimeoutTimer = setTimeout(() => {
-        this.handleError(new Error("Pong timeout"));
-        this.close();
+        this.pingTimeoutTimer = null;
+        this.notifyError(new Error("Pong timeout"));
+        this.handleDisconnect();
       }, this.options.pingTimeout);
     } catch (err) {
       this.handleError(err instanceof Error ? err : new Error(String(err)));
@@ -492,12 +588,14 @@ export class MessageLoopClient {
       throw new Error("Transport not initialized");
     }
 
-    // Build subscription list with recovery info when reconnecting
+    // Build subscription list with recovery info when reconnecting.
+    // recover matches the Go SDK: always true when reconnecting (the server
+    // falls back to recovering from the beginning when epoch is unknown).
     const subs = Array.from(this.subscribedChannels).map((ch) => ({
       channel: ch,
       ephemeral: this.options.ephemeral,
       token: "",
-      recover: this.isReconnecting && this.epoch !== "",
+      recover: this.isReconnecting,
       offset: this.channelOffsets.get(ch) || BigInt(0),
       epoch: this.isReconnecting ? this.epoch : "",
     }));
@@ -530,6 +628,10 @@ export class MessageLoopClient {
 
     // Stop ping loop
     this.stopPingLoop();
+
+    // Reject any pending connect waiters
+    this.connectWaitReject = null;
+    this.connectError = null;
 
     // Reject pending RPC requests
     for (const [_, pending] of this.pendingRPC) {
@@ -573,9 +675,11 @@ export class MessageLoopClient {
     const msg = createUnsubscribeMessage(channels);
     await this.send(msg);
 
-    // Remove from subscribed channels
+    // Remove from subscribed channels and clear per-channel offsets so a
+    // later resubscribe + reconnect does not replay stale history.
     for (const channel of channels) {
       this.subscribedChannels.delete(channel);
+      this.channelOffsets.delete(channel);
     }
   }
 
@@ -635,6 +739,9 @@ export class MessageLoopClient {
 
   /**
    * Set the message handler.
+   * Convenience alias for a single message slot: prefer addMessageHandler,
+   * and do not mix both on the same client (messages would be delivered to
+   * each, duplicating delivery).
    */
   onMessage(handler: (messages: ReceivedMessage[]) => void): void {
     this.messageHandler = handler;
@@ -686,6 +793,7 @@ export class MessageLoopClient {
 
   /**
    * Add a message handler. Returns a function to remove the handler.
+   * Recommended over onMessage: supports multiple handlers and disposers.
    */
   addMessageHandler(
     handler: (messages: ReceivedMessage[]) => void

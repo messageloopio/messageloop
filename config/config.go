@@ -112,14 +112,24 @@ type ProxyConfig struct {
 }
 
 // ToProxyConfig converts the config YAML struct to proxy.ProxyConfig.
+// The timeout duration string is parsed here so callers do not need to
+// re-parse it.
 func (c *ProxyConfig) ToProxyConfig() (*proxy.ProxyConfig, error) {
-	return &proxy.ProxyConfig{
+	pc := &proxy.ProxyConfig{
 		Name:     c.Name,
 		Endpoint: c.Endpoint,
 		HTTP:     c.HTTP,
 		GRPC:     c.GRPC,
 		Routes:   c.Routes,
-	}, nil
+	}
+	if c.Timeout != "" {
+		timeout, err := time.ParseDuration(c.Timeout)
+		if err != nil {
+			return nil, fmt.Errorf("invalid timeout: %w", err)
+		}
+		pc.Timeout = timeout
+	}
+	return pc, nil
 }
 
 type BrokerConfig struct {
@@ -145,8 +155,18 @@ type RedisConfig struct {
 
 // Validate checks the configuration for common errors and returns a descriptive error if any are found.
 func (c *Config) Validate() error {
-	if c.Transport.WebSocket.Addr == "" && c.Transport.GRPC.Addr == "" {
-		return fmt.Errorf("at least one transport address (websocket or grpc) must be configured")
+	// The startup wiring always constructs both transports: a WebSocket
+	// listener (newWebSocketServer) and a client gRPC listener
+	// (prepareGRPCServers). Validate the addresses here so a configuration
+	// that would mis-bind or panic at startup is rejected up front.
+	if c.Transport.WebSocket.Addr == "" {
+		return fmt.Errorf("transport.websocket.addr is required")
+	}
+	if c.Transport.WebSocket.Path == "" {
+		return fmt.Errorf("transport.websocket.path is required when websocket transport is enabled")
+	}
+	if c.Transport.GRPC.Addr == "" {
+		return fmt.Errorf("transport.grpc.addr is required")
 	}
 
 	// Validate duration fields.
@@ -195,6 +215,19 @@ func (c *Config) Validate() error {
 	case "redis":
 		if c.Broker.Redis.Addr == "" {
 			return fmt.Errorf("broker.redis.addr is required when broker.type is redis")
+		}
+		// consumer_group is declared but never consumed by the Redis broker;
+		// reject it instead of silently accepting a configuration that
+		// appears to do something.
+		if c.Broker.Redis.ConsumerGroup != "" {
+			return fmt.Errorf("broker.redis.consumer_group is not implemented; remove it from the configuration")
+		}
+		// stream_approximate=false is silently ignored by the broker (only
+		// approximate trimming is implemented, so it always behaves as true).
+		// An unset field is indistinguishable from an explicit false after
+		// parsing, so require the field to be explicitly true.
+		if !c.Broker.Redis.StreamApproximate {
+			return fmt.Errorf("broker.redis.stream_approximate: false is not supported (only approximate trimming is implemented); remove the field or set it to true")
 		}
 	default:
 		return fmt.Errorf("unknown broker.type: %q (expected \"memory\" or \"redis\")", c.Broker.Type)

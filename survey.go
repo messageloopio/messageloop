@@ -2,7 +2,6 @@ package messageloop
 
 import (
 	"context"
-	"log/slog"
 	"sync"
 	"time"
 )
@@ -97,19 +96,14 @@ func (s *Survey) AddResponse(sessionID string, payload []byte, err error) {
 	s.responses[sessionID] = result
 	s.mu.Unlock()
 
-	// Also send to channel for Wait() method
+	// Also send to channel for Wait() method. The map write above already
+	// captured the response, so a full or closed channel never loses it:
+	// Wait() collects the map once done is signaled. No warning is needed
+	// when the channel is full.
 	select {
 	case s.responseCh <- result:
 	case <-s.done:
-		// Survey is closed, don't block
 	default:
-		// Channel full, log and try non-blocking
-		slog.Warn("survey response channel full, response may be dropped",
-			"survey_id", s.id, "session_id", sessionID)
-		select {
-		case s.responseCh <- result:
-		default:
-		}
 	}
 }
 
@@ -173,10 +167,14 @@ func (s *Survey) closeDone() {
 // Close cleans up survey resources.
 func (s *Survey) Close() {
 	s.closeDone()
-	// Drain response channel
-	select {
-	case <-s.responseCh:
-	default:
+	// Drain the response channel so late senders never block: a single
+	// non-blocking receive could leave items behind.
+	for {
+		select {
+		case <-s.responseCh:
+		default:
+			return
+		}
 	}
 }
 

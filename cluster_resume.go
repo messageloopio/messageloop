@@ -140,9 +140,14 @@ func (n *Node) restoreSessionSubscriptions(ctx context.Context, client *Client, 
 			n.rollbackRestoredSubscriptions(client, restored)
 			return err
 		}
-		if err := n.SetPresenceForSession(ctx, sub.Channel, client); err != nil {
-			n.rollbackRestoredSubscriptions(client, append(restored, sub.Channel))
-			return err
+		// Ephemeral subscriptions never register presence (docs/protocol.md):
+		// a cross-node resume must not turn them into visible online members
+		// or publish join/leave events.
+		if !sub.Ephemeral {
+			if err := n.SetPresenceForSession(ctx, sub.Channel, client); err != nil {
+				n.rollbackRestoredSubscriptions(client, append(restored, sub.Channel))
+				return err
+			}
 		}
 		restored = append(restored, sub.Channel)
 		n.adjustClusterChannelSubscriptionsTimeout(sub.Channel, 1)
@@ -152,12 +157,18 @@ func (n *Node) restoreSessionSubscriptions(ctx context.Context, client *Client, 
 
 // rollbackRestoredSubscriptions undoes restored subscriptions after a partial
 // restore failure, compensating the shared channel projection for each channel
-// that was actually removed.
+// that was actually removed and clearing the presence entries the restore
+// path added.
 func (n *Node) rollbackRestoredSubscriptions(client *Client, channels []string) {
 	for _, channel := range channels {
 		removed, _ := n.removeLocalSubscriptionOnly(channel, client, true)
 		if removed {
 			n.adjustClusterChannelSubscriptionsTimeout(channel, -1)
+			// A partial restore must not leave a ghost online member behind.
+			// Remove on a channel that never registered presence is a no-op.
+			ctx, cancel := context.WithTimeout(context.Background(), clusterProjectionAdjustTimeout)
+			_ = n.presence.Remove(ctx, channel, client.SessionID())
+			cancel()
 		}
 	}
 }
@@ -246,7 +257,11 @@ func (n *Node) evictSessionForTakeover(client *Client) error {
 	// for rollback and shared projection adjustment.
 	var evictErrs []error
 	removed := make([]string, 0, len(channels))
+	ephemeralByChannel := make(map[string]bool, len(channels))
 	for _, ch := range channels {
+		if stored, ok := n.hub.LookupSubscriber(ch, client); ok {
+			ephemeralByChannel[ch] = stored.Ephemeral
+		}
 		wasRemoved, err := n.removeLocalSubscriptionOnly(ch, client, true)
 		if err != nil {
 			evictErrs = append(evictErrs, fmt.Errorf("remove channel %s: %w", ch, err))
@@ -263,7 +278,7 @@ func (n *Node) evictSessionForTakeover(client *Client) error {
 		// session is not left half-evicted, then report the aggregated error.
 		rollbackCtx, cancel := context.WithTimeout(context.Background(), clusterEvictRollbackTimeout)
 		for _, ch := range removed {
-			if err := n.restoreLocalSubscription(rollbackCtx, ch, NewSubscriber(client, false)); err != nil {
+			if err := n.restoreLocalSubscription(rollbackCtx, ch, NewSubscriber(client, ephemeralByChannel[ch])); err != nil {
 				evictErrs = append(evictErrs, fmt.Errorf("rollback channel %s: %w", ch, err))
 			}
 			n.adjustClusterChannelSubscriptionsTimeout(ch, 1)
@@ -273,7 +288,11 @@ func (n *Node) evictSessionForTakeover(client *Client) error {
 	}
 
 	if sessionID != "" {
-		n.hub.RemoveSession(sessionID)
+		// Only evict the session when the registered client is still this
+		// one: a newer connection may have taken over the session ID between
+		// LookupSession and this removal, and RemoveSessionIfMatches
+		// protects it from being evicted by a stale takeover.
+		n.hub.RemoveSessionIfMatches(sessionID, client)
 	}
 	return client.transport.Close(Disconnect{})
 }

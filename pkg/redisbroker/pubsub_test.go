@@ -2,6 +2,7 @@ package redisbroker
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -63,6 +64,235 @@ func TestRedisBroker_Subscribe_ExactRefCount(t *testing.T) {
 	if b.interested("forex.usd") {
 		t.Fatal("sibling channel must not match an exact subscription")
 	}
+}
+
+// TestRedisBroker_DeliverOnce_DeduplicatesByOffset verifies that the same
+// offset delivered twice (live delivery racing reconnect catch-up) reaches
+// the handler exactly once, while a new offset always goes through.
+func TestRedisBroker_DeliverOnce_DeduplicatesByOffset(t *testing.T) {
+	b := newTestRedisBroker()
+	var delivered []uint64
+	b.handler = func(_ string, pub *messageloop.Publication) error {
+		delivered = append(delivered, pub.Offset)
+		return nil
+	}
+
+	b.deliverOnce("ch", &messageloop.Publication{Offset: 10})
+	b.deliverOnce("ch", &messageloop.Publication{Offset: 10})
+	b.deliverOnce("ch", &messageloop.Publication{Offset: 11})
+	b.deliverOnce("other", &messageloop.Publication{Offset: 10})
+
+	require.Equal(t, []uint64{10, 11, 10}, delivered)
+	require.Equal(t, map[string]uint64{"ch": 11, "other": 10}, b.lastOffsets)
+}
+
+// TestRedisBroker_DeliverOnce_TransientDeliversUnconditionally verifies that
+// offset-0 (transient) publications bypass deduplication.
+func TestRedisBroker_DeliverOnce_TransientDeliversUnconditionally(t *testing.T) {
+	b := newTestRedisBroker()
+	var delivered int
+	b.handler = func(string, *messageloop.Publication) error {
+		delivered++
+		return nil
+	}
+	for i := 0; i < 3; i++ {
+		b.deliverOnce("ch", &messageloop.Publication{Offset: 0})
+	}
+	require.Equal(t, 3, delivered)
+	require.NotContains(t, b.lastOffsets, "ch")
+}
+
+// TestRedisBroker_DeliverOnce_HandlerPanicIsContained verifies P1-C3: a
+// panicking handler must be recovered into a logged error instead of taking
+// down the pub/sub consumer goroutine.
+func TestRedisBroker_DeliverOnce_HandlerPanicIsContained(t *testing.T) {
+	b := newTestRedisBroker()
+	b.handler = func(string, *messageloop.Publication) error {
+		panic("injected panic")
+	}
+
+	require.NotPanics(t, func() {
+		b.deliverOnce("ch", &messageloop.Publication{Offset: 1})
+	})
+	require.EqualValues(t, 1, b.handlerFailures.Load())
+
+	// The broker keeps working after the panic: the offset is recorded and
+	// the next delivery still goes through.
+	require.Equal(t, map[string]uint64{"ch": 1}, b.lastOffsets)
+}
+
+// TestRedisBroker_DeliverOnce_HandlerErrorCountedNotPropagated verifies
+// P1-C3: handler errors are counted and logged, never propagated to Publish
+// callers (the Redis broker is an asynchronous delivery implementation).
+func TestRedisBroker_DeliverOnce_HandlerErrorCountedNotPropagated(t *testing.T) {
+	b := newTestRedisBroker()
+	b.handler = func(string, *messageloop.Publication) error {
+		return errors.New("injected delivery error")
+	}
+
+	require.NotPanics(t, func() {
+		b.deliverOnce("ch", &messageloop.Publication{Offset: 5})
+	})
+	require.EqualValues(t, 1, b.handlerFailures.Load())
+}
+
+// TestRedisBroker_DeliverOnce_NilHandlerNoOp verifies the nil-handler guard.
+func TestRedisBroker_DeliverOnce_NilHandlerNoOp(t *testing.T) {
+	b := newTestRedisBroker()
+	require.NotPanics(t, func() {
+		b.deliverOnce("ch", &messageloop.Publication{Offset: 7})
+		b.deliverOnce("ch", &messageloop.Publication{Offset: 0})
+	})
+	require.EqualValues(t, 0, b.handlerFailures.Load())
+}
+
+// TestRedisBroker_CrossChannelDeliveryNotSerialized verifies P1-C2: a slow
+// handler on one channel must not block real-time delivery on other channels
+// (previously the handler ran inside the global deliverMu critical section).
+func TestRedisBroker_CrossChannelDeliveryNotSerialized(t *testing.T) {
+	redisCfg := requireCommandBusRedis(t)
+
+	brokerA := New(redisCfg).(*redisBroker)
+	brokerB := New(redisCfg).(*redisBroker)
+	t.Cleanup(func() { _ = brokerB.client.Close() })
+
+	const slowCh = "serialization-slow"
+	const fastCh = "serialization-fast"
+	// The two channels must land on different workers, otherwise the fast
+	// channel shares the slow handler's worker and legitimately queues
+	// behind it.
+	require.NotEqual(t, deliveryWorkerIndex(slowCh), deliveryWorkerIndex(fastCh))
+	slowEntered := make(chan struct{}, 1)
+	releaseSlow := make(chan struct{})
+	delivered := make(chan string, 8)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	started := make(chan error, 1)
+	go func() {
+		started <- brokerA.Start(ctx, func(ch string, _ *messageloop.Publication) error {
+			if ch == slowCh {
+				select {
+				case slowEntered <- struct{}{}:
+				default:
+				}
+				<-releaseSlow
+			}
+			delivered <- ch
+			return nil
+		})
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-started:
+		case <-time.After(3 * time.Second):
+		}
+	})
+
+	require.NoError(t, brokerA.Subscribe(slowCh))
+	require.NoError(t, brokerA.Subscribe(fastCh))
+	select {
+	case <-brokerA.Ready():
+	case <-time.After(3 * time.Second):
+		t.Fatal("broker never became ready")
+	}
+
+	// Enter a slow handler on the first channel.
+	_, err := brokerB.Publish(slowCh, &messageloop.Publication{Payload: []byte("slow"), Kind: messageloop.PayloadKindBinary})
+	require.NoError(t, err)
+	select {
+	case <-slowEntered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("slow handler never entered")
+	}
+
+	// A publication on a different channel must be delivered while the slow
+	// handler is still inside (previously it queued behind deliverMu).
+	startTime := time.Now()
+	_, err = brokerB.Publish(fastCh, &messageloop.Publication{Payload: []byte("fast"), Kind: messageloop.PayloadKindBinary})
+	require.NoError(t, err)
+	select {
+	case ch := <-delivered:
+		require.Equal(t, fastCh, ch)
+		require.Less(t, time.Since(startTime), 2*time.Second,
+			"fast-channel delivery must not wait for the slow handler")
+	case <-time.After(2 * time.Second):
+		t.Fatal("fast channel delivery blocked behind slow handler")
+	}
+
+	close(releaseSlow)
+}
+
+// TestRedisBroker_CatchUpGapDetected verifies P1-C4: when the stream holds
+// more entries than XRangeN's cap since the delivery baseline, the truncated
+// tail is surfaced as a detected gap instead of failing silently.
+func TestRedisBroker_CatchUpGapDetected(t *testing.T) {
+	redisCfg := requireCommandBusRedis(t)
+
+	brokerA := New(redisCfg).(*redisBroker)
+	brokerB := New(redisCfg).(*redisBroker)
+	t.Cleanup(func() { _ = brokerB.client.Close() })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	started := make(chan error, 1)
+	go func() {
+		started <- brokerA.Start(ctx, func(string, *messageloop.Publication) error { return nil })
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-started:
+		case <-time.After(3 * time.Second):
+		}
+	})
+
+	require.NoError(t, brokerA.Subscribe("gap-ch"))
+	select {
+	case <-brokerA.Ready():
+	case <-time.After(3 * time.Second):
+		t.Fatal("broker never became ready")
+	}
+
+	// Seed a delivery baseline.
+	_, err := brokerB.Publish("gap-ch", &messageloop.Publication{Payload: []byte("seed"), Kind: messageloop.PayloadKindBinary})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		brokerA.subMu.RLock()
+		last := brokerA.lastOffsets["gap-ch"]
+		brokerA.subMu.RUnlock()
+		return last > 0
+	}, 5*time.Second, 25*time.Millisecond)
+
+	// Shrink the catch-up window so the replay cap is smaller than the
+	// number of missed messages.
+	originalMaxLen := brokerA.opts.StreamMaxLength
+	brokerA.opts.StreamMaxLength = 2
+	t.Cleanup(func() { brokerA.opts.StreamMaxLength = originalMaxLen })
+
+	// Publish more messages than the capped window while disconnected.
+	brokerA.pubsubMu.Lock()
+	if brokerA.activePubSub != nil {
+		_ = brokerA.activePubSub.Close()
+	}
+	brokerA.pubsubMu.Unlock()
+	require.Eventually(t, func() bool {
+		brokerA.pubsubMu.Lock()
+		defer brokerA.pubsubMu.Unlock()
+		return brokerA.activePubSub == nil
+	}, 5*time.Second, 25*time.Millisecond)
+
+	for i := 0; i < 5; i++ {
+		_, err := brokerB.Publish("gap-ch", &messageloop.Publication{Payload: []byte("missed"), Kind: messageloop.PayloadKindBinary})
+		require.NoError(t, err)
+	}
+
+	// The reconnect catch-up replays at most 2 entries; the newest stream
+	// entries cannot be replayed, so the gap must be detected and counted.
+	require.Eventually(t, func() bool {
+		return brokerA.catchUpGaps.Load() >= 1
+	}, 15*time.Second, 50*time.Millisecond)
 }
 
 // TestRedisBroker_WildcardReceivesPublication_Redis verifies wildcard

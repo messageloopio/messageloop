@@ -23,13 +23,18 @@ export interface IClient {
   close(): Promise<void>;
   subscribe(...channels: string[]): Promise<void>;
   unsubscribe(...channels: string[]): Promise<void>;
-  publish(channel: string, msg: import("../message").Message): Promise<void>;
+  publish(
+    channel: string,
+    msg: import("../message").Message,
+    transient?: boolean
+  ): Promise<void>;
   rpc(
     channel: string,
     method: string,
     request: import("../message").Message,
     options?: { timeout?: number }
   ): Promise<import("../message").Message>;
+  /** Single-slot convenience alias; prefer addMessageHandler for new code. */
   onMessage(handler: (messages: import("../message").ReceivedMessage[]) => void): void;
   onError(handler: (error: Error) => void): void;
   onConnected(handler: (sessionId: string) => void): void;
@@ -38,7 +43,8 @@ export interface IClient {
   isConnected(): boolean;
   getSubscribedChannels(): string[];
 
-  // Multi-handler support
+  // Multi-handler support (recommended over the onXxx aliases)
+  /** Register a message handler; returns a disposer. */
   addMessageHandler(
     handler: (messages: import("../message").ReceivedMessage[]) => void
   ): () => void;

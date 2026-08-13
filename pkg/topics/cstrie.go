@@ -1,6 +1,7 @@
 package topics
 
 import (
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"unsafe"
@@ -149,6 +150,12 @@ func (b *branch) subscribers() []Subscriber {
 
 type tNode struct{}
 
+// maxCASRetries is the retry budget before a CAS retry loop yields to other
+// goroutines. Retries are still unbounded in time (lock-free progress), but
+// converting recursion to a loop with this yield bound removes the unbounded
+// stack growth risk.
+const maxCASRetries = 1000
+
 type csTrieMatcher struct {
 	root *iNode
 }
@@ -160,15 +167,25 @@ func NewCSTrieMatcher() Matcher {
 
 // Subscribe adds the Subscriber to the topic and returns a Subscription.
 func (c *csTrieMatcher) Subscribe(topic string, sub Subscriber) (*Subscription, error) {
+	if err := validateSubscriber(sub); err != nil {
+		return nil, err
+	}
+	if !validTopic(topic) {
+		return nil, ErrBadTopic
+	}
 	var (
 		words   = strings.Split(topic, delimiter)
 		rootPtr = (*unsafe.Pointer)(unsafe.Pointer(&c.root))
-		root    = (*iNode)(atomic.LoadPointer(rootPtr))
 	)
-	if !c.iinsert(root, nil, words, sub) {
-		return c.Subscribe(topic, sub)
+	for attempt := 0; ; attempt++ {
+		root := (*iNode)(atomic.LoadPointer(rootPtr))
+		if c.iinsert(root, nil, words, sub) {
+			return &Subscription{Topic: topic, Subscriber: sub}, nil
+		}
+		if attempt >= maxCASRetries {
+			runtime.Gosched()
+		}
 	}
-	return &Subscription{Topic: topic, Subscriber: sub}, nil
 }
 
 func (c *csTrieMatcher) iinsert(i, parent *iNode, words []string, sub Subscriber) bool {
@@ -221,15 +238,25 @@ func (c *csTrieMatcher) iinsert(i, parent *iNode, words []string, sub Subscriber
 	}
 }
 
-// Unsubscribe removes the Subscription.
+// Unsubscribe removes the Subscription. It is idempotent: unsubscribing a
+// Subscription that is no longer registered, or a nil Subscription, is a
+// no-op.
 func (c *csTrieMatcher) Unsubscribe(sub *Subscription) {
+	if sub == nil {
+		return
+	}
 	var (
 		words   = strings.Split(sub.Topic, delimiter)
 		rootPtr = (*unsafe.Pointer)(unsafe.Pointer(&c.root))
-		root    = (*iNode)(atomic.LoadPointer(rootPtr))
 	)
-	if !c.iremove(root, nil, nil, words, 0, sub.Subscriber) {
-		c.Unsubscribe(sub)
+	for attempt := 0; ; attempt++ {
+		root := (*iNode)(atomic.LoadPointer(rootPtr))
+		if c.iremove(root, nil, nil, words, 0, sub.Subscriber) {
+			return
+		}
+		if attempt >= maxCASRetries {
+			runtime.Gosched()
+		}
 	}
 }
 
@@ -296,13 +323,16 @@ func (c *csTrieMatcher) Lookup(topic string) []Subscriber {
 	var (
 		words   = strings.Split(topic, delimiter)
 		rootPtr = (*unsafe.Pointer)(unsafe.Pointer(&c.root))
-		root    = (*iNode)(atomic.LoadPointer(rootPtr))
 	)
-	result, ok := c.ilookup(root, nil, words)
-	if !ok {
-		return c.Lookup(topic)
+	for attempt := 0; ; attempt++ {
+		root := (*iNode)(atomic.LoadPointer(rootPtr))
+		if result, ok := c.ilookup(root, nil, words); ok {
+			return result
+		}
+		if attempt >= maxCASRetries {
+			runtime.Gosched()
+		}
 	}
-	return result
 }
 
 // ilookup attempts to retrieve the Subscribers for the word path. True is
@@ -419,7 +449,11 @@ func cleanParent(i, parent, parentsParent *iNode, c *csTrieMatcher, word string)
 			}
 			if main.tNode != nil {
 				if !contract(parentsParent, parent, i, c, pMain) {
-					cleanParent(parentsParent, parent, i, c, word)
+					// The contraction CAS failed against a concurrently
+					// modified tree; retry with the same node chain as the
+					// original call (rotating the arguments would inspect a
+					// different chain and silently no-op).
+					cleanParent(i, parent, parentsParent, c, word)
 				}
 			}
 		}

@@ -17,8 +17,9 @@ export interface Codec {
 
   /**
    * Decode bytes to an outbound message.
+   * May return a Promise when the input is a Blob (browser binary frame).
    */
-  decode(data: Uint8Array | string): OutboundMessage;
+  decode(data: Uint8Array | string | Blob): OutboundMessage | Promise<OutboundMessage>;
 
   /**
    * Whether this codec uses binary data (true for protobuf).

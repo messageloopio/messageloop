@@ -11,6 +11,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/messageloopio/messageloop"
 	"github.com/messageloopio/messageloop/config"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
 	ws "github.com/messageloopio/messageloop/pkg/websocket"
 	"github.com/stretchr/testify/require"
 )
@@ -133,4 +134,93 @@ func TestWebSocket_RateLimiting(t *testing.T) {
 		}
 	}
 	require.True(t, gotRateLimited, "expected to hit rate limit")
+}
+
+// TestWebSocket_SubprotocolNegotiation is the e2e regression test for P1-B2:
+// the negotiated subprotocol and the frame type must always agree, regardless
+// of the order of the client's offers. Before the fix, offers like
+// ["messageloop+proto", "messageloop"] negotiated "messageloop" (text frames)
+// while the protobuf marshaler was selected from the offer list, so the
+// connection could never decode a frame.
+func TestWebSocket_SubprotocolNegotiation(t *testing.T) {
+	ctx := t.Context()
+	node := messageloop.NewNode(nil)
+	require.NoError(t, node.Run(ctx))
+
+	server := startTestWSServer(t, node)
+	url := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"
+
+	cases := []struct {
+		name            string
+		offers          []string
+		wantSubprotocol string
+	}{
+		{"plain", []string{"messageloop"}, "messageloop"},
+		{"json suffix", []string{"messageloop+json"}, "messageloop+json"},
+		{"proto", []string{"messageloop+proto"}, "messageloop+proto"},
+		// Server-side protocol list order wins over the client offer order:
+		// the negotiated result is "messageloop" even though the first offer
+		// mentions proto.
+		{"proto then plain", []string{"messageloop+proto", "messageloop"}, "messageloop"},
+		{"plain then proto", []string{"messageloop", "messageloop+proto"}, "messageloop"},
+		{"no subprotocol", nil, ""},
+		{"unknown subprotocol", []string{"xproto"}, ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dialer := websocket.Dialer{Subprotocols: tc.offers}
+			conn, resp, err := dialer.Dial(url, nil)
+			require.NoError(t, err)
+			defer func() { _ = conn.Close() }()
+			require.Equal(t, tc.wantSubprotocol, resp.Header.Get("Sec-Websocket-Protocol"), "negotiated subprotocol")
+
+			// The connection must actually work with the frame type that
+			// matches the negotiated subprotocol: JSON text frames for every
+			// case except messageloop+proto, which uses binary protobuf.
+			if tc.wantSubprotocol == "messageloop+proto" {
+				protoRoundTrip(t, conn)
+			} else {
+				jsonRoundTrip(t, conn)
+			}
+		})
+	}
+}
+
+// jsonRoundTrip connects with a JSON text frame and expects a JSON Connected
+// response, proving the JSON marshaler is paired with text frames.
+func jsonRoundTrip(t *testing.T, conn *websocket.Conn) {
+	t.Helper()
+	sendJSON(t, conn, map[string]any{
+		"id":      "conn",
+		"connect": map[string]any{"client_id": "negotiation-json"},
+	})
+	resp := readJSON(t, conn, 2*time.Second)
+	require.NotNil(t, resp["connected"], "expected JSON Connected response, got: %v", resp)
+}
+
+// protoRoundTrip connects with a binary protobuf frame and expects a binary
+// protobuf Connected response, proving the protobuf marshaler is paired with
+// binary frames.
+func protoRoundTrip(t *testing.T, conn *websocket.Conn) {
+	t.Helper()
+	protoMarshaler := messageloop.ProtobufMarshaler{}
+	msg := &clientpb.InboundMessage{
+		Id: "conn",
+		Envelope: &clientpb.InboundMessage_Connect{
+			Connect: &clientpb.Connect{ClientId: "negotiation-proto"},
+		},
+	}
+	data, err := protoMarshaler.Marshal(msg)
+	require.NoError(t, err)
+	require.NoError(t, conn.WriteMessage(websocket.BinaryMessage, data))
+
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	msgType, payload, err := conn.ReadMessage()
+	require.NoError(t, err)
+	require.Equal(t, websocket.BinaryMessage, msgType, "protobuf connection must use binary frames")
+
+	var out clientpb.OutboundMessage
+	require.NoError(t, protoMarshaler.Unmarshal(payload, &out))
+	require.NotNil(t, out.GetConnected(), "expected protobuf Connected response, got: %v", &out)
 }

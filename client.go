@@ -153,10 +153,38 @@ func (c *Client) close(disconnect Disconnect) error {
 	metricsCharged := c.metricsCharged
 	c.mu.Unlock()
 
-	// Remove local subscriptions before clearing presence and hub state.
-	// Cleanup runs with bounded concurrency: each channel keeps its own saga
-	// ordering (RemoveSubscription serializes per-channel via subLock), while
-	// the cluster-mode steps no longer serialize thousands of channels.
+	// Remove presence for all subscribed channels first, while the
+	// subscriptions are still registered in the hub: ephemeral subscriptions
+	// are identified this way and skipped (they never register presence or
+	// publish join/leave events). Cleanup runs with bounded concurrency —
+	// one goroutine per channel would explode on connections with thousands
+	// of subscriptions (P1-A5).
+	if len(channels) > 0 {
+		const maxConcurrentPresence = 16
+		presCtx := context.Background()
+		work := make(chan string)
+		var wg sync.WaitGroup
+		for i := 0; i < maxConcurrentPresence; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for ch := range work {
+					if stored, ok := c.node.hub.LookupSubscriber(ch, c); ok && stored.Ephemeral {
+						continue
+					}
+					_ = c.node.presence.Remove(presCtx, ch, sessionID)
+					c.node.PublishPresenceLeave(ch, sessionID, userID)
+				}
+			}()
+		}
+		for _, ch := range channels {
+			work <- ch
+		}
+		close(work)
+		wg.Wait()
+	}
+
+	// Remove local subscriptions before clearing hub state.
 	if len(channels) > 0 {
 		const maxConcurrentRemovals = 16
 		work := make(chan string)
@@ -177,15 +205,6 @@ func (c *Client) close(disconnect Disconnect) error {
 		}
 		close(work)
 		wg.Wait()
-	}
-
-	// Remove presence for all subscribed channels.
-	if len(channels) > 0 {
-		presCtx := context.Background()
-		for _, ch := range channels {
-			_ = c.node.presence.Remove(presCtx, ch, sessionID)
-			go c.node.PublishPresenceLeave(ch, sessionID, userID)
-		}
 	}
 
 	// Clean up session from hub. Only remove the hub entry (and the matching
@@ -379,10 +398,12 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 		return DisconnectBadRequest
 	}
 
-	// The session ID is needed by the auth proxy (authReq.SessionID) before
-	// authentication, so it is set here. Takeover and state inheritance only
-	// run after authentication succeeds: an unauthenticated connect must not
-	// be able to evict a session that is still being served.
+	// The requested session ID is staged before authentication so that the
+	// takeover and state inheritance below can adopt it, but it is only kept
+	// once authentication succeeds: an unauthenticated connect must not be
+	// able to evict a session that is still being served. The auth proxy is
+	// presented the original server-generated session ID instead of this
+	// client-supplied value (it cannot be trusted before authentication).
 	originalSessionID := c.session
 	if connect.SessionId != "" {
 		c.mu.Lock()
@@ -428,7 +449,11 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 			ClientID:   connect.ClientId,
 			Token:      connect.Token,
 			ClientType: connect.ClientType,
-			SessionID:  c.session,
+			// The server-generated session ID, never the client-supplied one:
+			// an unauthenticated client must not be able to feed an arbitrary
+			// session ID to the authentication proxy (P2). The requested
+			// session ID is only adopted after authentication succeeds.
+			SessionID:  originalSessionID,
 			RemoteAddr: c.transport.RemoteAddr(),
 		}
 		authResp, err := p.Authenticate(ctx, authReq)
@@ -513,18 +538,54 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 			}
 			c.mu.Unlock()
 
+			// The authenticated user wins over the inherited one: apply it
+			// before ReplaceSession so the per-user limit check inside the
+			// hub sees the real user (a cross-user takeover must not bypass
+			// maxConnsPerUser) and the session is registered in the
+			// connShard of the user that will own it.
+			if authUser != "" {
+				c.mu.Lock()
+				c.user = authUser
+				c.mu.Unlock()
+			}
+
 			// 3. Silently close old session (no presence leave, no sub removal)
 			oldSession.closeQuiet()
 
 			// 4. Replace session references in hub (sessions map + subShards)
 			if err := c.node.hub.ReplaceSession(connect.SessionId, c); err != nil {
-				return err
+				// Roll back the failed resume: the old session's transport is
+				// already closed, so it must be fully evicted instead of
+				// lingering as a zombie that keeps receiving broadcasts (its
+				// subscriptions, presence and hub entry are cleaned up, plus
+				// the cluster state).
+				for ch := range oldChannels {
+					ephemeral := false
+					if stored, ok := c.node.hub.LookupSubscriber(ch, oldSession); ok {
+						ephemeral = stored.Ephemeral
+					}
+					if rmErr := c.node.RemoveSubscription(ch, oldSession); rmErr != nil {
+						log.WarnContext(ctx, "failed to remove subscription during resume rollback",
+							"channel", ch, "session", connect.SessionId, "error", rmErr)
+					}
+					if !ephemeral {
+						_ = c.node.presence.Remove(ctx, ch, connect.SessionId)
+						go c.node.PublishPresenceLeave(ch, connect.SessionId, oldUser)
+					}
+				}
+				if c.node.hub.RemoveSessionIfMatches(connect.SessionId, oldSession) {
+					if delErr := c.node.deleteClusterSessionState(context.Background(), connect.SessionId); delErr != nil {
+						log.WarnContext(ctx, "failed to clean cluster session state after failed resume",
+							"session", connect.SessionId, "error", delErr)
+					}
+				}
+				return c.disconnectOnConnectError(ctx, err)
 			}
 		} else {
 			var err error
 			resumeSnapshot, resumed, err = c.node.resumeRemoteSession(ctx, c, connect.SessionId)
 			if err != nil {
-				return err
+				return c.disconnectOnConnectError(ctx, err)
 			}
 		}
 	}
@@ -549,14 +610,24 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 
 	if !resumed || !resumedLocal {
 		if err := c.node.AddClient(c); err != nil {
-			return err
+			return c.disconnectOnConnectError(ctx, err)
 		}
 		// Only a client that passed AddClient is counted in ConnectionsTotal;
 		// close() decrements the gauge solely for such clients.
 		c.MarkMetricsCharged()
 	} else if err := c.node.syncClusterSessionState(ctx, c); err != nil {
-		return err
+		return c.disconnectOnConnectError(ctx, err)
 	}
+
+	c.mu.Lock()
+	// Only mark the connection connected when it is not closing: a
+	// concurrent close() must not have its status resurrected by a connect
+	// that is still in flight.
+	if c.status != statusClosed {
+		c.status = statusConnected
+	}
+	c.mu.Unlock()
+
 	if resumeSnapshot != nil {
 		if err := c.node.restoreSessionSubscriptions(ctx, c, resumeSnapshot.Subscriptions); err != nil {
 			// Roll back the partially restored session: remove the hub
@@ -585,17 +656,7 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 	subs := connect.Subscriptions
 	var pubs []*clientpb.Publication
 	addedChannels := make([]string, 0, len(subs))
-
-	// Enforce the per-client subscription limit, counting channels inherited
-	// from a resumed session (they are already tracked in subscribedChannels).
-	if limit := c.node.limits.MaxSubscriptionsPerClient; limit > 0 {
-		c.mu.RLock()
-		inheritedCount := len(c.subscribedChannels)
-		c.mu.RUnlock()
-		if inheritedCount+len(subs) > limit {
-			return DisconnectChannelLimit
-		}
-	}
+	addedPresence := make([]string, 0, len(subs))
 
 	// Get current broker epoch for recovery validation
 	var currentEpoch string
@@ -616,21 +677,50 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 		}
 
 		alreadySubscribed := c.hasSubscription(sub.Channel)
+
+		// Enforce the per-client subscription limit, counting only channels
+		// that would actually be added: duplicates, ACL-denied channels, and
+		// channels inherited from a resumed session do not count.
+		if limit := c.node.limits.MaxSubscriptionsPerClient; limit > 0 && !alreadySubscribed {
+			c.mu.RLock()
+			currentCount := len(c.subscribedChannels)
+			c.mu.RUnlock()
+			if currentCount >= limit {
+				// Roll back the channels already added in this round so the
+				// hub is not left half-registered until close() runs.
+				for _, channel := range addedChannels {
+					_ = c.node.RemoveSubscription(channel, c)
+				}
+				for _, channel := range addedPresence {
+					_ = c.node.presence.Remove(ctx, channel, c.session)
+				}
+				return DisconnectChannelLimit
+			}
+		}
+
 		if err := c.node.AddSubscription(ctx, sub.Channel, NewSubscriber(c, sub.Ephemeral)); err != nil {
 			for _, channel := range addedChannels {
 				_ = c.node.RemoveSubscription(channel, c)
+			}
+			for _, channel := range addedPresence {
 				_ = c.node.presence.Remove(ctx, channel, c.session)
 			}
 			return err
 		}
 		if !alreadySubscribed {
 			addedChannels = append(addedChannels, sub.Channel)
-			_ = c.node.presence.Add(ctx, sub.Channel, &PresenceInfo{
-				ClientID:    c.session,
-				UserID:      c.user,
-				ConnectedAt: c.connectedAt.UnixMilli(),
-			})
-			go c.node.PublishPresenceJoin(sub.Channel, c.session, c.user)
+			// Ephemeral subscriptions are never tracked for presence and do
+			// not publish join events (docs/protocol.md: ephemeral = "not
+			// tracked for presence").
+			if !sub.Ephemeral {
+				addedPresence = append(addedPresence, sub.Channel)
+				_ = c.node.presence.Add(ctx, sub.Channel, &PresenceInfo{
+					ClientID:    c.session,
+					UserID:      c.user,
+					ConnectedAt: c.connectedAt.UnixMilli(),
+				})
+				go c.node.PublishPresenceJoin(sub.Channel, c.session, c.user)
+			}
 		}
 
 		// Handle message recovery if requested
@@ -694,6 +784,23 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 	}))
 }
 
+// disconnectOnConnectError converts a non-terminal connect failure into a
+// disconnect: a connect that fails mid-way must not leave a half-open
+// connection that can neither serve traffic nor re-Connect (a second Connect
+// would be rejected as BadRequest). Errors that are already Disconnect are
+// returned unchanged so HandleMessage closes the connection with the original
+// code (e.g. DisconnectStale for a failed resume claim); any other error
+// closes the connection with DisconnectInternal.
+func (c *Client) disconnectOnConnectError(ctx context.Context, err error) error {
+	var dis Disconnect
+	if errors.As(err, &dis) {
+		return err
+	}
+	log.WarnContext(ctx, "connect failed, disconnecting client", "error", err)
+	_ = c.close(DisconnectInternal)
+	return err
+}
+
 // checkSubscribeACL evaluates the subscribe ACL for one channel and returns the
 // error envelope to send to the client, or nil when the subscription is allowed.
 func (c *Client) checkSubscribeACL(ctx context.Context, in *clientpb.InboundMessage, ch *clientpb.Subscription) *sharedpb.Error {
@@ -752,14 +859,20 @@ func MakeOutboundMessage(in *clientpb.InboundMessage, bodyFunc func(out *clientp
 }
 
 func (c *Client) ClientInfo() *ClientInfo {
-	return &ClientInfo{
+	// c.client/c.session/c.user are written under c.mu by handleConnect and
+	// the cluster resume path, so they must be read under the same lock.
+	// connectedAt is immutable after construction and needs no protection.
+	c.mu.RLock()
+	info := &ClientInfo{
 		ClientID:    c.client,
 		SessionID:   c.session,
 		UserID:      c.user,
-		RemoteAddr:  c.transport.RemoteAddr(),
 		Protocol:    c.protocol,
 		ConnectedAt: c.connectedAt.UnixMilli(),
 	}
+	c.mu.RUnlock()
+	info.RemoteAddr = c.transport.RemoteAddr()
+	return info
 }
 
 func (c *Client) Authenticated() bool {
@@ -1008,18 +1121,9 @@ func (c *Client) handlePublish(ctx context.Context, in *clientpb.InboundMessage,
 }
 
 func (c *Client) handleSubscribe(ctx context.Context, in *clientpb.InboundMessage, sub *clientpb.Subscribe) error {
-	// Enforce per-client subscription limit.
-	if limit := c.node.limits.MaxSubscriptionsPerClient; limit > 0 {
-		c.mu.RLock()
-		currentCount := len(c.subscribedChannels)
-		c.mu.RUnlock()
-		if currentCount+len(sub.Subscriptions) > limit {
-			return DisconnectChannelLimit
-		}
-	}
-
 	subs := []*clientpb.Subscription{}
 	addedChannels := make([]string, 0, len(sub.Subscriptions))
+	addedPresence := make([]string, 0, len(sub.Subscriptions))
 	for _, ch := range sub.Subscriptions {
 		alreadySubscribed := c.hasSubscription(ch.Channel)
 		// Proxy ACL check - check if there's a proxy configured for subscription ACL
@@ -1032,11 +1136,25 @@ func (c *Client) handleSubscribe(ctx context.Context, in *clientpb.InboundMessag
 			continue
 		}
 
+		// Enforce the per-client subscription limit, counting only channels
+		// that would actually be added: duplicates and ACL-denied channels
+		// do not count toward the limit.
+		if limit := c.node.limits.MaxSubscriptionsPerClient; limit > 0 && !alreadySubscribed {
+			c.mu.RLock()
+			currentCount := len(c.subscribedChannels)
+			c.mu.RUnlock()
+			if currentCount >= limit {
+				return DisconnectChannelLimit
+			}
+		}
+
 		if err := c.node.AddSubscription(ctx, ch.Channel, Subscriber{Client: c, Ephemeral: ch.Ephemeral}); err != nil {
 			for _, channel := range addedChannels {
 				if err := c.node.RemoveSubscription(channel, c); err != nil {
 					log.WarnContext(ctx, "failed to rollback subscription", "channel", channel, "error", err)
 				}
+			}
+			for _, channel := range addedPresence {
 				_ = c.node.presence.Remove(ctx, channel, c.session)
 			}
 			return err
@@ -1046,17 +1164,16 @@ func (c *Client) handleSubscribe(ctx context.Context, in *clientpb.InboundMessag
 		}
 		subs = append(subs, ch)
 
-		// Track presence and subscribed channel.
-		if !alreadySubscribed {
+		// Track presence for non-ephemeral subscriptions: ephemeral
+		// subscriptions are never tracked for presence and publish no join
+		// event (docs/protocol.md: ephemeral = "not tracked for presence").
+		if !alreadySubscribed && !ch.Ephemeral {
+			addedPresence = append(addedPresence, ch.Channel)
 			_ = c.node.presence.Add(ctx, ch.Channel, &PresenceInfo{
 				ClientID:    c.session,
 				UserID:      c.user,
 				ConnectedAt: c.connectedAt.UnixMilli(),
 			})
-		}
-
-		// Publish presence join event asynchronously
-		if !alreadySubscribed {
 			go c.node.PublishPresenceJoin(ch.Channel, c.session, c.user)
 		}
 
@@ -1104,19 +1221,39 @@ func (c *Client) write(ctx context.Context, msg proto.Message) error {
 }
 
 func (c *Client) handleUnsubscribe(ctx context.Context, in *clientpb.InboundMessage, unsubscribe *clientpb.Unsubscribe) error {
+	// Publish presence leave events with bounded concurrency: one goroutine
+	// per channel would explode on a batch of thousands of unsubscribes.
+	const maxConcurrentPresenceEvents = 16
+	sem := make(chan struct{}, maxConcurrentPresenceEvents)
+	var wg sync.WaitGroup
 	for _, sub := range unsubscribe.Subscriptions {
 		alreadySubscribed := c.hasSubscription(sub.Channel)
+		// The unsubscribe request carries no ephemeral flag, so the stored
+		// subscription decides: ephemeral subscriptions never registered
+		// presence and must not publish a leave event.
+		ephemeral := false
+		if stored, ok := c.node.hub.LookupSubscriber(sub.Channel, c); ok {
+			ephemeral = stored.Ephemeral
+		}
 		// Remove subscription
 		_ = c.node.RemoveSubscription(sub.Channel, c)
 
 		// Remove presence and untrack channel.
-		if alreadySubscribed {
+		if alreadySubscribed && !ephemeral {
 			_ = c.node.presence.Remove(ctx, sub.Channel, c.session)
 		}
 
 		// Publish presence leave event asynchronously
-		if alreadySubscribed {
-			go c.node.PublishPresenceLeave(sub.Channel, c.session, c.user)
+		if alreadySubscribed && !ephemeral {
+			sem <- struct{}{}
+			wg.Add(1)
+			go func(channel string) {
+				defer func() {
+					<-sem
+					wg.Done()
+				}()
+				c.node.PublishPresenceLeave(channel, c.session, c.user)
+			}(sub.Channel)
 		}
 
 		// Notify proxy about unsubscription
@@ -1130,6 +1267,7 @@ func (c *Client) handleUnsubscribe(ctx context.Context, in *clientpb.InboundMess
 			_, _ = p.OnUnsubscribed(ctx, unsubscribedReq) // Ignore error for notification
 		}
 	}
+	wg.Wait()
 	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_UnsubscribeAck{
 			UnsubscribeAck: &clientpb.UnsubscribeAck{
@@ -1173,6 +1311,12 @@ func (c *Client) handlePing(ctx context.Context, in *clientpb.InboundMessage, pi
 }
 
 func (c *Client) handleSubRefresh(ctx context.Context, in *clientpb.InboundMessage, refresh *clientpb.SubRefresh) error {
+	// Publish presence leave events with bounded concurrency, same as
+	// handleUnsubscribe: one goroutine per revoked channel would explode on a
+	// batch of thousands of channels.
+	const maxConcurrentPresenceEvents = 16
+	sem := make(chan struct{}, maxConcurrentPresenceEvents)
+	var wg sync.WaitGroup
 	for _, ch := range refresh.Channels {
 		p := c.node.FindProxy(ch, "subscribe")
 		if p == nil {
@@ -1182,11 +1326,26 @@ func (c *Client) handleSubRefresh(ctx context.Context, in *clientpb.InboundMessa
 		aclResp, err := p.SubscribeAcl(ctx, aclReq)
 		if err != nil || aclResp.Error != nil {
 			// ACL check failed — revoke subscription for this channel.
+			ephemeral := false
+			if stored, ok := c.node.hub.LookupSubscriber(ch, c); ok {
+				ephemeral = stored.Ephemeral
+			}
 			_ = c.node.RemoveSubscription(ch, c)
-			_ = c.node.presence.Remove(ctx, ch, c.session)
-			go c.node.PublishPresenceLeave(ch, c.session, c.user)
+			if !ephemeral {
+				_ = c.node.presence.Remove(ctx, ch, c.session)
+				sem <- struct{}{}
+				wg.Add(1)
+				go func(channel string) {
+					defer func() {
+						<-sem
+						wg.Done()
+					}()
+					c.node.PublishPresenceLeave(channel, c.session, c.user)
+				}(ch)
+			}
 		}
 	}
+	wg.Wait()
 	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_SubRefreshAck{
 			SubRefreshAck: &clientpb.SubRefreshAck{},
@@ -1270,18 +1429,16 @@ func (c *Client) handleSurveyReply(ctx context.Context, in *clientpb.InboundMess
 		}
 	}
 
-	// Use request_id from reply, or fall back to stored request_id
-	requestID := reply.RequestId
-	if requestID == "" {
-		c.mu.RLock()
-		requestID = c.lastSurveyRequestID
-		c.mu.RUnlock()
+	// The reply must carry its own request ID: routing through the client's
+	// single lastSurveyRequestID slot would misroute concurrent survey
+	// responses across requests.
+	if reply.RequestId == "" {
+		log.WarnContext(ctx, "survey reply without request id dropped", "session", c.session)
+		return nil
 	}
 
 	// Add the response to the survey (if the survey is still active)
-	if requestID != "" {
-		c.node.AddSurveyResponse(ctx, c.session, requestID, payload, err)
-	}
+	c.node.AddSurveyResponse(ctx, c.session, reply.RequestId, payload, err)
 
 	return nil
 }
@@ -1358,6 +1515,11 @@ func (c *Client) refreshPresence() {
 		ConnectedAt: connAt,
 	}
 	for _, ch := range channels {
+		// Ephemeral subscriptions never register presence, so their TTL must
+		// not be refreshed here either.
+		if stored, ok := c.node.hub.LookupSubscriber(ch, c); ok && stored.Ephemeral {
+			continue
+		}
 		_ = c.node.presence.Add(c.ctx, ch, info)
 	}
 }

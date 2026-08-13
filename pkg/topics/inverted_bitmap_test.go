@@ -12,7 +12,7 @@ func TestInvertedBitmapMatcherConcurrentSubscribe(t *testing.T) {
 	for i := range topics {
 		topics[i] = fmt.Sprintf("%d.%d.%d", i, i, i)
 	}
-	testMatcherConcurrentSubscribe(t, NewInvertedBitmapMatcher(topics), topics)
+	testMatcherConcurrentSubscribe(t, NewInvertedBitmapMatcher(topics), topics, true)
 }
 
 func TestInvertedBitmapMatcher(t *testing.T) {
@@ -69,6 +69,31 @@ func TestInvertedBitmapMatcher(t *testing.T) {
 	assertEqual(assert, []Subscriber{}, ib.Lookup("trade.jpy"))
 	assertEqual(assert, []Subscriber{}, ib.Lookup("forex.jpy"))
 	assertEqual(assert, []Subscriber{}, ib.Lookup("trade"))
+}
+
+func TestInvertedBitmapMatcherDuplicateUnsubscribe(t *testing.T) {
+	assert := assert.New(t)
+	m := NewInvertedBitmapMatcher([]string{"a.b", "c.d", "e.f"})
+
+	subA, err := m.Subscribe("a.b", 10)
+	assert.NoError(err)
+	_, err = m.Subscribe("c.d", 20)
+	assert.NoError(err)
+
+	m.Unsubscribe(subA)
+	m.Unsubscribe(subA)
+
+	subC, err := m.Subscribe("e.f", 30)
+	assert.NoError(err)
+	subD, err := m.Subscribe("a.b", 40)
+	assert.NoError(err)
+
+	// Regression: unsubscribing the same Subscription twice must not enqueue
+	// its position twice, which aliased two live subscriptions to one ID and
+	// made them overwrite each other.
+	assert.NotEqual(subC.ID, subD.ID, "reclaimed position must not be handed out twice")
+	assertEqual(assert, []Subscriber{30}, m.Lookup("e.f"))
+	assertEqual(assert, []Subscriber{40}, m.Lookup("a.b"))
 }
 
 func BenchmarkInvertedBitmapMatcherSubscribe(b *testing.B) {

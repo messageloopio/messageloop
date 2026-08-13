@@ -13,6 +13,7 @@ import (
 	"github.com/lynx-go/x/log"
 	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v1"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 // notificationErrorResponse is the JSON wire format of the notification
@@ -22,6 +23,25 @@ import (
 type notificationErrorResponse struct {
 	Error *sharedpb.Error `json:"error"`
 }
+
+// HTTPStatusError is returned by the HTTP proxy when the backend answers with
+// a non-200 status. When the body carries a structured sharedpb.Error it is
+// preserved in Err; otherwise the raw body text is kept in Body. Callers may
+// use errors.As to inspect the structured error.
+type HTTPStatusError struct {
+	StatusCode int
+	Err        *sharedpb.Error
+	Body       []byte
+}
+
+func (e *HTTPStatusError) Error() string {
+	if e.Err != nil && e.Err.Message != "" {
+		return fmt.Sprintf("proxy returned status %d: %s (code: %s)", e.StatusCode, e.Err.Message, e.Err.Code)
+	}
+	return fmt.Sprintf("proxy returned status %d: %s", e.StatusCode, string(e.Body))
+}
+
+var _ error = (*HTTPStatusError)(nil)
 
 // HTTPProxy implements Proxy using HTTP transport.
 type HTTPProxy struct {
@@ -84,12 +104,11 @@ func (p *HTTPProxy) RPC(ctx context.Context, req *RPCProxyRequest) (*RPCProxyRes
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert request: %w", err)
 	}
-	body, err := json.Marshal(map[string]any{
-		"id":      protoReq.Id,
-		"channel": protoReq.Channel,
-		"method":  protoReq.Method,
-		"payload": protoReq.Payload,
-	})
+	// Marshal the payload-bearing request with protojson: encoding/json cannot
+	// round-trip the sharedpb.Payload oneof, which silently drops the Data
+	// field. protojson matches the proto3 JSON contract of the gRPC path and
+	// carries the request metadata through.
+	body, err := protojson.Marshal(protoReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
@@ -102,7 +121,8 @@ func (p *HTTPProxy) RPC(ctx context.Context, req *RPCProxyRequest) (*RPCProxyRes
 	result, err := p.doRequest(ctx, httpReq, "RPC", req.Channel, req.Method,
 		func(respBody []byte) (any, error) {
 			var protoResp proxypb.RPCResponse
-			if err := json.Unmarshal(respBody, &protoResp); err != nil {
+			// protojson restores the payload oneof that encoding/json drops.
+			if err := protojson.Unmarshal(respBody, &protoResp); err != nil {
 				return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 			}
 			return FromProtoReply(&protoResp)
@@ -391,7 +411,13 @@ func (p *HTTPProxy) doRequest(ctx context.Context, httpReq *http.Request, method
 
 	// Check status code
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("proxy returned status %d: %s", resp.StatusCode, string(respBody))
+		// Prefer a structured sharedpb.Error from the body (same JSON shape as
+		// notification responses); fall back to raw body text.
+		var structured notificationErrorResponse
+		if json.Unmarshal(respBody, &structured) == nil && structured.Error != nil {
+			return nil, &HTTPStatusError{StatusCode: resp.StatusCode, Err: structured.Error, Body: respBody}
+		}
+		return nil, &HTTPStatusError{StatusCode: resp.StatusCode, Body: respBody}
 	}
 
 	return parseFunc(respBody)

@@ -3,13 +3,18 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/structpb"
 
+	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v1"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 )
 
@@ -155,4 +160,143 @@ func TestHTTPProxy_PublishAcl_RequestCarriesUserAndSession(t *testing.T) {
 	assert.Equal(t, "token-1", body["token"])
 	assert.Equal(t, "user-1", body["user_id"])
 	assert.Equal(t, "session-1", body["session_id"])
+}
+
+// TestHTTPProxy_RPC_PayloadRoundTrip is the regression test for P1-B1: the
+// sharedpb.Payload oneof must survive the HTTP round trip. Before the fix the
+// payload was serialized with encoding/json, which drops the oneof Data field,
+// so the backend never received any actual payload.
+func TestHTTPProxy_RPC_PayloadRoundTrip(t *testing.T) {
+	// The backend decodes the request with protojson, checks the payload
+	// arrived, and echoes it back.
+	type backendResult struct {
+		reqPayload     *sharedpb.Payload
+		reqMetadata    *sharedpb.Metadata
+		protoReqParsed bool
+	}
+	resultCh := make(chan backendResult, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		var req proxypb.RPCRequest
+		if err := protojson.Unmarshal(body, &req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		resultCh <- backendResult{
+			reqPayload:     req.Payload,
+			reqMetadata:    req.Metadata,
+			protoReqParsed: true,
+		}
+		resp := &proxypb.RPCResponse{Id: req.Id, Payload: req.Payload, Metadata: req.Metadata}
+		respBody, err := protojson.Marshal(resp)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(respBody)
+	}))
+	defer server.Close()
+
+	p := newTestHTTPProxy(t, server)
+	ctx := context.Background()
+
+	cases := []struct {
+		name    string
+		payload *sharedpb.Payload
+	}{
+		{"json", &sharedpb.Payload{Data: &sharedpb.Payload_Json{Json: mustStruct(t, map[string]any{"input": "data", "n": 42})}}},
+		{"text", &sharedpb.Payload{Data: &sharedpb.Payload_Text{Text: "hello proxy"}}},
+		{"binary", &sharedpb.Payload{Data: &sharedpb.Payload_Binary{Binary: []byte{0xde, 0xad, 0xbe, 0xef}}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := &RPCProxyRequest{
+				ID:      "req-" + tc.name,
+				Channel: "test.channel",
+				Method:  "testMethod",
+				Payload: tc.payload,
+				Meta:    map[string]string{"trace": "t-1", "locale": "zh"},
+			}
+			resp, err := p.RPC(ctx, req)
+			require.NoError(t, err)
+
+			// The backend must have seen a non-nil payload with a non-nil
+			// oneof Data — the pre-fix encoding/json path failed this.
+			result := <-resultCh
+			require.True(t, result.protoReqParsed, "backend could not decode the request")
+			require.NotNil(t, result.reqPayload, "backend received no payload")
+			require.NotNil(t, result.reqPayload.GetData(), "backend payload oneof Data was lost")
+			// Metadata must be forwarded (P1-B5).
+			require.NotNil(t, result.reqMetadata)
+			require.Equal(t, "t-1", result.reqMetadata.GetEntries()["trace"])
+			require.Equal(t, "zh", result.reqMetadata.GetEntries()["locale"])
+
+			// The response payload must round-trip the oneof too.
+			require.NotNil(t, resp.Payload, "response payload is nil")
+			require.NotNil(t, resp.Payload.GetData(), "response payload oneof Data was lost")
+			assert.Equal(t, tc.payload.GetContentType(), resp.Payload.GetContentType())
+		})
+	}
+}
+
+// TestHTTPProxy_RPC_NonOKStructuredError verifies that a non-200 response
+// carrying a structured sharedpb.Error body surfaces as HTTPStatusError with
+// the structured error preserved (P1-B5).
+func TestHTTPProxy_RPC_NonOKStructuredError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"code":"PROXY_REJECTED","type":"proxy_error","message":"backend refused the call"}}`))
+	}))
+	defer server.Close()
+
+	p := newTestHTTPProxy(t, server)
+
+	_, err := p.RPC(context.Background(), &RPCProxyRequest{ID: "r1", Channel: "c", Method: "m"})
+	require.Error(t, err)
+
+	var statusErr *HTTPStatusError
+	require.ErrorAs(t, err, &statusErr)
+	assert.Equal(t, http.StatusBadRequest, statusErr.StatusCode)
+	require.NotNil(t, statusErr.Err, "structured backend error must be preserved")
+	assert.Equal(t, "PROXY_REJECTED", statusErr.Err.Code)
+	assert.Equal(t, "proxy_error", statusErr.Err.Type)
+	assert.Equal(t, "backend refused the call", statusErr.Err.Message)
+}
+
+// TestHTTPProxy_RPC_NonOKFallbackTextError verifies that a non-200 response
+// without a structured error body still returns an error containing the body
+// text (P1-B5 fallback).
+func TestHTTPProxy_RPC_NonOKFallbackTextError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("backend exploded"))
+	}))
+	defer server.Close()
+
+	p := newTestHTTPProxy(t, server)
+
+	_, err := p.RPC(context.Background(), &RPCProxyRequest{ID: "r1", Channel: "c", Method: "m"})
+	require.Error(t, err)
+
+	var statusErr *HTTPStatusError
+	require.ErrorAs(t, err, &statusErr)
+	assert.Equal(t, http.StatusInternalServerError, statusErr.StatusCode)
+	assert.Nil(t, statusErr.Err)
+	assert.Contains(t, err.Error(), "backend exploded")
+
+	// Non-200 without structured error must not be masked as a plain error.
+	assert.False(t, errors.Is(err, context.DeadlineExceeded))
+}
+
+func mustStruct(t *testing.T, v map[string]any) *structpb.Struct {
+	t.Helper()
+	s, err := structpb.NewStruct(v)
+	require.NoError(t, err)
+	return s
 }

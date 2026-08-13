@@ -167,7 +167,7 @@ breaking:
 
 ### 错误处理
 
-- 主动断连使用类型化 `Disconnect` 错误（`disconnect.go`），带编号代码：`3000` 正常关闭，`3500–3509` 各类终端错误（`DisconnectBadRequest`、`DisconnectStale` 等），`3511` 空闲超时，`3512` 慢消费者。
+- 主动断连使用类型化 `Disconnect` 错误（`disconnect.go`），带编号代码：`3000` 正常关闭，`3500–3509` 各类终端错误（`DisconnectBadRequest`、`DisconnectStale` 等），`3511` 空闲超时，`3512` 慢消费者，`3513` 内部错误（connect 路径失败时强制断连）。
 - 用 `fmt.Errorf("context: %w", err)` 包装错误保留链，用 `errors.As` / `errors.Is` 判断类型或哨兵值。
 - 返回前在适当级别记录日志，不要无理由吞掉错误。
 
@@ -191,7 +191,7 @@ breaking:
 ## 本地运行开发服务器
 
 ```bash
-go run cmd/server/main.go --config ./config.yaml
+go run ./cmd/server --config ./config.yaml
 ```
 
 命令行参数（`cmd/server/main.go` 中通过 pflag 定义）：
@@ -203,9 +203,9 @@ go run cmd/server/main.go --config ./config.yaml
 
 | 监听器 | 配置键 | 默认值 |
 | --- | --- | --- |
-| WebSocket 客户端流量 | `transport.websocket.addr` | `:9080`（路径 `/ws`） |
-| 客户端 gRPC 流 | `transport.grpc.addr` | `:9090` |
-| gRPC 管理 API | `server.grpc_admin.addr` | `127.0.0.1:9091` |
+| WebSocket 客户端流量 | `transport.websocket.addr` | 无默认（必填） |
+| 客户端 gRPC 流 | `transport.grpc.addr` | 无默认（必填） |
+| gRPC 管理 API | `server.grpc_admin.addr` | 无默认（必填，启动预检阶段无条件预绑定） |
 | HTTP 健康检查与指标 | `server.http.addr` | `127.0.0.1:8080` |
 
 仓库内的配置示例用途：
@@ -239,7 +239,7 @@ npm run lint       # ESLint 检查 src/
 
 - `task release-all`：依次为三个模块打 annotated tag 并推送：`v0.1.1`（根）、`shared/v0.1.1`（shared 模块）、`sdks/go/v0.1.1`（Go SDK）。标签格式为 `git tag -a <tag> -m <comment>` 后 `git push origin <tag>`，三组标签共享同一版本号，用目录前缀区分模块。
 - `task release-tag`：单独打一个标签并推送（`task release-tag Version=v0.1.1` 形式覆盖变量）。
-- `task release-sdk-ts`：在 `sdks/ts/` 下执行 `npm exec rimraf -- dist` 清理、`npm run build` 构建、`npm publish --access public --registry https://registry.npmjs.org/` 发布。注意 npm 包版本（`package.json` 的 `version`，当前 `1.0.5`）独立于 Go 侧标签，需要单独递增。
+- `task release-sdk-ts`：在 `sdks/ts/` 下执行 `npm exec rimraf -- dist` 清理、`npm run build` 构建、`npm publish --access public --registry https://registry.npmjs.org/` 发布。注意 npm 包版本（`package.json` 的 `version`，当前 `1.1.0`）独立于 Go 侧标签，需要单独递增。
 - `task upgrade-lynx`：批量升级 `lynx` 框架及 contrib 依赖（`go get -u github.com/lynx-go/x` 等）后 `go mod tidy`。
 
 CI 在 push/PR 合并前自动执行构建、vet、带竞态与覆盖率的测试以及 golangci-lint，发布动作均为手动触发。

@@ -32,7 +32,8 @@ messageloop.server.v1.APIService
 | 配置键 | 说明 |
 | --- | --- |
 | `server.grpc_admin.addr` | 管理 API 监听地址（监听器在启动预检阶段即绑定） |
-| `server.grpc_admin.auth_token` | 管理 API 访问令牌；为空则不启用鉴权 |
+| `server.grpc_admin.auth_token` | 管理 API 访问令牌；`addr` 非空时该字段与 `allow_insecure` 必须至少设置一个（否则配置校验失败） |
+| `server.grpc_admin.allow_insecure` | 显式放弃强制鉴权（仅限开发/受控环境）；置为 true 时 `auth_token` 可留空 |
 | `server.grpc_admin.tls.cert_file` / `server.grpc_admin.tls.key_file` | TLS 证书与私钥，必须同时设置或同时留空 |
 
 ### 鉴权
@@ -308,12 +309,7 @@ grpcurl \
 
 语义：
 
-- 查询直接落到 broker 的历史存储。`since_offset` 的包含性（inclusive/exclusive）**取决于 broker 实现**：
-
-| Broker | `since_offset` 语义 | 说明 |
-| --- | --- | --- |
-| 内存 broker（`broker.type: memory`） | 包含（inclusive） | 返回 `offset >= since_offset` 的消息 |
-| Redis broker（`broker.type: redis`） | 不包含（exclusive） | 返回 `offset > since_offset` 的消息，即从该偏移之后开始 |
+- 查询直接落到 broker 的历史存储。两种实现下 `since_offset` 均为**包含（inclusive）**语义：返回 `offset >= since_offset` 的消息（`Broker.History` 契约，`broker.go:105-108`；内存实现与 Redis 实现一致）。
 
 - 两种实现下，`limit <= 0` 都使用默认上限 `DefaultHistoryLimit`（1000 条）。
 - 没有分页游标：`limit` 就是单次返回的硬上限，`since_offset` 是唯一的前进指针。
@@ -551,7 +547,7 @@ grpcurl \
 | `Survey` | 除本地调查外，还会通过命令总线向集群内所有其他节点广播调查请求（排除自身，`exclude_self`），聚合各节点的应答后统一排序返回；每个 `SurveyResult` 会附带 `node_id` 与 `incarnation_id` 元数据，标识应答来源节点；集群中某个节点执行调查失败时，该节点会以一条带 `error` 的 `SurveyResult` 表示（`code` 为 `SURVEY_FAILED`） |
 | `GetChannels` | 不再查询本地 hub，而是读取集群共享的频道投影（query store），返回全集群的活跃频道与订阅者数量 |
 | `GetPresence` | 在线状态存储在集群模式下替换为 Redis 支撑的存储，查询返回全集群的在线客户端 |
-| `GetHistory` | 语义由 broker 决定：Redis broker 从共享的 Redis Stream 读取历史，`since_offset` 为不包含（exclusive）语义，且数据跨节点一致 |
+| `GetHistory` | 从共享的 Redis Stream 读取历史，`since_offset` 为包含（inclusive）语义，数据跨节点一致 |
 
 非集群模式下，会话定向操作只作用于本节点（未知会话返回 `false`），`Survey` 只调查本节点订阅者，`GetChannels` 与 `GetPresence` 只反映本节点状态。
 
@@ -562,5 +558,5 @@ grpcurl \
 - **RawCodec**：两个 gRPC 服务器都通过 `grpc.ForceServerCodec` 装配名为 `messageloop-proto` 的 `RawCodec`（`pkg/grpcstream/codec.go`）。该 codec 对普通 proto 消息仍使用标准 `proto.Marshal`/`proto.Unmarshal`，因此管理 API 的线上编码与标准 protobuf gRPC 完全兼容（这是 `grpcurl -proto` 方式可以正常调用的原因）；流式路径额外支持免二次编解码的原始帧（raw frame）优化。codec 按服务器注册而不是全局注册，避免覆盖进程内其他 gRPC 连接的默认 codec。
 - **压缩**：gRPC 的 gzip 压缩编解码器已在服务器侧注册，客户端可在请求中声明 `grpc-accept-encoding: gzip`。
 - **管理服务器未设置 `MaxRecvMsgSize`**：管理服务器使用 gRPC 默认的最大接收消息大小（4 MiB）；客户端流服务器则应用 `limits.max_message_size`（默认 64 KiB，见[《配置参考》](02-configuration.md)）。
-- **调用方客户端**：Go 与 TypeScript SDK 的后端集成均通过本管理 API 与服务端通信（见[《Go SDK 指南》](07-sdk-go.md)、[《TypeScript SDK 指南》](08-sdk-ts.md)）；SDK 生成的桩代码依赖 `server/v1/api.proto`，调用前请确保协议版本与服务器一致。
+- **调用方客户端**：Go SDK 的后端集成通过本管理 API 与服务端通信（见[《Go SDK 指南》](07-sdk-go.md)）；TypeScript SDK 是纯 WebSocket 客户端，不包含管理 API 客户端。Go SDK 生成的桩代码依赖 `server/v1/api.proto`，调用前请确保协议版本与服务器一致。
 - **运维**：健康检查与指标走独立的 HTTP 管理面（`server.http.addr`），不属于本 API 范围（见[《可观测性指南》](05-observability.md)）。

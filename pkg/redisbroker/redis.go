@@ -47,10 +47,25 @@ type redisBroker struct {
 	// replayed delivery. Guarded by subMu.
 	lastOffsets map[string]uint64
 
-	// deliverMu serializes check+record+deliver for a single offset so live
-	// delivery and catch-up can never double-deliver, no matter the
-	// interleaving between the two paths.
+	// deliverMu serializes the check+record of each offset so live delivery
+	// and catch-up can never double-deliver, no matter the interleaving
+	// between the two paths. The handler runs on the worker pool outside
+	// this lock (see deliverOnce/dispatch).
 	deliverMu sync.Mutex
+
+	// deliveryActive is true once the handler worker pool is running (see
+	// startDeliveryWorkers). Before Start, deliverOnce dispatches inline.
+	deliveryActive atomic.Bool
+	// deliverChans routes publications to the per-channel workers.
+	deliverChans [deliveryWorkers]chan delivery
+
+	// handlerFailures counts publication handler errors and panics (see
+	// deliver). Guarded by atomic ops; wiring into Prometheus would require
+	// a metrics hook on the broker.
+	handlerFailures atomic.Uint64
+	// catchUpGaps counts reconnect catch-up ranges that could not be
+	// replayed in full (see checkCatchUpGap).
+	catchUpGaps atomic.Uint64
 
 	// activePubSub is the live pub/sub subscription; tests close it to
 	// simulate a disconnect. Guarded by pubsubMu.
@@ -82,8 +97,9 @@ func (b *redisBroker) Ready() <-chan struct{} {
 }
 
 // Start verifies the Redis connection, initializes the cluster-wide epoch,
-// and then runs the Pub/Sub consumer loop until ctx is cancelled. Intended to
-// be called as: go broker.Start(ctx, handler).
+// starts the bounded delivery worker pool, and then runs the Pub/Sub
+// consumer loop until ctx is cancelled. Intended to be called as:
+// go broker.Start(ctx, handler).
 func (b *redisBroker) Start(ctx context.Context, handler messageloop.PublicationHandler) error {
 	b.handler = handler
 
@@ -96,6 +112,7 @@ func (b *redisBroker) Start(ctx context.Context, handler messageloop.Publication
 		return fmt.Errorf("redis broker: init epoch: %w", err)
 	}
 
+	b.startDeliveryWorkers(ctx)
 	defer func() { _ = b.client.Close() }()
 	return b.runPubSubWithRetry(ctx)
 }
@@ -169,6 +186,11 @@ func (b *redisBroker) Unsubscribe(ch string) error {
 		b.subscribed[ch]--
 		if b.subscribed[ch] == 0 {
 			delete(b.subscribed, ch)
+			// The delivery baseline is meaningless without subscribers:
+			// drop it so the map cannot grow without bound, and a fresh
+			// subscription starts from its own baseline instead of
+			// replaying history the previous subscriber already consumed.
+			delete(b.lastOffsets, ch)
 		}
 	}
 	return nil

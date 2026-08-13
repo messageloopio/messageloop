@@ -137,6 +137,15 @@ type TLSConfig struct {
 type GRPCProxyConfig struct {
 	// Insecure disables TLS for gRPC connections.
 	Insecure bool `yaml:"insecure" json:"insecure" mapstructure:"insecure"`
+
+	// ServerName overrides the TLS server name used for certificate
+	// verification. When empty, grpc-go derives it from the endpoint
+	// authority.
+	ServerName string `yaml:"server_name" json:"server_name" mapstructure:"server_name"`
+
+	// InsecureSkipVerify disables TLS certificate verification for secure
+	// connections.
+	InsecureSkipVerify bool `yaml:"insecure_skip_verify" json:"insecure_skip_verify" mapstructure:"insecure_skip_verify"`
 }
 
 // RouteConfig defines a routing rule for the proxy.

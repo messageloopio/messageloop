@@ -253,13 +253,13 @@ func (h *MyLifecycleHandler) OnDisconnected(ctx context.Context, sessionID, user
 	return nil
 }
 
-func (h *MyLifecycleHandler) OnSubscribed(ctx context.Context) error {
-	log.Printf("[Lifecycle] Client subscribed")
+func (h *MyLifecycleHandler) OnSubscribed(ctx context.Context, sessionID, channel, username string) error {
+	log.Printf("[Lifecycle] Client subscribed: sessionID=%s channel=%s username=%s", sessionID, channel, username)
 	return nil
 }
 
-func (h *MyLifecycleHandler) OnUnsubscribed(ctx context.Context) error {
-	log.Printf("[Lifecycle] Client unsubscribed")
+func (h *MyLifecycleHandler) OnUnsubscribed(ctx context.Context, sessionID, channel, username string) error {
+	log.Printf("[Lifecycle] Client unsubscribed: sessionID=%s channel=%s username=%s", sessionID, channel, username)
 	return nil
 }
 
@@ -300,6 +300,11 @@ func (s *MyProxyService) RPC(ctx context.Context, req *proxypb.RPCRequest) (*pro
 				Message: err.Error(),
 			},
 		}, nil
+	}
+
+	if resp == nil {
+		log.Printf("[RPC Error] id=%s handler returned a nil response", req.Id)
+		return nil, status.Error(codes.Internal, "RPC handler returned a nil response")
 	}
 
 	// Convert Message to Payload
@@ -343,6 +348,11 @@ func (s *MyProxyService) Authenticate(ctx context.Context, req *proxypb.Authenti
 				Message: err.Error(),
 			},
 		}, nil
+	}
+
+	if resp == nil {
+		log.Printf("[Authenticate Error] client_id=%s handler returned a nil response", req.ClientId)
+		return nil, status.Error(codes.Internal, "auth handler returned a nil response")
 	}
 
 	if resp.Error != nil {
@@ -402,9 +412,9 @@ func (s *MyProxyService) OnConnected(ctx context.Context, req *proxypb.OnConnect
 
 // OnSubscribed implements ProxyServiceServer.OnSubscribed.
 func (s *MyProxyService) OnSubscribed(ctx context.Context, req *proxypb.OnSubscribedRequest) (*proxypb.OnSubscribedResponse, error) {
-	log.Printf("[OnSubscribed Request]")
+	log.Printf("[OnSubscribed Request] session_id=%s channel=%s username=%s", req.SessionId, req.Channel, req.Username)
 
-	if err := s.lifecycleHandler.OnSubscribed(ctx); err != nil {
+	if err := s.lifecycleHandler.OnSubscribed(ctx, req.SessionId, req.Channel, req.Username); err != nil {
 		log.Printf("[OnSubscribed Error] error=%s", err.Error())
 		return nil, status.Error(codes.Internal, err.Error())
 	}
@@ -415,9 +425,9 @@ func (s *MyProxyService) OnSubscribed(ctx context.Context, req *proxypb.OnSubscr
 
 // OnUnsubscribed implements ProxyServiceServer.OnUnsubscribed.
 func (s *MyProxyService) OnUnsubscribed(ctx context.Context, req *proxypb.OnUnsubscribedRequest) (*proxypb.OnUnsubscribedResponse, error) {
-	log.Printf("[OnUnsubscribed Request]")
+	log.Printf("[OnUnsubscribed Request] session_id=%s channel=%s username=%s", req.SessionId, req.Channel, req.Username)
 
-	if err := s.lifecycleHandler.OnUnsubscribed(ctx); err != nil {
+	if err := s.lifecycleHandler.OnUnsubscribed(ctx, req.SessionId, req.Channel, req.Username); err != nil {
 		log.Printf("[OnUnsubscribed Error] error=%s", err.Error())
 		return nil, status.Error(codes.Internal, err.Error())
 	}

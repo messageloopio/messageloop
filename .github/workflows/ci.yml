@@ -25,6 +25,12 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Check generated protocol code is up to date
+        run: |
+          go install github.com/bufbuild/buf/cmd/buf@v1.63.0
+          buf generate
+          git diff --exit-code
+
       - name: Test with race detector
         run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
@@ -47,4 +53,5 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          # Pinned for reproducible lint results.
+          version: v2.12.2

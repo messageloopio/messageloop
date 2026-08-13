@@ -14,9 +14,12 @@
 
 ### Config.Validate() 校验规则
 
-`Validate()`（`config/config.go:143-197`）按以下顺序检查，返回第一条错误：
+`Validate()`（`config/config.go:157-242`）按以下顺序检查，返回第一条错误：
 
-1. **至少一个传输地址**：`transport.websocket.addr` 与 `transport.grpc.addr` 不能同时为空，否则报 `at least one transport address (websocket or grpc) must be configured`。
+1. **传输地址必填**：`transport.websocket.addr`、`transport.websocket.path` 与 `transport.grpc.addr` 均必填。启动接线无条件构造两个传输监听器（`newWebSocketServer` 与 `prepareGRPCServers`），缺失地址会错绑或 panic，故在此提前拒绝（`config/config.go:162-170`）：
+   - `transport.websocket.addr` 为空 → `transport.websocket.addr is required`；
+   - `transport.websocket.path` 为空 → `transport.websocket.path is required when websocket transport is enabled`（空 path 会在 `http.ServeMux` 注册时 panic，见 [transport.websocket 节](#transportwebsocket-节)）；
+   - `transport.grpc.addr` 为空 → `transport.grpc.addr is required`。
 2. **时长格式**：以下字段若非空必须是合法的 Go duration 字符串（如 `"30s"`、`"1m30s"`）：
    - `server.heartbeat.idle_timeout`
    - `server.rpc_timeout`
@@ -29,8 +32,13 @@
    - `server.grpc_admin.tls`
    - `transport.websocket.tls`
    - `transport.grpc.tls`
-4. **broker.type**：必须为 `memory` 或 `redis`（空等价于 `memory`）；为 `redis` 时 `broker.redis.addr` 必填，否则报 `broker.redis.addr is required when broker.type is redis`。
-5. **cluster 前置条件**：`cluster.enabled: true` 要求 `broker.type: redis`，否则报 `cluster requires broker.type=redis`。
+4. **管理 gRPC 鉴权**：`server.grpc_admin.addr` 非空时，`auth_token` 与 `allow_insecure` 必须至少设置一个，否则报 `server.grpc_admin requires auth_token, or set allow_insecure: true to explicitly run without authentication`（`config.go:207-209`）。
+5. **broker 校验**：
+   - `broker.type` 必须为 `memory` 或 `redis`（空等价于 `memory`），否则报 `unknown broker.type: ...`；
+   - 为 `redis` 时 `broker.redis.addr` 必填，否则报 `broker.redis.addr is required when broker.type is redis`；
+   - `broker.redis.consumer_group` 非空 → 直接拒绝：`broker.redis.consumer_group is not implemented; remove it from the configuration`（该字段声明但从未被消费，见 [broker.redis 字段](#brokerredis-字段)）；
+   - `broker.redis.stream_approximate` 非 true（含显式 false）→ 直接拒绝：`broker.redis.stream_approximate: false is not supported (only approximate trimming is implemented); remove the field or set it to true`（`config.go:222-231`）。
+6. **cluster 前置条件**：`cluster.enabled: true` 要求 `broker.type: redis`，否则报 `cluster requires broker.type=redis`。
 
 `cluster.node_id` 是否必填不在 `Validate()` 中，而在 `ClusterOptions.normalize()`（`cluster.go:27-30`）检查：启用集群时 `node_id` 为空直接报错。
 
@@ -41,7 +49,7 @@
 | 常量 | 值 | 用途 |
 | --- | --- | --- |
 | `DefaultMaxMessageSize` | 64 KB（65536 字节） | `limits.max_message_size` 为 0 时生效 |
-| `DefaultHeartbeatIdleTimeout` | 300s | 仅作为 `heartbeat.idle_timeout` 解析失败时的兜底 |
+| `DefaultHeartbeatIdleTimeout` | 300s | `heartbeat.idle_timeout` 为空或解析失败时回退的默认值 |
 | `DefaultHistoryLimit` | 1000 | `History` 未指定 limit 时的返回条数上限 |
 | `MaxRecoveredPublications` | 1000 | 连接时历史恢复的最大投递条数 |
 | `DefaultShutdownTimeout` | 10s | 优雅关闭时排空连接的上限 |
@@ -72,12 +80,13 @@ server:
     addr: "127.0.0.1:8080"      # 管理 HTTP：/health 与 /metrics
   grpc_admin:
     addr: "127.0.0.1:9091"      # 管理 gRPC API
-    auth_token: ""              # Bearer token，空 = 不鉴权
+    auth_token: ""              # Bearer token；addr 非空时必须设置 auth_token 或 allow_insecure
+    allow_insecure: false       # 仅限开发：跳过强制鉴权
     # tls:
     #   cert_file: "./certs/admin.crt"
     #   key_file: "./certs/admin.key"
   heartbeat:
-    idle_timeout: "300s"        # 空 = 禁用心跳
+    idle_timeout: "300s"        # 空或解析失败 = 回退 300s；"0s" = 禁用心跳
   rpc_timeout: "30s"
   limits:
     max_connections_per_user: 0
@@ -99,8 +108,9 @@ server:
 | `server.http.addr` | string | `127.0.0.1:8080` | 管理 HTTP 监听地址，暴露 `/health` 与 `/metrics`（`cmd/server/main.go:217-225`）。为空时回退到 `127.0.0.1:8080`。集群模式下 `/health` 会附带探测 Redis 连通性（`cmd/server/main.go:57-59`）。指标说明见[《可观测性指南》](05-observability.md) |
 | `server.grpc_admin.addr` | string | 未设置 | 管理 gRPC API 监听地址（`serverpb.APIService`）。启动时必须有效：`prepareGRPCServers` 会无条件预绑定该监听器（见 [启动要求](#启动要求)）。接口清单见[《管理 API 参考》](03-admin-api.md) |
 | `server.grpc_admin.tls.cert_file` / `.key_file` | string | 未设置 | 管理 gRPC 的 TLS 证书与私钥，二者必须成对设置（`Config.Validate()` 规则 3）。设置后经 `credentials.NewServerTLSFromFile` 加载（`pkg/grpcstream/server.go:56-62`） |
-| `server.grpc_admin.auth_token` | string | 未设置 | 管理 API 的 Bearer token，通过 `authorization: Bearer <token>` 头传递，采用常量时间比较（`pkg/grpcstream/server.go:81-103`）。为空则不启用鉴权拦截器（`pkg/grpcstream/admin_server.go:12-14`），生产环境不建议留空 |
-| `server.heartbeat.idle_timeout` | string | 未设置 | 客户端心跳空闲超时。**字段为空 = 完全禁用心跳**（`node.go:82-90`，不创建 `HeartbeatManager`）；非空时解析失败回退到 `DefaultHeartbeatIdleTimeout`（300s）。启用后每个客户端会话在 `idle_timeout` 内无任何活动即被断开（`DisconnectIdleTimeout`，`heartbeat.go:38-60`），对 WebSocket 与 gRPC 传输同时生效。WebSocket 读超时与其联动，见 [transport.websocket 节](#transportwebsocket-节) |
+| `server.grpc_admin.auth_token` | string | 未设置 | 管理 API 的 Bearer token，通过 `authorization: Bearer <token>` 头传递，采用常量时间比较（`pkg/grpcstream/server.go:81-103`）。**`server.grpc_admin.addr` 非空时，`auth_token` 与 `allow_insecure` 必须至少设置一个**（`config.go:184-189`，否则启动校验失败）；`auth_token` 为空时管理 API 不鉴权，该形态仅在 `allow_insecure: true` 下合法，生产环境不建议 |
+| `server.grpc_admin.allow_insecure` | bool | `false` | 显式放弃强制鉴权：`addr` 非空且 `auth_token` 为空时，置为 true 才能通过启动校验（`config.go:184-189`）；此时管理 API 完全不鉴权并在启动时记录 WARN 日志（`config.go:64-67`）。仅限受控环境（开发/内网） |
+| `server.heartbeat.idle_timeout` | string | 未设置 | 客户端心跳空闲超时。**为空或解析失败均回退 `DefaultHeartbeatIdleTimeout`（300s）**（`node.go:82-94`，`HeartbeatManager` 恒被创建，心跳无法通过留空禁用）；**配置为 `"0s"` 时 `HeartbeatManager.Start` 直接返回、不启动心跳 goroutine**（`heartbeat.go:27-29`），是唯一禁用心跳的方式。启用后每个客户端会话在 `idle_timeout` 内无任何活动即被断开（`DisconnectIdleTimeout`，`heartbeat.go:38-60`），对 WebSocket 与 gRPC 传输同时生效。WebSocket 读超时与其联动，见 [transport.websocket 节](#transportwebsocket-节) |
 | `server.rpc_timeout` | string | `30s` | RPC 转发请求的超时（`proxy.DefaultRPCTimeout`，`proxy/proxy.go:155`）。节点默认取 30s；配置非空时解析，解析失败同样回退 30s（`node.go:74-80`）。每个 RPC 请求以此值创建 context 截止时间，超时向客户端返回 `RPC_TIMEOUT` 错误（`client.go:742-745, 773-789`）。与代理级超时的关系见 [三层超时](#三层超时) |
 | `server.limits.max_connections_per_user` | int | 0（不限） | 同一用户 ID 的最大并发连接数（`node.go:66`，按用户分片限制，`hub.go:386-397`）。0 = 不限 |
 | `server.limits.max_subscriptions_per_client` | int | 0（不限） | 单个客户端可订阅的频道数上限（`client.go:553-560, 954-960`）。0 = 不限 |
@@ -145,9 +155,9 @@ transport:
 
 | 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `transport.websocket.addr` | string | 未设置 | WebSocket 监听地址（如 `:9080` 或 `127.0.0.1:9080`）。与 `transport.grpc.addr` 至少设置一个（`Validate()` 规则 1） |
+| `transport.websocket.addr` | string | 未设置 | WebSocket 监听地址（如 `:9080` 或 `127.0.0.1:9080`）。**必填**（`Validate()` 规则 1）：`transport.websocket.addr` 与 `transport.grpc.addr` 均必须配置 |
 | `transport.websocket.path` | string | 未设置 | 升级路径（如 `/ws`）。**注意：二进制未应用默认值**——`pkg/websocket` 包内虽有默认路径 `/ws`（`pkg/websocket/server.go:32-37`），但 `cmd/server/main.go:190-191` 直接透传配置值，空路径不会替换为 `/ws`，且空 pattern 会在 `http.ServeMux` 注册时触发 panic（`pkg/websocket/server.go:45`），因此建议始终显式配置 |
-| `transport.websocket.read_timeout` | string | 见说明 | 单次读操作的截止时间。优先级：显式配置 > 心跳联动值 > 60s。具体规则（`pkg/websocket/handler.go:65-73`）：未配置且心跳禁用时默认 60s；启用心跳（`server.heartbeat.idle_timeout` 非空）时取 `2 × idle_timeout`（容忍一次心跳丢失）；显式配置则完全覆盖前两者。每次成功读消息后重置截止时间 |
+| `transport.websocket.read_timeout` | string | 见说明 | 单次读操作的截止时间。优先级：显式配置 > 心跳联动值。具体规则（`pkg/websocket/handler.go:64-73`）：未配置时取 `2 × idle_timeout`（容忍一次心跳丢失；心跳恒启用、默认 300s，因此未配置时实际为 600s，"心跳禁用时 60s"的分支不可达）；显式配置则完全覆盖前两者。每次成功读消息后重置截止时间 |
 | `transport.websocket.write_timeout` | string | 未设置 | 单次写操作的截止时间（`pkg/websocket/transport.go:43-52`）。为空则不设置写截止时间 |
 | `transport.websocket.allow_all_origins` | bool | `false` | 允许任意 Origin 的跨域连接（仅限开发环境，`cmd/server/main.go:201-203`）。为 true 时 `CheckOrigin` 恒返回 true |
 | `transport.websocket.allowed_origins` | string[] | 未设置 | Origin 白名单，对 `Origin` 请求头做**精确匹配**（`cmd/server/main.go:204-212`）。仅在 `allow_all_origins` 与 `check_origin` 均为 false 时生效 |
@@ -177,7 +187,7 @@ transport:
 
 | 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `transport.grpc.addr` | string | 未设置 | 客户端面向的 gRPC 流式监听地址（`clientpb.MessageLoopService`，双向流）。与 `transport.websocket.addr` 至少设置一个（`Validate()` 规则 1） |
+| `transport.grpc.addr` | string | 未设置 | 客户端面向的 gRPC 流式监听地址（`clientpb.MessageLoopService`，双向流）。**必填**（`Validate()` 规则 1）：与 `transport.websocket.addr` 均必须配置 |
 | `transport.grpc.write_timeout` | string | 10s | 流式下行写超时。显式设置后通过 `WithWriteTimeout` 注入 handler（`cmd/server/runtime.go:48-52`、`pkg/grpcstream/client_server.go:13-15`）；未设置时由 `pkg/grpcstream/transport.go:19,66` 的 `defaultWriteTimeout`（10s）兜底 |
 | `transport.grpc.tls.cert_file` / `.key_file` | string | 未设置 | 为 gRPC 监听器启用 TLS，二者必须成对设置（`Validate()` 规则 3） |
 
@@ -185,7 +195,7 @@ transport:
 
 ### 启动要求
 
-`cmd/server/runtime.go:67-80` 会在启动时**无条件预绑定两个 gRPC 监听器**（`transport.grpc.addr` 与 `server.grpc_admin.addr`），任一失败（地址为空、端口被占用等）都会中止启动——这与 `Validate()` 允许"仅配置 WebSocket"并不矛盾：纯 WebSocket 部署也必须在两个 gRPC 地址上给出可绑定的值。预绑定失败时先启动的监听器会被释放，不会泄漏端口。
+`cmd/server/runtime.go:67-80` 会在启动时**无条件预绑定两个 gRPC 监听器**（`transport.grpc.addr` 与 `server.grpc_admin.addr`），任一失败（地址为空、端口被占用等）都会中止启动——这与 `Validate()` 规则 1 的必填校验一致：三个客户端面地址（`transport.websocket.addr` / `transport.websocket.path` / `transport.grpc.addr`）均必须给出可绑定的值。预绑定失败时先启动的监听器会被释放，不会泄漏端口。
 
 ## broker 节
 
@@ -225,9 +235,9 @@ broker:
 | `broker.redis.read_timeout` | string | `3s` | 读操作超时 |
 | `broker.redis.write_timeout` | string | `3s` | 写操作超时 |
 | `broker.redis.stream_max_length` | int64 | 10000 | 每条频道 Stream 的最大条目数（XADD 的 `MAXLEN`，`pkg/redisbroker/redis.go:85-90`） |
-| `broker.redis.stream_approximate` | bool | `true` | 是否使用 Stream `MAXLEN ~` 近似截断（`Approx` 标志）。**注意：`false` 会被忽略**——`options.go:107-108` 仅在配置值为 true 时才覆盖默认值，显式写 `stream_approximate: false` 仍以 true 生效 |
+| `broker.redis.stream_approximate` | bool | `true` | 是否使用 Stream `MAXLEN ~` 近似截断（`Approx` 标志）。**注意：仅实现近似截断，显式写 `stream_approximate: false`（或省略后反序列化为 false）会被 `Validate()` 拒绝**（`Validate()` 规则 5，`config.go:229-231`），必须删除该字段或设为 `true` |
 | `broker.redis.history_ttl` | string | `24h` | 频道 Stream 的空闲过期时间（每条发布后刷新 `EXPIRE`，`pkg/redisbroker/redis.go:94-96`） |
-| `broker.redis.consumer_group` | string | 未设置 | **已声明但当前版本未消费**：该字段存在于 `config.RedisConfig`（`config/config.go:139`），但整个代码库没有任何读取点。配置它不会有任何效果，仅作保留占位 |
+| `broker.redis.consumer_group` | string | 未设置 | **未实现：配置非空会被 `Validate()` 直接拒绝**（`broker.redis.consumer_group is not implemented`，`Validate()` 规则 5）。该字段仅存在于 `config.RedisConfig`（`config/config.go:153`）声明，整个代码库没有任何读取点；配置它会启动失败，应移除 |
 
 以上时长字段（`dial_timeout` / `read_timeout` / `write_timeout` / `history_ttl`）不在 `Validate()` 校验范围内，解析失败会被静默忽略并保留默认值（`options.go:89-114`），因此无效时长不会导致启动失败。
 
@@ -343,10 +353,10 @@ server:
 ```yaml
   grpc_admin:
     addr: "127.0.0.1:9091"
-    auth_token: ""
+    auth_token: "change-me"
 ```
 
-管理 gRPC 同样绑定回环地址，并建议放置于私有网卡。`auth_token` 留空意味着管理 API 完全不鉴权（注释也警告生产环境不应如此）；需要 TLS 时取消 `tls` 段注释并成对填写证书与私钥。注意：这两个地址（连同 `transport.grpc.addr`）在启动时都会被无条件预绑定，必须可监听。
+管理 gRPC 同样绑定回环地址，并建议放置于私有网卡。注意 `addr` 非空时 `auth_token` 与 `allow_insecure` 必须至少设置一个（校验规则 6）：`auth_token: ""` 会直接启动失败，需要填写 token 或显式加 `allow_insecure: true`（仅限开发）；需要 TLS 时取消 `tls` 段注释并成对填写证书与私钥。注意：这两个地址（连同 `transport.grpc.addr`）在启动时都会被无条件预绑定，必须可监听。
 
 ```yaml
   heartbeat:
@@ -354,7 +364,7 @@ server:
   rpc_timeout: "30s"
 ```
 
-`idle_timeout: "300s"` 显式声明 300s 空闲断开——该值恰好等于解析失败时的兜底默认，但语义不同：显式配置会创建心跳管理器并生效，留空则完全禁用心跳。`rpc_timeout: "30s"` 与代理默认值相同，可省略。
+`idle_timeout: "300s"` 显式声明 300s 空闲断开——该值恰好等于回退默认值：留空或解析失败同样按 300s 生效，心跳无法通过留空禁用；唯一禁用方式是显式配置 `"0s"`（`HeartbeatManager.Start` 直接返回，不启动心跳）。`rpc_timeout: "30s"` 与代理默认值相同，可省略。
 
 ```yaml
   limits:

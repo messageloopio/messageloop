@@ -102,4 +102,12 @@ var (
 		Code:   3512,
 		Reason: "slow consumer",
 	}
+	// DisconnectInternal may be issued when a server-side failure prevents a
+	// connection from being established (e.g. cluster state synchronization
+	// failed), leaving the server unable to serve the session. The client
+	// should reconnect rather than retry on the same connection.
+	DisconnectInternal = Disconnect{
+		Code:   3513,
+		Reason: "internal error",
+	}
 )

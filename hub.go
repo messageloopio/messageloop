@@ -288,103 +288,21 @@ func (h *subShard) removeSub(ch string, c *Client) (bool, bool) {
 	return false, true
 }
 
-func (h *subShard) broadcastPublication(channel string, pub *Publication) error {
-	h.mu.RLock()
-	subscribers, ok := h.subs[channel]
-	if !ok {
-		h.mu.RUnlock()
-		return nil
-	}
-
-	// Copy subscribers under lock to avoid data race during iteration.
-	subs := make([]Subscriber, 0, len(subscribers))
-	for _, sub := range subscribers {
-		subs = append(subs, sub)
-	}
-	h.mu.RUnlock()
-
-	ctx := context.Background()
-
-	// Create Payload from publication data, preserving the original
-	// oneof variant (Binary/Text/JSON).
-	payload := pub.PayloadProto()
-
-	msg := &clientpb.Message{
-		Channel: channel,
-		Id:      publicationMessageID(channel, pub.Offset),
-		Offset:  pub.Offset,
-		Payload: payload,
-		Metadata: func() *sharedpb.Metadata {
-			if len(pub.Metadata) == 0 {
-				return nil
-			}
-			return &sharedpb.Metadata{Entries: pub.Metadata}
-		}(),
-	}
-
-	out := MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
-		out.Envelope = &clientpb.OutboundMessage_Publication{Publication: &clientpb.Publication{
-			Messages: []*clientpb.Message{msg},
-		}}
-	})
-
-	const broadcastParallelThreshold = 8
-
-	if len(subs) <= broadcastParallelThreshold {
-		// Serial send for small fan-out — avoids goroutine overhead
-		for _, sub := range subs {
-			if err := sub.Client.Send(ctx, out); err != nil {
-				log.ErrorContext(ctx, "send publication error", err)
-				if sub.Client.node.metrics != nil {
-					sub.Client.node.metrics.DeliveryFailures.Inc()
-				}
-			} else if sub.Client.node.metrics != nil {
-				sub.Client.node.metrics.MessagesDelivered.Inc()
-			}
-		}
-	} else {
-		// Parallel send for large fan-out, bounded to broadcastParallelLimit
-		// concurrent goroutines.
-		var wg sync.WaitGroup
-		sem := make(chan struct{}, broadcastParallelLimit)
-		for _, sub := range subs {
-			sem <- struct{}{}
-			wg.Add(1)
-			go func(sub Subscriber) {
-				defer func() {
-					if r := recover(); r != nil {
-						log.ErrorContext(ctx, "panic in send publication", fmt.Errorf("panic: %v, channel: %s", r, channel))
-					}
-					<-sem
-					wg.Done()
-				}()
-				if err := sub.Client.Send(ctx, out); err != nil {
-					log.ErrorContext(ctx, "send publication error", err)
-					if sub.Client.node.metrics != nil {
-						sub.Client.node.metrics.DeliveryFailures.Inc()
-					}
-				} else if sub.Client.node.metrics != nil {
-					sub.Client.node.metrics.MessagesDelivered.Inc()
-				}
-			}(sub)
-		}
-		wg.Wait()
-	}
-
-	return nil
-}
-
 // add adds a connection into the hub, enforcing per-user connection limits.
 func (h *Hub) add(c *Client) error {
+	// h.mu is taken before the connShard lock, matching RemoveSessionIfMatches
+	// and ReplaceSession: addWithLimit checks the per-user limit and registers
+	// the connection atomically under the shard lock, and the sessions map
+	// update is serialized under h.mu.
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	shard := h.connShards[index(c.UserID(), numHubShards)]
 	if err := shard.addWithLimit(c, h.maxConnsPerUser); err != nil {
 		return err
 	}
-	h.mu.Lock()
 	if c.SessionID() != "" {
 		h.sessions[c.SessionID()] = c
 	}
-	h.mu.Unlock()
 	return nil
 }
 
@@ -447,14 +365,23 @@ func (h *Hub) broadcastPublication(ch string, pub *Publication) error {
 	if len(clients) <= broadcastParallelThreshold {
 		// Serial send for small fan-out — avoids goroutine overhead
 		for _, client := range clients {
-			if err := client.Send(ctx, out); err != nil {
-				log.ErrorContext(ctx, "send publication error", err)
-				if client.node.metrics != nil {
-					client.node.metrics.DeliveryFailures.Inc()
+			// A panic in one send must not take down the broker handler;
+			// the parallel branch below recovers too.
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.ErrorContext(ctx, "panic in send publication", fmt.Errorf("panic: %v, channel: %s", r, ch))
+					}
+				}()
+				if err := client.Send(ctx, out); err != nil {
+					log.ErrorContext(ctx, "send publication error", err)
+					if client.node.metrics != nil {
+						client.node.metrics.DeliveryFailures.Inc()
+					}
+				} else if client.node.metrics != nil {
+					client.node.metrics.MessagesDelivered.Inc()
 				}
-			} else if client.node.metrics != nil {
-				client.node.metrics.MessagesDelivered.Inc()
-			}
+			}()
 		}
 	} else {
 		// Parallel send for large fan-out, bounded to broadcastParallelLimit
@@ -620,7 +547,11 @@ type ChannelInfo struct {
 	Subscribers int
 }
 
-// GetActiveChannels returns all channels with at least one subscriber, along with subscriber counts.
+// GetActiveChannels returns all channels with at least one subscriber, along
+// with subscriber counts. Wildcard patterns are not channels (a subscription
+// to "chat.*" subscribes the matcher, not a channel), so they are neither
+// listed nor counted; the exact-channel counts are already unique per session
+// because each shard keys subscribers by session ID.
 func (h *Hub) GetActiveChannels() []ChannelInfo {
 	counts := make(map[string]int)
 	for i := 0; i < numHubShards; i++ {
@@ -628,20 +559,11 @@ func (h *Hub) GetActiveChannels() []ChannelInfo {
 		shard.mu.RLock()
 		for ch, subs := range shard.subs {
 			if len(subs) > 0 {
-				counts[ch] += len(subs)
+				counts[ch] = len(subs)
 			}
 		}
 		shard.mu.RUnlock()
 	}
-
-	h.wcSubsMu.Lock()
-	for _, sub := range h.wcSubs {
-		if sub == nil || sub.Topic == "" {
-			continue
-		}
-		counts[sub.Topic]++
-	}
-	h.wcSubsMu.Unlock()
 
 	result := make([]ChannelInfo, 0, len(counts))
 	for ch, count := range counts {
@@ -669,26 +591,33 @@ func (h *Hub) ReplaceSession(sessionID string, newClient *Client) error {
 	}
 
 	// Per-user connection limit: a same-user replacement keeps the user's
-	// connection count unchanged; a different user must have room.
-	if h.maxConnsPerUser > 0 && oldClient.UserID() != newClient.UserID() {
-		shard := h.connShards[index(newClient.UserID(), numHubShards)]
-		shard.mu.RLock()
-		userConns := len(shard.users[newClient.UserID()])
-		shard.mu.RUnlock()
-		if userConns >= h.maxConnsPerUser {
-			h.mu.Unlock()
-			return DisconnectConnectionLimit
+	// connection count unchanged; a different user must have room. The limit
+	// check and the shard registration are atomic under the shard lock (a
+	// concurrent AddClient only takes the shard lock), so the last slot
+	// cannot be claimed in between (TOCTOU fix). h.mu is held throughout so
+	// a concurrent close() cannot evict the session mid-replacement.
+	oldIdx := index(oldClient.UserID(), numHubShards)
+	newIdx := index(newClient.UserID(), numHubShards)
+	newShard := h.connShards[newIdx]
+	newShard.mu.Lock()
+	if h.maxConnsPerUser > 0 && oldClient.UserID() != newClient.UserID() &&
+		len(newShard.users[newClient.UserID()]) >= h.maxConnsPerUser {
+		newShard.mu.Unlock()
+		h.mu.Unlock()
+		return DisconnectConnectionLimit
+	}
+	if oldIdx != newIdx {
+		h.connShards[oldIdx].remove(sessionID)
+	} else {
+		// Same shard: the old entry is overwritten below; drop the old
+		// user's registration first so the count does not leak.
+		if users, ok := newShard.users[oldClient.UserID()]; ok {
+			delete(users, sessionID)
+			if len(users) == 0 {
+				delete(newShard.users, oldClient.UserID())
+			}
 		}
 	}
-
-	h.sessions[sessionID] = newClient
-	h.mu.Unlock()
-
-	// Replace in connShards: remove old, add new
-	oldUserID := oldClient.UserID()
-	h.connShards[index(oldUserID, numHubShards)].remove(sessionID)
-	newShard := h.connShards[index(newClient.UserID(), numHubShards)]
-	newShard.mu.Lock()
 	newShard.clients[sessionID] = newClient
 	uid := newClient.UserID()
 	if _, ok := newShard.users[uid]; !ok {
@@ -696,6 +625,9 @@ func (h *Hub) ReplaceSession(sessionID string, newClient *Client) error {
 	}
 	newShard.users[uid][sessionID] = struct{}{}
 	newShard.mu.Unlock()
+
+	h.sessions[sessionID] = newClient
+	h.mu.Unlock()
 
 	// Replace subscriber references in all subShards
 	for i := 0; i < numHubShards; i++ {

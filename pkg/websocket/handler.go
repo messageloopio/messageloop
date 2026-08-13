@@ -2,7 +2,6 @@ package websocket
 
 import (
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -38,19 +37,25 @@ func NewHandler(node *messageloop.Node, opt Options) *Handler {
 func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	conn, err := h.upgrader.Upgrade(rw, r, nil)
 	if err != nil {
+		// The upgrader has already written the handshake error response.
 		log.ErrorContext(r.Context(), "websocket upgrade error", err)
-		rw.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
-	subProtocols := websocket.Subprotocols(r)
-	marshaler := h.marshaler(subProtocols)
-	transport := newTransport(conn, msgTypeFromSubprotocol(conn.Subprotocol()), h.opt.WriteTimeout)
+	// The negotiated subprotocol decides both the marshaler and the frame
+	// type. Reading the client's offer list (websocket.Subprotocols) instead
+	// would desync the two: gorilla negotiates against the server-side list,
+	// so offer order does not determine the result.
+	subProtocol := conn.Subprotocol()
+	marshaler := h.marshaler(subProtocol)
+	transport := newTransport(conn, msgTypeFromSubprotocol(subProtocol), h.opt.WriteTimeout)
 	ctx := r.Context()
 	client, closeFn, err := messageloop.NewClient(ctx, h.node, transport, marshaler, messageloop.WithProtocol("ws"))
 	if err != nil {
 		log.ErrorContext(r.Context(), "create client error", err)
-		rw.WriteHeader(http.StatusInternalServerError)
+		// The connection is already upgraded; rw can no longer carry an HTTP
+		// response. Close the upgraded connection and leave.
+		_ = conn.Close()
 		return
 	}
 	ctx = log.Context(ctx, log.FromContext(ctx), "client_id", client.SessionID())
@@ -107,14 +112,17 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// 通过 subProtocols 确定 marshaler
-func (h *Handler) marshaler(subProtocols []string) messageloop.Marshaler {
-	for _, subProtocol := range subProtocols {
-		for _, marshaler := range messageloop.Marshalers {
-			if strings.Contains(subProtocol, marshaler.Name()) {
-				return marshaler
-			}
-		}
+// marshaler maps the negotiated subprotocol to a Marshaler. The mapping must
+// stay in lockstep with msgTypeFromSubprotocol: "messageloop+proto" speaks
+// binary protobuf frames, every other negotiated value speaks JSON text
+// frames. Unknown subprotocols fall back to JSON rather than matching by
+// substring, so names containing "proto" cannot accidentally select the
+// protobuf marshaler.
+func (h *Handler) marshaler(subProtocol string) messageloop.Marshaler {
+	switch subProtocol {
+	case "messageloop+proto":
+		return messageloop.ProtobufMarshaler{}
+	default:
+		return messageloop.ProtoJSONMarshaler
 	}
-	return messageloop.ProtoJSONMarshaler
 }

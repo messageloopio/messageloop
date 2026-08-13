@@ -75,6 +75,15 @@ type PublicationHandler func(ch string, pub *Publication) error
 
 // Broker manages pub/sub message routing and optional per-channel history.
 //
+// Delivery error contract: a handler error means the delivery to local
+// subscribers failed, not the publish itself. Synchronous in-memory
+// implementations (memoryBroker) propagate handler errors back from Publish.
+// Asynchronous implementations (Redis: a pub/sub consumer loop) MUST NOT
+// propagate delivery errors to Publish callers — the publication has already
+// been accepted by the transport by the time the handler runs, and delivery
+// failures are logged/metrics events there. Publish callers must not rely on
+// the handler's return value for either implementation.
+//
 // Lifecycle: Start must be called once before Publish/Subscribe/History.
 // Start blocks until the provided context is cancelled — call it as a goroutine:
 //

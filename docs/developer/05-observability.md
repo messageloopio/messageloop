@@ -59,9 +59,9 @@ curl -s http://127.0.0.1:8080/health
 
 采集范围说明（`cmd/server/main.go`）：
 
-- 指标注册在进程内新建的 `prometheus.NewRegistry()` 上，**只包含** `messageloop.Metrics` 定义的指标，不含 Go runtime 与 process 默认采集器（`go_*`、`process_*` 等）；
+- 指标注册在进程内新建的 `prometheus.NewRegistry()` 上：除 `messageloop.Metrics` 定义的指标外，还注册了 Go runtime 与 process 默认采集器（`collectors.NewGoCollector()`、`collectors.NewProcessCollector(...)`，`cmd/server/main.go:44-47`），因此 `/metrics` 同时暴露 `go_*`、`process_*` 系列指标；
 - `node.SetMetrics(metrics)` 后，`Node` 与 `Hub` 在运行路径中更新指标；集群模式下指标对象同时注入 Redis 命令总线与投影修复器；
-- 全部指标以 `messageloop` 为命名空间，**均无标签**。
+- `messageloop_*` 指标以 `messageloop` 为命名空间；**cluster 启用且配置 `node_id` 时，指标带 `node_id` 标签**（`prometheus.WrapRegistererWith`，`cmd/server/main.go:49-53`）；其余指标无标签。
 
 快速查看示例：
 
@@ -142,7 +142,7 @@ curl -s http://127.0.0.1:8080/metrics | grep '^messageloop_'
 
 ## 5. 断连码参考
 
-`Disconnect` 是携带 `Code` 与 `Reason` 的结构体并实现 `error` 接口（`disconnect.go`）：核心代码以返回错误的方式表达"应断开此连接"，`Client.HandleMessage` 用 `errors.As` 识别后关闭连接，传输层把 Code 与 Reason 交给客户端（WebSocket 用 close 帧的 code/reason，gRPC 流先投递 `DISCONNECT_ERROR` 错误帧）。`Code` 为 0 表示正常关闭（WebSocket 端映射为 1000）。
+`Disconnect` 是携带 `Code` 与 `Reason` 的结构体并实现 `error` 接口（`disconnect.go`）：核心代码以返回错误的方式表达"应断开此连接"，`Client.HandleMessage` 用 `errors.As` 识别后关闭连接，传输层把 Code 与 Reason 交给客户端（WebSocket 用 close 帧的 code/reason；gRPC 流先投递 `DISCONNECT_ERROR` 错误帧，数值码随错误信封传递——目标语义，由传输修复实现后生效，见 `pkg/grpcstream/transport.go:106-121`）。`Code` 为 0 表示正常关闭（WebSocket 端映射为 1000）。
 
 下表列出全部内置断连码（`disconnect.go`）。"服务端是否触发"标注该码当前在源码中是否有实际触发点：
 
@@ -151,7 +151,7 @@ curl -s http://127.0.0.1:8080/metrics | grep '^messageloop_'
 | 3000 | `DisconnectConnectionClosed` | `connection closed` | 连接关闭且无服务端建议：可能是干净断开，也可能网络中断，服务端无法区分 | 是（`client.go`） | 按需重连；如反复出现，先排查网络稳定性 |
 | 3500 | `DisconnectInvalidToken` | `invalid token` | token 无效，或 `require_auth` 开启且未携带 token | 是（`client.go`） | 修复/刷新 token 后重连；不要无限重试 |
 | 3501 | `DisconnectBadRequest` | `bad request` | 协议帧格式错误（如已鉴权再发 Connect） | 是（`client.go`） | 检查 SDK 版本与协议兼容性，属客户端 bug |
-| 3502 | `DisconnectStale` | `stale` | 连接在配置的间隔内未完成鉴权 | 否（保留定义） | 连接后尽快发送带 token 的 Connect |
+| 3502 | `DisconnectStale` | `stale` | 集群会话恢复失败：远端会话租约 CAS 抢占失败、或恢复/接管回滚（`cluster_resume.go:77`、`client.go:571`） | 是（集群恢复失败） | 检查集群与 Redis 连通性后携带 `SessionId` 重试 |
 | 3503 | `DisconnectForceNoReconnect` | `force disconnect` | 服务端要求不要重连（如关停排空 `DrainAll`） | 是（`node.go`） | 停止重连，等待外部恢复信号 |
 | 3504 | `DisconnectConnectionLimit` | `connection limit` | 超过每用户连接数上限（`limits.max_connections_per_user`） | 是（`hub.go`） | 先断开该用户的旧连接；检查客户端是否泄漏连接 |
 | 3505 | `DisconnectChannelLimit` | `channel limit` | 超过每客户端订阅数上限（`limits.max_subscriptions_per_client`） | 是（`client.go`） | 收敛订阅数；检查订阅清理逻辑 |
@@ -161,6 +161,7 @@ curl -s http://127.0.0.1:8080/metrics | grep '^messageloop_'
 | 3509 | `DisconnectTooManyErrors` | `too many errors` | 客户端产生过多错误 | 否（保留定义） | 修复客户端侧持续报错的根本原因 |
 | 3511 | `DisconnectIdleTimeout` | `idle timeout` | 心跳检测到超时未活动（`server.heartbeat.idle_timeout`，默认 300 秒） | 是（`heartbeat.go`） | 定期发送 Ping 保活（见[《客户端协议参考》](../protocol.md)的心跳小节） |
 | 3512 | `DisconnectSlowConsumer` | `slow consumer` | 客户端消费速度跟不上，写入失败触发 | 是（`client.go`） | 加快消费或增加缓冲；客户端能力与频道吞吐不匹配 |
+| 3513 | `DisconnectInternal` | `internal error` | connect 路径内部错误（如集群状态同步失败），连接被强制关闭（`disconnectOnConnectError`，`client.go:775-783`） | 是（`client.go`） | 不要在同一连接上重试；检查服务端日志与集群/Redis 状态后重新连接 |
 
 说明：
 
@@ -187,8 +188,8 @@ curl -s http://127.0.0.1:8080/metrics | grep '^messageloop_'
 
 - **绑定地址**：`server.http.addr` 默认为 `127.0.0.1:8080`，仅暴露 `/health` 与 `/metrics`。该 HTTP 面**无鉴权**，若绑定到非回环地址，必须置于私有网络或防火墙之后，否则指标与健康状态会对外泄露（参见 [../deployment.md](../deployment.md) 的 Health And Metrics 与 Production Checklist 章节）；
 - **抓取间隔**：推荐 10–15 秒，不小于 5 秒。直方图桶为 Prometheus 默认桶，P99 类告警需要足够的历史样本；
-- **registry 不含 Go runtime / process 指标**：如需 GC、协程数等运行时信号，请另行通过 `net/http/pprof` 或外部 exporter 采集，本端点不提供；
-- **多节点部署**：每节点独立暴露指标，聚合与告警请按 `node_id`（或实例标签）区分；集群相关指标只在集群模式下有意义（见 §3.4）；
+- **registry 已注册 Go runtime / process 采集器**：`/metrics` 自带 `go_*`、`process_*` 系列指标（GC、协程数、内存等，`cmd/server/main.go:44-47`），无需外部 exporter；如需 pprof 剖析接口再另行挂载 `net/http/pprof`；
+- **多节点部署**：每节点独立暴露指标；cluster 启用且配置 `node_id` 时，`messageloop_*` 指标自动带 `node_id` 标签（见 §3），可直接按该标签聚合与告警；未启用 cluster 时按实例标签区分。集群相关指标只在集群模式下有意义（见 §3.4）；
 - 健康检查探针的 Redis 探测超时固定为 2 秒（`healthCheckTimeout`），请勿把 `/health` 用作 Redis 延迟的监控手段。
 
 ## 7. 故障排查指引

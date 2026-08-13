@@ -24,6 +24,7 @@ import (
 	"github.com/messageloopio/messageloop"
 	"github.com/messageloopio/messageloop/config"
 	"github.com/redis/go-redis/v9"
+	"sync/atomic"
 )
 
 const (
@@ -54,8 +55,14 @@ var (
 	// clusterCommandHandlerTimeout bounds each handler execution. A stuck
 	// handler (e.g. a blocked survey write) produces a terminal
 	// CLUSTER_COMMAND_TIMEOUT result instead of pinning the command in
-	// pending forever.
+	// pending forever. NOTE: a handler that ignores its context keeps
+	// occupying its concurrency slot until it returns; handlers must honor
+	// ctx cancellation.
 	clusterCommandHandlerTimeout = 10 * time.Second
+	// clusterCommandReconnectBaseBackoff is the initial delay before the
+	// first cluster command bus reconnection attempt. Variable so tests can
+	// shorten it.
+	clusterCommandReconnectBaseBackoff = 1 * time.Second
 )
 
 type redisClusterCommandBus struct {
@@ -73,6 +80,10 @@ type redisClusterCommandBus struct {
 	metrics   *messageloop.Metrics
 	start     bool
 	stop      bool
+
+	// disconnects counts unexpected pub/sub disconnects of the request
+	// channel (reconnect attempts); exposed for tests and operators.
+	disconnects atomic.Uint64
 }
 
 // NewClusterCommandBus returns a Redis-backed request/reply ClusterCommandBus.
@@ -100,46 +111,177 @@ func (b *redisClusterCommandBus) SetMetrics(metrics *messageloop.Metrics) {
 
 func (b *redisClusterCommandBus) Start(ctx context.Context) error {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	if b.start {
+		b.mu.Unlock()
 		return nil
 	}
 	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
 	if err := b.client.Ping(pingCtx).Err(); err != nil {
+		cancel()
+		b.mu.Unlock()
 		return err
 	}
+	cancel()
 
 	busCtx, busCancel := context.WithCancel(ctx)
-	pubsub := b.client.Subscribe(busCtx, b.requestChannel(b.nodeID, b.incarnationID))
-	if _, err := pubsub.Receive(busCtx); err != nil {
-		busCancel()
-		_ = pubsub.Close()
-		return err
-	}
-
 	b.cancel = busCancel
-	b.pubsub = pubsub
 	b.start = true
+	b.mu.Unlock()
+
 	// Bound concurrent command handling: the reader blocks on the semaphore
 	// before dispatching, so at most clusterCommandHandlerConcurrency
 	// commands run at once and none is dropped under load.
 	sem := make(chan struct{}, clusterCommandHandlerConcurrency)
+	confirmed := make(chan error, 1)
+
 	b.readerWG.Add(1)
 	go func() {
 		defer b.readerWG.Done()
-		for message := range pubsub.Channel() {
+		// runCommandReaderWithRetry reports the first-subscription outcome on
+		// confirmed itself; later outcomes are absorbed by the retry loop.
+		b.runCommandReaderWithRetry(busCtx, sem, confirmed)
+	}()
+
+	// The reader reports the outcome of the first subscription attempt so
+	// Start can surface subscribe failures synchronously (cluster startup
+	// rolls back on component start errors); later disconnects are absorbed
+	// by the retry loop.
+	select {
+	case err := <-confirmed:
+		if err != nil {
+			busCancel()
+			b.mu.Lock()
+			b.start = false
+			b.cancel = nil
+			b.mu.Unlock()
+			b.readerWG.Wait()
+			return err
+		}
+	case <-ctx.Done():
+		busCancel()
+		return ctx.Err()
+	}
+	return nil
+}
+
+// runCommandReaderWithRetry keeps the request-channel subscription alive,
+// reconnecting with exponential backoff after unexpected disconnects. The
+// outcome of the first subscription attempt is reported on confirmed (nil
+// once the subscription is live, or an error when the first attempt fails)
+// so Start can fail synchronously. It returns nil once the bus is stopped.
+func (b *redisClusterCommandBus) runCommandReaderWithRetry(ctx context.Context, sem chan struct{}, confirmed chan<- error) error {
+	backoff := clusterCommandReconnectBaseBackoff
+	const maxBackoff = 30 * time.Second
+	first := true
+	for {
+		pubsub := b.client.Subscribe(ctx, b.requestChannel(b.nodeID, b.incarnationID))
+		if _, err := pubsub.Receive(ctx); err != nil {
+			_ = pubsub.Close()
+			if ctx.Err() != nil || b.stopped() {
+				return nil
+			}
+			if first {
+				first = false
+				confirmed <- err
+				return err
+			}
+			log.WarnContext(ctx, "cluster command bus subscribe failed, retrying",
+				"error", err, "backoff", backoff, "node_id", b.nodeID)
+			b.recordCommandBusDisconnect()
+			if !b.waitReconnectBackoff(ctx, &backoff, maxBackoff) {
+				return nil
+			}
+			continue
+		}
+		// The first successful subscribe unblocks Start; later reconnects
+		// must not touch the confirmed channel again (Start has returned and
+		// nobody drains it).
+		if first {
+			first = false
+			confirmed <- nil
+		}
+		err := b.runCommandReader(ctx, sem, pubsub)
+		if err == nil {
+			// runCommandReader returns nil only on intentional shutdown.
+			return nil
+		}
+		if ctx.Err() != nil || b.stopped() {
+			return nil
+		}
+		log.WarnContext(ctx, "cluster command bus disconnected, retrying",
+			"error", err, "backoff", backoff, "node_id", b.nodeID)
+		b.recordCommandBusDisconnect()
+		if !b.waitReconnectBackoff(ctx, &backoff, maxBackoff) {
+			return nil
+		}
+	}
+}
+
+// runCommandReader drains the request channel and dispatches each command to
+// a bounded handler goroutine. It returns nil when ctx is cancelled (the bus
+// is shutting down) and an error when the subscription dies unexpectedly, so
+// the caller can reconnect.
+func (b *redisClusterCommandBus) runCommandReader(ctx context.Context, sem chan struct{}, pubsub *redis.PubSub) error {
+	b.mu.Lock()
+	b.pubsub = pubsub
+	b.mu.Unlock()
+	defer func() {
+		b.mu.Lock()
+		if b.pubsub == pubsub {
+			b.pubsub = nil
+		}
+		b.mu.Unlock()
+		_ = pubsub.Close()
+	}()
+
+	ch := pubsub.Channel()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case message, ok := <-ch:
+			if !ok {
+				return fmt.Errorf("cluster command pubsub channel closed")
+			}
 			sem <- struct{}{}
 			b.handlerWG.Add(1)
 			go func(payload string) {
 				defer b.handlerWG.Done()
 				defer func() { <-sem }()
-				b.handleMessage(busCtx, payload)
+				b.handleMessage(ctx, payload)
 			}(message.Payload)
 		}
-	}()
+	}
+}
 
-	return nil
+// recordCommandBusDisconnect counts an unexpected bus disconnect (the Warn
+// log lives in the retry loop).
+func (b *redisClusterCommandBus) recordCommandBusDisconnect() {
+	b.disconnects.Add(1)
+}
+
+// stopped reports whether Shutdown has been called, i.e. reconnection must
+// stop even though ctx may not be cancelled yet.
+func (b *redisClusterCommandBus) stopped() bool {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.stop
+}
+
+// waitReconnectBackoff sleeps for the current backoff and doubles it (capped)
+// for the next attempt. Returns false when ctx is done, i.e. the caller must
+// stop retrying.
+func (b *redisClusterCommandBus) waitReconnectBackoff(ctx context.Context, backoff *time.Duration, maxBackoff time.Duration) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(*backoff):
+	}
+	*backoff *= 2
+	if *backoff > maxBackoff {
+		*backoff = maxBackoff
+	}
+	return true
 }
 
 func (b *redisClusterCommandBus) Shutdown(ctx context.Context) error {
@@ -206,6 +348,26 @@ func (b *redisClusterCommandBus) SendCommand(ctx context.Context, cmd *messagelo
 		b.recordDedupeHit(commandCtx, cmd, "send")
 		return resolvedResult, nil
 	}
+
+	// Fast-fail when the target incarnation holds no live node lease: a dead
+	// target would otherwise leave the sender waiting for the full command
+	// deadline (defaultCommandTimeout) before resolving UnknownFinalState.
+	alive, err := b.targetAlive(commandCtx, cmd.TargetNodeID, cmd.TargetIncarnationID)
+	if err != nil {
+		return nil, err
+	}
+	if !alive {
+		return &messageloop.ClusterCommandResult{
+			CommandID:     cmd.CommandID,
+			SessionID:     cmd.SessionID,
+			NodeID:        cmd.TargetNodeID,
+			IncarnationID: cmd.TargetIncarnationID,
+			Status:        messageloop.ClusterCommandStatusFailed,
+			ErrorCode:     "TARGET_NODE_NOT_ALIVE",
+			ErrorMessage:  "target node incarnation has no live lease",
+		}, nil
+	}
+
 	replyChannel := b.replyChannel(uuid.NewString())
 	cmd.Metadata[clusterCommandReplyKey] = replyChannel
 
@@ -226,6 +388,27 @@ func (b *redisClusterCommandBus) SendCommand(ctx context.Context, cmd *messagelo
 	return b.waitForReply(commandCtx, cmd, pubsub.Channel())
 }
 
+// targetAlive reports whether the target node incarnation currently holds a
+// live node lease. SendCommand calls it before subscribing for the reply so
+// a dead target fails fast instead of burning the full command deadline.
+// The lease key layout matches redisSessionDirectory.nodeLeaseKey.
+func (b *redisClusterCommandBus) targetAlive(ctx context.Context, nodeID, incarnationID string) (bool, error) {
+	data, err := b.client.Get(ctx, b.opts.ClusterNodePrefix+nodeID+":"+incarnationID).Result()
+	if errors.Is(err, redis.Nil) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	lease := &messageloop.ClusterNodeLease{}
+	if err := json.Unmarshal([]byte(data), lease); err != nil {
+		// Unreadable lease: be permissive and let the normal send path run
+		// (the publish/reply machinery reports the real failure).
+		return true, nil
+	}
+	return lease.ExpiresAt.IsZero() || lease.ExpiresAt.After(time.Now()), nil
+}
+
 // waitForReply drains the reply channel until a result whose CommandID matches
 // the command arrives. Mismatched replies are logged and skipped as defense in
 // depth; the wait still ends at the command deadline.
@@ -233,12 +416,17 @@ func (b *redisClusterCommandBus) waitForReply(ctx context.Context, cmd *messagel
 	for {
 		select {
 		case <-ctx.Done():
-			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				b.recordCommandTimeout(ctx, cmd)
-			}
-			return b.resolveTimedOutCommand(ctx, cmd)
+			return b.resolveTimeout(ctx, cmd)
 		case reply, ok := <-replies:
 			if !ok {
+				// The reply channel can close at the exact moment the command
+				// deadline fires (go-redis closes the connection when the
+				// deadline passes). Prefer the timeout resolution in that case
+				// so the caller observes UnknownFinalState instead of a hard
+				// channel-closed error.
+				if ctx.Err() != nil {
+					return b.resolveTimeout(ctx, cmd)
+				}
 				return nil, fmt.Errorf("cluster command reply channel closed")
 			}
 			result := &messageloop.ClusterCommandResult{}
@@ -254,6 +442,15 @@ func (b *redisClusterCommandBus) waitForReply(ctx context.Context, cmd *messagel
 			)
 		}
 	}
+}
+
+// resolveTimeout records a reply timeout (when the deadline actually expired)
+// and resolves the command through the timed-out path.
+func (b *redisClusterCommandBus) resolveTimeout(ctx context.Context, cmd *messageloop.ClusterCommand) (*messageloop.ClusterCommandResult, error) {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		b.recordCommandTimeout(ctx, cmd)
+	}
+	return b.resolveTimedOutCommand(ctx, cmd)
 }
 
 func (b *redisClusterCommandBus) BroadcastCommand(ctx context.Context, cmd *messageloop.ClusterCommand) ([]*messageloop.ClusterCommandResult, error) {
@@ -599,7 +796,9 @@ func (b *redisClusterCommandBus) executeHandler(ctx context.Context, handler mes
 // that does not return before ctx expires (e.g. it ignores its context) is
 // abandoned: a terminal context.DeadlineExceeded error is returned and the
 // still-running goroutine's eventual result is discarded, so a stuck handler
-// cannot wedge the command bus.
+// cannot wedge the command bus. Handlers MUST respond to ctx cancellation: a
+// handler that keeps running past its deadline continues to occupy its
+// clusterCommandHandlerConcurrency slot until it returns.
 func (b *redisClusterCommandBus) executeHandlerBounded(ctx context.Context, handler messageloop.ClusterCommandHandler, command *messageloop.ClusterCommand) (result *messageloop.ClusterCommandResult, err error) {
 	type outcome struct {
 		result *messageloop.ClusterCommandResult

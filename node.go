@@ -121,18 +121,25 @@ func (n *Node) Run(ctx context.Context) error {
 		}
 	}
 
+	// Broker failures are funneled through an error channel instead of a
+	// panic: a broker that fails to start (e.g. Redis unreachable) must
+	// surface as a Run error so the caller (lynx) can react, rather than
+	// crashing the process after Run has returned (P1-A6).
+	startErr := make(chan error, 1)
 	go func() {
 		if err := n.broker.Start(ctx, func(ch string, pub *Publication) error {
 			return n.hub.broadcastPublication(ch, pub)
 		}); err != nil {
 			log.ErrorContext(ctx, "broker stopped with error", err)
-			panic(err)
+			startErr <- err
 		}
 	}()
 	type readyBroker interface{ Ready() <-chan struct{} }
 	if r, ok := n.broker.(readyBroker); ok {
 		select {
 		case <-r.Ready():
+		case err := <-startErr:
+			return err
 		case <-ctx.Done():
 		}
 	}
@@ -275,8 +282,15 @@ func (n *Node) AddSubscription(ctx context.Context, ch string, sub Subscriber) e
 			name: "track.client",
 			commit: func() error {
 				sub.Client.mu.Lock()
+				defer sub.Client.mu.Unlock()
+				// Reject subscriptions on a closing/closed client: close()
+				// snapshots subscribedChannels under this same lock, so a
+				// subscribe admitted here after the snapshot would never be
+				// cleaned up and would leak in the hub (P1-A3).
+				if sub.Client.status == statusClosed {
+					return fmt.Errorf("client is closed")
+				}
 				sub.Client.subscribedChannels[ch] = struct{}{}
-				sub.Client.mu.Unlock()
 				return nil
 			},
 			rollback: func() {

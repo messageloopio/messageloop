@@ -16,7 +16,11 @@ func assertEqual(assert *assert.Assertions, expected, actual []Subscriber) {
 	}
 }
 
-func testMatcherConcurrentSubscribe(t *testing.T, m Matcher, topics []string) {
+// testMatcherConcurrentSubscribe exercises concurrent subscribe, unsubscribe
+// and re-subscribe of distinct topics. checkIDs additionally asserts that
+// every Subscription got a unique ID; only the bitmap implementations assign
+// meaningful IDs, so callers of other matchers pass false.
+func testMatcherConcurrentSubscribe(t *testing.T, m Matcher, topics []string, checkIDs bool) {
 	assert := assert.New(t)
 
 	subs := make([]*Subscription, len(topics))
@@ -32,7 +36,9 @@ func testMatcherConcurrentSubscribe(t *testing.T, m Matcher, topics []string) {
 	}
 	wg.Wait()
 
-	assertSubscriptionIDsUnique(assert, subs)
+	if checkIDs {
+		assertSubscriptionIDsUnique(assert, subs)
+	}
 	for i, topic := range topics {
 		assert.Contains(m.Lookup(topic), Subscriber(i))
 	}
@@ -63,7 +69,9 @@ func testMatcherConcurrentSubscribe(t *testing.T, m Matcher, topics []string) {
 	}
 	wg.Wait()
 
-	assertSubscriptionIDsUnique(assert, subs)
+	if checkIDs {
+		assertSubscriptionIDsUnique(assert, subs)
+	}
 	for i, topic := range topics {
 		assert.Contains(m.Lookup(topic), Subscriber(i))
 	}

@@ -2,6 +2,7 @@ package shared
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -124,13 +125,14 @@ func (p *protoJSONMarshaler) Unmarshal(data []byte, msg any) error {
 }
 
 func (p *protoJSONMarshaler) Name() string {
-	return "json"
+	return "protojson"
 }
 
 // Marshalers is a list of available marshalers.
 var Marshalers = []Marshaler{
 	JSONMarshaler{},
 	ProtobufMarshaler{},
+	ProtoJSONMarshaler,
 }
 
 // MarshalTypeError is returned when Marshal receives an unexpected type.
@@ -139,7 +141,7 @@ type MarshalTypeError struct {
 }
 
 func (e *MarshalTypeError) Error() string {
-	return "message is not a proto.Message"
+	return fmt.Sprintf("marshal: %T is not a proto.Message", e.Type)
 }
 
 // UnmarshalTypeError is returned when Unmarshal receives an unexpected type.
@@ -148,5 +150,5 @@ type UnmarshalTypeError struct {
 }
 
 func (e *UnmarshalTypeError) Error() string {
-	return "message is not a proto.Message"
+	return fmt.Sprintf("unmarshal: %T is not a proto.Message", e.Type)
 }

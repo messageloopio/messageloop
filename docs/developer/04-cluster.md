@@ -198,7 +198,7 @@ cluster:
 
 | 数据 | 键 | TTL | 内容要点 |
 | --- | --- | --- | --- |
-| 会话租约 | `ml:cluster:session:lease:<sessionID>` | 90 秒（`defaultClusterSessionLeaseTTL`） | `SessionID`、`NodeID`、`IncarnationID`、`UserID`、`ClientID`、`LeaseVersion`、`Authenticated`、`ConnectedAt`、`LastActivityAt`、`ExpiresAt` |
+| 会话租约 | `ml:cluster:session:lease:<sessionID>` | 600 秒（`defaultClusterSessionLeaseTTL`，须覆盖 `DefaultHeartbeatIdleTimeout`=300s 并留出余量） | `SessionID`、`NodeID`、`IncarnationID`、`UserID`、`ClientID`、`LeaseVersion`、`Authenticated`、`ConnectedAt`、`LastActivityAt`、`ExpiresAt` |
 | 会话快照 | `ml:cluster:session:snapshot:<sessionID>` | 24 小时（`defaultClusterSessionSnapshotTTL`） | 会话身份（user/client/protocol）、订阅列表（`Subscriptions`）、`AuthContext`；结构上还声明了 `ChannelOffsets` 与 `BrokerEpoch` 字段，但当前填充逻辑未写入（见 4.4） |
 
 会话所有权 = 「会话租约指向的节点实例正在服务该会话」。`LeaseVersion` 是所有权代际计数：新连接从 1 起，每次 resume/takeover 递增（`client.go`、`cluster_resume.go`）。它被用于接管时的版本校验，防止旧代际的接管命令误伤新代际的会话。
@@ -233,9 +233,9 @@ cluster:
 
 ### 4.4 跨节点恢复与 epoch 校验
 
-跨节点恢复中，**历史消息的续读**仍走客户端协议原有的 epoch 校验逻辑（`client.go:562-643`）：Redis broker 的 `Epoch()` 是每个 broker 进程实例启动时生成的随机 UUID（`redis.go:35`），订阅者请求恢复（`sub.Recover`）且携带的 `sub.Epoch` 与当前节点的 broker epoch 不一致（包括未携带 epoch）时，视为 offset 无效，从历史开头（offset 0）恢复。
+跨节点恢复中，**历史消息的续读**走客户端协议原有的 epoch 校验逻辑（`client.go:600-689`）：Redis broker 的 epoch 存于固定键 **`ml:broker:epoch`**（`defaultEpochKey`，`options.go:18`），首个启动的节点经 `SETNX` 写入随机 UUID（`redis.go` 的 `initEpoch`），之后所有节点读取同一值——**集群共享、跨节点一致、跨重启持久**（`epoch_test.go` 的 `SharedAcrossNodes` / `PersistedAcrossRestart` 两测试为证）。订阅者请求恢复（`sub.Recover`）时，携带的 `sub.Epoch` 与当前节点的 broker epoch 不一致（包括未携带 epoch）即视为 offset 无效，从历史开头（offset 0）恢复；epoch 匹配则从 `sub.Offset+1` 续读。
 
-集群部署下这意味着：客户端在节点 B 恢复一个曾在节点 A 建立、带 `Recover` 的订阅时，由于各节点 broker 实例的 epoch 不同，epoch 校验会判为不匹配，从而从该频道历史开头恢复（受 `MaxRecoveredPublications` = 1000 条封顶）。这是当前实现保守且确定的行为。会话快照中预留的 `ChannelOffsets` 与 `BrokerEpoch` 字段正是为跨节点精确续读准备的，但 `clusterSessionSnapshot` 目前并未填充它们（`cluster_state.go:274-309`），跨节点按 offset 续读尚未实现。
+集群部署下的推论：由于 epoch 是集群共享的，客户端在节点 A 建立订阅时拿到的 epoch 在节点 B 依然有效——跨节点恢复时**epoch 校验可以通过**，续读位置由客户端携带的逐频道 offset 决定（`client.go:642`），不再需要从历史开头全量恢复。全量恢复仅发生在客户端未携带 epoch（旧 SDK）或携带陈旧 epoch（epoch 键被清理/重建）时。会话快照中预留的 `ChannelOffsets` 与 `BrokerEpoch` 字段仍未被填充（`cluster_state.go:274-309`），即快照本身不承载续读位置，续读完全依赖客户端自带 offset；跨节点按 offset 续读因此已可工作，但快照侧的能力仍属未完成功能。
 
 ## 5. 集群级 Survey
 
@@ -278,7 +278,7 @@ hash 的字段是频道名、值是本节点在该频道的订阅者计数。增
 | 键 | 类型 | TTL | 内容 |
 | --- | --- | --- | --- |
 | `ml:presence:member:<channel>:<clientID>` | string | 60 秒（`PresenceTTL`） | `PresenceInfo` JSON（`ClientID`、`UserID`、`ConnectedAt`） |
-| `ml:presence:idx:<channel>` | set | 120 秒（`PresenceTTL * 2`） | 频道内在线客户端 ID 集合索引 |
+| `ml:presence:idx:<channel>` | set | 60 秒（`PresenceTTL`，与成员键同 TTL） | 频道内在线客户端 ID 集合索引 |
 
 `Add`（订阅登记/心跳刷新）在一条流水线内完成 `SET` 成员 + `SADD` 索引 + `EXPIRE` 索引；`Remove`（退订/断开）`DEL` 成员 + `SREM` 索引；`Get`（查询）先 `SMEMBERS` 索引，再流水线 `GET` 每个成员并反序列化，读取时发现成员键已过期缺失则顺手 `SREM` 清理索引中的残留（`presence_redis.go:62-109`）。
 
@@ -292,8 +292,8 @@ hash 的字段是频道名、值是本节点在该频道的订阅者计数。增
 
 - 发布路径（`redis.go` 的 `Publish`）：先 `XADD` 写入 `ml:stream:<channel>`（`StreamMaxLength` 默认 10000 条、`StreamApproximate` 默认 true，`HistoryTTL` 默认 24 小时），从 Stream ID 解析出 offset；再 `PUBLISH` 到 `ml:pubsub:<channel>` 做实时分发。任意节点发布，全部节点共享同一份历史。
 - 消费路径（`pubsub.go`）：每个节点 `PSUBSCRIBE ml:pubsub:*` 模式订阅，只处理本节点登记过兴趣（`Subscribe`）的频道；断线以指数退避重连（1 秒起、上限 30 秒）。
-- **offset 语义**：offset 由 Stream ID 编码而来，`offset = ts<<20 | seq`（毫秒时间戳与序列号拼入 uint64，`history.go`）。历史查询 `History(ch, sinceOffset, limit)` 用**排他**起始 ID（`"(ts-seq"`，`streamStartID`）——即 Redis broker 下 `since_offset` 是**不包含**（exclusive）语义，返回 `offset > since_offset`；`limit <= 0` 时上限为 `DefaultHistoryLimit`（1000 条）。内存 broker 的 `since_offset` 则是包含（inclusive）语义（见[《管理 API 参考》](03-admin-api.md) 的 GetHistory 一节）。
-- 由于历史与 offset 都来自共享的 Redis Stream，跨节点查询历史得到的是同一份数据；但跨节点**恢复**时的 offset 校验受各节点 broker epoch 不同的影响（见 4.4）。
+- **offset 语义**：offset 由 Stream ID 编码而来，`offset = ts<<20 | seq`（毫秒时间戳与序列号拼入 uint64，`history.go`）。历史查询 `History(ch, sinceOffset, limit)` 用**包含**起始 ID（`"ts-seq"`，`streamStartID`）——Redis broker 与内存 broker 的 `since_offset` 均为**包含**（inclusive）语义，返回 `offset >= since_offset`（契约见 `broker.go:105-108`）；`limit <= 0` 时上限为 `DefaultHistoryLimit`（1000 条）。
+- 由于历史与 offset 都来自共享的 Redis Stream，跨节点查询历史得到的是同一份数据；跨节点**恢复**的 epoch 校验也因 Redis epoch 集群共享而可通过（见 4.4）。
 - 瞬时消息（`PublishTransient`，presence 事件等）不写 Stream，offset 恒为 0，永不进入历史。
 
 ## 9. 故障与恢复
@@ -305,7 +305,7 @@ hash 的字段是频道名、值是本节点在该频道的订阅者计数。增
 | 数据 | TTL | 宕机后的行为 |
 | --- | --- | --- |
 | 节点租约 `ml:cluster:node:*` | 90 秒 | 过期后该节点从广播目标（Survey 等）中消失 |
-| 会话租约 `ml:cluster:session:lease:*` | 90 秒 | 过期后会话不再被识别为属于任何存活节点；期间携带该 `SessionId` 的新连接会尝试 takeover 并向已死节点发送命令，命令超时后经节点租约检查降级继续恢复（见 4.3） |
+| 会话租约 `ml:cluster:session:lease:*` | 600 秒 | 过期后会话不再被识别为属于任何存活节点；期间携带该 `SessionId` 的新连接会尝试 takeover 并向已死节点发送命令，命令超时后经节点租约检查降级继续恢复（见 4.3） |
 | 会话快照 `ml:cluster:session:snapshot:*` | 24 小时 | 保留足够久，客户端重连到任意存活节点都能拿到订阅列表等恢复信息 |
 | 节点投影 `ml:cluster:channel:owner:*` | 10 分钟 | 过期后全集群频道列表自动收敛（见第 6 节） |
 | presence 成员 | 60 秒 | 过期后在线状态自动收敛（见第 7 节） |
@@ -353,6 +353,6 @@ hash 的字段是频道名、值是本节点在该频道的订阅者计数。增
 | `Survey` | 本地调查 + 向所有存活节点广播（`exclude_self`），聚合结果按节点/会话排序，每个结果带 `node_id` / `incarnation_id` 元数据，远端失败以带 `error` 的结果呈现 |
 | `GetChannels` | 不再读本地 hub，改读集群共享投影（聚合所有 owner hash），返回全集群活跃频道 |
 | `GetPresence` | Presence 存储为 Redis 实现，返回全集群在线成员 |
-| `GetHistory` | 从共享 Redis Stream 读取，`since_offset` 为不包含（exclusive）语义，跨节点数据一致 |
+| `GetHistory` | 从共享 Redis Stream 读取，`since_offset` 为包含（inclusive）语义，跨节点数据一致 |
 
 非集群模式下上述操作只作用于本节点。完整语义、请求/响应格式与示例见[《管理 API 参考》](03-admin-api.md) 的「集群感知行为」一节。

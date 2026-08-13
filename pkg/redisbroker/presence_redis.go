@@ -36,6 +36,24 @@ func (s *redisPresenceStore) memberKey(ch, clientID string) string {
 	return fmt.Sprintf("%smember:%s:%s", s.opts.PresencePrefix, ch, clientID)
 }
 
+// presenceRemoveScript atomically removes a member and prunes an index left
+// empty. The DEL-member / SREM / SCARD / DEL-index decision must be one
+// atomic script: the previous read-then-delete sequence (SCard followed by
+// DEL) had a window where a concurrent Add could land between SREM and DEL,
+// producing a member that is "online but invisible" in the index.
+var presenceRemoveScript = redis.NewScript(`
+local index = KEYS[1]
+local member = KEYS[2]
+local client_id = ARGV[1]
+redis.call('DEL', member)
+redis.call('SREM', index, client_id)
+if redis.call('SCARD', index) == 0 then
+  redis.call('DEL', index)
+  return 1
+end
+return 0
+`)
+
 // Add records or refreshes the client's presence with an independent TTL.
 // The index key shares the member TTL so stale indexes cannot outlive their
 // members.
@@ -52,23 +70,16 @@ func (s *redisPresenceStore) Add(ctx context.Context, ch string, info *messagelo
 	return err
 }
 
-// Remove deletes a client's membership entry and channel index reference.
-// An index left empty is removed entirely.
+// Remove deletes a client's membership entry and channel index reference
+// atomically (see presenceRemoveScript). An index left empty is removed
+// entirely.
 func (s *redisPresenceStore) Remove(ctx context.Context, ch, clientID string) error {
-	pipe := s.client.Pipeline()
-	pipe.Del(ctx, s.memberKey(ch, clientID))
-	pipe.SRem(ctx, s.indexKey(ch), clientID)
-	if _, err := pipe.Exec(ctx); err != nil {
-		return err
-	}
-	count, err := s.client.SCard(ctx, s.indexKey(ch)).Result()
-	if err != nil {
-		return err
-	}
-	if count == 0 {
-		return s.client.Del(ctx, s.indexKey(ch)).Err()
-	}
-	return nil
+	return presenceRemoveScript.Run(
+		ctx,
+		s.client,
+		[]string{s.indexKey(ch), s.memberKey(ch, clientID)},
+		clientID,
+	).Err()
 }
 
 // Get returns all currently present clients in ch.

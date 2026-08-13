@@ -1,6 +1,8 @@
-import type { OutboundMessage } from "../../proto/client/v1/service_pb";
+import { fromBinary, toBinary } from "@bufbuild/protobuf";
+import { InboundMessage, InboundMessageSchema, OutboundMessage, OutboundMessageSchema } from "../../proto/client/v1/service_pb";
 import type { Codec } from "./codec";
-import { OutboundMessageSchema } from "../../proto/client/v1/service_pb";
+
+const INBOUND_TYPE = "messageloop.client.v1.InboundMessage";
 
 /**
  * Protobuf codec implementation.
@@ -12,18 +14,20 @@ export class ProtobufCodec implements Codec {
   }
 
   encode(msg: object): Uint8Array {
-    // Use toBinary() if available (protobuf v2 messages have this method)
-    if ("toBinary" in msg && typeof msg.toBinary === "function") {
-      return (msg as any).toBinary();
+    if ((msg as { $typeName?: unknown }).$typeName !== INBOUND_TYPE) {
+      throw new Error("Message does not support binary serialization");
     }
-    throw new Error("Message does not support binary serialization");
+    return toBinary(InboundMessageSchema, msg as InboundMessage);
   }
 
-  decode(data: Uint8Array | string): OutboundMessage {
+  decode(data: Uint8Array | string | Blob): OutboundMessage | Promise<OutboundMessage> {
+    if (data instanceof Blob) {
+      return data
+        .arrayBuffer()
+        .then((buf) => this.decode(new Uint8Array(buf)));
+    }
     const bytes = data instanceof Uint8Array ? data : new TextEncoder().encode(data);
-    // Use fromBinary() with Schema for protobuf v2
-    // Cast to any because TypeScript doesn't recognize the method on GenMessage type
-    return (OutboundMessageSchema as any).fromBinary(bytes) as unknown as OutboundMessage;
+    return fromBinary(OutboundMessageSchema, bytes) as OutboundMessage;
   }
 
   useBytes(): boolean {

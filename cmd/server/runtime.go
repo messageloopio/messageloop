@@ -1,18 +1,13 @@
 package main
 
 import (
-	"context"
 	"time"
 
-	"github.com/lynx-go/lynx"
 	"github.com/messageloopio/messageloop"
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/pkg/grpcstream"
+	"github.com/lynx-go/lynx"
 )
-
-type nodeRunner interface {
-	Run(context.Context) error
-}
 
 type preparedGRPCServers struct {
 	client *grpcstream.Server
@@ -26,6 +21,9 @@ func (s *preparedGRPCServers) Components() []lynx.Service {
 	return []lynx.Service{s.client, s.admin}
 }
 
+// Close releases both pre-bound gRPC listeners. It is invoked from the
+// runner's OnStop hook as a defensive measure so listeners cannot leak even
+// if a component fails to start after prepareGRPCServers.
 func (s *preparedGRPCServers) Close() {
 	if s == nil {
 		return
@@ -79,12 +77,3 @@ func prepareGRPCServers(cfg *config.Config, node *messageloop.Node) (*preparedGR
 
 	return &preparedGRPCServers{client: clientServer, admin: adminServer}, nil
 }
-
-func runNodeWithPreflight(ctx context.Context, runner nodeRunner, preflight func() error) error {
-	if err := preflight(); err != nil {
-		return err
-	}
-	return runner.Run(ctx)
-}
-
-var _ nodeRunner = (*messageloop.Node)(nil)

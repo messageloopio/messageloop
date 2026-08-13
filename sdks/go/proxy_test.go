@@ -155,10 +155,10 @@ func (h *failingLifecycleHandler) OnDisconnected(ctx context.Context, sessionID,
 	return nil
 }
 
-func (h *failingLifecycleHandler) OnSubscribed(ctx context.Context) error {
+func (h *failingLifecycleHandler) OnSubscribed(ctx context.Context, sessionID, channel, username string) error {
 	return nil
 }
 
-func (h *failingLifecycleHandler) OnUnsubscribed(ctx context.Context) error {
+func (h *failingLifecycleHandler) OnUnsubscribed(ctx context.Context, sessionID, channel, username string) error {
 	return nil
 }

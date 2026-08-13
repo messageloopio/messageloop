@@ -404,16 +404,11 @@ func TestHub_RemoveSub(t *testing.T) {
 	}
 }
 
-func TestSubShard_BroadcastPublication(t *testing.T) {
-	shard := newSubShard(0)
-
-	transport1 := &mockTransport{}
-	transport2 := &mockTransport{}
-	client1 := newTestClientWithTransport(t, "session-1", "user-1", transport1)
-	client2 := newTestClientWithTransport(t, "session-2", "user-2", transport2)
-
-	_, _ = shard.addSub("test-channel", Subscriber{Client: client1, Ephemeral: false})
-	_, _ = shard.addSub("test-channel", Subscriber{Client: client2, Ephemeral: false})
+// TestHub_BroadcastPublication covers the Hub-level broadcast (the former
+// subShard-level duplicate implementation was removed); see
+// TestHub_BroadcastPublication below for the subscriber-delivery assertions.
+func TestHub_BroadcastPublication_NoSubscribers(t *testing.T) {
+	h := newHub(0, 0)
 
 	pub := &Publication{
 		Channel: "test-channel",
@@ -422,22 +417,14 @@ func TestSubShard_BroadcastPublication(t *testing.T) {
 		Time:    time.Now().UnixMilli(),
 	}
 
-	err := shard.broadcastPublication("test-channel", pub)
+	err := h.broadcastPublication("test-channel", pub)
 	if err != nil {
 		t.Fatalf("broadcastPublication() error = %v", err)
 	}
-
-	// Check that both clients received a message
-	if transport1.getMessageCount() != 1 {
-		t.Errorf("client1 received %d messages, want 1", transport1.getMessageCount())
-	}
-	if transport2.getMessageCount() != 1 {
-		t.Errorf("client2 received %d messages, want 1", transport2.getMessageCount())
-	}
 }
 
-func TestSubShard_BroadcastPublication_NoSubscribers(t *testing.T) {
-	shard := newSubShard(0)
+func TestHub_BroadcastPublication_ShardLevelNoSubscribers(t *testing.T) {
+	h := newHub(0, 0)
 
 	pub := &Publication{
 		Channel: "test-channel",
@@ -446,7 +433,7 @@ func TestSubShard_BroadcastPublication_NoSubscribers(t *testing.T) {
 		Time:    time.Now().UnixMilli(),
 	}
 
-	err := shard.broadcastPublication("test-channel", pub)
+	err := h.broadcastPublication("test-channel", pub)
 	if err != nil {
 		t.Fatalf("broadcastPublication() error = %v", err)
 	}
@@ -715,6 +702,35 @@ func TestHub_MultipleChannels(t *testing.T) {
 	}
 }
 
+// --- Fix task 11: GetActiveChannels must not list wildcard patterns or
+// double-count exact + wildcard subscriptions ---
+
+func TestHub_GetActiveChannels_ExcludesWildcardPatterns(t *testing.T) {
+	h := newHub(0, 0)
+	transport1 := &mockTransport{}
+	transport2 := &mockTransport{}
+	client1 := newTestClientWithTransport(t, "session-1", "user-1", transport1)
+	client2 := newTestClientWithTransport(t, "session-2", "user-2", transport2)
+
+	require.NoError(t, h.add(client1))
+	require.NoError(t, h.add(client2))
+
+	// client1 subscribes to chat.x exactly and via chat.*; client2 to chat.y.
+	_, err := h.addSub("chat.x", Subscriber{Client: client1, Ephemeral: false})
+	require.NoError(t, err)
+	_, err = h.addSub("chat.*", Subscriber{Client: client1, Ephemeral: false})
+	require.NoError(t, err)
+	_, err = h.addSub("chat.y", Subscriber{Client: client2, Ephemeral: false})
+	require.NoError(t, err)
+
+	channels := h.GetActiveChannels()
+	require.Len(t, channels, 2, "wildcard patterns must not be listed as active channels")
+	assert.Equal(t, "chat.x", channels[0].Name)
+	assert.Equal(t, 1, channels[0].Subscribers, "exact + wildcard subscription must not double-count")
+	assert.Equal(t, "chat.y", channels[1].Name)
+	assert.Equal(t, 1, channels[1].Subscribers)
+}
+
 // --- P1-13: exact + wildcard double subscription must not double-deliver ---
 
 func newTestPublication(channel string, offset uint64) *Publication {
@@ -905,4 +921,50 @@ func TestHub_ReplaceSession_EnforcesMaxConnsPerUser(t *testing.T) {
 	// Same-user replacement stays within the limit and succeeds.
 	sameUser := newTestClientWithTransport(t, "session-1", "user-a", &mockTransport{})
 	require.NoError(t, h.ReplaceSession("session-1", sameUser))
+}
+
+// TestHub_ReplaceSession_FailureKeepsOldSessionIntact guards against the
+// P1-A2 zombie shape: a failed ReplaceSession must not mutate the hub at all.
+// The old session keeps its hub entry, its connShard registration and its
+// subscriptions (they still deliver), and the replacement client is
+// registered nowhere.
+func TestHub_ReplaceSession_FailureKeepsOldSessionIntact(t *testing.T) {
+	h := newHub(0, 1) // 1 connection per user
+
+	transportA := &mockTransport{}
+	clientA := newTestClientWithTransport(t, "session-1", "user-a", transportA)
+	require.NoError(t, h.add(clientA))
+	_, err := h.addSub("zombie-ch", Subscriber{Client: clientA, Ephemeral: false})
+	require.NoError(t, err)
+
+	clientB := newTestClientWithTransport(t, "session-2", "user-b", &mockTransport{})
+	require.NoError(t, h.add(clientB))
+
+	// user-b sits at the limit, so this replacement must fail before any
+	// mutation.
+	replacement := newTestClientWithTransport(t, "session-1", "user-b", &mockTransport{})
+	err = h.ReplaceSession("session-1", replacement)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, DisconnectConnectionLimit)
+
+	// The old session is still fully registered...
+	assert.Same(t, clientA, h.LookupSession("session-1"))
+	shard := h.connShards[index("user-a", numHubShards)]
+	shard.mu.RLock()
+	_, inConnShard := shard.clients["session-1"]
+	shard.mu.RUnlock()
+	assert.True(t, inConnShard, "old session must keep its connShard entry")
+	assert.Equal(t, 1, h.NumSubscribers("zombie-ch"))
+	sub, ok := h.LookupSubscriber("zombie-ch", clientA)
+	require.True(t, ok)
+	assert.Same(t, clientA, sub.Client)
+
+	// ...and still receives deliveries.
+	err = h.broadcastPublication("zombie-ch", newTestPublication("zombie-ch", 1))
+	require.NoError(t, err)
+	assert.Equal(t, 1, transportA.getMessageCount(), "old session must keep receiving deliveries")
+
+	// The replacement client is registered nowhere.
+	assert.Same(t, clientB, h.LookupSession("session-2"))
+	assert.Zero(t, h.NumSubscribers("session-1"))
 }

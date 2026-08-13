@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -10,7 +11,8 @@ import (
 
 // mockRPCProxy is a mock implementation of RPCProxy for testing.
 type mockRPCProxy struct {
-	name string
+	name     string
+	closeErr error
 }
 
 func (m *mockRPCProxy) RPC(ctx context.Context, req *RPCProxyRequest) (*RPCProxyResponse, error) {
@@ -52,7 +54,7 @@ func (m *mockRPCProxy) Name() string {
 }
 
 func (m *mockRPCProxy) Close() error {
-	return nil
+	return m.closeErr
 }
 
 func TestRouter_Add(t *testing.T) {
@@ -254,4 +256,53 @@ func TestRouter_Close(t *testing.T) {
 
 	// After close, routes should be cleared
 	assert.Nil(t, r.Match("channel1", "method1"))
+}
+
+// TestRouter_Close_JoinsErrors verifies that Close aggregates every proxy
+// close error instead of keeping only the last one (P2-7).
+func TestRouter_Close_JoinsErrors(t *testing.T) {
+	r := NewRouter()
+	p1 := &mockRPCProxy{name: "proxy1", closeErr: errors.New("proxy1 close failed")}
+	p2 := &mockRPCProxy{name: "proxy2"}
+	p3 := &mockRPCProxy{name: "proxy3", closeErr: errors.New("proxy3 close failed")}
+
+	require.NoError(t, r.Add(p1, "channel1", "*"))
+	require.NoError(t, r.Add(p2, "channel2", "*"))
+	require.NoError(t, r.Add(p3, "channel3", "*"))
+
+	err := r.Close()
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "proxy1 close failed")
+	assert.ErrorContains(t, err, "proxy3 close failed")
+	assert.Nil(t, r.Match("channel1", "method1"), "routes must be cleared even when close fails")
+}
+
+// TestRouter_AddFromConfig_RollsBackOnFailure verifies that a failed
+// AddFromConfig leaves the router unchanged instead of half-initialized
+// (P2-8): the valid first route must not survive a later compile failure.
+func TestRouter_AddFromConfig_RollsBackOnFailure(t *testing.T) {
+	r := NewRouter()
+	p := &mockRPCProxy{name: "config-proxy"}
+
+	cfg := &ProxyConfig{
+		Name: "test-proxy",
+		Routes: []RouteConfig{
+			{Channel: "user.*", Method: "*"},
+			{Channel: "[invalid", Method: "*"}, // fails to compile
+		},
+	}
+
+	err := r.AddFromConfig(p, cfg)
+	require.Error(t, err)
+
+	// Nothing may have been committed, not even the valid first route.
+	assert.Nil(t, r.Match("user.profile", "get"), "router must stay unchanged when AddFromConfig fails")
+
+	// A subsequent valid call still works.
+	valid := &ProxyConfig{
+		Name:   "test-proxy",
+		Routes: []RouteConfig{{Channel: "user.*", Method: "*"}},
+	}
+	require.NoError(t, r.AddFromConfig(p, valid))
+	assert.Equal(t, "config-proxy", r.Match("user.profile", "get").Name())
 }

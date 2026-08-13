@@ -2,7 +2,7 @@
 
 ## 1. 概述
 
-`@messageloop/sdk` 是 MessageLoop 的官方 TypeScript/JavaScript 客户端 SDK，面向浏览器与 Node.js 的 WebSocket 客户端，源码位于 `sdks/ts/`。当前版本为 `1.0.5`（见 `sdks/ts/package.json`）。
+`@messageloop/sdk` 是 MessageLoop 的官方 TypeScript/JavaScript 客户端 SDK，面向浏览器与 Node.js 的 WebSocket 客户端，源码位于 `sdks/ts/`。当前版本为 `1.1.0`（见 `sdks/ts/package.json`）。
 
 功能范围：
 

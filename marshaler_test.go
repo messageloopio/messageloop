@@ -141,15 +141,15 @@ func TestProtobufMarshaler_Marshal_NonProtoError(t *testing.T) {
 		t.Errorf("Error should be MarshalTypeError, got %T", err)
 	}
 	// Check the error message
-	if err.Error() != "message is not a proto.Message" {
-		t.Errorf("Error message = %v, want %v", err.Error(), "message is not a proto.Message")
+	if err.Error() != "marshal: messageloop.testStruct is not a proto.Message" {
+		t.Errorf("Error message = %v, want %v", err.Error(), "marshal: messageloop.testStruct is not a proto.Message")
 	}
 }
 
 func TestMarshalTypeError_Error(t *testing.T) {
 	err := &MarshalTypeError{Type: "testType"}
-	if got := err.Error(); got != "message is not a proto.Message" {
-		t.Errorf("MarshalTypeError.Error() = %v, want %v", got, "message is not a proto.Message")
+	if got := err.Error(); got != "marshal: string is not a proto.Message" {
+		t.Errorf("MarshalTypeError.Error() = %v, want %v", got, "marshal: string is not a proto.Message")
 	}
 }
 
@@ -172,14 +172,14 @@ func TestProtobufMarshaler_Unmarshal_NonProtoError(t *testing.T) {
 
 func TestUnmarshalTypeError_Error(t *testing.T) {
 	err := &UnmarshalTypeError{Type: "testType"}
-	if got := err.Error(); got != "message is not a proto.Message" {
-		t.Errorf("UnmarshalTypeError.Error() = %v, want %v", got, "message is not a proto.Message")
+	if got := err.Error(); got != "unmarshal: string is not a proto.Message" {
+		t.Errorf("UnmarshalTypeError.Error() = %v, want %v", got, "unmarshal: string is not a proto.Message")
 	}
 }
 
 func TestProtoJSONMarshaler_Name(t *testing.T) {
-	if got := ProtoJSONMarshaler.Name(); got != "json" {
-		t.Errorf("ProtoJSONMarshaler.Name() = %v, want %v", got, "json")
+	if got := ProtoJSONMarshaler.Name(); got != "protojson" {
+		t.Errorf("ProtoJSONMarshaler.Name() = %v, want %v", got, "protojson")
 	}
 }
 
@@ -238,8 +238,8 @@ func TestProtoJSONMarshaler_Unmarshal_NonProtoError(t *testing.T) {
 
 func TestMarshalers(t *testing.T) {
 	marshalers := Marshalers
-	if len(marshalers) != 2 {
-		t.Errorf("len(Marshalers) = %v, want %v", len(marshalers), 2)
+	if len(marshalers) != 3 {
+		t.Errorf("len(Marshalers) = %v, want %v", len(marshalers), 3)
 	}
 
 	// Check that each marshaler implements the interface

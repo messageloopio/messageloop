@@ -162,7 +162,27 @@ func newTestClusterCommandBus(t *testing.T, redisCfg config.RedisConfig, nodeID,
 	t.Cleanup(func() {
 		require.NoError(t, bus.Shutdown(context.Background()))
 	})
+	// Register a live node lease so SendCommand's target-alive pre-check
+	// passes: in production the node lease manager writes it on startup.
+	registerTestNodeLease(t, bus, nodeID, incarnationID)
 	return &testClusterCommandBus{redisClusterCommandBus: bus}
+}
+
+// registerTestNodeLease writes a node lease for the given incarnation using
+// the same key layout as redisSessionDirectory.nodeLeaseKey.
+func registerTestNodeLease(t *testing.T, bus *redisClusterCommandBus, nodeID, incarnationID string) {
+	t.Helper()
+	lease := &messageloop.ClusterNodeLease{
+		NodeID:        nodeID,
+		IncarnationID: incarnationID,
+		StartedAt:     time.Now(),
+		ExpiresAt:     time.Now().Add(time.Hour),
+	}
+	data, err := json.Marshal(lease)
+	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	require.NoError(t, bus.client.Set(ctx, bus.opts.ClusterNodePrefix+nodeID+":"+incarnationID, data, time.Hour).Err())
 }
 
 func (b *testClusterCommandBus) start(t *testing.T, ctx context.Context) {
@@ -520,4 +540,128 @@ func TestClusterCommandBus_HandlerTimeoutWritesTerminalError(t *testing.T) {
 	require.Equal(t, "CLUSTER_COMMAND_TIMEOUT", result.ErrorCode)
 
 	close(releaseHandler)
+}
+
+// TestClusterCommandBus_ReconnectsAfterDisconnect verifies P1-C1: when the
+// request-channel subscription dies unexpectedly, the reader reconnects with
+// backoff and the node keeps processing cluster commands instead of
+// silently stopping until restart.
+func TestClusterCommandBus_ReconnectsAfterDisconnect(t *testing.T) {
+	originalBackoff := clusterCommandReconnectBaseBackoff
+	clusterCommandReconnectBaseBackoff = 100 * time.Millisecond
+	t.Cleanup(func() { clusterCommandReconnectBaseBackoff = originalBackoff })
+
+	redisCfg := requireCommandBusRedis(t)
+	ctx := context.Background()
+
+	receiver := newTestClusterCommandBus(t, redisCfg, "node-a", "inc-a")
+	sender := newTestClusterCommandBus(t, redisCfg, "node-b", "inc-b")
+
+	var handled atomic.Int32
+	receiver.SetHandler(func(context.Context, *messageloop.ClusterCommand) (*messageloop.ClusterCommandResult, error) {
+		handled.Add(1)
+		return &messageloop.ClusterCommandResult{Status: messageloop.ClusterCommandStatusSucceeded}, nil
+	})
+	receiver.start(t, ctx)
+
+	sendOnce := func(commandID string) {
+		t.Helper()
+		result, err := sender.SendCommand(ctx, testClusterCommand(commandID, "node-a", "inc-a"))
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		require.Equal(t, messageloop.ClusterCommandStatusSucceeded, result.Status)
+	}
+
+	// First round-trip works.
+	sendOnce("reconnect-1")
+	require.EqualValues(t, 1, handled.Load())
+
+	// Simulate an unexpected disconnect by closing the reader's subscription.
+	receiver.mu.RLock()
+	oldPubSub := receiver.pubsub
+	receiver.mu.RUnlock()
+	require.NotNil(t, oldPubSub)
+	require.NoError(t, oldPubSub.Close())
+
+	// Wait until the reader has torn down the old subscription and reconnected
+	// with a fresh one.
+	require.Eventually(t, func() bool {
+		receiver.mu.RLock()
+		current := receiver.pubsub
+		receiver.mu.RUnlock()
+		return current != nil && current != oldPubSub
+	}, 10*time.Second, 25*time.Millisecond)
+	require.GreaterOrEqual(t, receiver.disconnects.Load(), uint64(1),
+		"the unexpected disconnect must be counted")
+
+	// A command sent after the reconnect must be handled again.
+	sendOnce("reconnect-2")
+	require.EqualValues(t, 2, handled.Load())
+
+	// A graceful Shutdown must not reconnect.
+	require.NoError(t, receiver.Shutdown(context.Background()))
+	require.NoError(t, sender.Shutdown(context.Background()))
+}
+
+// TestClusterCommandBus_DeadlineAndClosedReplyChannelYieldsUnknownFinalState
+// verifies P1-C5: when the command deadline fires at the exact moment the
+// reply channel closes (both select arms ready), the timeout resolution must
+// win and the caller observes UnknownFinalState — never a hard error.
+func TestClusterCommandBus_DeadlineAndClosedReplyChannelYieldsUnknownFinalState(t *testing.T) {
+	redisCfg := requireCommandBusRedis(t)
+
+	bus := newTestClusterCommandBus(t, redisCfg, "node-a", "inc-a")
+	cmd := testClusterCommand("deadline-race", "node-a", "inc-a")
+
+	expired, cancel := context.WithTimeout(context.Background(), -time.Millisecond)
+	defer cancel()
+	replies := make(chan *redis.Message)
+	close(replies)
+
+	result, err := bus.waitForReply(expired, cmd, replies)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, messageloop.ClusterCommandStatusUnknownFinalState, result.Status,
+		"an expired deadline with a simultaneously closed reply channel must resolve as unknown final state")
+	require.Equal(t, "UNKNOWN_FINAL_STATE", result.ErrorCode)
+}
+
+// TestClusterCommandBus_ReplyChannelClosedWithoutDeadlineReturnsError verifies
+// the non-deadline counterpart of the P1-C5 race: a reply channel that closes
+// while the context is still live is still a hard error (the caller is not
+// inside a timeout).
+func TestClusterCommandBus_ReplyChannelClosedWithoutDeadlineReturnsError(t *testing.T) {
+	bus := &redisClusterCommandBus{}
+	cmd := &messageloop.ClusterCommand{CommandID: "closed-without-deadline"}
+
+	replies := make(chan *redis.Message)
+	close(replies)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	_, err := bus.waitForReply(ctx, cmd, replies)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "reply channel closed")
+}
+
+// TestClusterCommandBus_SendCommandFailsFastWhenTargetNotAlive verifies
+// P2-12: SendCommand fails immediately with TARGET_NODE_NOT_ALIVE when the
+// target incarnation holds no live node lease, instead of burning the full
+// command deadline.
+func TestClusterCommandBus_SendCommandFailsFastWhenTargetNotAlive(t *testing.T) {
+	redisCfg := requireCommandBusRedis(t)
+	ctx := context.Background()
+
+	// Sender only: no lease is registered for "node-dead"/"inc-dead".
+	sender := newTestClusterCommandBus(t, redisCfg, "node-b", "inc-b")
+
+	start := time.Now()
+	result, err := sender.SendCommand(ctx, testClusterCommand("dead-target", "node-dead", "inc-dead"))
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, messageloop.ClusterCommandStatusFailed, result.Status)
+	require.Equal(t, "TARGET_NODE_NOT_ALIVE", result.ErrorCode)
+	require.Less(t, time.Since(start), 2*time.Second,
+		"the dead-target failure must be immediate, not after the command deadline")
 }

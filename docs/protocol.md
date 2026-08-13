@@ -69,6 +69,7 @@ Envelope types:
 | `publish_ack` | PublishAck | Publish confirmed with offset |
 | `publication` | Publication | Messages delivered to subscriber |
 | `rpc_reply` | RpcReply | RPC response from backend |
+| `sub_refresh_ack` | SubRefreshAck | SubRefresh acknowledged (subscriptions re-validated) |
 | `pong` | Pong | Keepalive response |
 | `error` | Error | Error notification |
 | `survey_request` | SurveyRequest | Incoming survey from another client |
@@ -343,16 +344,17 @@ When the server closes a connection, it sends a disconnect with a numeric code. 
 | 3000 | ConnectionClosed | Yes | Clean disconnect or network loss; the server cannot distinguish the two |
 | 3500 | InvalidToken | Yes | Invalid token, or missing token when `require_auth` is enabled |
 | 3501 | BadRequest | Yes | Malformed protocol frame (e.g. second Connect on an authenticated connection) |
-| 3502 | Stale | Yes | Connection did not authenticate within the configured interval |
+| 3502 | Stale | Yes | Cluster session resume failed (remote session lease CAS claim failed, or resume/takeover rollback) |
 | 3503 | ForceNoReconnect | No | Server requires the client not to reconnect (e.g. shutdown drain) |
 | 3504 | ConnectionLimit | Yes | Per-user connection limit exceeded |
 | 3505 | ChannelLimit | Yes | Per-client subscription limit exceeded |
-| 3506 | InappropriateProtocol | Yes | Transport cannot carry the data (e.g. binary data to a JSON client) |
-| 3507 | PermissionDenied | Yes | Not enough permissions |
-| 3508 | NotAvailable | Yes | Server cannot process the message type |
-| 3509 | TooManyErrors | Yes | Client produced too many errors |
+| 3506 | InappropriateProtocol | Yes | Transport cannot carry the data (e.g. binary data to a JSON client). Reserved definition; no current trigger point |
+| 3507 | PermissionDenied | Yes | Not enough permissions. Reserved definition; no current trigger point |
+| 3508 | NotAvailable | Yes | Server cannot process the message type. Reserved definition; no current trigger point |
+| 3509 | TooManyErrors | Yes | Client produced too many errors. Reserved definition; no current trigger point |
 | 3511 | IdleTimeout | Yes | No activity within the heartbeat idle timeout |
 | 3512 | SlowConsumer | Yes | Client cannot consume messages fast enough |
+| 3513 | Internal | Yes | Connect path internal error (e.g. cluster state sync failed), connection forced closed (`disconnectOnConnectError`, `client.go`) |
 
 ## Channel Naming
 

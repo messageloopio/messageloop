@@ -182,3 +182,66 @@ func TestACLEngine_EntryWithoutAllowListDoesNotOverride(t *testing.T) {
 		t.Error("expected publish allowed by last publish allow rule")
 	}
 }
+
+// --- Fix task 10: segment-based wildcard semantics consistent with the
+// subscription matcher ("*" = one segment, "**" = zero or more) ---
+
+func TestMatchChannelPattern(t *testing.T) {
+	tests := []struct {
+		name    string
+		pattern string
+		channel string
+		want    bool
+	}{
+		{"exact", "chat.room", "chat.room", true},
+		{"exact differs", "chat.room", "chat.room2", false},
+		{"single star one segment", "chat.*", "chat.room", true},
+		{"single star not multi-segment", "chat.*", "chat.room.sub", false},
+		{"single star not empty", "chat.*", "chat", false},
+		{"double star matches multi-segment", "chat.**", "chat.room.sub", true},
+		{"double star matches one segment", "chat.**", "chat.room", true},
+		{"double star matches prefix only", "chat.**", "chat", true},
+		{"double star requires prefix", "chat.**", "other.room", false},
+		{"double star matches zero segments anywhere", "a.**.b", "a.b", true},
+		{"double star consumes middle", "a.**.b", "a.x.y.b", true},
+		{"leading double star", "**.x", "a.b.x", true},
+		{"global star", "*", "room", true},
+		{"global star not multi-segment", "*", "a.b", false},
+		{"global double star", "**", "a.b.c", true},
+		{"presence sub-channel matched by chat.*", "chat.*", "chat.room/__presence", true},
+		{"presence sub-channel matched by chat.**", "chat.**", "chat.room/__presence", true},
+		{"extra pattern segment", "chat.room.extra", "chat.room", false},
+		{"extra channel segment", "chat.room", "chat.room.extra", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := matchChannelPattern(tt.pattern, tt.channel); got != tt.want {
+				t.Errorf("matchChannelPattern(%q, %q) = %v, want %v", tt.pattern, tt.channel, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestACLEngine_StarIsSingleSegment locks the matcher-consistent semantics at
+// the engine level: a "chat.*" deny must not cover deeper channels, while a
+// "log.**" deny covers the whole subtree including the bare prefix.
+func TestACLEngine_StarIsSingleSegment(t *testing.T) {
+	engine := NewACLEngine([]ACLRule{
+		{ChannelPattern: "chat.*", DenyAll: true},
+		{ChannelPattern: "log.**", DenyAll: true},
+	})
+
+	if engine.CanSubscribe("chat.room", "user-1") {
+		t.Error("chat.* must match chat.room")
+	}
+	if !engine.CanSubscribe("chat.room.sub", "user-1") {
+		t.Error("chat.* must not match chat.room.sub (single-segment wildcard)")
+	}
+	if engine.CanSubscribe("log.a.b.c", "user-1") {
+		t.Error("log.** must match log.a.b.c")
+	}
+	if engine.CanSubscribe("log", "user-1") {
+		t.Error("log.** must match log itself")
+	}
+}

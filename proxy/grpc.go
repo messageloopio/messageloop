@@ -41,8 +41,16 @@ func NewGRPCProxy(cfg *ProxyConfig) (*GRPCProxy, error) {
 	if cfg.GRPC.Insecure {
 		dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	} else {
-		// For secure connections, use TLS with system CA pool
-		dialOpts = append(dialOpts, grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{})))
+		// For secure connections, use TLS with system CA pool and the
+		// optional overrides from the config.
+		tlsConfig := &tls.Config{}
+		if cfg.GRPC.ServerName != "" {
+			tlsConfig.ServerName = cfg.GRPC.ServerName
+		}
+		if cfg.GRPC.InsecureSkipVerify {
+			tlsConfig.InsecureSkipVerify = true
+		}
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 	}
 
 	conn, err := grpc.NewClient(cfg.Endpoint, dialOpts...)

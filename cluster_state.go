@@ -57,17 +57,26 @@ type ClusterSubscriptionSnapshot struct {
 
 // ClusterSessionSnapshot stores resumable state for a client session.
 type ClusterSessionSnapshot struct {
-	SessionID      string                        `json:"session_id"`
-	UserID         string                        `json:"user_id,omitempty"`
-	ClientID       string                        `json:"client_id,omitempty"`
-	Authenticated  bool                          `json:"authenticated"`
-	Protocol       string                        `json:"protocol,omitempty"`
-	ConnectedAt    int64                         `json:"connected_at,omitempty"`
-	Subscriptions  []ClusterSubscriptionSnapshot `json:"subscriptions,omitempty"`
-	ChannelOffsets map[string]uint64             `json:"channel_offsets,omitempty"`
-	BrokerEpoch    string                        `json:"broker_epoch,omitempty"`
-	AuthContext    map[string]string             `json:"auth_context,omitempty"`
-	UpdatedAt      time.Time                     `json:"updated_at"`
+	SessionID     string                        `json:"session_id"`
+	UserID        string                        `json:"user_id,omitempty"`
+	ClientID      string                        `json:"client_id,omitempty"`
+	Authenticated bool                          `json:"authenticated"`
+	Protocol      string                        `json:"protocol,omitempty"`
+	ConnectedAt   int64                         `json:"connected_at,omitempty"`
+	Subscriptions []ClusterSubscriptionSnapshot `json:"subscriptions,omitempty"`
+	// ChannelOffsets is reserved for per-channel delivery tracking that would
+	// enable exact cross-node resume (each channel's last delivered offset).
+	// It is NOT populated yet: the hub does not record per-channel delivered
+	// offsets, so cross-node resume falls back to the client's own reported
+	// offsets. Filling it requires per-channel delivery accounting in the hub
+	// broadcast path (future work).
+	ChannelOffsets map[string]uint64 `json:"channel_offsets,omitempty"`
+	// BrokerEpoch is the cluster-wide broker epoch at snapshot time; it lets
+	// the resuming node detect that the broker's history was invalidated
+	// (epoch change forces full recovery).
+	BrokerEpoch string            `json:"broker_epoch,omitempty"`
+	AuthContext map[string]string `json:"auth_context,omitempty"`
+	UpdatedAt   time.Time         `json:"updated_at"`
 }
 
 // ClusterChannelInfo describes one shared subscription key projection.
@@ -307,7 +316,7 @@ func (n *Node) clusterSessionSnapshot(client *Client) *ClusterSessionSnapshot {
 		subscriptions = append(subscriptions, ClusterSubscriptionSnapshot{Channel: channel, Ephemeral: ephemeral})
 	}
 
-	return &ClusterSessionSnapshot{
+	snapshot := &ClusterSessionSnapshot{
 		SessionID:     sessionID,
 		UserID:        userID,
 		ClientID:      clientID,
@@ -315,6 +324,8 @@ func (n *Node) clusterSessionSnapshot(client *Client) *ClusterSessionSnapshot {
 		Protocol:      protocol,
 		ConnectedAt:   connectedAt,
 		Subscriptions: subscriptions,
+		// BrokerEpoch lets the resuming node detect broker history
+		// invalidation across the resume (see the field comment).
 		AuthContext: map[string]string{
 			"user_id":   userID,
 			"client_id": clientID,
@@ -322,6 +333,10 @@ func (n *Node) clusterSessionSnapshot(client *Client) *ClusterSessionSnapshot {
 		},
 		UpdatedAt: time.Now(),
 	}
+	if epochBroker, ok := n.broker.(interface{ Epoch() string }); ok {
+		snapshot.BrokerEpoch = epochBroker.Epoch()
+	}
+	return snapshot
 }
 
 // ClusterNodeLeaseManagerConfig configures the generic node lease renewer.

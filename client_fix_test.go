@@ -1087,3 +1087,751 @@ func TestClient_Recovery_PreservesPayloadType(t *testing.T) {
 	require.IsType(t, &sharedpb.Payload_Text{}, payload.Data, "recovered payload must keep the text variant")
 	require.Equal(t, "m2", payload.GetText())
 }
+
+// --- Fix task 1 (P0-7): ephemeral subscriptions must not register presence
+// or publish join/leave events ---
+
+// presenceEventObserver subscribes to a channel's presence sub-channel and
+// counts the join/leave events it receives.
+type presenceEventObserver struct {
+	transport *capturingTransport
+	client    *Client
+}
+
+func newPresenceEventObserver(t *testing.T, node *Node, channel string) *presenceEventObserver {
+	t.Helper()
+	ctx := context.Background()
+	transport := &capturingTransport{}
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
+	require.NoError(t, err)
+	connectMsg := &clientpb.InboundMessage{
+		Id:       "obs-connect",
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: "presence-observer"}},
+	}
+	require.NoError(t, client.HandleMessage(ctx, connectMsg))
+	subMsg := &clientpb.InboundMessage{
+		Id: "obs-sub",
+		Envelope: &clientpb.InboundMessage_Subscribe{
+			Subscribe: &clientpb.Subscribe{
+				Subscriptions: []*clientpb.Subscription{{Channel: presenceChannel(channel)}},
+			},
+		},
+	}
+	require.NoError(t, client.HandleMessage(ctx, subMsg))
+	transport.messages = nil
+	return &presenceEventObserver{transport: transport, client: client}
+}
+
+// eventCount returns the number of presence events received since the last
+// reset.
+func (o *presenceEventObserver) eventCount() int {
+	count := 0
+	for i := 0; i < o.transport.getMessageCount(); i++ {
+		var out clientpb.OutboundMessage
+		err := (JSONMarshaler{}).Unmarshal(o.transport.getMessage(i), &out)
+		if err != nil {
+			continue
+		}
+		pub := out.GetPublication()
+		if pub == nil {
+			continue
+		}
+		for _, msg := range pub.GetMessages() {
+			if msg.GetPayload().GetText() != "" {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+func TestClient_EphemeralSubscription_NoPresenceOrEvents(t *testing.T) {
+	ctx := context.Background()
+	node := NewNode(nil)
+	_ = node.Run(ctx)
+
+	const ch = "ephemeral-ch"
+	observer := newPresenceEventObserver(t, node, ch)
+
+	transport := &capturingTransport{}
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
+	require.NoError(t, err)
+
+	// Connect with an ephemeral subscription.
+	connectMsg := &clientpb.InboundMessage{
+		Id: "msg-1",
+		Envelope: &clientpb.InboundMessage_Connect{
+			Connect: &clientpb.Connect{
+				ClientId: "client-1",
+				Subscriptions: []*clientpb.Subscription{
+					{Channel: ch, Ephemeral: true},
+				},
+			},
+		},
+	}
+	require.NoError(t, client.HandleMessage(ctx, connectMsg))
+
+	// The subscription exists (messages are delivered)...
+	assert.Equal(t, 1, node.Hub().NumSubscribers(ch))
+	// ...but no presence record and no join event.
+	presence, err := node.Presence(ctx, ch)
+	require.NoError(t, err)
+	assert.Empty(t, presence, "ephemeral subscription must not register presence")
+	time.Sleep(50 * time.Millisecond) // presence events are published async
+	assert.Zero(t, observer.eventCount(), "ephemeral connect subscription must not publish a join event")
+
+	// An ephemeral Subscribe must behave the same.
+	subMsg := &clientpb.InboundMessage{
+		Id: "msg-2",
+		Envelope: &clientpb.InboundMessage_Subscribe{
+			Subscribe: &clientpb.Subscribe{
+				Subscriptions: []*clientpb.Subscription{{Channel: ch + "-2", Ephemeral: true}},
+			},
+		},
+	}
+	require.NoError(t, client.HandleMessage(ctx, subMsg))
+	assert.Equal(t, 1, node.Hub().NumSubscribers(ch+"-2"))
+	presence, err = node.Presence(ctx, ch+"-2")
+	require.NoError(t, err)
+	assert.Empty(t, presence)
+	time.Sleep(50 * time.Millisecond)
+	assert.Zero(t, observer.eventCount(), "ephemeral subscribe must not publish a join event")
+
+	// Unsubscribing an ephemeral channel must not publish a leave event.
+	unsubMsg := &clientpb.InboundMessage{
+		Id: "msg-3",
+		Envelope: &clientpb.InboundMessage_Unsubscribe{
+			Unsubscribe: &clientpb.Unsubscribe{
+				Subscriptions: []*clientpb.Subscription{{Channel: ch + "-2"}},
+			},
+		},
+	}
+	require.NoError(t, client.HandleMessage(ctx, unsubMsg))
+	time.Sleep(50 * time.Millisecond)
+	assert.Zero(t, observer.eventCount(), "ephemeral unsubscribe must not publish a leave event")
+
+	// Closing a client with only ephemeral subscriptions must not publish
+	// leave events either.
+	require.NoError(t, client.Close(Disconnect{}))
+	time.Sleep(50 * time.Millisecond)
+	assert.Zero(t, observer.eventCount(), "close of ephemeral subscriptions must not publish leave events")
+	assert.Zero(t, node.Hub().NumSubscribers(ch))
+}
+
+// Control test: a non-ephemeral subscription registers presence and publishes
+// join/leave events, proving the observer above is wired correctly.
+func TestClient_NonEphemeralSubscription_PresenceAndEvents(t *testing.T) {
+	ctx := context.Background()
+	node := NewNode(nil)
+	_ = node.Run(ctx)
+
+	const ch = "plain-ch"
+	observer := newPresenceEventObserver(t, node, ch)
+
+	transport := &capturingTransport{}
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
+	require.NoError(t, err)
+	connectMsg := &clientpb.InboundMessage{
+		Id: "msg-1",
+		Envelope: &clientpb.InboundMessage_Connect{
+			Connect: &clientpb.Connect{
+				ClientId: "client-1",
+				Subscriptions: []*clientpb.Subscription{
+					{Channel: ch},
+				},
+			},
+		},
+	}
+	require.NoError(t, client.HandleMessage(ctx, connectMsg))
+
+	presence, err := node.Presence(ctx, ch)
+	require.NoError(t, err)
+	require.Len(t, presence, 1, "non-ephemeral subscription must register presence")
+	require.Eventually(t, func() bool { return observer.eventCount() == 1 }, time.Second, 10*time.Millisecond,
+		"non-ephemeral subscription must publish one join event")
+
+	unsubMsg := &clientpb.InboundMessage{
+		Id: "msg-2",
+		Envelope: &clientpb.InboundMessage_Unsubscribe{
+			Unsubscribe: &clientpb.Unsubscribe{
+				Subscriptions: []*clientpb.Subscription{{Channel: ch}},
+			},
+		},
+	}
+	require.NoError(t, client.HandleMessage(ctx, unsubMsg))
+	require.Eventually(t, func() bool { return observer.eventCount() == 2 }, time.Second, 10*time.Millisecond,
+		"non-ephemeral unsubscribe must publish one leave event")
+}
+
+// --- Fix task 2 (P1-A1): a failed connect must disconnect, never leave a
+// half-open connection ---
+
+// TestClient_Connect_AddClientClusterSyncFailureDisconnects simulates a
+// cluster session sync failure inside AddClient: the connection must be
+// closed with DisconnectInternal, not left half-open.
+func TestClient_Connect_AddClientClusterSyncFailureDisconnects(t *testing.T) {
+	ctx := context.Background()
+	directory := &fakeSessionDirectory{putLeaseErr: errors.New("redis down")}
+	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-a", IncarnationID: "inc-a", Backend: "memory"}, ClusterDependencies{
+		SessionDirectory: directory,
+		CommandBus:       &fakeClusterCommandBus{},
+		QueryStore:       fakeQueryStore{},
+	})
+	require.NoError(t, err)
+
+	node := NewNode(&config.Server{RequireAuth: true})
+	node.SetCluster(runtime)
+	authProxy := &connectAuthProxyStub{userID: "user-1"}
+	require.NoError(t, node.AddProxy(authProxy, "", SystemMethodAuthenticate))
+
+	transport := &capturingTransport{}
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
+	require.NoError(t, err)
+
+	msg := &clientpb.InboundMessage{
+		Id: "msg-1",
+		Envelope: &clientpb.InboundMessage_Connect{
+			Connect: &clientpb.Connect{ClientId: "client-1", Token: "t"},
+		},
+	}
+	err = client.HandleMessage(ctx, msg)
+	require.Error(t, err, "the cluster sync failure must surface as an error")
+
+	// The connection must be closed with the internal-error code...
+	require.True(t, transport.isClosed(), "connect failure must close the transport")
+	assert.Equal(t, DisconnectInternal.Code, transport.getCloseReason().Code)
+	// ...and no half-registered state may remain in the hub.
+	assert.Nil(t, node.Hub().LookupSession(client.SessionID()))
+}
+
+// TestClient_Connect_RemoteResumeFailureDisconnects simulates a remote resume
+// that fails with a plain error (lease store unreachable): the connection
+// must be closed instead of remaining half-open.
+func TestClient_Connect_RemoteResumeFailureDisconnects(t *testing.T) {
+	ctx := context.Background()
+	directory := &failingGetLeaseDirectory{err: errors.New("lease store down")}
+	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-a", IncarnationID: "inc-a", Backend: "memory"}, ClusterDependencies{
+		SessionDirectory: directory,
+		CommandBus:       &fakeClusterCommandBus{},
+		QueryStore:       fakeQueryStore{},
+	})
+	require.NoError(t, err)
+
+	node := NewNode(&config.Server{RequireAuth: true})
+	node.SetCluster(runtime)
+	authProxy := &connectAuthProxyStub{userID: "user-1"}
+	require.NoError(t, node.AddProxy(authProxy, "", SystemMethodAuthenticate))
+
+	transport := &capturingTransport{}
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
+	require.NoError(t, err)
+
+	msg := &clientpb.InboundMessage{
+		Id: "msg-1",
+		Envelope: &clientpb.InboundMessage_Connect{
+			Connect: &clientpb.Connect{ClientId: "client-1", Token: "t", SessionId: "sess-remote"},
+		},
+	}
+	err = client.HandleMessage(ctx, msg)
+	require.Error(t, err, "the remote resume failure must surface as an error")
+
+	require.True(t, transport.isClosed())
+	assert.Equal(t, DisconnectInternal.Code, transport.getCloseReason().Code)
+	assert.Nil(t, node.Hub().LookupSession("sess-remote"))
+}
+
+// userPerClientAuthProxy authenticates every client as "user-<client-id>".
+type userPerClientAuthProxy struct {
+	connectAuthProxyStub
+}
+
+func (m *userPerClientAuthProxy) Authenticate(_ context.Context, req *proxy.AuthenticateProxyRequest) (*proxy.AuthenticateProxyResponse, error) {
+	return &proxy.AuthenticateProxyResponse{UserInfo: &proxy.UserInfo{ID: "user-" + req.ClientID}}, nil
+}
+
+// TestClient_Connect_ResumeAtUserLimit_NoZombie documents the P1-A2 failure
+// shape: the old session's transport is closed quietly (closeQuiet ran)
+// before the hub replaces the session. The connect path inherits the old
+// session's user before ReplaceSession, so the per-user limit can never
+// reject a resume (same-user replacement keeps the count unchanged); the
+// hub-level rejection is exercised directly in
+// TestHub_ReplaceSession_FailureKeepsOldSessionIntact. Here we verify the
+// resume leaves no zombie: the old session is fully replaced, its
+// subscription follows the session, and the old transport stays closed.
+func TestClient_Connect_ResumeAtUserLimit_NoZombie(t *testing.T) {
+	ctx := context.Background()
+	node := NewNode(&config.Server{RequireAuth: true, Limits: config.Limits{MaxConnectionsPerUser: 1}})
+	authProxy := &userPerClientAuthProxy{}
+	require.NoError(t, node.AddProxy(authProxy, "", SystemMethodAuthenticate))
+
+	// A (user-a) connects and subscribes.
+	transportA := &capturingTransport{}
+	clientA, _, err := NewClient(ctx, node, transportA, JSONMarshaler{})
+	require.NoError(t, err)
+	connectA := &clientpb.InboundMessage{
+		Id: "msg-a1",
+		Envelope: &clientpb.InboundMessage_Connect{
+			Connect: &clientpb.Connect{ClientId: "a", Token: "t"},
+		},
+	}
+	require.NoError(t, clientA.HandleMessage(ctx, connectA))
+	sessionA := clientA.SessionID()
+	subA := &clientpb.InboundMessage{
+		Id: "msg-a2",
+		Envelope: &clientpb.InboundMessage_Subscribe{
+			Subscribe: &clientpb.Subscribe{
+				Subscriptions: []*clientpb.Subscription{{Channel: "zombie-ch"}},
+			},
+		},
+	}
+	require.NoError(t, clientA.HandleMessage(ctx, subA))
+	require.Equal(t, 1, node.Hub().NumSubscribers("zombie-ch"))
+
+	// B (user-b) occupies the only slot of its user.
+	transportB := &capturingTransport{}
+	clientB, _, err := NewClient(ctx, node, transportB, JSONMarshaler{})
+	require.NoError(t, err)
+	connectB := &clientpb.InboundMessage{
+		Id: "msg-b1",
+		Envelope: &clientpb.InboundMessage_Connect{
+			Connect: &clientpb.Connect{ClientId: "b", Token: "t"},
+		},
+	}
+	require.NoError(t, clientB.HandleMessage(ctx, connectB))
+	sessionB := clientB.SessionID()
+
+	// C (user-a) resumes A's session. The resume inherits user-a, so the
+	// per-user limit of 1 does not reject it (same-user replacement keeps the
+	// count unchanged); the session must be replaced cleanly.
+	transportC := &capturingTransport{}
+	clientC, _, err := NewClient(ctx, node, transportC, JSONMarshaler{})
+	require.NoError(t, err)
+	resumeC := &clientpb.InboundMessage{
+		Id: "msg-c1",
+		Envelope: &clientpb.InboundMessage_Connect{
+			Connect: &clientpb.Connect{ClientId: "a", Token: "t", SessionId: sessionA},
+		},
+	}
+	require.NoError(t, clientC.HandleMessage(ctx, resumeC))
+
+	// The replacement connection stays up and owns the session...
+	require.False(t, transportC.isClosed())
+	assert.Same(t, clientC, node.Hub().LookupSession(sessionA), "the session must be replaced by the new client")
+	// ...the subscription followed the session (deliveries reach the new
+	// client, not a zombie)...
+	assert.Equal(t, 1, node.Hub().NumSubscribers("zombie-ch"))
+	sub, ok := node.Hub().LookupSubscriber("zombie-ch", clientC)
+	require.True(t, ok)
+	assert.Same(t, clientC, sub.Client)
+	// ...and the old transport was closed quietly, never re-registered.
+	assert.True(t, transportA.isClosed(), "the old session transport was closed quietly")
+
+	// The unrelated B session is untouched.
+	assert.Same(t, clientB, node.Hub().LookupSession(sessionB))
+	assert.False(t, transportB.isClosed())
+}
+
+// TestClient_Connect_ResumeReplaceFailure_RollsBackOldSession exercises the
+// P1-A2 rollback path at the client level: when a resume fails at
+// ReplaceSession because the authenticating user already sits at the per-user
+// connection limit, the old session's subscriptions, presence, hub entry and
+// cluster state must all be cleaned up per the client.go rollback path — no
+// zombie may remain.
+func TestClient_Connect_ResumeReplaceFailure_RollsBackOldSession(t *testing.T) {
+	ctx := context.Background()
+	directory := &recordingSessionDirectory{fakeSessionDirectory: &fakeSessionDirectory{}}
+	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-a", IncarnationID: "inc-a", Backend: "memory"}, ClusterDependencies{
+		SessionDirectory: directory,
+		CommandBus:       &fakeClusterCommandBus{},
+		QueryStore:       fakeQueryStore{},
+	})
+	require.NoError(t, err)
+
+	node := NewNode(&config.Server{RequireAuth: true, Limits: config.Limits{MaxConnectionsPerUser: 1}})
+	node.SetCluster(runtime)
+	authProxy := &userPerClientAuthProxy{}
+	require.NoError(t, node.AddProxy(authProxy, "", SystemMethodAuthenticate))
+
+	// A (user-a) connects, subscribes and owns presence plus cluster state.
+	transportA := &capturingTransport{}
+	clientA, _, err := NewClient(ctx, node, transportA, JSONMarshaler{})
+	require.NoError(t, err)
+	connectA := &clientpb.InboundMessage{
+		Id: "msg-a1",
+		Envelope: &clientpb.InboundMessage_Connect{
+			Connect: &clientpb.Connect{ClientId: "a", Token: "t"},
+		},
+	}
+	require.NoError(t, clientA.HandleMessage(ctx, connectA))
+	sessionA := clientA.SessionID()
+	subA := &clientpb.InboundMessage{
+		Id: "msg-a2",
+		Envelope: &clientpb.InboundMessage_Subscribe{
+			Subscribe: &clientpb.Subscribe{
+				Subscriptions: []*clientpb.Subscription{{Channel: "zombie-ch"}},
+			},
+		},
+	}
+	require.NoError(t, clientA.HandleMessage(ctx, subA))
+	require.Equal(t, 1, node.Hub().NumSubscribers("zombie-ch"))
+	present, err := node.presence.Get(ctx, "zombie-ch")
+	require.NoError(t, err)
+	require.Contains(t, present, sessionA, "the old session must own presence before the failed resume")
+
+	// B (user-b) occupies the only slot of its user.
+	transportB := &capturingTransport{}
+	clientB, _, err := NewClient(ctx, node, transportB, JSONMarshaler{})
+	require.NoError(t, err)
+	connectB := &clientpb.InboundMessage{
+		Id: "msg-b1",
+		Envelope: &clientpb.InboundMessage_Connect{
+			Connect: &clientpb.Connect{ClientId: "b", Token: "t"},
+		},
+	}
+	require.NoError(t, clientB.HandleMessage(ctx, connectB))
+	sessionB := clientB.SessionID()
+
+	// C authenticates as user-b (at its connection limit) and tries to resume
+	// A's session: the authenticated user overrides the inherited one, so
+	// ReplaceSession must fail with DisconnectConnectionLimit.
+	transportC := &capturingTransport{}
+	clientC, _, err := NewClient(ctx, node, transportC, JSONMarshaler{})
+	require.NoError(t, err)
+	resumeC := &clientpb.InboundMessage{
+		Id: "msg-c1",
+		Envelope: &clientpb.InboundMessage_Connect{
+			Connect: &clientpb.Connect{ClientId: "b", Token: "t", SessionId: sessionA},
+		},
+	}
+	require.NoError(t, clientC.HandleMessage(ctx, resumeC))
+
+	// The new connection is closed with the connection-limit code...
+	require.True(t, transportC.isClosed())
+	assert.Equal(t, DisconnectConnectionLimit.Code, transportC.getCloseReason().Code)
+
+	// ...and the old session is fully evicted: no hub entry, no subscription,
+	// no presence, no cluster state.
+	assert.Nil(t, node.Hub().LookupSession(sessionA), "the failed resume must evict the old session")
+	assert.Zero(t, node.Hub().NumSubscribers("zombie-ch"), "the old session's subscription must be removed")
+	present, err = node.presence.Get(ctx, "zombie-ch")
+	require.NoError(t, err)
+	assert.Empty(t, present, "the old session's presence must be removed")
+	assert.True(t, directory.deletedLease, "the old session's lease must be deleted")
+	assert.True(t, directory.deletedSnapshot, "the old session's snapshot must be deleted")
+
+	// The unrelated B session is untouched.
+	assert.Same(t, clientB, node.Hub().LookupSession(sessionB))
+	assert.False(t, transportB.isClosed())
+}
+
+// failingGetLeaseDirectory makes GetSessionLease fail, simulating an
+// unreachable lease store during a remote resume.
+type failingGetLeaseDirectory struct {
+	*fakeSessionDirectory
+	err error
+}
+
+func (f *failingGetLeaseDirectory) GetSessionLease(context.Context, string) (*ClusterSessionLease, error) {
+	return nil, f.err
+}
+
+// --- Fix task 4 (P1-A3): close() must not leak subscriptions added by a
+// concurrent Subscribe ---
+
+func TestNode_AddSubscription_RejectedWhenClientClosed(t *testing.T) {
+	ctx := context.Background()
+	node := NewNode(nil)
+	transport := &capturingTransport{}
+
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
+	require.NoError(t, err)
+	require.NoError(t, client.Close(Disconnect{}))
+
+	err = node.AddSubscription(ctx, "closed-ch", NewSubscriber(client, false))
+	require.Error(t, err, "subscribing a closed client must fail")
+	assert.Zero(t, node.Hub().NumSubscribers("closed-ch"))
+	assert.Empty(t, client.subscriptionList())
+}
+
+func TestClient_Close_ConcurrentSubscribe_NoLeak(t *testing.T) {
+	ctx := context.Background()
+	node := NewNode(nil)
+	_ = node.Run(ctx)
+	transport := &capturingTransport{}
+
+	client, closeFn, err := NewClient(ctx, node, transport, JSONMarshaler{})
+	require.NoError(t, err)
+	client.ForceTestIDs("sess-race", "user-race", "client-race")
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			for j := 0; ; j++ {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				msg := &clientpb.InboundMessage{
+					Id: fmt.Sprintf("sub-%d-%d", worker, j),
+					Envelope: &clientpb.InboundMessage_Subscribe{
+						Subscribe: &clientpb.Subscribe{
+							Subscriptions: []*clientpb.Subscription{{Channel: fmt.Sprintf("race-ch-%d", j%64)}},
+						},
+					},
+				}
+				_ = client.HandleMessage(ctx, msg)
+			}
+		}(i)
+	}
+
+	time.Sleep(20 * time.Millisecond)
+	close(stop)
+	require.NoError(t, closeFn())
+	wg.Wait()
+
+	for j := 0; j < 64; j++ {
+		assert.Zero(t, node.Hub().NumSubscribers(fmt.Sprintf("race-ch-%d", j)),
+			"no subscription may leak in the hub after close")
+	}
+	assert.Empty(t, client.subscriptionList())
+}
+
+// --- Fix task 5 (P1-A4): ClientInfo must not read fields unlocked ---
+
+func TestClient_ClientInfo_ConcurrentWithConnect(t *testing.T) {
+	ctx := context.Background()
+	node := NewNode(&config.Server{RequireAuth: true})
+	authProxy := &connectAuthProxyStub{userID: "user-1"}
+	require.NoError(t, node.AddProxy(authProxy, "", SystemMethodAuthenticate))
+	transport := &capturingTransport{}
+
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
+	require.NoError(t, err)
+
+	connectMsg := &clientpb.InboundMessage{
+		Id: "msg-1",
+		Envelope: &clientpb.InboundMessage_Connect{
+			Connect: &clientpb.Connect{ClientId: "client-1", Token: "t", SessionId: "sess-1"},
+		},
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		_ = client.HandleMessage(ctx, connectMsg)
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 500; i++ {
+			_ = client.ClientInfo()
+		}
+	}()
+	wg.Wait()
+
+	info := client.ClientInfo()
+	assert.Equal(t, "client-1", info.ClientID)
+	assert.Equal(t, "sess-1", info.SessionID)
+	assert.Equal(t, "user-1", info.UserID)
+}
+
+// --- Fix task 7 (P1-A6): broker start failure must surface through Run ---
+
+// failStartBroker fails immediately at Start and never reports Ready.
+type failStartBroker struct{}
+
+func (b *failStartBroker) Start(context.Context, PublicationHandler) error {
+	return errors.New("redis connection refused")
+}
+func (b *failStartBroker) Ready() <-chan struct{} { return make(chan struct{}) }
+func (b *failStartBroker) Subscribe(string) error { return nil }
+func (b *failStartBroker) Unsubscribe(string) error { return nil }
+func (b *failStartBroker) Publish(string, *Publication) (uint64, error) { return 0, nil }
+func (b *failStartBroker) PublishTransient(string, *Publication) error { return nil }
+func (b *failStartBroker) History(string, uint64, int) ([]*Publication, error) { return nil, nil }
+
+func TestNode_Run_BrokerStartFailureReturnsError(t *testing.T) {
+	node := NewNode(nil)
+	node.SetBroker(&failStartBroker{})
+	err := node.Run(context.Background())
+	require.Error(t, err, "a broker that fails to start must surface as a Run error, not a panic")
+	assert.Contains(t, err.Error(), "redis connection refused")
+}
+
+// --- Fix task 8: statusConnected must be set once the connect completes ---
+
+func TestClient_Connect_SetsStatusConnected(t *testing.T) {
+	ctx := context.Background()
+	node := NewNode(nil)
+	transport := &capturingTransport{}
+
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
+	require.NoError(t, err)
+	assert.NotEqual(t, statusConnected, client.status)
+
+	connectMsg := &clientpb.InboundMessage{
+		Id:       "msg-1",
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: "client-1"}},
+	}
+	require.NoError(t, client.HandleMessage(ctx, connectMsg))
+	assert.Equal(t, statusConnected, client.status, "a successful connect must move the client to statusConnected")
+}
+
+// --- Fix task 14: subscription limits must count only newly added channels
+// (duplicates and ACL-denied channels are free) ---
+
+func TestClient_SubscribeLimit_IgnoresDuplicatesAndACLDenied(t *testing.T) {
+	ctx := context.Background()
+	node := NewNode(&config.Server{
+		Limits: config.Limits{MaxSubscriptionsPerClient: 2},
+		ACL: config.ACLConfig{
+			Rules: []config.ACLRule{
+				{ChannelPattern: "private.*", DenyAll: true},
+			},
+		},
+	})
+	transport := &capturingTransport{}
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
+	require.NoError(t, err)
+
+	connectMsg := &clientpb.InboundMessage{
+		Id:       "msg-1",
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: "client-1"}},
+	}
+	require.NoError(t, client.HandleMessage(ctx, connectMsg))
+	transport.messages = nil
+
+	// ch1, a duplicate of ch1, and an ACL-denied channel: only ch1 and ch2
+	// are new, so the batch (2 new) fits the limit of 2.
+	subMsg := &clientpb.InboundMessage{
+		Id: "msg-2",
+		Envelope: &clientpb.InboundMessage_Subscribe{
+			Subscribe: &clientpb.Subscribe{
+				Subscriptions: []*clientpb.Subscription{
+					{Channel: "ch1"},
+					{Channel: "ch1"},
+					{Channel: "private.secret"},
+					{Channel: "ch2"},
+				},
+			},
+		},
+	}
+	require.NoError(t, client.HandleMessage(ctx, subMsg))
+	require.False(t, transport.isClosed(), "duplicates and ACL-denied channels must not count toward the limit")
+	assert.Equal(t, 1, node.Hub().NumSubscribers("ch1"))
+	assert.Equal(t, 1, node.Hub().NumSubscribers("ch2"))
+	assert.Zero(t, node.Hub().NumSubscribers("private.secret"))
+
+	// A genuinely new channel now exceeds the limit and disconnects.
+	overMsg := &clientpb.InboundMessage{
+		Id: "msg-3",
+		Envelope: &clientpb.InboundMessage_Subscribe{
+			Subscribe: &clientpb.Subscribe{
+				Subscriptions: []*clientpb.Subscription{{Channel: "ch3"}},
+			},
+		},
+	}
+	require.NoError(t, client.HandleMessage(ctx, overMsg))
+	require.True(t, transport.isClosed())
+	assert.Equal(t, DisconnectChannelLimit.Code, transport.getCloseReason().Code)
+}
+
+// --- Fix task 15: the auth proxy must receive the server-generated session
+// ID, never a client-forged one ---
+
+// recordingAuthProxy records every Authenticate request's session ID.
+type recordingAuthProxy struct {
+	connectAuthProxyStub
+	mu         sync.Mutex
+	sessionIDs []string
+}
+
+func (m *recordingAuthProxy) Authenticate(ctx context.Context, req *proxy.AuthenticateProxyRequest) (*proxy.AuthenticateProxyResponse, error) {
+	m.mu.Lock()
+	m.sessionIDs = append(m.sessionIDs, req.SessionID)
+	m.mu.Unlock()
+	return m.connectAuthProxyStub.Authenticate(ctx, req)
+}
+
+func TestClient_Connect_AuthProxyReceivesServerSessionID(t *testing.T) {
+	ctx := context.Background()
+	node := NewNode(&config.Server{RequireAuth: true})
+	authProxy := &recordingAuthProxy{connectAuthProxyStub: connectAuthProxyStub{userID: "user-1"}}
+	require.NoError(t, node.AddProxy(authProxy, "", SystemMethodAuthenticate))
+
+	transport := &capturingTransport{}
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
+	require.NoError(t, err)
+	originalSessionID := client.SessionID()
+	require.NotEmpty(t, originalSessionID)
+
+	msg := &clientpb.InboundMessage{
+		Id: "msg-1",
+		Envelope: &clientpb.InboundMessage_Connect{
+			Connect: &clientpb.Connect{
+				ClientId:  "client-1",
+				Token:     "t",
+				SessionId: "client-forged-session",
+			},
+		},
+	}
+	require.NoError(t, client.HandleMessage(ctx, msg))
+	require.False(t, transport.isClosed())
+
+	authProxy.mu.Lock()
+	defer authProxy.mu.Unlock()
+	require.Len(t, authProxy.sessionIDs, 1)
+	assert.Equal(t, originalSessionID, authProxy.sessionIDs[0],
+		"the auth proxy must see the server-generated session ID, not the client-supplied one")
+	assert.NotEqual(t, "client-forged-session", authProxy.sessionIDs[0])
+}
+
+// --- Fix task 16: survey replies must carry their own request ID ---
+
+func TestClient_SurveyReply_WithoutRequestID_Dropped(t *testing.T) {
+	ctx := context.Background()
+	node := NewNode(nil)
+	transport := &capturingTransport{}
+
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
+	require.NoError(t, err)
+	client.ForceTestIDs("sess-1", "user-1", "client-1")
+
+	// Register an active survey expecting this session.
+	survey := NewSurvey("survey-1", "ch", []byte("ping"), time.Second)
+	survey.AddExpectedSession("sess-1")
+	node.surveyMu.Lock()
+	node.surveys["survey-1"] = survey
+	node.surveyMu.Unlock()
+
+	// A reply without a request ID must be dropped, not routed through the
+	// client's single lastSurveyRequestID slot.
+	replyNoID := &clientpb.InboundMessage{
+		Id: "msg-1",
+		Envelope: &clientpb.InboundMessage_SurveyReply{
+			SurveyReply: &clientpb.SurveyReply{
+				Payload: &sharedpb.Payload{Data: &sharedpb.Payload_Binary{Binary: []byte("pong")}},
+			},
+		},
+	}
+	require.NoError(t, client.HandleMessage(ctx, replyNoID))
+	assert.Empty(t, survey.Results(), "a reply without request id must not be recorded")
+
+	// Control: a reply carrying the request ID is recorded.
+	replyWithID := &clientpb.InboundMessage{
+		Id: "msg-2",
+		Envelope: &clientpb.InboundMessage_SurveyReply{
+			SurveyReply: &clientpb.SurveyReply{
+				RequestId: "survey-1",
+				Payload:   &sharedpb.Payload{Data: &sharedpb.Payload_Binary{Binary: []byte("pong")}},
+			},
+		},
+	}
+	require.NoError(t, client.HandleMessage(ctx, replyWithID))
+	require.Len(t, survey.Results(), 1)
+	assert.Equal(t, []byte("pong"), survey.Results()[0].Payload)
+}

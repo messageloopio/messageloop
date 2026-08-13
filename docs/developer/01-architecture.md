@@ -172,9 +172,9 @@ MessageLoop 的核心设计目标可以归纳为四点：
 
 **内存实现（broker_memory.go）**：每频道一个固定容量环形缓冲（`defaultMemoryHistorySize`，256），`nextOff` 从 1 起按发布递增；缓冲写满后覆盖最旧条目。频道历史在仍有订阅者或仍有条目时被保留，最后一个订阅者离开且历史为空时回收，保证断开重连的恢复仍然可用。`Start` 仅登记 handler 并阻塞到 ctx 取消，`Ready()` 在 handler 注册后关闭。每次 `Start` 生成的实例带随机 `Epoch`。
 
-**Redis 实现（pkg/redisbroker/redis.go）**：发布先 `XAdd` 写入 Redis Stream（前缀 `ml:stream:`，`StreamMaxLength` 默认 10000 条、`HistoryTTL` 默认 24h），从 Stream ID 解析出 offset，再经 Redis Pub/Sub（前缀 `ml:pubsub:`）实时分发；消费者以 `PSubscribe(ml:pubsub:*)` 模式订阅，仅处理本节点登记过兴趣的频道，断线以指数退避（1s 起、上限 30s）重连。`History` 用 `XRangeN` 以排他起始 ID 读取，offset 编码为 `ts<<20|seq`（Redis Stream ID 的毫秒时间戳与序列号拼入 uint64）。
+**Redis 实现（pkg/redisbroker/redis.go）**：发布先 `XAdd` 写入 Redis Stream（前缀 `ml:stream:`，`StreamMaxLength` 默认 10000 条、`HistoryTTL` 默认 24h），从 Stream ID 解析出 offset，再经 Redis Pub/Sub（前缀 `ml:pubsub:`）实时分发；消费者以 `PSubscribe(ml:pubsub:*)` 模式订阅，仅处理本节点登记过兴趣的频道，断线以指数退避（1s 起、上限 30s）重连。`History` 用 `XRangeN` 以包含起始 ID（`"ts-seq"`，`streamStartID`）读取，offset 编码为 `ts<<20|seq`（Redis Stream ID 的毫秒时间戳与序列号拼入 uint64），与内存实现同为 `offset >= sinceOffset` 语义。
 
-**offset + epoch 语义**：offset 是频道内的单调序号（内存实现从 1 起，Redis 实现由 Stream ID 编码），客户端用它做断线续读；epoch 是 broker 实例的随机标识，用于判断 offset 是否仍属于当前 broker 代际——epoch 不匹配时视为 offset 无效，从历史开头恢复。
+**offset + epoch 语义**：offset 是频道内的单调序号（内存实现从 1 起，Redis 实现由 Stream ID 编码），客户端用它做断线续读；epoch 用于判断 offset 是否仍属于当前 broker 代际——epoch 不匹配（或客户端未携带）时视为 offset 无效，从历史开头恢复。两种实现的 epoch 来源不同：**内存 broker** 每进程实例启动时生成随机 UUID（`broker_memory.go:33`），重启即失效；**Redis broker** 的 epoch 存于固定键 `ml:broker:epoch`，首个启动节点经 `SETNX` 写入随机 UUID，集群共享、跨重启持久（`pkg/redisbroker/redis.go` 的 `initEpoch`），因此 Redis 部署下 epoch 校验跨节点、跨重启均可通过（详见[《分布式集群指南》](04-cluster.md) 第 4.4 节）。
 
 ### 3.5 Presence（presence.go、presence_event.go）
 
@@ -394,14 +394,14 @@ Hub 的 `wcSubs` 记录每个通配符订阅（键 `sessionID:channel`），广�
 
 ## 7. 断连模型（disconnect.go）
 
-`Disconnect` 是携带 `Code` 与 `Reason` 的结构体并实现 `error` 接口：核心代码以返回错误的方式表达"应断开此连接"，`Client.HandleMessage` 用 `errors.As` 识别后调用 `close(disconnect)`，传输层把 Code 与 Reason 交给客户端（WebSocket 用 close 帧的 code/reason，gRPC 用 `DISCONNECT_ERROR` 错误信封）。`Code` 为 0 时表示正常关闭（WebSocket 端映射为 1000）。
+`Disconnect` 是携带 `Code` 与 `Reason` 的结构体并实现 `error` 接口：核心代码以返回错误的方式表达"应断开此连接"，`Client.HandleMessage` 用 `errors.As` 识别后调用 `close(disconnect)`，传输层把 Code 与 Reason 交给客户端（WebSocket 用 close 帧的 code/reason；gRPC 用 `DISCONNECT_ERROR` 错误信封，数值码随错误信封传递——目标语义，由传输修复实现后生效，见 `pkg/grpcstream/transport.go:106-121`）。`Code` 为 0 时表示正常关闭（WebSocket 端映射为 1000）。
 
 | Code | 常量 | 含义 |
 | --- | --- | --- |
 | 3000 | `DisconnectConnectionClosed` | 连接被关闭，无服务端建议；可能是干净断开，也可能是网络中断，服务端无法区分 |
 | 3500 | `DisconnectInvalidToken` | token 无效或 `require_auth` 下未携带 token |
 | 3501 | `DisconnectBadRequest` | 协议帧格式错误（如重复 Connect） |
-| 3502 | `DisconnectStale` | 连接在配置的超时内未完成鉴权 |
+| 3502 | `DisconnectStale` | 集群会话恢复失败（远端租约 CAS 抢占失败，或恢复回滚，`cluster_resume.go:77`、`client.go:571`） |
 | 3503 | `DisconnectForceNoReconnect` | 服务端要求客户端不要重连（如关停排空） |
 | 3504 | `DisconnectConnectionLimit` | 超过每用户连接数上限 |
 | 3505 | `DisconnectChannelLimit` | 超过每客户端订阅数上限 |
@@ -411,6 +411,7 @@ Hub 的 `wcSubs` 记录每个通配符订阅（键 `sessionID:channel`），广�
 | 3509 | `DisconnectTooManyErrors` | 客户端产生过多错误 |
 | 3511 | `DisconnectIdleTimeout` | 心跳检测到超时未活动 |
 | 3512 | `DisconnectSlowConsumer` | 客户端消费速度跟不上（写失败触发） |
+| 3513 | `DisconnectInternal` | connect 路径内部错误（如集群状态同步失败），连接被强制关闭（`client.go` `disconnectOnConnectError`） |
 
 客户端如何解读这些代码（重连策略、错误展示）见 [《客户端协议参考》](../protocol.md) 的 Disconnect Codes 一节。
 

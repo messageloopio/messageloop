@@ -70,12 +70,35 @@ func (r *Router) Match(channel, method string) Proxy {
 	return nil
 }
 
-// AddFromConfig adds routes from a ProxyConfig.
+// AddFromConfig adds routes from a ProxyConfig. All patterns are compiled
+// before any route is committed, so a failure leaves the router unchanged
+// instead of half-initialized.
 func (r *Router) AddFromConfig(proxy Proxy, cfg *ProxyConfig) error {
+	type compiledRoute struct {
+		channel glob.Glob
+		method  glob.Glob
+	}
+	compiled := make([]compiledRoute, 0, len(cfg.Routes))
 	for _, routeCfg := range cfg.Routes {
-		if err := r.Add(proxy, routeCfg.Channel, routeCfg.Method); err != nil {
+		channelGlob, err := glob.Compile(routeCfg.Channel)
+		if err != nil {
 			return err
 		}
+		methodGlob, err := glob.Compile(routeCfg.Method)
+		if err != nil {
+			return err
+		}
+		compiled = append(compiled, compiledRoute{channel: channelGlob, method: methodGlob})
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, cr := range compiled {
+		r.routes = append(r.routes, &route{
+			proxy:          proxy,
+			channelMatcher: cr.channel,
+			methodMatcher:  cr.method,
+		})
 	}
 	return nil
 }
@@ -85,13 +108,13 @@ func (r *Router) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	var lastErr error
+	var closeErrs []error
 	for _, rt := range r.routes {
 		if err := rt.proxy.Close(); err != nil {
-			lastErr = err
+			closeErrs = append(closeErrs, err)
 		}
 	}
 
 	r.routes = nil
-	return lastErr
+	return errors.Join(closeErrs...)
 }

@@ -36,7 +36,7 @@
 
 - **Imports**: Group into three sections separated by blank lines: Standard Library, Third-Party, and Local.
   - Use aliases for generated protobuf packages (e.g., `clientpb`, `sharedpb`) to avoid naming conflicts.
-- **Error Handling**: Use typed `Disconnect` errors (range 3000-3509) for intentional connection termination.
+- **Error Handling**: Use typed `Disconnect` errors (range 3000-3513) for intentional connection termination.
   - Wrap errors with `fmt.Errorf("context: %w", err)` for chaining.
 - **Concurrency**: Use `sync.Mutex` or `sync.RWMutex` embedded by value in structs.
 - **Naming**:

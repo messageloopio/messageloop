@@ -57,7 +57,7 @@ broker:
     # read_timeout: "3s"
     # write_timeout: "3s"
     # stream_max_length: 10000
-    # stream_approximate: true
+    stream_approximate: true  # Only approximate trimming is implemented; false is rejected by Validate
     # history_ttl: "24h"
 
 cluster:

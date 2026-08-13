@@ -22,6 +22,7 @@ type evictTestBroker struct {
 	mu          sync.Mutex
 	failUnsubCh string
 	subscribed  map[string]bool
+	transients  []string
 }
 
 func (b *evictTestBroker) Start(context.Context, PublicationHandler) error { return nil }
@@ -41,7 +42,12 @@ func (b *evictTestBroker) Unsubscribe(ch string) error {
 	return nil
 }
 func (b *evictTestBroker) Publish(string, *Publication) (uint64, error) { return 0, nil }
-func (b *evictTestBroker) PublishTransient(string, *Publication) error { return nil }
+func (b *evictTestBroker) PublishTransient(ch string, _ *Publication) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.transients = append(b.transients, ch)
+	return nil
+}
 func (b *evictTestBroker) History(string, uint64, int) ([]*Publication, error) { return nil, nil }
 
 // projectionQueryStore accumulates shared channel projection deltas and lists
@@ -109,6 +115,44 @@ func TestNode_EvictSessionForTakeover_RollsBackPartiallyRemovedChannels(t *testi
 	for _, ch := range []string{"evict.ch.1", "evict.ch.2", "evict.ch.3"} {
 		assert.True(t, broker.subscribed[ch], "broker should be subscribed to %s", ch)
 	}
+}
+
+func TestNode_EvictSessionForTakeover_RollbackPreservesEphemeral(t *testing.T) {
+	broker := &evictTestBroker{failUnsubCh: "evict.eph.fail", subscribed: make(map[string]bool)}
+	node := NewNode(nil)
+	node.SetBroker(broker)
+
+	client, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
+	require.NoError(t, err)
+	client.ForceTestIDs("sess-evict-eph", "user-evict", "client-evict")
+	require.NoError(t, node.AddClient(client))
+
+	require.NoError(t, node.AddSubscription(context.Background(), "evict.eph", NewSubscriber(client, true)))
+	require.NoError(t, node.AddSubscription(context.Background(), "evict.eph.fail", NewSubscriber(client, true)))
+
+	err = node.evictSessionForTakeover(client)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unsubscribe failed")
+
+	for _, ch := range []string{"evict.eph", "evict.eph.fail"} {
+		stored, exists := node.hub.LookupSubscriber(ch, client)
+		require.True(t, exists, "channel %s should be restored in the hub", ch)
+		require.True(t, stored.Ephemeral, "rollback must preserve the ephemeral flag of channel %s", ch)
+	}
+
+	require.NoError(t, client.handleUnsubscribe(context.Background(), &clientpb.InboundMessage{
+		Id: "msg-1",
+	}, &clientpb.Unsubscribe{
+		Subscriptions: []*clientpb.Subscription{{Channel: "evict.eph"}},
+	}))
+
+	broker.mu.Lock()
+	defer broker.mu.Unlock()
+	for _, ch := range broker.transients {
+		assert.NotEqual(t, presenceChannel("evict.eph"), ch,
+			"ephemeral subscription must not publish a presence leave event")
+	}
+	assert.False(t, broker.subscribed["evict.eph"], "unsubscribe must remove the channel from the broker")
 }
 
 func TestNode_EvictSessionForTakeover_AdjustsSharedProjection(t *testing.T) {
@@ -365,4 +409,117 @@ func TestNode_ClusterSessionSnapshot_PreservesEphemeral(t *testing.T) {
 	}
 	require.True(t, byChannel["ephemeral.ch"], "ephemeral subscription must stay ephemeral in the snapshot")
 	require.False(t, byChannel["normal.ch"], "permanent subscription must stay non-ephemeral in the snapshot")
+}
+
+// TestNode_RestoreSessionSubscriptions_SkipsPresenceForEphemeral verifies
+// the ephemeral-presence handoff (docs/protocol.md): restoring an ephemeral
+// subscription across nodes must NOT register presence, while permanent
+// subscriptions still do.
+func TestNode_RestoreSessionSubscriptions_SkipsPresenceForEphemeral(t *testing.T) {
+	node := NewNode(nil)
+	client, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
+	require.NoError(t, err)
+	client.ForceTestIDs("sess-restore-eph", "user-restore", "client-restore")
+
+	subscriptions := []ClusterSubscriptionSnapshot{
+		{Channel: "eph.ch", Ephemeral: true},
+		{Channel: "normal.ch"},
+	}
+	require.NoError(t, node.restoreSessionSubscriptions(context.Background(), client, subscriptions))
+
+	present, err := node.presence.Get(context.Background(), "eph.ch")
+	require.NoError(t, err)
+	require.Empty(t, present, "ephemeral subscription must not register presence on restore")
+
+	present, err = node.presence.Get(context.Background(), "normal.ch")
+	require.NoError(t, err)
+	require.Contains(t, present, "sess-restore-eph",
+		"permanent subscription must register presence on restore")
+}
+
+// failSecondSubscribeBroker fails the second broker Subscribe so a restore
+// aborts after the first channel was already restored.
+type failSecondSubscribeBroker struct {
+	mu       sync.Mutex
+	attempts int
+}
+
+func (b *failSecondSubscribeBroker) Start(context.Context, PublicationHandler) error { return nil }
+func (b *failSecondSubscribeBroker) Subscribe(ch string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.attempts++
+	if b.attempts == 2 {
+		return errors.New("injected subscribe failure")
+	}
+	return nil
+}
+func (b *failSecondSubscribeBroker) Unsubscribe(ch string) error                { return nil }
+func (b *failSecondSubscribeBroker) Publish(string, *Publication) (uint64, error) { return 0, nil }
+func (b *failSecondSubscribeBroker) PublishTransient(string, *Publication) error  { return nil }
+func (b *failSecondSubscribeBroker) History(string, uint64, int) ([]*Publication, error) {
+	return nil, nil
+}
+
+// TestNode_RestoreSessionSubscriptions_RollbackClearsPresence verifies that
+// a partial restore rollback removes the presence entries the restore path
+// added (no ghost online member after a failed restore).
+func TestNode_RestoreSessionSubscriptions_RollbackClearsPresence(t *testing.T) {
+	node := NewNode(nil)
+	node.SetBroker(&failSecondSubscribeBroker{})
+	client, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
+	require.NoError(t, err)
+	client.ForceTestIDs("sess-restore-rollback", "user-rollback", "client-rollback")
+
+	subscriptions := []ClusterSubscriptionSnapshot{
+		{Channel: "rollback.ch.1"},
+		{Channel: "rollback.ch.2"},
+	}
+	err = node.restoreSessionSubscriptions(context.Background(), client, subscriptions)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "injected subscribe failure")
+
+	// The first channel was restored (presence added) then rolled back: no
+	// ghost presence may remain.
+	present, getErr := node.presence.Get(context.Background(), "rollback.ch.1")
+	require.NoError(t, getErr)
+	require.Empty(t, present, "rollback must clear the presence entry of restored channels")
+	require.False(t, client.hasSubscription("rollback.ch.1"))
+}
+
+// TestNode_EvictSessionForTakeover_DoesNotDeleteNewSession verifies P1-C6:
+// the takeover eviction must not remove a session that a newer connection
+// has taken over between the session lookup and the removal.
+func TestNode_EvictSessionForTakeover_DoesNotDeleteNewSession(t *testing.T) {
+	node := NewNode(nil)
+	clientA, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
+	require.NoError(t, err)
+	clientA.ForceTestIDs("sess-shared", "user-shared", "client-a")
+	require.NoError(t, node.AddClient(clientA))
+	require.NoError(t, node.AddSubscription(context.Background(), "news", NewSubscriber(clientA, false)))
+
+	// A newer connection takes over the same session ID while the stale
+	// takeover eviction is in flight.
+	clientB, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
+	require.NoError(t, err)
+	clientB.ForceTestIDs("sess-shared", "user-shared", "client-b")
+	require.NoError(t, node.hub.ReplaceSession("sess-shared", clientB))
+
+	require.NoError(t, node.evictSessionForTakeover(clientA))
+	require.Same(t, clientB, node.hub.LookupSession("sess-shared"),
+		"the new session must survive the stale client's eviction")
+}
+
+// TestNode_EvictSessionForTakeover_RemovesOwnSession verifies the matching
+// removal still works when the session was not taken over: the registered
+// client is the evicted one.
+func TestNode_EvictSessionForTakeover_RemovesOwnSession(t *testing.T) {
+	node := NewNode(nil)
+	client, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
+	require.NoError(t, err)
+	client.ForceTestIDs("sess-own", "user-own", "client-own")
+	require.NoError(t, node.AddClient(client))
+
+	require.NoError(t, node.evictSessionForTakeover(client))
+	require.Nil(t, node.hub.LookupSession("sess-own"))
 }

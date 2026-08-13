@@ -54,6 +54,11 @@ func (t *Transport) WriteMany(msgs ...[]byte) error {
 }
 
 func (t *Transport) Close(disconnect messageloop.Disconnect) error {
+	// Always close the underlying connection, even when the peer has already
+	// torn the socket down (e.g. RST): WriteControl and the read loop below
+	// fail early on such sockets, and skipping conn.Close() would leak the fd.
+	defer func() { _ = t.conn.Close() }()
+
 	t.writeMu.Lock()
 	// Send a WebSocket close message
 	deadline := time.Now().Add(5 * time.Second)
@@ -81,11 +86,6 @@ func (t *Transport) Close(disconnect messageloop.Disconnect) error {
 		if err != nil {
 			break
 		}
-	}
-	// Close the TCP connection
-	err = t.conn.Close()
-	if err != nil {
-		return err
 	}
 	return nil
 }

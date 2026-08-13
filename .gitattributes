@@ -1,0 +1,14 @@
+# Line ending normalization
+#
+# Go sources are stored normalized as LF in the repository (git's `text`
+# conversion) and checked out as CRLF (`eol=crlf`) to match the primary
+# Windows development environment. `text` keeps diffs line-ending agnostic
+# for cross-platform contributors; `eol=crlf` fixes the worktree form so no
+# contributor can accidentally introduce mixed line endings.
+#
+# Note: this repository deliberately does NOT use `* text=auto`; a top-level
+# `* -text` rule keeps all files byte-identical to their committed form
+# (immune to the user's global `core.autocrlf`), and the more specific
+# `*.go` rule below re-enables line-ending conversion for Go sources only.
+* -text
+*.go text eol=crlf

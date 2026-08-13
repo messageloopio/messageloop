@@ -38,6 +38,13 @@ export interface ClientOptions {
 
 /**
  * Default client options.
+ *
+ * Defaults intentionally diverge from the Go SDK in two ways:
+ * - autoReconnect defaults to true here (Go: false), because browsers
+ *   reconnect on visibility changes and this SDK targets browser users.
+ * - connectTimeout defaults to 30000ms here (Go DialTimeout: 10000ms), to
+ *   cover slower mobile networks.
+ * Both are explicit decisions; see README "Notes" for details.
  */
 const defaultOptions: Partial<ClientOptions> = {
   encoding: "json",
@@ -179,6 +186,24 @@ export function setReconnectDelay(initial: number, max: number): ClientOption {
   return (options: ClientOptions) => {
     options.reconnectInitialDelay = initial;
     options.reconnectMaxDelay = max;
+  };
+}
+
+/**
+ * Set reconnection backoff parameters (Go SDK WithReconnectBackoff equivalent).
+ * @param initial - Initial delay in milliseconds
+ * @param max - Maximum delay in milliseconds
+ * @param multiplier - Exponential backoff multiplier applied after each failed attempt
+ */
+export function setReconnectBackoff(
+  initial: number,
+  max: number,
+  multiplier: number
+): ClientOption {
+  return (options: ClientOptions) => {
+    options.reconnectInitialDelay = initial;
+    options.reconnectMaxDelay = max;
+    options.reconnectBackoffMultiplier = multiplier;
   };
 }
 

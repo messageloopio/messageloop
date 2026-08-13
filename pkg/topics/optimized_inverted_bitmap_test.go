@@ -12,7 +12,7 @@ func TestOptimizedInvertedBitmapMatcherConcurrentSubscribe(t *testing.T) {
 	for i := range topics {
 		topics[i] = fmt.Sprintf("%d.%d.%d", i, i, i)
 	}
-	testMatcherConcurrentSubscribe(t, NewOptimizedInvertedBitmapMatcher(3), topics)
+	testMatcherConcurrentSubscribe(t, NewOptimizedInvertedBitmapMatcher(3), topics, true)
 }
 
 func TestOptimizedInvertedBitmapMatcher(t *testing.T) {
@@ -73,6 +73,52 @@ func TestOptimizedInvertedBitmapMatcherRejectsEmptySegments(t *testing.T) {
 	assert.Empty(ib.Lookup(".a"))
 	assert.Empty(ib.Lookup("a..b"))
 	assert.Empty(ib.Lookup("."))
+}
+
+func TestOptimizedInvertedBitmapMatcherUnsubscribeStaleEmpty(t *testing.T) {
+	assert := assert.New(t)
+	m := NewOptimizedInvertedBitmapMatcher(3)
+
+	sub0, err := m.Subscribe("a", 0)
+	assert.NoError(err)
+	m.Unsubscribe(sub0)
+
+	sub1, err := m.Subscribe("b.c.d", 1)
+	assert.NoError(err)
+	assert.Equal(sub0.ID, sub1.ID, "position must be reclaimed")
+
+	// Regression: subscribing to "a" padded empty constituents at depths 1
+	// and 2. Those bits must not survive Unsubscribe and later mis-match
+	// shorter lookups on a reclaimed position.
+	assert.Empty(m.Lookup("b.c"))
+	assert.Empty(m.Lookup("b"))
+	assert.Empty(m.Lookup("c.d"))
+	assertEqual(assert, []Subscriber{1}, m.Lookup("b.c.d"))
+}
+
+func TestOptimizedInvertedBitmapMatcherDuplicateUnsubscribe(t *testing.T) {
+	assert := assert.New(t)
+	m := NewOptimizedInvertedBitmapMatcher(2)
+
+	subA, err := m.Subscribe("a.b", 10)
+	assert.NoError(err)
+	_, err = m.Subscribe("c.d", 20)
+	assert.NoError(err)
+
+	m.Unsubscribe(subA)
+	m.Unsubscribe(subA)
+
+	subC, err := m.Subscribe("e.f", 30)
+	assert.NoError(err)
+	subD, err := m.Subscribe("g.h", 40)
+	assert.NoError(err)
+
+	// Regression: unsubscribing the same Subscription twice must not enqueue
+	// its position twice, which aliased two live subscriptions to one ID and
+	// made them overwrite each other.
+	assert.NotEqual(subC.ID, subD.ID, "reclaimed position must not be handed out twice")
+	assertEqual(assert, []Subscriber{30}, m.Lookup("e.f"))
+	assertEqual(assert, []Subscriber{40}, m.Lookup("g.h"))
 }
 
 func TestOptimizedInvertedBitmapMatcherPaddingSemantics(t *testing.T) {

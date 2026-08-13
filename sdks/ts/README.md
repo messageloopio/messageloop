@@ -35,7 +35,7 @@ const client = await MessageLoopClient.dial("ws://localhost:9080/ws", [
 ]);
 
 client.onConnected((sessionId) => console.log("Connected:", sessionId));
-client.onMessage((messages) => {
+client.addMessageHandler((messages) => {
   for (const msg of messages) {
     console.log(msg.channel, msg.message.type, msg.message.data);
   }
@@ -75,6 +75,7 @@ await client.close();
 | `setEphemeral(boolean)` | `false` | Mark subscriptions as ephemeral |
 | `setAutoReconnect(boolean)` | `true` | Enable or disable reconnect logic |
 | `setReconnectDelay(initial, max)` | `1000`, `30000` | Configure reconnect backoff window |
+| `setReconnectBackoff(initial, max, multiplier)` | `1000`, `30000`, `2` | Configure reconnect backoff window and multiplier |
 | `setReconnectMaxAttempts(number)` | `0` | Maximum reconnect attempts, `0` = unlimited |
 
 ## API Reference
@@ -99,12 +100,21 @@ await client.close();
 
 ### Event Handlers
 
-- `onMessage(handler)` - Handle incoming messages
-- `onError(handler)` - Handle errors
-- `onConnected(handler)` - Handle connection established
-- `onClosed(handler)` - Handle connection closed
-- `addMessageHandler(handler)` - Register an additional message handler and get a disposer
-- `addStateChangeHandler(handler)` - Observe connection state transitions and get a disposer
+Use the `add` series for new code: handlers can be registered in multiples and
+each call returns a disposer for removal.
+
+- `addMessageHandler(handler)` - Register a message handler; returns a function that removes it
+- `addStateChangeHandler(handler)` - Observe connection state transitions; returns a function that removes it
+- `removeMessageHandler(handler)` - Remove a message handler
+
+The `onXxx` methods are single-slot convenience aliases (the last registration
+wins). They are kept for backward compatibility; do not mix them with the `add`
+series on the same event, or handlers may both fire and duplicate delivery.
+
+- `onMessage(handler)` - Convenience alias for the single-slot message handler
+- `onError(handler)` - Set the error handler
+- `onConnected(handler)` - Set the connected handler
+- `onClosed(handler)` - Set the closed handler
 
 ### Message Helpers
 
@@ -135,6 +145,12 @@ npm test
 
 ## Notes
 
-- Node.js `>=18` is required.
+- Node.js `>=18` is required. On Node.js `<21` the SDK uses the `ws` package
+  (a runtime dependency); Node 21+ and browsers use the built-in WebSocket.
+- Custom `headers` on `dial()` are honored in Node.js only (via `ws`); the
+  browser WebSocket constructor does not support request headers.
+- Default values intentionally differ from the Go SDK in two ways (explicit
+  decisions, not drift): `autoReconnect` defaults to `true` here (Go: `false`),
+  and `connectTimeout` defaults to `30000ms` here (Go `DialTimeout`: `10000ms`).
 - The current TypeScript SDK is WebSocket-based; it does not expose a gRPC transport.
 - Run `npm run build` before opening the browser example because it imports from `dist/`.

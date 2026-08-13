@@ -1,14 +1,11 @@
 package topics
 
 import (
-	"errors"
 	"strings"
 	"sync"
 
 	"github.com/RoaringBitmap/roaring"
 )
-
-var ErrBadTopic = errors.New("topic does not fit within topic space")
 
 type constituentBitmap struct {
 	bitmaps map[string]*roaring.Bitmap
@@ -66,17 +63,19 @@ func NewOptimizedInvertedBitmapMatcher(topicSpaceSize uint) Matcher {
 
 // Subscribe adds the Subscriber to the topic and returns a Subscription.
 func (b *optimizedInvertedBitmapMatcher) Subscribe(topic string, sub Subscriber) (*Subscription, error) {
+	if err := validateSubscriber(sub); err != nil {
+		return nil, err
+	}
+	if !validTopic(topic) {
+		// Reject explicit empty segments (e.g. "a.", ".a", "a..b") and the
+		// empty topic to stay consistent with the other matchers. Trailing
+		// padding with empty segments is applied below and is unrelated to
+		// this check.
+		return nil, ErrBadTopic
+	}
 	constituents := strings.Split(topic, delimiter)
 	if uint(len(constituents)) > b.maxConstituents {
 		return nil, ErrBadTopic
-	}
-	for _, constituent := range constituents {
-		if constituent == empty {
-			// Reject explicit empty segments (e.g. "a.", ".a", "a..b") to stay
-			// consistent with the other matchers. Trailing padding with empty
-			// segments is applied below and is unrelated to this check.
-			return nil, ErrBadTopic
-		}
 	}
 
 	b.mu.Lock()
@@ -106,20 +105,32 @@ func (b *optimizedInvertedBitmapMatcher) Subscribe(topic string, sub Subscriber)
 	return &Subscription{ID: pos, Topic: topic, Subscriber: sub}, nil
 }
 
-// Unsubscribe removes the Subscription.
+// Unsubscribe removes the Subscription. It is idempotent: unsubscribing a
+// Subscription that is no longer registered, or a nil Subscription, is a
+// no-op.
 func (b *optimizedInvertedBitmapMatcher) Unsubscribe(sub *Subscription) {
-	constituents := strings.Split(sub.Topic, delimiter)
-	b.mu.Lock()
-	for i, cb := range b.constituentBitmaps {
-		if i == len(constituents) {
-			break
-		}
-		if bm, ok := cb.bitmaps[constituents[i]]; ok {
-			bm.Remove(sub.ID)
-		}
+	if sub == nil {
+		return
 	}
-	b.deletedPositions = append(b.deletedPositions, sub.ID)
-	delete(b.subscribers, sub.ID)
+	b.mu.Lock()
+	existing, ok := b.subscribers[sub.ID]
+	if ok && existing == sub.Subscriber {
+		constituents := strings.Split(sub.Topic, delimiter)
+		for i, cb := range b.constituentBitmaps {
+			if i < len(constituents) {
+				if bm, ok := cb.bitmaps[constituents[i]]; ok {
+					bm.Remove(sub.ID)
+				}
+			} else if bm, ok := cb.bitmaps[empty]; ok {
+				// Clear the trailing empty constituents padded at subscribe
+				// time; leaving them behind mis-matches shorter topics once
+				// the position is reclaimed.
+				bm.Remove(sub.ID)
+			}
+		}
+		b.deletedPositions = append(b.deletedPositions, sub.ID)
+		delete(b.subscribers, sub.ID)
+	}
 	b.mu.Unlock()
 }
 

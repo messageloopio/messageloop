@@ -1,7 +1,6 @@
 package topics
 
 import (
-	"strings"
 	"sync"
 
 	"github.com/RoaringBitmap/roaring"
@@ -28,6 +27,12 @@ func NewInvertedBitmapMatcher(topicSpace []string) Matcher {
 }
 
 func (b *invertedBitmapMatcher) Subscribe(topic string, sub Subscriber) (*Subscription, error) {
+	if err := validateSubscriber(sub); err != nil {
+		return nil, err
+	}
+	if !validTopic(topic) {
+		return nil, ErrBadTopic
+	}
 	b.mu.Lock()
 	var (
 		pos       uint32
@@ -43,7 +48,9 @@ func (b *invertedBitmapMatcher) Subscribe(topic string, sub Subscriber) (*Subscr
 
 	match := false
 	for t, bitmap := range b.bitmaps {
-		if matchCriteria(t, topic) {
+		// The subscription topic may contain "*" wildcards, so it is the
+		// pattern; the topic-space entry is the concrete topic.
+		if matchCriteria(topic, t) {
 			bitmap.Add(pos)
 			match = true
 		}
@@ -66,13 +73,22 @@ func (b *invertedBitmapMatcher) Subscribe(topic string, sub Subscriber) (*Subscr
 	return &Subscription{ID: pos, Topic: topic, Subscriber: sub}, nil
 }
 
+// Unsubscribe removes the Subscription. It is idempotent: unsubscribing a
+// Subscription that is no longer registered, or a nil Subscription, is a
+// no-op.
 func (b *invertedBitmapMatcher) Unsubscribe(sub *Subscription) {
-	b.mu.Lock()
-	for _, bm := range b.bitmaps {
-		bm.Remove(sub.ID)
+	if sub == nil {
+		return
 	}
-	b.deletedPositions = append(b.deletedPositions, sub.ID)
-	delete(b.subscribers, sub.ID)
+	b.mu.Lock()
+	existing, ok := b.subscribers[sub.ID]
+	if ok && existing == sub.Subscriber {
+		for _, bm := range b.bitmaps {
+			bm.Remove(sub.ID)
+		}
+		b.deletedPositions = append(b.deletedPositions, sub.ID)
+		delete(b.subscribers, sub.ID)
+	}
 	b.mu.Unlock()
 }
 
@@ -98,23 +114,4 @@ func (b *invertedBitmapMatcher) Lookup(topic string) []Subscriber {
 		i++
 	}
 	return subscribers
-}
-
-func matchCriteria(topic, request string) bool {
-	var (
-		requestConstituents = strings.Split(request, delimiter)
-		topicConstituents   = strings.Split(topic, delimiter)
-	)
-
-	if len(requestConstituents) != len(topicConstituents) {
-		return false
-	}
-
-	for i, constituent := range topicConstituents {
-		if constituent != requestConstituents[i] && requestConstituents[i] != wildcard {
-			return false
-		}
-	}
-
-	return true
 }

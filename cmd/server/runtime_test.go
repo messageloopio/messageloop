@@ -1,8 +1,6 @@
 package main
 
 import (
-	"context"
-	"errors"
 	"net"
 	"testing"
 
@@ -10,24 +8,6 @@ import (
 	"github.com/messageloopio/messageloop/config"
 	"github.com/stretchr/testify/require"
 )
-
-type fakeNodeRunner struct {
-	ran bool
-}
-
-func (f *fakeNodeRunner) Run(context.Context) error {
-	f.ran = true
-	return nil
-}
-
-func TestRunNodeWithPreflight_PreflightErrorDoesNotRunNode(t *testing.T) {
-	runner := &fakeNodeRunner{}
-	err := runNodeWithPreflight(context.Background(), runner, func() error {
-		return errors.New("preflight failed")
-	})
-	require.EqualError(t, err, "preflight failed")
-	require.False(t, runner.ran)
-}
 
 func TestPrepareGRPCServers_CleansUpClientListenerOnAdminFailure(t *testing.T) {
 	reserved, err := net.Listen("tcp", "127.0.0.1:0")

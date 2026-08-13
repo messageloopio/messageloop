@@ -47,6 +47,7 @@ server:
     addr: ":8080"
   grpc_admin:
     addr: "127.0.0.1:9091"
+    auth_token: "change-me"   # Required (or set allow_insecure: true for dev only)
 
 transport:
   websocket:
@@ -60,10 +61,12 @@ broker:
   type: memory
 ```
 
+Note: when `server.grpc_admin.addr` is set, configuration validation requires `auth_token` (or `allow_insecure: true`, which serves the admin API without authentication and is intended for development environments only).
+
 Start the server:
 
 ```bash
-go run cmd/server/main.go --config ./config.yaml
+go run ./cmd/server --config ./config.yaml
 ```
 
 Default endpoints:
@@ -357,7 +360,7 @@ npm test
 - [docs/deployment.md](docs/deployment.md): production deployment guide, TLS, Docker, multi-node
 - [docs/protocol.md](docs/protocol.md): client protocol reference with message formats
 - [CLAUDE.md](CLAUDE.md): architecture and development notes
-- [RPC_TIMEOUT.md](RPC_TIMEOUT.md): RPC timeout behavior and rationale
+- [RPC_TIMEOUT.md](docs/archive/RPC_TIMEOUT.md): RPC timeout behavior and rationale (archived historical record)
 - [sdks/go](sdks/go): Go SDK module and examples
 - [sdks/ts](sdks/ts): TypeScript SDK package and examples
 

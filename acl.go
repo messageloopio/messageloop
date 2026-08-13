@@ -1,13 +1,17 @@
 package messageloop
 
 import (
-	"path"
+	"strings"
 	"sync"
 )
 
 // ACLRule defines a single access control rule for channel operations.
 type ACLRule struct {
-	// ChannelPattern is a glob pattern to match channels, e.g. "private.*", "chat.**".
+	// ChannelPattern is a glob pattern to match channels, e.g. "private.*",
+	// "chat.**". Matching is segment-based (dots separate segments) and more
+	// permissive than the subscription matcher: "*" matches exactly one
+	// non-empty segment (consistent with the matcher), while "**" matches
+	// zero or more segments and is supported only at the ACL layer.
 	ChannelPattern string `yaml:"channel_pattern" json:"channel_pattern"`
 
 	// AllowSubscribe lists user IDs allowed to subscribe. Use "*" for any authenticated user.
@@ -81,7 +85,7 @@ func (e *ACLEngine) CanSubscribe(channel, userID string) bool {
 	defer e.mu.RUnlock()
 	allowed := true
 	for _, entry := range e.entries {
-		if matched, _ := path.Match(entry.pattern, channel); matched {
+		if matchChannelPattern(entry.pattern, channel) {
 			if entry.denyAll {
 				return false
 			}
@@ -108,7 +112,7 @@ func (e *ACLEngine) CanPublish(channel, userID string) bool {
 	defer e.mu.RUnlock()
 	allowed := true
 	for _, entry := range e.entries {
-		if matched, _ := path.Match(entry.pattern, channel); matched {
+		if matchChannelPattern(entry.pattern, channel) {
 			if entry.denyAll {
 				return false
 			}
@@ -118,4 +122,51 @@ func (e *ACLEngine) CanPublish(channel, userID string) bool {
 		}
 	}
 	return allowed
+}
+
+// matchChannelPattern reports whether channel matches pattern using
+// segment-based wildcard semantics that are more permissive than the
+// subscription matcher:
+//
+//   - segments are separated by "."; each pattern segment must match the
+//     corresponding channel segment
+//   - "*" matches exactly one non-empty segment, consistent with the
+//     subscription matcher ("chat.*" matches "chat.room" but not
+//     "chat.room.sub")
+//   - "**" matches zero or more segments; this is supported only at the ACL
+//     layer, the subscription matcher has no equivalent, so "chat.**" there
+//     is treated as a literal channel name
+//   - any other segment matches only an identical channel segment
+//
+// This deliberately replaces path.Match, whose "*" matches across dots,
+// making "chat.*" and "chat.**" behave identically and failing to match the
+// CSTrie single-segment wildcard used for subscription routing.
+func matchChannelPattern(pattern, channel string) bool {
+	return matchSegments(strings.Split(pattern, "."), strings.Split(channel, "."))
+}
+
+func matchSegments(pattern, channel []string) bool {
+	for len(pattern) > 0 {
+		switch pattern[0] {
+		case "**":
+			// Try every split point: "**" may consume zero or more segments.
+			for i := 0; i <= len(channel); i++ {
+				if matchSegments(pattern[1:], channel[i:]) {
+					return true
+				}
+			}
+			return false
+		case "*":
+			if len(channel) == 0 {
+				return false
+			}
+			pattern, channel = pattern[1:], channel[1:]
+		default:
+			if len(channel) == 0 || pattern[0] != channel[0] {
+				return false
+			}
+			pattern, channel = pattern[1:], channel[1:]
+		}
+	}
+	return len(channel) == 0
 }

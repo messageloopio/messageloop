@@ -7,7 +7,7 @@ This guide covers running MessageLoop in production environments.
 MessageLoop compiles to a single static binary with no runtime dependencies (unless you use the Redis broker).
 
 ```bash
-go build -o messageloop cmd/server/main.go
+go build -o messageloop ./cmd/server
 ./messageloop --config ./config.yaml
 ```
 
@@ -17,9 +17,9 @@ A single MessageLoop process exposes four network listeners:
 
 | Listener | Config Key | Purpose | Default |
 | --- | --- | --- | --- |
-| WebSocket | `transport.websocket.addr` | Client pub/sub traffic | `:9080` |
-| gRPC streaming | `transport.grpc.addr` | Client pub/sub traffic | `:9090` |
-| gRPC admin | `server.grpc_admin.addr` | Server-side admin API | `127.0.0.1:9091` |
+| WebSocket | `transport.websocket.addr` | Client pub/sub traffic | None (required) |
+| gRPC streaming | `transport.grpc.addr` | Client pub/sub traffic | None (required) |
+| gRPC admin | `server.grpc_admin.addr` | Server-side admin API | None (required) |
 | HTTP admin | `server.http.addr` | Health checks and Prometheus metrics | `127.0.0.1:8080` |
 
 Bind client-facing listeners to public interfaces and admin listeners to private/loopback interfaces.
@@ -146,6 +146,8 @@ All nodes in a cluster must:
 2. Use `broker.type: redis` with identical broker settings.
 3. Have unique `cluster.node_id` values.
 
+**Security note (cluster command bus):** cluster commands (disconnect, takeover, publish, survey) travel over Redis Pub/Sub with **no signature or sender authentication** — any process that can write to the shared Redis instance can inject commands (see the package comment in `pkg/redisbroker/cluster_command_bus.go`). Commands carry an `IssuedBy` audit field (sender `node_id`) for tracing only. Redis network isolation is therefore the security prerequisite for a cluster deployment: run Redis on a private network or with authentication/firewalling so that only trusted nodes can reach it.
+
 ## Resource Limits
 
 Protect the server from resource exhaustion:
@@ -169,7 +171,7 @@ server:
     idle_timeout: "300s"
 ```
 
-Clients that send no messages (including pings) within the idle timeout are disconnected with a `DisconnectStale` error code. Clients should send periodic `Ping` messages to keep connections alive.
+Clients that send no messages (including pings) within the idle timeout are disconnected with a `DisconnectIdleTimeout` (3511) code. Clients should send periodic `Ping` messages to keep connections alive.
 
 ## WebSocket Options
 
@@ -230,7 +232,7 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -o /messageloop cmd/server/main.go
+RUN CGO_ENABLED=0 go build -o /messageloop ./cmd/server
 
 FROM gcr.io/distroless/static-debian12
 COPY --from=builder /messageloop /messageloop

@@ -39,6 +39,12 @@ func NewTrieMatcher() Matcher {
 
 // Subscribe adds the Subscriber to the topic and returns a Subscription.
 func (t *trieMatcher) Subscribe(topic string, sub Subscriber) (*Subscription, error) {
+	if err := validateSubscriber(sub); err != nil {
+		return nil, err
+	}
+	if !validTopic(topic) {
+		return nil, ErrBadTopic
+	}
 	t.mu.Lock()
 	curr := t.root
 	for _, word := range strings.Split(topic, delimiter) {
@@ -61,6 +67,9 @@ func (t *trieMatcher) Subscribe(topic string, sub Subscriber) (*Subscription, er
 
 // Unsubscribe removes the Subscription.
 func (t *trieMatcher) Unsubscribe(sub *Subscription) {
+	if sub == nil {
+		return
+	}
 	t.mu.Lock()
 	curr := t.root
 	for _, word := range strings.Split(sub.Topic, delimiter) {

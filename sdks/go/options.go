@@ -58,6 +58,9 @@ type Options struct {
 	PingInterval time.Duration
 	// PingTimeout is the timeout for waiting for a pong response
 	PingTimeout time.Duration
+	// RPCTimeout is the default timeout applied to RPC calls when the
+	// caller's context does not carry a deadline. Zero disables the default.
+	RPCTimeout time.Duration
 
 	// AutoReconnect enables automatic reconnection on disconnect.
 	AutoReconnect bool
@@ -86,6 +89,7 @@ func defaultOptions() *Options {
 		AutoSubscribe:          nil,
 		PingInterval:           30 * time.Second,
 		PingTimeout:            10 * time.Second,
+		RPCTimeout:             30 * time.Second,
 		AutoReconnect:          false,
 		ReconnectInitialDelay:  1 * time.Second,
 		ReconnectMaxDelay:      30 * time.Second,
@@ -154,6 +158,14 @@ func WithPingInterval(interval time.Duration) Option {
 func WithPingTimeout(timeout time.Duration) Option {
 	return func(o *Options) {
 		o.PingTimeout = timeout
+	}
+}
+
+// WithRPCTimeout sets the default timeout applied to RPC calls when the
+// caller's context has no deadline. Pass 0 to disable the default timeout.
+func WithRPCTimeout(timeout time.Duration) Option {
+	return func(o *Options) {
+		o.RPCTimeout = timeout
 	}
 }
 

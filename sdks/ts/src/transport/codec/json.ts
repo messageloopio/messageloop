@@ -27,13 +27,23 @@ export class JSONCodec implements Codec {
   encode(msg: object): string {
     // Bufbuild messages carry $typeName; plain objects are serialized as-is
     // (legacy convenience) while messages use the canonical proto3 JSON
-    // mapping so the output matches the server wire format.
+    // mapping so the output matches the server wire format. useProtoFieldName
+    // emits snake_case field names to match the Go side's
+    // protojson UseProtoNames: true, independent of generated json_name
+    // annotations.
     const isMessage = typeof (msg as { $typeName?: unknown }).$typeName === "string";
-    const json = isMessage ? toJson(InboundMessageSchema, msg as InboundMessage) : msg;
+    const json = isMessage
+      ? toJson(InboundMessageSchema, msg as InboundMessage, { useProtoFieldName: true })
+      : msg;
     return JSON.stringify(json, JSONCodec.bigIntReplacer);
   }
 
-  decode(data: Uint8Array | string): OutboundMessage {
+  decode(data: Uint8Array | string | Blob): OutboundMessage | Promise<OutboundMessage> {
+    if (data instanceof Blob) {
+      return data
+        .arrayBuffer()
+        .then((buf) => this.decode(new Uint8Array(buf)));
+    }
     const text = typeof data === "string" ? data : new TextDecoder().decode(data);
     // ignoreUnknownFields mirrors the server's protojson DiscardUnknown
     // behavior, so forward-incompatible server payloads still decode.

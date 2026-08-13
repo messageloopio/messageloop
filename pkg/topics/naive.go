@@ -1,7 +1,6 @@
 package topics
 
 import (
-	"strings"
 	"sync"
 )
 
@@ -17,6 +16,12 @@ func NewNaiveMatcher() Matcher {
 
 // Subscribe adds the Subscriber to the topic and returns a Subscription.
 func (n *naiveMatcher) Subscribe(topic string, sub Subscriber) (*Subscription, error) {
+	if err := validateSubscriber(sub); err != nil {
+		return nil, err
+	}
+	if !validTopic(topic) {
+		return nil, ErrBadTopic
+	}
 	n.mu.Lock()
 	if _, ok := n.subs[topic]; !ok {
 		n.subs[topic] = make(map[Subscriber]struct{})
@@ -28,15 +33,15 @@ func (n *naiveMatcher) Subscribe(topic string, sub Subscriber) (*Subscription, e
 
 // Unsubscribe removes the Subscription.
 func (n *naiveMatcher) Unsubscribe(sub *Subscription) {
+	if sub == nil {
+		return
+	}
 	n.mu.Lock()
 	if subscribers, ok := n.subs[sub.Topic]; ok {
-		for existing := range subscribers {
-			if existing != sub.Subscriber {
-				continue
-			}
-
-			// Delete the subscriber from the list.
-			delete(n.subs[sub.Topic], sub.Subscriber)
+		delete(subscribers, sub.Subscriber)
+		if len(subscribers) == 0 {
+			// Drop the topic entry so empty topics do not accumulate.
+			delete(n.subs, sub.Topic)
 		}
 	}
 	n.mu.Unlock()
@@ -47,7 +52,7 @@ func (n *naiveMatcher) Lookup(topic string) []Subscriber {
 	n.mu.RLock()
 	subscriberSet := make(map[Subscriber]struct{})
 	for existingTopic, subscribers := range n.subs {
-		if topicMatches(existingTopic, topic) {
+		if matchCriteria(existingTopic, topic) {
 			for sub, x := range subscribers {
 				subscriberSet[sub] = x
 			}
@@ -65,23 +70,4 @@ func (n *naiveMatcher) Lookup(topic string) []Subscriber {
 	}
 
 	return subscriberList
-}
-
-func topicMatches(sub, topic string) bool {
-	var (
-		subConstituents   = strings.Split(sub, delimiter)
-		topicConstituents = strings.Split(topic, delimiter)
-	)
-
-	if len(subConstituents) != len(topicConstituents) {
-		return false
-	}
-
-	for i, constituent := range topicConstituents {
-		if constituent != subConstituents[i] && subConstituents[i] != wildcard {
-			return false
-		}
-	}
-
-	return true
 }
