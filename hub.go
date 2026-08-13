@@ -80,6 +80,13 @@ func (h *Hub) addSub(ch string, sub Subscriber) (bool, error) {
 	if isWildcard(ch) {
 		return h.addWildcardSub(ch, sub)
 	}
+	// Exact channels never reach the matcher, so their validity is checked
+	// here: channels with explicit empty segments ("a.", ".a", "a..b") and
+	// the empty channel are rejected with ErrBadTopic instead of being
+	// registered silently (B1).
+	if err := topics.ValidateTopic(ch); err != nil {
+		return false, err
+	}
 	return h.subShards[index(ch, numHubShards)].addSub(ch, sub)
 }
 
@@ -208,6 +215,14 @@ func newSubShard(maxTimeLagMilli int64) *subShard {
 type Subscriber struct {
 	Client    *Client
 	Ephemeral bool
+	// DeliveredOffset is the highest offset of a publication successfully
+	// delivered to Client on this exact channel. Maintained by the broadcast
+	// path under the subShard lock (see recordDeliveredOffsets) and read by
+	// the cluster snapshot path via LookupSubscriber; it feeds
+	// ClusterSessionSnapshot.ChannelOffsets for exact cross-node resume.
+	// Zero when nothing was delivered yet (transient publications carry
+	// offset 0 and never update it). Wildcard subscriptions never track it.
+	DeliveredOffset uint64
 }
 
 // NewSubscriber creates a new Subscriber.
@@ -362,12 +377,18 @@ func (h *Hub) broadcastPublication(ch string, pub *Publication) error {
 
 	const broadcastParallelThreshold = 8
 
+	// delivered marks the positions of clients that received the publication,
+	// so the last-delivered-offset bookkeeping below only counts successful
+	// sends. One slot per client: each fan-out goroutine writes only its own
+	// index, so no locking is needed.
+	delivered := make([]bool, len(clients))
+
 	if len(clients) <= broadcastParallelThreshold {
 		// Serial send for small fan-out — avoids goroutine overhead
-		for _, client := range clients {
+		for i, client := range clients {
 			// A panic in one send must not take down the broker handler;
 			// the parallel branch below recovers too.
-			func() {
+			func(i int) {
 				defer func() {
 					if r := recover(); r != nil {
 						log.ErrorContext(ctx, "panic in send publication", fmt.Errorf("panic: %v, channel: %s", r, ch))
@@ -378,20 +399,23 @@ func (h *Hub) broadcastPublication(ch string, pub *Publication) error {
 					if client.node.metrics != nil {
 						client.node.metrics.DeliveryFailures.Inc()
 					}
-				} else if client.node.metrics != nil {
-					client.node.metrics.MessagesDelivered.Inc()
+				} else {
+					delivered[i] = true
+					if client.node.metrics != nil {
+						client.node.metrics.MessagesDelivered.Inc()
+					}
 				}
-			}()
+			}(i)
 		}
 	} else {
 		// Parallel send for large fan-out, bounded to broadcastParallelLimit
 		// concurrent goroutines.
 		var wg sync.WaitGroup
 		sem := make(chan struct{}, broadcastParallelLimit)
-		for _, client := range clients {
+		for i, client := range clients {
 			sem <- struct{}{}
 			wg.Add(1)
-			go func(client *Client) {
+			go func(i int, client *Client) {
 				defer func() {
 					if r := recover(); r != nil {
 						log.ErrorContext(ctx, "panic in send publication", fmt.Errorf("panic: %v, channel: %s", r, ch))
@@ -404,15 +428,62 @@ func (h *Hub) broadcastPublication(ch string, pub *Publication) error {
 					if client.node.metrics != nil {
 						client.node.metrics.DeliveryFailures.Inc()
 					}
-				} else if client.node.metrics != nil {
-					client.node.metrics.MessagesDelivered.Inc()
+				} else {
+					delivered[i] = true
+					if client.node.metrics != nil {
+						client.node.metrics.MessagesDelivered.Inc()
+					}
 				}
-			}(client)
+			}(i, client)
 		}
 		wg.Wait()
 	}
 
+	// Record the last successfully delivered offset per exact subscription.
+	// Transient publications (offset 0) never update the bookkeeping.
+	if pub.Offset > 0 {
+		h.recordDeliveredOffsets(ch, pub.Offset, clients, delivered)
+	}
+
 	return nil
+}
+
+// recordDeliveredOffsets updates the last successfully delivered offset for
+// every exact subscription of ch that received the publication. The update
+// runs in a single pass under one subShard write lock per publication, so the
+// broadcast hot path pays one short lock acquisition regardless of fan-out
+// size, never one per subscriber. Wildcard patterns are not channels and
+// never receive offset tracking (their deliveries are not resumable
+// per-channel); the guard keeps their records untouched.
+func (h *Hub) recordDeliveredOffsets(ch string, offset uint64, clients []*Client, delivered []bool) {
+	if isWildcard(ch) || len(delivered) == 0 {
+		return
+	}
+	shard := h.subShards[index(ch, numHubShards)]
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+	subs, ok := shard.subs[ch]
+	if !ok {
+		return
+	}
+	for i, client := range clients {
+		if !delivered[i] {
+			continue
+		}
+		uid := client.SessionID()
+		sub, ok := subs[uid]
+		if !ok {
+			// The subscription was removed between the fan-out and this
+			// pass (e.g. concurrent unsubscribe/close): nothing to record.
+			continue
+		}
+		// Max-guard: concurrent publications may deliver out of order, but
+		// the recorded offset must never regress.
+		if sub.DeliveredOffset < offset {
+			sub.DeliveredOffset = offset
+			subs[uid] = sub
+		}
+	}
 }
 
 // RemoveSession removes a session from the sessions map and connShards.

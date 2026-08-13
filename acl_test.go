@@ -245,3 +245,38 @@ func TestACLEngine_StarIsSingleSegment(t *testing.T) {
 		t.Error("log.** must match log itself")
 	}
 }
+
+// TestACLEngine_TrailingDoubleWildcardParity locks parity between the ACL
+// layer and the subscription matcher for trailing "**" (B2): both must match
+// the bare prefix, single segments and deeper paths, while "*" stays
+// single-segment. Middle-position "**" remains legal in ACL patterns
+// (deliberately more permissive than the matcher, which rejects it).
+func TestACLEngine_TrailingDoubleWildcardParity(t *testing.T) {
+	engine := NewACLEngine([]ACLRule{
+		{ChannelPattern: "chat.**", DenyAll: true},
+		{ChannelPattern: "*/__presence", AllowSubscribe: []string{"*"}},
+	})
+
+	for _, ch := range []string{"chat", "chat.room", "chat.room.sub", "chat.room/__presence"} {
+		if engine.CanSubscribe(ch, "user-1") {
+			t.Errorf("CanSubscribe(%q): chat.** must cover the whole subtree including the bare prefix", ch)
+		}
+	}
+	for _, ch := range []string{"other", "x.chat"} {
+		if !engine.CanSubscribe(ch, "user-1") {
+			t.Errorf("CanSubscribe(%q): channels outside chat.** must be allowed", ch)
+		}
+	}
+
+	// "*" stays single-segment in ACL patterns, consistent with the matcher:
+	// "chat.*" covers "chat.room" but not "chat.room.sub".
+	single := NewACLEngine([]ACLRule{
+		{ChannelPattern: "chat.*", DenyAll: true},
+	})
+	if !single.CanSubscribe("chat.room.sub", "user-1") {
+		t.Error("chat.* must not match chat.room.sub (single-segment wildcard)")
+	}
+	if single.CanSubscribe("chat.room", "user-1") {
+		t.Error("chat.* must match chat.room")
+	}
+}

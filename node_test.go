@@ -862,7 +862,7 @@ func TestNode_AddClient_ClusterSyncFailure_NoGaugeIncrease(t *testing.T) {
 
 	err = node.AddClient(client)
 	require.Error(t, err)
-	require.Equal(t, float64(0), testutil.ToFloat64(metrics.ConnectionsTotal),
+	require.Equal(t, float64(0), testutil.ToFloat64(metrics.ConnectionsTotal.WithLabelValues("ws")),
 		"failed AddClient must not count the connection")
 }
 

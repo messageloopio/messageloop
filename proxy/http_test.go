@@ -294,6 +294,86 @@ func TestHTTPProxy_RPC_NonOKFallbackTextError(t *testing.T) {
 	assert.False(t, errors.Is(err, context.DeadlineExceeded))
 }
 
+// TestHTTPProxy_RPC_NonOKStructuredErrorProtoJSONContract verifies that a
+// non-200 error body emitted per the proto3 JSON contract (protojson
+// encoding) parses into a structured sharedpb.Error: exact camelCase field
+// names, a metadata Struct with nested values, tolerated unknown fields
+// inside the error object, and an unrelated top-level member (A4).
+func TestHTTPProxy_RPC_NonOKStructuredErrorProtoJSONContract(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"code":"RATE_LIMITED","type":"proxy_error","message":"too many requests","metadata":{"attempt":3,"reason":"rate_limited","region":{"code":"cn"}},"future_field":"ignored"},"trace_id":"t-9"}`))
+	}))
+	defer server.Close()
+
+	p := newTestHTTPProxy(t, server)
+
+	_, err := p.RPC(context.Background(), &RPCProxyRequest{ID: "r1", Channel: "c", Method: "m"})
+	require.Error(t, err)
+
+	var statusErr *HTTPStatusError
+	require.ErrorAs(t, err, &statusErr)
+	assert.Equal(t, http.StatusBadRequest, statusErr.StatusCode)
+	require.NotNil(t, statusErr.Err, "structured backend error must be preserved")
+	assert.Equal(t, "RATE_LIMITED", statusErr.Err.Code)
+	assert.Equal(t, "proxy_error", statusErr.Err.Type)
+	assert.Equal(t, "too many requests", statusErr.Err.Message)
+	md := statusErr.Err.GetMetadata()
+	require.NotNil(t, md)
+	assert.Equal(t, 3.0, md.GetFields()["attempt"].GetNumberValue())
+	assert.Equal(t, "rate_limited", md.GetFields()["reason"].GetStringValue())
+	assert.Equal(t, "cn", md.GetFields()["region"].GetStructValue().GetFields()["code"].GetStringValue())
+}
+
+// TestHTTPProxy_RPC_NonOKStructuredErrorExactFieldNames verifies that the
+// error member is parsed with protojson, which honors only exact proto3 JSON
+// field names. encoding/json matched wrong-case names case-insensitively and
+// would populate Code from "Code"; protojson drops the non-contract member.
+// This is the regression guard for A4: it fails against the old
+// encoding/json-based implementation.
+func TestHTTPProxy_RPC_NonOKStructuredErrorExactFieldNames(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"Code":"WRONG_CASE","message":"still parses"}}`))
+	}))
+	defer server.Close()
+
+	p := newTestHTTPProxy(t, server)
+
+	_, err := p.RPC(context.Background(), &RPCProxyRequest{ID: "r1", Channel: "c", Method: "m"})
+	require.Error(t, err)
+
+	var statusErr *HTTPStatusError
+	require.ErrorAs(t, err, &statusErr)
+	require.NotNil(t, statusErr.Err)
+	assert.Equal(t, "", statusErr.Err.Code, "non-contract field name must not populate code")
+	assert.Equal(t, "still parses", statusErr.Err.Message)
+}
+
+// TestHTTPProxy_RPC_NonOKMalformedErrorMemberFallsBack verifies that a
+// non-200 body whose error member is not a valid protojson object still
+// falls back to the raw body text (A4 keeps the fallback behavior).
+func TestHTTPProxy_RPC_NonOKMalformedErrorMemberFallsBack(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":42,"note":"not an object"}`))
+	}))
+	defer server.Close()
+
+	p := newTestHTTPProxy(t, server)
+
+	_, err := p.RPC(context.Background(), &RPCProxyRequest{ID: "r1", Channel: "c", Method: "m"})
+	require.Error(t, err)
+
+	var statusErr *HTTPStatusError
+	require.ErrorAs(t, err, &statusErr)
+	assert.Equal(t, http.StatusBadRequest, statusErr.StatusCode)
+	assert.Nil(t, statusErr.Err)
+	assert.Contains(t, err.Error(), "not an object")
+}
+
 func mustStruct(t *testing.T, v map[string]any) *structpb.Struct {
 	t.Helper()
 	s, err := structpb.NewStruct(v)

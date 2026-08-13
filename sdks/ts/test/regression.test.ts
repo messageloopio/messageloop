@@ -247,7 +247,7 @@ describe("P1-9: unsubscribe clears channelOffsets", () => {
     };
     (client as any).isConnectedFlag = true;
     (client as any).channelOffsets.set("ch1", 100n);
-    (client as any).subscribedChannels.add("ch1");
+    (client as any).subscribedChannels = new Map([["ch1", ""]]);
 
     await client.unsubscribe("ch1");
 
@@ -297,7 +297,10 @@ describe("P2-1: Connected.subscriptions is authoritative on reconnect", () => {
     };
     (client as any).isConnectedFlag = true;
     (client as any).connectionState = "reconnecting";
-    (client as any).subscribedChannels = new Set(["keep", "gone"]);
+    (client as any).subscribedChannels = new Map([
+      ["keep", ""],
+      ["gone", ""],
+    ]);
 
     const connected = create(OutboundMessageSchema, {
       envelope: {
@@ -330,7 +333,7 @@ describe("P2-1: Connected.subscriptions is authoritative on reconnect", () => {
     (client as any).transport = { send };
     (client as any).isConnectedFlag = true;
     (client as any).connectionState = "reconnecting";
-    (client as any).subscribedChannels = new Set(["stale"]);
+    (client as any).subscribedChannels = new Map([["stale", ""]]);
 
     const connected = create(OutboundMessageSchema, {
       envelope: {

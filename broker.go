@@ -103,12 +103,16 @@ type Broker interface {
 	// Publish sends payload to all subscribers of ch.
 	// Returns the offset assigned to this publication (0 if history is
 	// disabled). The assigned offset is also written back to pub.Offset.
+	// Channels with explicit empty segments ("a.", ".a", "a..b") and the
+	// empty channel are rejected with topics.ErrBadTopic before any
+	// publication side effect.
 	Publish(ch string, pub *Publication) (uint64, error)
 
 	// PublishTransient delivers payload to all subscribers of ch in real
 	// time without writing history, so the publication never appears in
 	// History. Used for events (e.g. presence join/leave) that must not
-	// leak into the recovery message stream.
+	// leak into the recovery message stream. Malformed channels are rejected
+	// with topics.ErrBadTopic like Publish.
 	PublishTransient(ch string, pub *Publication) error
 
 	// History returns publications stored for ch with offset >= sinceOffset.

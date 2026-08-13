@@ -32,6 +32,11 @@ type Client interface {
 	// Publish publishes a message to a channel. Pass transient=true to skip
 	// persistence and only deliver to currently connected subscribers.
 	Publish(channel string, msg *Message, transient ...bool) error
+	// PublishWith publishes a message with per-publish options.
+	PublishWith(channel string, msg *Message, opts ...PublishOption) error
+	// PublishWithAck publishes a message and waits for the server's PublishAck,
+	// returning the broker-assigned offset.
+	PublishWithAck(ctx context.Context, channel string, msg *Message, opts ...PublishOption) (uint64, error)
 	// RPC sends an RPC request and waits for a response
 	RPC(ctx context.Context, channel, method string, req, resp *Message) error
 	// OnMessage sets the message handler
@@ -74,6 +79,37 @@ func (r *rpcPending) close() {
 	r.once.Do(func() { close(r.ch) })
 }
 
+// subscriptionState tracks the per-channel subscription options that must be
+// restored when the subscription is resumed after a reconnect.
+type subscriptionState struct {
+	ephemeral bool
+	token     string
+}
+
+// ackPending tracks a pending publish waiting for its PublishAck. The once
+// guard makes resolve/reject idempotent so concurrent delivery and disconnect
+// or Close cleanup cannot double-send on the channel.
+type ackPending struct {
+	ch   chan ackResult
+	once sync.Once
+}
+
+// ackResult is the outcome of a pending publish.
+type ackResult struct {
+	offset uint64
+	err    error
+}
+
+// resolve delivers the broker-assigned offset, at most once.
+func (a *ackPending) resolve(offset uint64) {
+	a.once.Do(func() { a.ch <- ackResult{offset: offset} })
+}
+
+// reject fails the pending publish with err, at most once.
+func (a *ackPending) reject(err error) {
+	a.once.Do(func() { a.ch <- ackResult{err: err} })
+}
+
 // client is the implementation of the Client interface.
 type client struct {
 	mu                  sync.RWMutex
@@ -97,8 +133,10 @@ type client struct {
 	surveyHandler       func(requestID string, req *Message) (*Message, error)
 	pendingRPC          map[string]*rpcPending
 	pendingRPCMu        sync.RWMutex
+	pendingAck          map[string]*ackPending // Publish id -> pending publish awaiting its PublishAck
+	pendingAckMu        sync.RWMutex
 	nextMsgID           atomic.Uint64
-	subscriptions       map[string]bool // Channel -> ephemeral flag
+	subscriptions       map[string]*subscriptionState // Channel -> subscription state
 	subMu               sync.RWMutex
 	pingCancel          context.CancelFunc
 	pongCh              chan struct{} // Signals pong receipt to the ping loop
@@ -169,7 +207,8 @@ func newClient(ctx context.Context, cancel context.CancelFunc, trans transport, 
 		connectedCh:    make(chan struct{}),
 		connectErrCh:   make(chan error, 1),
 		pendingRPC:     make(map[string]*rpcPending),
-		subscriptions:  make(map[string]bool),
+		pendingAck:     make(map[string]*ackPending),
+		subscriptions:  make(map[string]*subscriptionState),
 		channelOffsets: make(map[string]uint64),
 		pongCh:         make(chan struct{}, 1),
 	}
@@ -309,10 +348,11 @@ func (c *client) buildConnectMessage(resume bool) *clientpb.InboundMessage {
 func (c *client) resumeSubscriptions(epoch string) []*clientpb.Subscription {
 	c.subMu.RLock()
 	subs := make([]*clientpb.Subscription, 0, len(c.subscriptions))
-	for ch, ephemeral := range c.subscriptions {
+	for ch, state := range c.subscriptions {
 		sub := &clientpb.Subscription{
 			Channel:   ch,
-			Ephemeral: ephemeral,
+			Ephemeral: state.ephemeral,
+			Token:     state.token,
 			Recover:   true,
 			Epoch:     epoch,
 		}
@@ -353,6 +393,10 @@ func (c *client) receiveLoop(trans transport, gen uint64) {
 				isConnError := !c.connected.Load()
 				c.handleError(fmt.Errorf("receive error: %w", err), isConnError)
 				c.connected.Store(false)
+				// Pending publishes can no longer be acked on the lost
+				// connection: fail them so callers can retry instead of
+				// hanging until their context deadline.
+				c.rejectPendingAcks(err)
 				// Attempt reconnection if enabled
 				if c.opts.AutoReconnect && !c.closed.Load() {
 					go c.reconnectLoop()
@@ -372,12 +416,21 @@ func (c *client) handleMessage(msg *clientpb.OutboundMessage, gen uint64) {
 		c.handleConnected(env.Connected, gen)
 
 	case *clientpb.OutboundMessage_Error:
-		// If the error references a pending RPC request, deliver it to the
-		// RPC caller so the call fails fast with the server error instead of
-		// hanging until the context deadline.
-		if !c.deliverPending(msg) {
-			err := fmt.Errorf("server error: %s (code: %s)", env.Error.GetMessage(), env.Error.GetCode())
-			c.handleError(err, !c.connected.Load())
+		// If the error references a pending RPC request or a pending
+		// publish, deliver it to the waiting caller so the call fails fast
+		// with the server error instead of hanging until the context
+		// deadline.
+		if !c.deliverPending(msg) && !c.rejectPendingAck(msg) {
+			if dis, ok := disconnectFromError(env.Error); ok {
+				// The gRPC stream has no close frame: the server encodes the
+				// numeric disconnect code in the error envelope metadata, and
+				// the typed error keeps this path aligned with the WebSocket
+				// close-frame path.
+				c.handleError(dis, !c.connected.Load())
+			} else {
+				err := fmt.Errorf("server error: %s (code: %s)", env.Error.GetMessage(), env.Error.GetCode())
+				c.handleError(err, !c.connected.Load())
+			}
 		}
 
 	case *clientpb.OutboundMessage_SubscribeAck:
@@ -393,8 +446,7 @@ func (c *client) handleMessage(msg *clientpb.OutboundMessage, gen uint64) {
 		c.handleRPCReply(msg, env.RpcReply)
 
 	case *clientpb.OutboundMessage_PublishAck:
-		// PublishAck is handled via RPC reply mechanism
-		// or we can just log it
+		c.handlePublishAck(env.PublishAck, msg)
 
 	case *clientpb.OutboundMessage_Pong:
 		// Handle pong response from server
@@ -452,8 +504,20 @@ func (c *client) handleConnected(connected *clientpb.Connected, gen uint64) {
 	c.subMu.Lock()
 	server := make(map[string]bool, len(connected.GetSubscriptions()))
 	for _, sub := range connected.GetSubscriptions() {
+		state := c.subscriptions[sub.GetChannel()]
+		if state == nil {
+			state = &subscriptionState{}
+		}
+		// The server's list is authoritative for which channels are
+		// subscribed and for their ephemeral flag. Tokens are client-supplied
+		// credentials the server does not persist, so the local token is kept
+		// when the server does not echo one.
+		state.ephemeral = sub.GetEphemeral()
+		if sub.GetToken() != "" {
+			state.token = sub.GetToken()
+		}
 		server[sub.GetChannel()] = sub.GetEphemeral()
-		c.subscriptions[sub.GetChannel()] = sub.GetEphemeral()
+		c.subscriptions[sub.GetChannel()] = state
 	}
 	for ch := range c.subscriptions {
 		if _, ok := server[ch]; !ok {
@@ -505,8 +569,18 @@ func (c *client) handleConnected(connected *clientpb.Connected, gen uint64) {
 // handleSubscribeAck handles the SubscribeAck message.
 func (c *client) handleSubscribeAck(ack *clientpb.SubscribeAck) {
 	for _, sub := range ack.GetSubscriptions() {
+		state := c.subscriptions[sub.GetChannel()]
+		if state == nil {
+			state = &subscriptionState{}
+		}
+		state.ephemeral = sub.GetEphemeral()
+		// The server echoes the subscription (including its token) in the
+		// ack; keep the local token when it does not.
+		if sub.GetToken() != "" {
+			state.token = sub.GetToken()
+		}
 		c.subMu.Lock()
-		c.subscriptions[sub.GetChannel()] = sub.GetEphemeral()
+		c.subscriptions[sub.GetChannel()] = state
 		c.subMu.Unlock()
 	}
 }
@@ -580,6 +654,65 @@ func (c *client) deliverPending(msg *clientpb.OutboundMessage) bool {
 	return ok
 }
 
+// handlePublishAck resolves the pending publish with the matching id, if any.
+// The id is taken from the ack envelope and falls back to the message id; the
+// server echoes the request id in both.
+func (c *client) handlePublishAck(ack *clientpb.PublishAck, msg *clientpb.OutboundMessage) {
+	if ack == nil {
+		return
+	}
+	id := ack.GetId()
+	if id == "" {
+		id = msg.GetId()
+	}
+	if id == "" {
+		return
+	}
+
+	c.pendingAckMu.Lock()
+	ap, ok := c.pendingAck[id]
+	if ok {
+		delete(c.pendingAck, id)
+	}
+	c.pendingAckMu.Unlock()
+	if ok {
+		ap.resolve(ack.GetOffset())
+	}
+}
+
+// rejectPendingAck rejects the pending publish with the matching id, if any,
+// and removes the entry. It reports whether the error was routed to a pending
+// publish. The delivery is once-guarded, so it cannot race with the ack
+// delivery.
+func (c *client) rejectPendingAck(msg *clientpb.OutboundMessage) bool {
+	id := msg.GetId()
+	if id == "" {
+		return false
+	}
+
+	c.pendingAckMu.Lock()
+	ap, ok := c.pendingAck[id]
+	if ok {
+		delete(c.pendingAck, id)
+	}
+	c.pendingAckMu.Unlock()
+	if ok {
+		ap.reject(fmt.Errorf("server error: %s (code: %s)", msg.GetError().GetMessage(), msg.GetError().GetCode()))
+	}
+	return ok
+}
+
+// rejectPendingAcks fails all pending publishes when the connection is lost
+// before their acks arrive.
+func (c *client) rejectPendingAcks(err error) {
+	c.pendingAckMu.Lock()
+	for id, ap := range c.pendingAck {
+		delete(c.pendingAck, id)
+		ap.reject(fmt.Errorf("connection lost before publish ack: %w", err))
+	}
+	c.pendingAckMu.Unlock()
+}
+
 // handleError handles an error.
 func (c *client) handleError(err error, isConnError bool) {
 	c.handlerMu.RLock()
@@ -610,6 +743,18 @@ type SubscribeOption func(*clientpb.Subscription)
 func WithEphemeral(ephemeral bool) SubscribeOption {
 	return func(s *clientpb.Subscription) {
 		s.Ephemeral = ephemeral
+	}
+}
+
+// WithSubscriptionToken sets the per-subscription authorization token
+// forwarded to the server, which passes it to the subscribe ACL proxy for
+// channel-level authorization. The default is empty (no token).
+//
+// Note: named WithSubscriptionToken (not WithToken) because WithToken is
+// already taken by the client-level connect auth token (options.go).
+func WithSubscriptionToken(token string) SubscribeOption {
+	return func(s *clientpb.Subscription) {
+		s.Token = token
 	}
 }
 
@@ -671,6 +816,7 @@ func (c *client) Unsubscribe(channels ...string) error {
 		subs[i] = &clientpb.Subscription{
 			Channel:   ch,
 			Ephemeral: c.isEphemeral(ch),
+			Token:     c.subToken(ch),
 		}
 	}
 
@@ -698,7 +844,129 @@ func (c *client) Unsubscribe(channels ...string) error {
 func (c *client) isEphemeral(ch string) bool {
 	c.subMu.RLock()
 	defer c.subMu.RUnlock()
-	return c.subscriptions[ch]
+	if s := c.subscriptions[ch]; s != nil {
+		return s.ephemeral
+	}
+	return false
+}
+
+// subToken returns the token the given channel was last subscribed with.
+func (c *client) subToken(ch string) string {
+	c.subMu.RLock()
+	defer c.subMu.RUnlock()
+	if s := c.subscriptions[ch]; s != nil {
+		return s.token
+	}
+	return ""
+}
+
+// PublishOption configures a single publish.
+type PublishOption func(*clientpb.Publish)
+
+// WithPublishToken sets the per-publish authorization token forwarded to the
+// server, which passes it to the publish ACL proxy. The default is empty (no
+// token).
+func WithPublishToken(token string) PublishOption {
+	return func(p *clientpb.Publish) {
+		p.Token = token
+	}
+}
+
+// PublishWith publishes a message with per-publish options.
+func (c *client) PublishWith(channel string, msg *Message, opts ...PublishOption) error {
+	if !c.connected.Load() {
+		return fmt.Errorf("not connected")
+	}
+
+	payload, err := msg.ToPayload()
+	if err != nil {
+		return fmt.Errorf("failed to convert message: %w", err)
+	}
+
+	pub := &clientpb.Publish{
+		Channel: channel,
+		Payload: payload,
+	}
+	for _, opt := range opts {
+		opt(pub)
+	}
+
+	pbMsg := &clientpb.InboundMessage{
+		Id: c.generateID(),
+		Envelope: &clientpb.InboundMessage_Publish{
+			Publish: pub,
+		},
+	}
+
+	c.mu.RLock()
+	trans := c.transport
+	c.mu.RUnlock()
+	if err := trans.Send(c.ctx, pbMsg); err != nil {
+		return fmt.Errorf("publish failed: %w", err)
+	}
+
+	return nil
+}
+
+// PublishWithAck publishes a message and waits for the server's PublishAck,
+// returning the broker-assigned offset. The caller's context bounds the wait:
+// on cancellation or timeout the pending publish is dropped, and a lost
+// connection fails all pending publishes so callers can retry.
+func (c *client) PublishWithAck(ctx context.Context, channel string, msg *Message, opts ...PublishOption) (uint64, error) {
+	if !c.connected.Load() {
+		return 0, fmt.Errorf("not connected")
+	}
+
+	payload, err := msg.ToPayload()
+	if err != nil {
+		return 0, fmt.Errorf("failed to convert message: %w", err)
+	}
+
+	pub := &clientpb.Publish{
+		Channel: channel,
+		Payload: payload,
+	}
+	for _, opt := range opts {
+		opt(pub)
+	}
+
+	id := c.generateID()
+	ap := &ackPending{ch: make(chan ackResult, 1)}
+
+	// Register the pending publish before sending so the ack can never be
+	// missed between the send and the registration.
+	c.pendingAckMu.Lock()
+	c.pendingAck[id] = ap
+	c.pendingAckMu.Unlock()
+	defer func() {
+		c.pendingAckMu.Lock()
+		delete(c.pendingAck, id)
+		c.pendingAckMu.Unlock()
+	}()
+
+	pbMsg := &clientpb.InboundMessage{
+		Id: id,
+		Envelope: &clientpb.InboundMessage_Publish{
+			Publish: pub,
+		},
+	}
+
+	c.mu.RLock()
+	trans := c.transport
+	c.mu.RUnlock()
+	if err := trans.Send(c.ctx, pbMsg); err != nil {
+		return 0, fmt.Errorf("publish failed: %w", err)
+	}
+
+	select {
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	case res := <-ap.ch:
+		if res.err != nil {
+			return 0, res.err
+		}
+		return res.offset, nil
+	}
 }
 
 // Publish publishes a message to a channel. The optional transient flag, when
@@ -1181,6 +1449,14 @@ func (c *client) Close() error {
 		rp.close()
 	}
 	c.pendingRPCMu.Unlock()
+
+	// Clean up pending publish acks
+	c.pendingAckMu.Lock()
+	for id, ap := range c.pendingAck {
+		delete(c.pendingAck, id)
+		ap.reject(errors.New("client closed before publish ack"))
+	}
+	c.pendingAckMu.Unlock()
 
 	c.mu.RLock()
 	trans := c.transport

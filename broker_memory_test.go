@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/messageloopio/messageloop/pkg/topics"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -254,6 +255,26 @@ func TestMemoryBroker_Publish_MultipleChannels(t *testing.T) {
 	if cp.count() != 3 {
 		t.Errorf("got %d publications, want 3", cp.count())
 	}
+}
+
+// TestMemoryBroker_Publish_RejectsMalformedChannel pins B1: the publish entry
+// must reject channels with explicit empty segments ("a.", ".a", "a..b") with
+// ErrBadTopic instead of recording history or invoking the handler.
+func TestMemoryBroker_Publish_RejectsMalformedChannel(t *testing.T) {
+	b, cp, cancel := newTestBroker(t, MemoryBrokerOptions{})
+	defer cancel()
+
+	for _, ch := range []string{"a.", ".a", "a..b", ""} {
+		_, err := b.Publish(ch, publishPub([]byte("x"), false))
+		assert.ErrorIs(t, err, topics.ErrBadTopic, "Publish(%q)", ch)
+		err = b.PublishTransient(ch, publishPub([]byte("x"), false))
+		assert.ErrorIs(t, err, topics.ErrBadTopic, "PublishTransient(%q)", ch)
+	}
+
+	assert.Zero(t, cp.count(), "no publication may reach the handler for malformed channels")
+	pubs, err := b.History("a.", 0, 0)
+	assert.NoError(t, err)
+	assert.Empty(t, pubs, "no history may be recorded for malformed channels")
 }
 
 func TestMemoryBroker_Publish_ConcurrentSafe(t *testing.T) {

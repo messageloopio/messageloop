@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/messageloopio/messageloop/pkg/topics"
 )
 
 const defaultMemoryHistorySize = 256
@@ -110,6 +111,12 @@ func (b *memoryBroker) Unsubscribe(ch string) error {
 }
 
 func (b *memoryBroker) Publish(ch string, pub *Publication) (uint64, error) {
+	// Channels with explicit empty segments ("a.", ".a", "a..b") and the
+	// empty channel are rejected up front so malformed channels never produce
+	// history entries or handler invocations (B1).
+	if err := topics.ValidateTopic(ch); err != nil {
+		return 0, err
+	}
 	b.mu.Lock()
 	h, ok := b.history[ch]
 	if !ok {
@@ -148,6 +155,9 @@ func (b *memoryBroker) Publish(ch string, pub *Publication) (uint64, error) {
 // writing history. The offset is always 0 because transient publications
 // have no history entry.
 func (b *memoryBroker) PublishTransient(ch string, pub *Publication) error {
+	if err := topics.ValidateTopic(ch); err != nil {
+		return err
+	}
 	stored := *pub
 	stored.Channel = ch
 	stored.Offset = 0

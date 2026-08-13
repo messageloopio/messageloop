@@ -249,7 +249,7 @@ func (n *Node) AddClient(c *Client) error {
 		return fmt.Errorf("sync cluster session: %w", err)
 	}
 	if n.metrics != nil {
-		n.metrics.ConnectionsTotal.Inc()
+		n.metrics.ConnectionsTotal.WithLabelValues(c.TransportLabel()).Inc()
 	}
 	return nil
 }

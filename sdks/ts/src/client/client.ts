@@ -1,5 +1,7 @@
 import type { OutboundMessage } from "../proto/client/v1/service_pb";
+import type { SurveyRequest } from "../proto/client/v1/service_pb";
 import type { ReceivedMessage, Message } from "../message";
+import type { ChannelOrSpec } from "../message";
 import type { Transport } from "../transport/transport";
 import type { Codec } from "../transport/codec/codec";
 import type { ClientOptions, ClientOption } from "./options";
@@ -18,6 +20,8 @@ import {
   createPublishMessage,
   createRPCRequestMessage,
   createPingMessage,
+  createSubRefreshMessage,
+  createSurveyReplyMessage,
   parseOutboundMessage,
   payloadToMessage,
   createMessage,
@@ -55,14 +59,30 @@ export class MessageLoopClient implements IClient {
   private connectedHandler: ((sessionId: string) => void) | null = null;
   private closedHandler: (() => void) | null = null;
 
-  // Subscriptions
-  private subscribedChannels: Set<string> = new Set();
+  // Subscriptions: channel -> optional subscription token
+  private subscribedChannels: Map<string, string> = new Map();
 
   // RPC pending requests
   private pendingRPC: Map<
     string,
     { resolve: (msg: Message) => void; reject: (err: Error) => void }
   > = new Map();
+
+  // Publish pending acks (publishWithAck)
+  private pendingPublish: Map<
+    string,
+    {
+      timer: ReturnType<typeof setTimeout>;
+      resolve: (ack: { id: string; offset: bigint }) => void;
+      reject: (err: Error) => void;
+    }
+  > = new Map();
+
+  // Survey request handler; when unset survey requests are echoed back
+  private surveyHandler: ((
+    requestId: string,
+    request: Message
+  ) => Message | Promise<Message>) | null = null;
 
   // Ping/Pong
   private pingTimer: ReturnType<typeof setInterval> | null = null;
@@ -88,7 +108,7 @@ export class MessageLoopClient implements IClient {
 
     // Add auto-subscribe channels to subscribed set
     for (const channel of options.autoSubscribe) {
-      this.subscribedChannels.add(channel);
+      this.subscribedChannels.set(channel, "");
     }
   }
 
@@ -219,12 +239,28 @@ export class MessageLoopClient implements IClient {
         this.connectError = null;
 
         // The server's Connected.subscriptions is authoritative: replace the
-        // local set unconditionally (even with an empty list) so channels
+        // local map unconditionally (even with an empty list) so channels
         // dropped server-side are forgotten before resubscribeAllChannels.
-        const serverSubs: string[] = (parsed.data.subscriptions || [])
-          .map((sub: any) => sub && sub.channel)
-          .filter((ch: any) => typeof ch === "string" && ch.length > 0);
-        this.subscribedChannels = new Set(serverSubs);
+        // When the server omits the subscription token (e.g. an older
+        // broker), fall back to the locally known token so resubscribes keep
+        // it across reconnects.
+        const serverSubs: { channel: string; token: string }[] = (
+          parsed.data.subscriptions || []
+        )
+          .filter(
+            (sub: any) =>
+              sub && typeof sub.channel === "string" && sub.channel.length > 0
+          )
+          .map((sub: any) => ({
+            channel: sub.channel,
+            token:
+              typeof sub.token === "string" && sub.token
+                ? sub.token
+                : this.subscribedChannels.get(sub.channel) || "",
+          }));
+        this.subscribedChannels = new Map(
+          serverSubs.map((sub) => [sub.channel, sub.token])
+        );
 
         // Deliver recovery messages carried in Connected.publications and
         // update per-channel offsets so the next reconnect resumes past them.
@@ -271,6 +307,26 @@ export class MessageLoopClient implements IClient {
             pending.resolve(respMsg);
           }
         }
+        break;
+      }
+
+      case "publishAck": {
+        // The server echoes the publish message id on the envelope and in
+        // PublishAck.id: resolve the matching pending publishWithAck.
+        const pending = this.pendingPublish.get(parsed.id);
+        if (pending) {
+          this.pendingPublish.delete(parsed.id);
+          clearTimeout(pending.timer);
+          pending.resolve({
+            id: parsed.data.id,
+            offset: parsed.data.offset,
+          });
+        }
+        break;
+      }
+
+      case "surveyRequest": {
+        this.handleSurveyRequest(parsed.data);
         break;
       }
 
@@ -370,6 +426,56 @@ export class MessageLoopClient implements IClient {
   }
 
   /**
+   * Handle a survey request from the server: dispatch to the registered
+   * handler, or echo the request payload back when no handler is set
+   * (mirroring the Go SDK and the server's own default).
+   */
+  private handleSurveyRequest(req: SurveyRequest): void {
+    const requestId = req.requestId;
+    const reqMsg = req.payload
+      ? payloadToMessage(req.payload, "")
+      : createMessage("messageloop.message", { contentType: "", type: "binary" });
+
+    if (!this.surveyHandler) {
+      this.sendSurveyReply(requestId, reqMsg, null).catch(() => {
+        // Ignore send failures on the default echo path
+      });
+      return;
+    }
+
+    Promise.resolve()
+      .then(() => this.surveyHandler!(requestId, reqMsg))
+      .then((reply) => this.sendSurveyReply(requestId, reply, null))
+      .catch((err) =>
+        this.sendSurveyReply(requestId, null, err instanceof Error ? err : new Error(String(err)))
+      );
+  }
+
+  /**
+   * Send a SurveyReply for the given request id.
+   * @param reply - Reply message, or null when the reply carries an error.
+   * @param replyErr - Optional error carried in the reply's error field.
+   */
+  private async sendSurveyReply(
+    requestId: string,
+    reply: Message | null,
+    replyErr: Error | null
+  ): Promise<void> {
+    const msg = createSurveyReplyMessage(
+      requestId,
+      reply,
+      replyErr
+        ? {
+            code: "SURVEY_REPLY_ERROR",
+            type: "survey_error",
+            message: replyErr.message,
+          }
+        : undefined
+    );
+    await this.send(msg);
+  }
+
+  /**
    * Handle an error.
    */
   private handleError(err: Error): void {
@@ -415,6 +521,14 @@ export class MessageLoopClient implements IClient {
   private handleDisconnect(): void {
     this.isConnectedFlag = false;
     this.stopPingLoop();
+
+    // Reject pending publish acks: the connection is gone, no ack will arrive.
+    for (const [_, pending] of this.pendingPublish) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error("Connection closed"));
+    }
+    this.pendingPublish.clear();
+
     this.setConnectionState("disconnected");
 
     // Attempt reconnection if enabled
@@ -513,7 +627,10 @@ export class MessageLoopClient implements IClient {
   private async resubscribeAllChannels(): Promise<void> {
     if (this.subscribedChannels.size === 0) return;
 
-    const channels = Array.from(this.subscribedChannels);
+    const channels: ChannelOrSpec[] = Array.from(
+      this.subscribedChannels,
+      ([channel, token]) => (token ? { channel, token } : channel)
+    );
     try {
       const msg = createSubscribeMessage(channels, this.options.ephemeral);
       await this.send(msg);
@@ -591,12 +708,12 @@ export class MessageLoopClient implements IClient {
     // Build subscription list with recovery info when reconnecting.
     // recover matches the Go SDK: always true when reconnecting (the server
     // falls back to recovering from the beginning when epoch is unknown).
-    const subs = Array.from(this.subscribedChannels).map((ch) => ({
-      channel: ch,
+    const subs = Array.from(this.subscribedChannels).map(([channel, token]) => ({
+      channel,
       ephemeral: this.options.ephemeral,
-      token: "",
+      token,
       recover: this.isReconnecting,
-      offset: this.channelOffsets.get(ch) || BigInt(0),
+      offset: this.channelOffsets.get(channel) || BigInt(0),
       epoch: this.isReconnecting ? this.epoch : "",
     }));
 
@@ -639,6 +756,13 @@ export class MessageLoopClient implements IClient {
     }
     this.pendingRPC.clear();
 
+    // Reject pending publish acks
+    for (const [_, pending] of this.pendingPublish) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error("Connection closed"));
+    }
+    this.pendingPublish.clear();
+
     // Close transport
     if (this.transport) {
       await this.transport.close();
@@ -657,29 +781,34 @@ export class MessageLoopClient implements IClient {
 
   /**
    * Subscribe to one or more channels.
+   * @param channels - Channel names, or SubscriptionSpec objects carrying an
+   * optional per-channel token (e.g. `{ channel: "ch1", token: "t1" }`).
    */
-  async subscribe(...channels: string[]): Promise<void> {
+  async subscribe(...channels: ChannelOrSpec[]): Promise<void> {
     const msg = createSubscribeMessage(channels, this.options.ephemeral);
     await this.send(msg);
 
     // Add to subscribed channels
     for (const channel of channels) {
-      this.subscribedChannels.add(channel);
+      const spec = typeof channel === "string" ? { channel } : channel;
+      this.subscribedChannels.set(spec.channel, spec.token || "");
     }
   }
 
   /**
    * Unsubscribe from one or more channels.
+   * @param channels - Channel names, or SubscriptionSpec objects.
    */
-  async unsubscribe(...channels: string[]): Promise<void> {
+  async unsubscribe(...channels: ChannelOrSpec[]): Promise<void> {
     const msg = createUnsubscribeMessage(channels);
     await this.send(msg);
 
     // Remove from subscribed channels and clear per-channel offsets so a
     // later resubscribe + reconnect does not replay stale history.
     for (const channel of channels) {
-      this.subscribedChannels.delete(channel);
-      this.channelOffsets.delete(channel);
+      const name = typeof channel === "string" ? channel : channel.channel;
+      this.subscribedChannels.delete(name);
+      this.channelOffsets.delete(name);
     }
   }
 
@@ -694,6 +823,50 @@ export class MessageLoopClient implements IClient {
   ): Promise<void> {
     const pbMsg = createPublishMessage(channel, msg, transient);
     await this.send(pbMsg);
+  }
+
+  /**
+   * Publish a message and await the server's PublishAck.
+   * @param options.transient - When true, skip persistence and only deliver to currently connected subscribers.
+   * @param options.timeout - Ack timeout in milliseconds (defaults to the RPC timeout).
+   * @returns The publish message id and the channel offset at which it was stored.
+   */
+  async publishWithAck(
+    channel: string,
+    msg: Message,
+    options?: { transient?: boolean; timeout?: number }
+  ): Promise<{ id: string; offset: bigint }> {
+    const pbMsg = createPublishMessage(channel, msg, options?.transient ?? false);
+    const id = pbMsg.id;
+
+    return new Promise((resolve, reject) => {
+      // Set up timeout
+      const timeout = options?.timeout ?? this.options.rpcTimeout;
+      const timeoutId = setTimeout(() => {
+        this.pendingPublish.delete(id);
+        reject(new Error(`Publish ack timeout after ${timeout}ms`));
+      }, timeout);
+
+      // Store pending request
+      this.pendingPublish.set(id, {
+        timer: timeoutId,
+        resolve: (ack: { id: string; offset: bigint }) => {
+          clearTimeout(timeoutId);
+          resolve(ack);
+        },
+        reject: (err: Error) => {
+          clearTimeout(timeoutId);
+          reject(err);
+        },
+      });
+
+      // Send request
+      this.send(pbMsg).catch((err) => {
+        clearTimeout(timeoutId);
+        this.pendingPublish.delete(id);
+        reject(err);
+      });
+    });
   }
 
   /**
@@ -735,6 +908,34 @@ export class MessageLoopClient implements IClient {
         reject(err);
       });
     });
+  }
+
+  /**
+   * Ask the server to re-validate the subscriptions for the given channels
+   * (e.g. after an ACL change on the backend). subRefreshAck needs no
+   * special handling, mirroring the Go SDK.
+   */
+  async subRefresh(...channels: string[]): Promise<void> {
+    const msg = createSubRefreshMessage(
+      channels.map((channel) => ({ channel, token: "" }))
+    );
+    await this.send(msg);
+  }
+
+  /**
+   * Register the handler for survey requests from the server. The handler
+   * receives the request id and the decoded request message and returns the
+   * reply message; the reply is sent back with the request id. When the
+   * handler throws (or rejects), an error reply is sent instead. When no
+   * handler is registered, the request payload is echoed back unchanged.
+   */
+  onSurvey(
+    handler: (
+      requestId: string,
+      request: Message
+    ) => Message | Promise<Message>
+  ): void {
+    this.surveyHandler = handler;
   }
 
   /**
@@ -786,7 +987,7 @@ export class MessageLoopClient implements IClient {
    * Get subscribed channels.
    */
   getSubscribedChannels(): string[] {
-    return Array.from(this.subscribedChannels);
+    return Array.from(this.subscribedChannels.keys());
   }
 
   // ========== Multi-handler API ==========

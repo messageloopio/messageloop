@@ -66,6 +66,30 @@ client.OnMessage(func(messages []*messageloopgo.Message) {
 - `NewBinaryData([]byte)`
 - `(*Message).DataAs(&target)`
 
+## 新增能力（非破坏性）
+
+以下能力为增量 API，不影响既有调用方；详细用法见 `README.md`。
+
+### 订阅级 / 发布级 token
+
+- `SubscribeWith(channel, WithSubscriptionToken("..."))`：订阅时携带订阅级鉴权 token，服务端会将其传给订阅 ACL proxy。重连恢复订阅时 token 随订阅状态一并保存与恢复。
+  - 命名说明：因 `WithToken` 已被客户端级连接鉴权 token（`options.go`）占用，本选项命名为 `WithSubscriptionToken`。
+- `PublishWith(channel, msg, WithPublishToken("..."))`：发布时携带发布级 token，服务端会将其传给发布 ACL proxy。`Publish` 原有签名与行为不变。
+
+### PublishWithAck：等待发布确认
+
+`PublishWithAck(ctx, channel, msg, opts...) (offset uint64, err error)`：等待服务端 `PublishAck` 并返回 broker 分配的 offset。ctx 超时/取消、连接断开或 `Close()` 时，pending 的发布会被 reject 并清理，调用方可据此重试。`Publish`（fire-and-forget）行为保持不变。
+
+### 带数值码的 typed Disconnect
+
+- 新增 `DisconnectError{Code, Reason}`：gRPC 路径解析 `DISCONNECT_ERROR` 信封 `metadata.disconnect_code` 得到数值断连码（3500-3513），与 WebSocket close frame 路径统一为同一类型，可通过 `errors.As(err, &de)` 取出数值码。
+- 行为变化：WebSocket 收到 close frame 时，`Recv` 不再返回笼统的 `"connection closed"`，而是带数值码的 `*DisconnectError`（reason 取自 close frame 文本，为空时为 `"disconnected (code: <n>)"`，不再保证包含 `connection closed` 字样）；gRPC 收到带 `disconnect_code` metadata 的错误信封时，错误处理器收到 `*DisconnectError` 而非 `"server error: ..."`。缺失/畸形 metadata 时保持原有行为。
+
+### Client 接口新增方法（对自定义实现是 breaking）
+
+- `PublishWith(channel string, msg *Message, opts ...PublishOption) error`
+- `PublishWithAck(ctx context.Context, channel string, msg *Message, opts ...PublishOption) (uint64, error)`
+
 ## 破坏性变更（Breaking Changes）
 
 ### LifecycleHandler 回调签名

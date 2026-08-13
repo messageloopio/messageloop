@@ -8,10 +8,11 @@ import (
 // ACLRule defines a single access control rule for channel operations.
 type ACLRule struct {
 	// ChannelPattern is a glob pattern to match channels, e.g. "private.*",
-	// "chat.**". Matching is segment-based (dots separate segments) and more
-	// permissive than the subscription matcher: "*" matches exactly one
-	// non-empty segment (consistent with the matcher), while "**" matches
-	// zero or more segments and is supported only at the ACL layer.
+	// "chat.**". Matching is segment-based (dots separate segments): "*"
+	// matches exactly one non-empty segment (consistent with the matcher),
+	// while "**" matches zero or more segments. The matcher only supports
+	// "**" as the final segment; ACL patterns additionally allow it in the
+	// middle (e.g. "a.**.b"), making the ACL layer more permissive.
 	ChannelPattern string `yaml:"channel_pattern" json:"channel_pattern"`
 
 	// AllowSubscribe lists user IDs allowed to subscribe. Use "*" for any authenticated user.
@@ -125,17 +126,16 @@ func (e *ACLEngine) CanPublish(channel, userID string) bool {
 }
 
 // matchChannelPattern reports whether channel matches pattern using
-// segment-based wildcard semantics that are more permissive than the
-// subscription matcher:
+// segment-based wildcard semantics:
 //
 //   - segments are separated by "."; each pattern segment must match the
 //     corresponding channel segment
 //   - "*" matches exactly one non-empty segment, consistent with the
 //     subscription matcher ("chat.*" matches "chat.room" but not
 //     "chat.room.sub")
-//   - "**" matches zero or more segments; this is supported only at the ACL
-//     layer, the subscription matcher has no equivalent, so "chat.**" there
-//     is treated as a literal channel name
+//   - "**" matches zero or more segments, consistent with the matcher's
+//     trailing "**"; unlike the matcher, ACL patterns may also place "**" in
+//     the middle (e.g. "a.**.b")
 //   - any other segment matches only an identical channel segment
 //
 // This deliberately replaces path.Match, whose "*" matches across dots,

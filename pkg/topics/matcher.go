@@ -9,12 +9,16 @@ import (
 const (
 	delimiter = "."
 	wildcard  = "*"
-	empty     = ""
+	// multiWildcard matches zero or more segments and is only valid as the
+	// final segment of a pattern (MQTT-style suffix wildcard).
+	multiWildcard = "**"
+	empty         = ""
 )
 
 // ErrBadTopic is returned when a topic is rejected: it is empty, contains
-// explicit empty segments (e.g. "a.", ".a", "a..b"), or does not fit within
-// the matcher's topic space.
+// explicit empty segments (e.g. "a.", ".a", "a..b"), contains "**" outside of
+// the final segment (e.g. "a.**.b", "a**b"), or does not fit within the
+// matcher's topic space.
 var ErrBadTopic = errors.New("topic does not fit within topic space")
 
 // ErrBadSubscriber is returned by Subscribe when sub cannot be used as a map
@@ -44,9 +48,14 @@ type Subscription struct {
 //
 // Topics are dot-separated lists of non-empty segments (e.g. "forex.eur",
 // "*", "a.b.c"). The single segment "*" is a wildcard matching exactly one
-// segment. The empty topic and topics with explicit empty segments ("a.",
-// ".a", "a..b") are rejected by Subscribe with ErrBadTopic and never match in
-// Lookup. Segment count is significant: "a" does not match "a.b".
+// segment. The final segment "**" is a multi-segment wildcard matching zero
+// or more segments (MQTT-style suffix wildcard): "a.**" matches "a", "a.b"
+// and "a.b.c", and a bare "**" matches every topic. "**" anywhere else
+// (middle position like "a.**.b" or embedded like "a**b") is rejected. The
+// empty topic, topics with explicit empty segments ("a.", ".a", "a..b") and
+// topics with middle-position "**" are rejected by Subscribe with ErrBadTopic
+// and never match in Lookup. Segment count is significant for everything but
+// a trailing "**": "a" does not match "a.b".
 //
 // Duplicate subscription semantics differ between implementations:
 //   - The naive, trie and cs-trie matchers are idempotent per (topic,
@@ -71,11 +80,31 @@ type Matcher interface {
 	Lookup(topic string) []Subscriber
 }
 
+// ValidateTopic reports whether topic is a valid channel or subscription
+// pattern: a non-empty dot-separated list of non-empty segments with "**"
+// allowed only as the final segment. It is the single validation entry point
+// shared by the matchers, the hub's exact-subscription path and the broker
+// publish paths.
+func ValidateTopic(topic string) error {
+	if !validTopic(topic) {
+		return ErrBadTopic
+	}
+	return nil
+}
+
 // validTopic reports whether topic is a non-empty dot-separated list of
-// non-empty segments.
+// non-empty segments with "**" allowed only as the final segment. "**"
+// embedded inside a segment ("a**b") is rejected; a single "*" embedded in a
+// segment ("a*b") keeps its literal-match semantics and is allowed.
 func validTopic(topic string) bool {
-	for _, constituent := range strings.Split(topic, delimiter) {
+	constituents := strings.Split(topic, delimiter)
+	last := len(constituents) - 1
+	for i, constituent := range constituents {
 		if constituent == empty {
+			return false
+		}
+		if strings.Contains(constituent, multiWildcard) &&
+			!(i == last && constituent == multiWildcard) {
 			return false
 		}
 	}
@@ -92,11 +121,33 @@ func validateSubscriber(sub Subscriber) error {
 
 // matchCriteria reports whether the subscription pattern (pattern) matches
 // the concrete topic (topic). pattern may contain single-segment "*"
-// wildcards; topic must be literal. Both sides must have the same number of
-// segments.
+// wildcards and a trailing "**" multi-segment wildcard; topic must be
+// literal. Without "**" both sides must have the same number of segments;
+// with a trailing "**" the pattern's leading segments must match the topic's
+// first segments and the rest of the topic is absorbed (zero or more
+// segments). A topic with explicit empty segments never matches.
 func matchCriteria(pattern, topic string) bool {
 	patternConstituents := strings.Split(pattern, delimiter)
 	topicConstituents := strings.Split(topic, delimiter)
+
+	for _, constituent := range topicConstituents {
+		if constituent == empty {
+			return false
+		}
+	}
+
+	multi := false
+	if n := len(patternConstituents); n > 0 && patternConstituents[n-1] == multiWildcard {
+		patternConstituents = patternConstituents[:n-1]
+		multi = true
+	}
+
+	if multi {
+		if len(topicConstituents) < len(patternConstituents) {
+			return false
+		}
+		topicConstituents = topicConstituents[:len(patternConstituents)]
+	}
 
 	if len(patternConstituents) != len(topicConstituents) {
 		return false

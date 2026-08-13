@@ -64,12 +64,15 @@ type ClusterSessionSnapshot struct {
 	Protocol      string                        `json:"protocol,omitempty"`
 	ConnectedAt   int64                         `json:"connected_at,omitempty"`
 	Subscriptions []ClusterSubscriptionSnapshot `json:"subscriptions,omitempty"`
-	// ChannelOffsets is reserved for per-channel delivery tracking that would
-	// enable exact cross-node resume (each channel's last delivered offset).
-	// It is NOT populated yet: the hub does not record per-channel delivered
-	// offsets, so cross-node resume falls back to the client's own reported
-	// offsets. Filling it requires per-channel delivery accounting in the hub
-	// broadcast path (future work).
+	// ChannelOffsets records the last offset successfully delivered to this
+	// session on each channel, as tracked by the hub broadcast path
+	// (Subscriber.DeliveredOffset in the subShard). It enables exact
+	// cross-node resume: the resuming node recovers from
+	// ChannelOffsets[ch]+1 instead of trusting the client-reported offset
+	// (which may be missing or forged). Only channels with at least one
+	// delivered history entry appear; channels with no delivered history
+	// (or transient-only publications) are absent. Populated by
+	// clusterSessionSnapshot at snapshot time.
 	ChannelOffsets map[string]uint64 `json:"channel_offsets,omitempty"`
 	// BrokerEpoch is the cluster-wide broker epoch at snapshot time; it lets
 	// the resuming node detect that the broker's history was invalidated
@@ -308,12 +311,21 @@ func (n *Node) clusterSessionSnapshot(client *Client) *ClusterSessionSnapshot {
 
 	sort.Strings(channels)
 	subscriptions := make([]ClusterSubscriptionSnapshot, 0, len(channels))
+	// Per-channel last delivered offset: read back from the hub subscriber
+	// record (the same re-read pattern as the ephemeral flag). Zero offsets
+	// (nothing delivered, or transient-only) are omitted from the snapshot.
+	channelOffsets := make(map[string]uint64, len(channels))
 	for _, channel := range channels {
 		ephemeral := false
+		var deliveredOffset uint64
 		if sub, ok := n.hub.LookupSubscriber(channel, client); ok {
 			ephemeral = sub.Ephemeral
+			deliveredOffset = sub.DeliveredOffset
 		}
 		subscriptions = append(subscriptions, ClusterSubscriptionSnapshot{Channel: channel, Ephemeral: ephemeral})
+		if deliveredOffset > 0 {
+			channelOffsets[channel] = deliveredOffset
+		}
 	}
 
 	snapshot := &ClusterSessionSnapshot{
@@ -324,6 +336,9 @@ func (n *Node) clusterSessionSnapshot(client *Client) *ClusterSessionSnapshot {
 		Protocol:      protocol,
 		ConnectedAt:   connectedAt,
 		Subscriptions: subscriptions,
+		// ChannelOffsets feeds the exact cross-node resume: the resuming
+		// node recovers from ChannelOffsets[ch]+1 (see the field comment).
+		ChannelOffsets: channelOffsets,
 		// BrokerEpoch lets the resuming node detect broker history
 		// invalidation across the resume (see the field comment).
 		AuthContext: map[string]string{

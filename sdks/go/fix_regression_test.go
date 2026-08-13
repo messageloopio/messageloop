@@ -246,7 +246,7 @@ func TestClientConnectAfterReconnect(t *testing.T) {
 	c.epoch = "ep-1"
 	c.mu.Unlock()
 	c.subMu.Lock()
-	c.subscriptions["ch1"] = true
+	c.subscriptions["ch1"] = &subscriptionState{ephemeral: true}
 	c.subMu.Unlock()
 
 	trans := newFakeTransport()
@@ -350,7 +350,10 @@ func TestClientConnectedResumedWritesSubscriptions(t *testing.T) {
 
 	c.subMu.RLock()
 	_, ok := c.subscriptions["resumed-ch"]
-	eph := c.subscriptions["resumed-ch"]
+	eph := false
+	if state := c.subscriptions["resumed-ch"]; state != nil {
+		eph = state.ephemeral
+	}
 	c.subMu.RUnlock()
 	if !ok {
 		t.Fatal("resumed session subscriptions were not written back")

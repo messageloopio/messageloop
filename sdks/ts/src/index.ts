@@ -43,9 +43,12 @@ export {
   createRPCRequestMessage,
   createPingMessage,
   createSubRefreshMessage,
+  createSurveyReplyMessage,
   generateMessageId,
   parseOutboundMessage,
   extractRpcReply,
+  type SubscriptionSpec,
+  type ChannelOrSpec,
   type Payload,
   type Metadata,
 } from "./message";

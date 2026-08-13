@@ -32,30 +32,12 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverpb.PublishRe
 	failed := 0
 	for _, pub := range req.Publications {
 		// Extract data from Payload, preserving the original oneof variant.
-		brokerPub := &messageloop.Publication{
-			Id:          pub.Id,
-			ContentType: pub.GetPayload().GetContentType(),
-			Metadata:    pub.GetMetadata().GetEntries(),
-		}
-		if pub.Payload != nil {
-			switch p := pub.Payload.Data.(type) {
-			case *sharedpb.Payload_Binary:
-				brokerPub.Payload = p.Binary
-				brokerPub.Kind = messageloop.PayloadKindBinary
-			case *sharedpb.Payload_Json:
-				jsonData, err := messageloop.MarshalJSONStruct(p.Json)
-				if err != nil {
-					log.ErrorContext(ctx, "failed to marshal JSON payload", err, "publication_id", pub.Id)
-					attempted++
-					failed++
-					continue
-				}
-				brokerPub.Payload = jsonData
-				brokerPub.Kind = messageloop.PayloadKindJSON
-			case *sharedpb.Payload_Text:
-				brokerPub.Payload = []byte(p.Text)
-				brokerPub.Kind = messageloop.PayloadKindText
-			}
+		brokerPub, err := messageloop.PublicationFromPayload(pub.Id, pub.GetMetadata().GetEntries(), pub.GetPayload())
+		if err != nil {
+			log.ErrorContext(ctx, "failed to marshal JSON payload", err, "publication_id", pub.Id)
+			attempted++
+			failed++
+			continue
 		}
 
 		// Get destination
@@ -281,17 +263,9 @@ func (h *apiServiceHandler) GetChannels(ctx context.Context, req *serverpb.GetCh
 }
 
 func payloadBytes(payload *sharedpb.Payload) ([]byte, error) {
-	if payload == nil {
-		return nil, nil
+	pub, err := messageloop.PublicationFromPayload("", nil, payload)
+	if err != nil {
+		return nil, err
 	}
-	switch data := payload.Data.(type) {
-	case *sharedpb.Payload_Binary:
-		return data.Binary, nil
-	case *sharedpb.Payload_Json:
-		return messageloop.MarshalJSONStruct(data.Json)
-	case *sharedpb.Payload_Text:
-		return []byte(data.Text), nil
-	default:
-		return nil, nil
-	}
+	return pub.Payload, nil
 }

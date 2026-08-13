@@ -320,8 +320,15 @@ func (c *csTrieMatcher) iremove(i, parent, parentsParent *iNode, words []string,
 
 // Lookup returns the Subscribers for the given topic.
 func (c *csTrieMatcher) Lookup(topic string) []Subscriber {
+	words := strings.Split(topic, delimiter)
+	for _, word := range words {
+		if word == empty {
+			// Topics with explicit empty segments never match, including
+			// against "**" branches that would otherwise absorb them.
+			return nil
+		}
+	}
 	var (
-		words   = strings.Split(topic, delimiter)
 		rootPtr = (*unsafe.Pointer)(unsafe.Pointer(&c.root))
 	)
 	for attempt := 0; ; attempt++ {
@@ -344,7 +351,12 @@ func (c *csTrieMatcher) ilookup(i, parent *iNode, words []string) ([]Subscriber,
 	main := (*mainNode)(atomic.LoadPointer(mainPtr))
 	switch {
 	case main.cNode != nil:
-		// Traverse exact-match branch and single-word-wildcard branch.
+		if words[0] == empty {
+			// Topics with explicit empty segments never match.
+			return make([]Subscriber, 0), true
+		}
+		// Traverse exact-match branch, single-word-wildcard branch and the
+		// multi-segment "**" branch (its subscribers match any remainder).
 		exact, singleWC := main.cNode.getBranches(words[0])
 		subs := make(map[Subscriber]struct{})
 		if exact != nil {
@@ -362,6 +374,11 @@ func (c *csTrieMatcher) ilookup(i, parent *iNode, words []string) ([]Subscriber,
 				return nil, false
 			}
 			for _, sub := range s {
+				subs[sub] = struct{}{}
+			}
+		}
+		if multi, ok := main.cNode.branches[multiWildcard]; ok {
+			for _, sub := range multi.subscribers() {
 				subs[sub] = struct{}{}
 			}
 		}
@@ -406,8 +423,20 @@ func (c *csTrieMatcher) bLookup(i, parent *iNode, main *mainNode, b *branch,
 		return subscribers, ok
 	}
 
-	// Retrieve the subscribers from the branch.
-	return b.subscribers(), true
+	// Retrieve the subscribers from the branch. A "**" branch one level below
+	// matches the empty remainder ("a.**" matches "a"), so its subscribers are
+	// collected as well.
+	subscribers := b.subscribers()
+	if b.iNode != nil {
+		childPtr := (*unsafe.Pointer)(unsafe.Pointer(&b.iNode.main))
+		child := (*mainNode)(atomic.LoadPointer(childPtr))
+		if child.cNode != nil {
+			if multi, ok := child.cNode.branches[multiWildcard]; ok {
+				subscribers = append(subscribers, multi.subscribers()...)
+			}
+		}
+	}
+	return subscribers, true
 }
 
 // toContracted ensures that every I-node except the root points to a C-node

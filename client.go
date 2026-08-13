@@ -219,7 +219,7 @@ func (c *Client) close(disconnect Disconnect) error {
 	}
 
 	if c.node.metrics != nil && metricsCharged {
-		c.node.metrics.ConnectionsTotal.Dec()
+		c.node.metrics.ConnectionsTotal.WithLabelValues(c.TransportLabel()).Dec()
 	}
 
 	// Notify proxy about disconnection
@@ -270,7 +270,7 @@ func (c *Client) MarkMetricsCharged() {
 	defer c.mu.Unlock()
 	if c.status == statusClosed {
 		if c.node.metrics != nil {
-			c.node.metrics.ConnectionsTotal.Dec()
+			c.node.metrics.ConnectionsTotal.WithLabelValues(c.TransportLabel()).Dec()
 		}
 		return
 	}
@@ -723,20 +723,41 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 			}
 		}
 
-		// Handle message recovery if requested
+		// Handle message recovery if requested.
 		if sub.Recover && sub.Offset > 0 {
-			// Epoch validation: if the broker has restarted, the client's offset is invalid.
-			// A client that carries no epoch (older SDK) cannot prove its offset belongs
-			// to the current broker generation, so it is treated conservatively: recover
-			// from the beginning instead of silently skipping messages.
 			sinceOffset := sub.Offset + 1
-			if currentEpoch != "" && sub.Epoch != currentEpoch {
-				if sub.Epoch == "" {
-					log.WarnContext(ctx, "client sent no epoch but broker epoch is set; recovering from the beginning",
-						"channel", sub.Channel, "broker_epoch", currentEpoch)
+			// Cross-node resume: the snapshot records the last offset this
+			// session actually received on each channel (delivered by the
+			// old node), which is more trustworthy than the client-reported
+			// offset (may be missing or forged). It wins when present.
+			serverRecorded := false
+			if resumeSnapshot != nil {
+				if serverOffset, ok := resumeSnapshot.ChannelOffsets[sub.Channel]; ok {
+					sinceOffset = serverOffset + 1
+					serverRecorded = true
 				}
-				// Epoch mismatch or unknown — recover from the beginning
-				sinceOffset = 0
+			}
+			if serverRecorded {
+				// The snapshot records the broker epoch it was taken under:
+				// a mismatch means the broker restarted since, so the
+				// recorded offsets belong to an invalidated history and
+				// recovery must start over.
+				if currentEpoch != "" && resumeSnapshot.BrokerEpoch != currentEpoch {
+					sinceOffset = 0
+				}
+			} else {
+				// Epoch validation: if the broker has restarted, the client's offset is invalid.
+				// A client that carries no epoch (older SDK) cannot prove its offset belongs
+				// to the current broker generation, so it is treated conservatively: recover
+				// from the beginning instead of silently skipping messages.
+				if currentEpoch != "" && sub.Epoch != currentEpoch {
+					if sub.Epoch == "" {
+						log.WarnContext(ctx, "client sent no epoch but broker epoch is set; recovering from the beginning",
+							"channel", sub.Channel, "broker_epoch", currentEpoch)
+					}
+					// Epoch mismatch or unknown — recover from the beginning
+					sinceOffset = 0
+				}
 			}
 			historyPubs, err := c.node.broker.History(sub.Channel, sinceOffset, 0)
 			if err != nil {
@@ -873,6 +894,15 @@ func (c *Client) ClientInfo() *ClientInfo {
 	c.mu.RUnlock()
 	info.RemoteAddr = c.transport.RemoteAddr()
 	return info
+}
+
+// TransportLabel returns the transport label value ("ws" or "grpc") for the
+// connections metric. The protocol is fixed at construction (WithProtocol by
+// the transport packages); anything unknown defaults to "ws".
+func (c *Client) TransportLabel() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return MetricsTransportLabel(c.protocol)
 }
 
 func (c *Client) Authenticated() bool {
@@ -1067,30 +1097,13 @@ func (c *Client) handlePublish(ctx context.Context, in *clientpb.InboundMessage,
 	}
 
 	// Extract data from Payload, preserving the original oneof variant.
-	pub := &Publication{}
-	if publish.Payload != nil {
-		pub.ContentType = publish.Payload.ContentType
-		switch p := publish.Payload.Data.(type) {
-		case *sharedpb.Payload_Json:
-			// JSON data - marshal to bytes.
-			data, err := MarshalJSONStruct(p.Json)
-			if err != nil {
-				return err
-			}
-			pub.Payload = data
-			pub.Kind = PayloadKindJSON
-		case *sharedpb.Payload_Binary:
-			pub.Payload = p.Binary
-			pub.Kind = PayloadKindBinary
-		case *sharedpb.Payload_Text:
-			pub.Payload = []byte(p.Text)
-			pub.Kind = PayloadKindText
-		}
+	pub, err := PublicationFromPayload(in.Id, nil, publish.Payload)
+	if err != nil {
+		return err
 	}
 	if publish.Metadata != nil {
 		pub.Metadata = publish.Metadata.Entries
 	}
-	pub.Id = in.Id
 
 	if publish.Transient {
 		if err := c.node.PublishTransient(channel, pub); err != nil {
@@ -1366,18 +1379,11 @@ func (c *Client) handleSurvey(ctx context.Context, in *clientpb.InboundMessage, 
 	// Extract payload from the survey request
 	var payload []byte
 	if req.Payload != nil {
-		switch p := req.Payload.Data.(type) {
-		case *sharedpb.Payload_Json:
-			data, err := MarshalJSONStruct(p.Json)
-			if err != nil {
-				return err
-			}
-			payload = data
-		case *sharedpb.Payload_Binary:
-			payload = p.Binary
-		case *sharedpb.Payload_Text:
-			payload = []byte(p.Text)
+		pub, err := PublicationFromPayload("", nil, req.Payload)
+		if err != nil {
+			return err
 		}
+		payload = pub.Payload
 	}
 
 	// Send survey response - by default, echo back the same payload
@@ -1416,16 +1422,16 @@ func (c *Client) handleSurveyReply(ctx context.Context, in *clientpb.InboundMess
 		err = fmt.Errorf("%s: %s", reply.Error.Code, reply.Error.Message)
 	}
 	if reply.Payload != nil {
-		switch p := reply.Payload.Data.(type) {
-		case *sharedpb.Payload_Json:
-			payload, err = MarshalJSONStruct(p.Json)
-			if err != nil {
-				return err
-			}
-		case *sharedpb.Payload_Binary:
-			payload = p.Binary
-		case *sharedpb.Payload_Text:
-			payload = []byte(p.Text)
+		pub, convErr := PublicationFromPayload("", nil, reply.Payload)
+		if convErr != nil {
+			return convErr
+		}
+		payload = pub.Payload
+		// Legacy behavior: a successfully converted JSON payload resets the
+		// reply error (the old inline code reused one variable for both);
+		// kept for exact equivalence with the pre-refactor semantics.
+		if pub.Kind == PayloadKindJSON {
+			err = nil
 		}
 	}
 

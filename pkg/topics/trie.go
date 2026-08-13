@@ -90,9 +90,17 @@ func (t *trieMatcher) Unsubscribe(sub *Subscription) {
 
 // Lookup returns the Subscribers for the given topic.
 func (t *trieMatcher) Lookup(topic string) []Subscriber {
+	words := strings.Split(topic, delimiter)
+	for _, word := range words {
+		if word == empty {
+			// Topics with explicit empty segments never match, including
+			// against "**" branches that would otherwise absorb them.
+			return nil
+		}
+	}
 	t.mu.RLock()
 	var (
-		subMap = t.lookup(strings.Split(topic, delimiter), t.root)
+		subMap = t.lookup(words, t.root)
 		subs   = make([]Subscriber, len(subMap))
 		i      = 0
 	)
@@ -105,10 +113,24 @@ func (t *trieMatcher) Lookup(topic string) []Subscriber {
 }
 
 func (t *trieMatcher) lookup(words []string, node *node) map[Subscriber]struct{} {
-	if len(words) == 0 {
-		return node.subs
-	}
 	subs := make(map[Subscriber]struct{})
+	// A "**" branch matches any remainder, including the empty one: its
+	// subscribers are collected at every level ("a.**" matches "a", "a.b", ...).
+	if n, ok := node.children[multiWildcard]; ok {
+		for sub := range n.subs {
+			subs[sub] = struct{}{}
+		}
+	}
+	if len(words) == 0 {
+		for sub := range node.subs {
+			subs[sub] = struct{}{}
+		}
+		return subs
+	}
+	if words[0] == empty {
+		// Topics with explicit empty segments never match.
+		return subs
+	}
 	if n, ok := node.children[words[0]]; ok {
 		for k, v := range t.lookup(words[1:], n) {
 			subs[k] = v

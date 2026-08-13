@@ -2,9 +2,20 @@ package messageloop
 
 import "github.com/prometheus/client_golang/prometheus"
 
+// MetricsTransportLabel maps a client protocol to the connections metric's
+// transport label value ("ws"/"grpc"). The protocol is set by the transport
+// packages at construction; anything unknown (e.g. tests) defaults to "ws".
+func MetricsTransportLabel(protocol string) string {
+	if protocol == "grpc" {
+		return "grpc"
+	}
+	return "ws"
+}
+
 // Metrics holds Prometheus metrics for the MessageLoop server.
 type Metrics struct {
-	ConnectionsTotal                prometheus.Gauge
+	// ConnectionsTotal is labeled by transport ("ws" or "grpc").
+	ConnectionsTotal                *prometheus.GaugeVec
 	SubscriptionsTotal              prometheus.Gauge
 	MessagesPublished               prometheus.Counter
 	MessagesDelivered               prometheus.Counter
@@ -23,11 +34,11 @@ type Metrics struct {
 // NewMetrics creates and registers all Prometheus metrics.
 func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m := &Metrics{
-		ConnectionsTotal: prometheus.NewGauge(prometheus.GaugeOpts{
+		ConnectionsTotal: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Namespace: "messageloop",
 			Name:      "connections_total",
 			Help:      "Current number of active client connections.",
-		}),
+		}, []string{"transport"}),
 		SubscriptionsTotal: prometheus.NewGauge(prometheus.GaugeOpts{
 			Namespace: "messageloop",
 			Name:      "subscriptions_total",

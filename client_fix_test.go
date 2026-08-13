@@ -684,7 +684,7 @@ func TestClient_Close_NoGaugeDriftOnAuthFailure(t *testing.T) {
 	require.NoError(t, client.HandleMessage(ctx, pubMsg))
 	require.True(t, transport.isClosed())
 
-	assert.Equal(t, float64(0), testutil.ToFloat64(node.metrics.ConnectionsTotal),
+	assert.Equal(t, float64(0), testutil.ToFloat64(node.metrics.ConnectionsTotal.WithLabelValues("ws")),
 		"gauge must stay at zero for a connection that never passed AddClient")
 }
 
@@ -702,10 +702,10 @@ func TestClient_Close_GaugeBalancedForChargedClient(t *testing.T) {
 		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: "client-1"}},
 	}
 	require.NoError(t, client.HandleMessage(ctx, connectMsg))
-	assert.Equal(t, float64(1), testutil.ToFloat64(node.metrics.ConnectionsTotal))
+	assert.Equal(t, float64(1), testutil.ToFloat64(node.metrics.ConnectionsTotal.WithLabelValues("ws")))
 
 	require.NoError(t, client.Close(Disconnect{}))
-	assert.Equal(t, float64(0), testutil.ToFloat64(node.metrics.ConnectionsTotal))
+	assert.Equal(t, float64(0), testutil.ToFloat64(node.metrics.ConnectionsTotal.WithLabelValues("ws")))
 }
 
 // --- P2-17: close() must remove all subscriptions across many channels ---
@@ -1022,7 +1022,7 @@ func TestClientSession_LocalResume_MetricsBalanced(t *testing.T) {
 	require.NoError(t, clientA.HandleMessage(ctx, connectA))
 	sessionA := clientA.SessionID()
 	require.NoError(t, err)
-	require.Equal(t, float64(1), testutil.ToFloat64(metrics.ConnectionsTotal))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.ConnectionsTotal.WithLabelValues("ws")))
 
 	// Resume the session locally (same node, same user, valid token).
 	transportB := &capturingTransport{}
@@ -1035,11 +1035,11 @@ func TestClientSession_LocalResume_MetricsBalanced(t *testing.T) {
 		},
 	}
 	require.NoError(t, clientB.HandleMessage(ctx, connectB))
-	require.Equal(t, float64(1), testutil.ToFloat64(metrics.ConnectionsTotal), "resume must not double count")
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.ConnectionsTotal.WithLabelValues("ws")), "resume must not double count")
 
 	// Closing the resumed client balances the gauge back to zero.
 	require.NoError(t, clientB.Close(Disconnect{}))
-	require.Equal(t, float64(0), testutil.ToFloat64(metrics.ConnectionsTotal))
+	require.Equal(t, float64(0), testutil.ToFloat64(metrics.ConnectionsTotal.WithLabelValues("ws")))
 }
 // Task 12: connect-time recovery must preserve the original payload type: a
 // text message recovered from history arrives as Payload_Text, not Binary.

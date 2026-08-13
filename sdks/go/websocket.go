@@ -2,6 +2,8 @@ package messageloopgo
 
 import (
 	"context"
+	"encoding/binary"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -96,12 +98,20 @@ func (t *wsTransport) Recv(ctx context.Context) (*clientpb.OutboundMessage, erro
 
 		messageType, data, err := t.conn.ReadMessage()
 		if err != nil {
+			// gorilla surfaces close frames as a *CloseError from the read
+			// instead of returning the CloseMessage message type: surface the
+			// same typed disconnect the gRPC path decodes from the
+			// DISCONNECT_ERROR envelope metadata.
+			var closeErr *websocket.CloseError
+			if errors.As(err, &closeErr) {
+				return nil, &DisconnectError{Code: uint32(closeErr.Code), Reason: closeErr.Text}
+			}
 			return nil, fmt.Errorf("read error: %w", err)
 		}
 
 		// Skip control messages
 		if messageType == websocket.CloseMessage {
-			return nil, fmt.Errorf("connection closed")
+			return nil, closeFrameError(data)
 		}
 		if messageType == websocket.PingMessage {
 			// Use sendMu to prevent concurrent write with Send()
@@ -131,6 +141,24 @@ func (t *wsTransport) Close() error {
 		return t.conn.Close()
 	}
 	return nil
+}
+
+// closeFrameError builds a typed disconnect error from a WebSocket close
+// frame. The numeric close code is the same disconnect code the server's gRPC
+// transport encodes in the DISCONNECT_ERROR envelope metadata, so both
+// transports surface the same *DisconnectError. A frame without a code (empty
+// or one-byte payload) falls back to the normal closure code, mirroring the
+// server's close-frame fallback.
+func closeFrameError(payload []byte) error {
+	code := uint32(websocket.CloseNormalClosure)
+	reason := "connection closed"
+	if len(payload) >= 2 {
+		code = uint32(binary.BigEndian.Uint16(payload[:2]))
+		if len(payload) > 2 {
+			reason = string(payload[2:])
+		}
+	}
+	return &DisconnectError{Code: code, Reason: reason}
 }
 
 // SetReadDeadline sets the read deadline on the connection.

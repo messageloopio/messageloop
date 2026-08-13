@@ -11,9 +11,11 @@ import {
   PingSchema,
   PublishSchema,
   RpcRequestSchema,
+  SurveyReplySchema,
 } from "../proto/client/v1/service_pb";
 
 import { PayloadSchema, MetadataSchema } from "../proto/shared/v1/types_pb";
+import { ErrorSchema } from "../proto/shared/v1/errors_pb";
 
 import type { InboundMessage, OutboundMessage, Message as ProtoMessage, Publication, Publish, RpcRequest, RpcReply } from "../proto/client/v1/service_pb";
 import type { Payload, Metadata } from "../proto/shared/v1/types_pb";
@@ -92,20 +94,40 @@ export function createConnectMessage(
 }
 
 /**
+ * Per-channel subscription spec: a plain channel name or a channel with an
+ * optional subscription token (used for subscription-level authorization).
+ */
+export interface SubscriptionSpec {
+  /** Channel name */
+  channel: string;
+  /** Optional subscription token */
+  token?: string;
+}
+
+/**
+ * A channel argument that accepts either a plain channel name or a
+ * SubscriptionSpec carrying an optional per-channel token.
+ */
+export type ChannelOrSpec = string | SubscriptionSpec;
+
+/**
  * Create an InboundMessage with Subscribe envelope.
+ * @param channels - Channel names or SubscriptionSpec objects with optional per-channel tokens.
+ * @param ephemeral - When true, the subscriptions are ephemeral.
  */
 export function createSubscribeMessage(
-  channels: string[],
+  channels: ChannelOrSpec[],
   ephemeral: boolean = false
 ): InboundMessage {
   const subscribe = create(SubscribeSchema, {
-    subscriptions: channels.map((ch) =>
-      create(SubscriptionSchema, {
-        channel: ch,
+    subscriptions: channels.map((ch) => {
+      const spec = typeof ch === "string" ? { channel: ch } : ch;
+      return create(SubscriptionSchema, {
+        channel: spec.channel,
         ephemeral,
-        token: "",
-      })
-    ),
+        token: spec.token || "",
+      });
+    }),
   });
 
   return create(InboundMessageSchema, {
@@ -116,16 +138,18 @@ export function createSubscribeMessage(
 
 /**
  * Create an InboundMessage with Unsubscribe envelope.
+ * @param channels - Channel names or SubscriptionSpec objects with optional per-channel tokens.
  */
-export function createUnsubscribeMessage(channels: string[]): InboundMessage {
+export function createUnsubscribeMessage(channels: ChannelOrSpec[]): InboundMessage {
   const unsubscribe = create(UnsubscribeSchema, {
-    subscriptions: channels.map((ch) =>
-      create(SubscriptionSchema, {
-        channel: ch,
+    subscriptions: channels.map((ch) => {
+      const spec = typeof ch === "string" ? { channel: ch } : ch;
+      return create(SubscriptionSchema, {
+        channel: spec.channel,
         ephemeral: false,
-        token: "",
-      })
-    ),
+        token: spec.token || "",
+      });
+    }),
   });
 
   return create(InboundMessageSchema, {
@@ -198,6 +222,35 @@ export function createSubRefreshMessage(
   return create(InboundMessageSchema, {
     id: generateMessageId(),
     envelope: { case: "subRefresh", value: subRefresh },
+  });
+}
+
+/**
+ * Create an InboundMessage with SurveyReply envelope.
+ * @param requestId - ID of the survey request being answered.
+ * @param reply - Reply message payload, or null when the reply carries an error.
+ * @param err - Optional error carried in the reply instead of the payload.
+ */
+export function createSurveyReplyMessage(
+  requestId: string,
+  reply: Message | null,
+  err?: { code: string; type: string; message: string }
+): InboundMessage {
+  const surveyReply = create(SurveyReplySchema, {
+    requestId,
+    payload: reply ? messageToPayload(reply) : undefined,
+    error: err
+      ? create(ErrorSchema, {
+          code: err.code,
+          type: err.type,
+          message: err.message,
+        })
+      : undefined,
+  });
+
+  return create(InboundMessageSchema, {
+    id: generateMessageId(),
+    envelope: { case: "surveyReply", value: surveyReply },
   });
 }
 

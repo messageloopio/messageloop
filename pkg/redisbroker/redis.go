@@ -210,6 +210,12 @@ func (b *redisBroker) interested(channel string) bool {
 // Publish writes payload to the Redis Stream (for history) and broadcasts via
 // Pub/Sub (for real-time delivery). Returns the stream offset assigned.
 func (b *redisBroker) Publish(ch string, pub *messageloop.Publication) (uint64, error) {
+	// Channels with explicit empty segments ("a.", ".a", "a..b") and the
+	// empty channel are rejected up front so malformed channels never reach
+	// Redis (B1).
+	if err := topics.ValidateTopic(ch); err != nil {
+		return 0, err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -274,6 +280,9 @@ func (b *redisBroker) Publish(ch string, pub *messageloop.Publication) (uint64, 
 // Stream, so the publication never appears in History. The offset is always
 // 0: no stream entry means there is no history offset to report.
 func (b *redisBroker) PublishTransient(ch string, pub *messageloop.Publication) error {
+	if err := topics.ValidateTopic(ch); err != nil {
+		return err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

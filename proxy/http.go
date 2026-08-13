@@ -412,10 +412,19 @@ func (p *HTTPProxy) doRequest(ctx context.Context, httpReq *http.Request, method
 	// Check status code
 	if resp.StatusCode != http.StatusOK {
 		// Prefer a structured sharedpb.Error from the body (same JSON shape as
-		// notification responses); fall back to raw body text.
-		var structured notificationErrorResponse
-		if json.Unmarshal(respBody, &structured) == nil && structured.Error != nil {
-			return nil, &HTTPStatusError{StatusCode: resp.StatusCode, Err: structured.Error, Body: respBody}
+		// notification responses); fall back to raw body text. The error
+		// member is parsed with protojson to match the proto3 JSON contract
+		// (exact field names, metadata Struct), tolerating unknown fields like
+		// the root ProtoJSONMarshaler does.
+		var envelope struct {
+			Error json.RawMessage `json:"error"`
+		}
+		if json.Unmarshal(respBody, &envelope) == nil && len(envelope.Error) > 0 {
+			var structured sharedpb.Error
+			opts := protojson.UnmarshalOptions{DiscardUnknown: true}
+			if err := opts.Unmarshal(envelope.Error, &structured); err == nil {
+				return nil, &HTTPStatusError{StatusCode: resp.StatusCode, Err: &structured, Body: respBody}
+			}
 		}
 		return nil, &HTTPStatusError{StatusCode: resp.StatusCode, Body: respBody}
 	}

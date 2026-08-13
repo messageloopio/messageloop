@@ -359,7 +359,9 @@ When the server closes a connection, it sends a disconnect with a numeric code. 
 ## Channel Naming
 
 - Channels use `.` as the hierarchy delimiter.
+- Channel names are non-empty dot-separated lists of non-empty segments: `a.` and `..b` are invalid and rejected at subscription and publish time.
 - Wildcard subscriptions use `*` to match a single level (e.g., `chat.*` matches `chat.general` but not `chat.rooms.1`).
+- A trailing `**` matches zero or more levels (MQTT-style suffix wildcard): `chat.**` matches `chat`, `chat.general` and `chat.rooms.1`, and a bare `**` matches every channel. `**` is only valid as the final segment — patterns like `a.**.b` or `a**b` are rejected.
 - Channel names are case-sensitive.
 
 ## Presence

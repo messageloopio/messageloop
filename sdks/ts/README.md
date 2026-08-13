@@ -7,6 +7,10 @@ A TypeScript SDK for MessageLoop, supporting Node.js and browsers over WebSocket
 - WebSocket client for Node.js and browsers
 - JSON and protobuf encoding
 - Channel pub/sub and RPC
+- Per-channel subscription tokens
+- Ack-aware publishing (`publishWithAck`)
+- Survey request handling (`onSurvey`)
+- Subscription refresh (`subRefresh`)
 - Automatic reconnection with session resumption
 - Heartbeat and pong timeout handling
 - Message helpers for JSON, text, and binary payloads
@@ -87,9 +91,14 @@ await client.close();
 ### Client Methods
 
 - `close()` - Close the connection
-- `subscribe(...channels)` - Subscribe to channels
-- `unsubscribe(...channels)` - Unsubscribe from channels
-- `publish(channel, message)` - Publish a message to a channel
+- `subscribe(...channels)` - Subscribe to channels; each argument is a channel
+  name or `{ channel, token? }` to pass a per-channel subscription token
+- `unsubscribe(...channels)` - Unsubscribe from channels (same argument form)
+- `publish(channel, message)` - Publish a message to a channel (fire-and-forget)
+- `publishWithAck(channel, message, options?)` - Publish and await the server
+  ack; resolves with `{ id, offset }`, rejects on timeout or disconnect
+  (`options.transient`, `options.timeout`)
+- `subRefresh(...channels)` - Ask the server to re-validate subscriptions
 - `rpc(channel, method, request, options?)` - Make an RPC call
 - `getSessionId()` - Get current session ID
 - `getConnectionState()` - Get `disconnected`, `connecting`, `connected`, or `reconnecting`
@@ -115,6 +124,10 @@ series on the same event, or handlers may both fire and duplicate delivery.
 - `onError(handler)` - Set the error handler
 - `onConnected(handler)` - Set the connected handler
 - `onClosed(handler)` - Set the closed handler
+- `onSurvey(handler)` - Handle survey requests from the server. The handler
+  receives `(requestId, request)` and returns the reply `Message` (sync or
+  async); a thrown error is sent back as an error reply. With no handler
+  registered, the request payload is echoed back unchanged (Go SDK parity).
 
 ### Message Helpers
 

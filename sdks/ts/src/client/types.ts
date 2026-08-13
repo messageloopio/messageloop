@@ -16,18 +16,47 @@ export interface ConnectionStateChangeEvent {
 }
 
 /**
+ * Per-channel subscription spec: a plain channel name or a channel with an
+ * optional subscription token (used for subscription-level authorization).
+ */
+export interface SubscriptionSpec {
+  /** Channel name */
+  channel: string;
+  /** Optional subscription token */
+  token?: string;
+}
+
+/**
+ * A channel argument that accepts either a plain channel name or a
+ * SubscriptionSpec carrying an optional per-channel token.
+ */
+export type ChannelOrSpec = string | SubscriptionSpec;
+
+/**
  * MessageLoop client type definition.
  */
 export interface IClient {
   connect(): Promise<void>;
   close(): Promise<void>;
-  subscribe(...channels: string[]): Promise<void>;
-  unsubscribe(...channels: string[]): Promise<void>;
+  subscribe(...channels: ChannelOrSpec[]): Promise<void>;
+  unsubscribe(...channels: ChannelOrSpec[]): Promise<void>;
   publish(
     channel: string,
     msg: import("../message").Message,
     transient?: boolean
   ): Promise<void>;
+  publishWithAck(
+    channel: string,
+    msg: import("../message").Message,
+    options?: { transient?: boolean; timeout?: number }
+  ): Promise<{ id: string; offset: bigint }>;
+  subRefresh(...channels: string[]): Promise<void>;
+  onSurvey(
+    handler: (
+      requestId: string,
+      request: import("../message").Message
+    ) => import("../message").Message | Promise<import("../message").Message>
+  ): void;
   rpc(
     channel: string,
     method: string,

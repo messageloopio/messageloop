@@ -29,12 +29,18 @@ func (c *constituentBitmap) index(constituent string, subPos uint32) {
 }
 
 func (c *constituentBitmap) lookup(constituent string) *roaring.Bitmap {
-	if constituent == empty {
-		return c.bitmaps[empty]
-	}
+	// The "**" bitmap matches any constituent at its depth: it is OR-ed into
+	// every lookup so trailing "**" patterns surface as candidates regardless
+	// of the remaining topic segments.
 	bitmap := c.bitmaps[wildcard]
 	if bm, ok := c.bitmaps[constituent]; ok {
 		bitmap = roaring.FastOr(bitmap, bm)
+	}
+	if bm, ok := c.bitmaps[multiWildcard]; ok {
+		bitmap = roaring.FastOr(bitmap, bm)
+	}
+	if constituent == empty {
+		bitmap = roaring.FastOr(bitmap, c.bitmaps[empty])
 	}
 	return bitmap
 }
@@ -43,6 +49,9 @@ type optimizedInvertedBitmapMatcher struct {
 	constituentBitmaps []*constituentBitmap
 	maxConstituents    uint
 	subscribers        map[uint32]Subscriber
+	// subTopics retains the original subscription pattern per position; it is
+	// used to verify bitmap candidates against the topic segment-by-segment.
+	subTopics          map[uint32]string
 	subPos             uint32
 	deletedPositions   []uint32
 	mu                 sync.RWMutex
@@ -57,6 +66,7 @@ func NewOptimizedInvertedBitmapMatcher(topicSpaceSize uint) Matcher {
 		constituentBitmaps: bitmaps,
 		maxConstituents:    topicSpaceSize,
 		subscribers:        make(map[uint32]Subscriber),
+		subTopics:          make(map[uint32]string),
 		deletedPositions:   []uint32{},
 	}
 }
@@ -78,6 +88,17 @@ func (b *optimizedInvertedBitmapMatcher) Subscribe(topic string, sub Subscriber)
 		return nil, ErrBadTopic
 	}
 
+	// A trailing "**" is indexed as the prefix followed by "**" filler at
+	// every remaining depth (mirroring the empty padding of other patterns),
+	// so it surfaces as a candidate for topics of any length up to the topic
+	// space size.
+	prefix := constituents
+	filler := empty
+	if n := len(constituents); n > 0 && constituents[n-1] == multiWildcard {
+		prefix = constituents[:n-1]
+		filler = multiWildcard
+	}
+
 	b.mu.Lock()
 	var (
 		i           int
@@ -93,14 +114,20 @@ func (b *optimizedInvertedBitmapMatcher) Subscribe(topic string, sub Subscriber)
 		b.subPos++
 	}
 
-	for i, constituent = range constituents {
+	for i, constituent = range prefix {
 		b.constituentBitmaps[i].index(constituent, pos)
 	}
-	for i := uint(i + 1); i < b.maxConstituents; i++ {
-		b.constituentBitmaps[i].index(empty, pos)
+	// Padding starts right after the prefix (depth 0 for a bare "**").
+	start := uint(i + 1)
+	if len(prefix) == 0 {
+		start = 0
+	}
+	for i := start; i < b.maxConstituents; i++ {
+		b.constituentBitmaps[i].index(filler, pos)
 	}
 
 	b.subscribers[pos] = sub
+	b.subTopics[pos] = topic
 	b.mu.Unlock()
 	return &Subscription{ID: pos, Topic: topic, Subscriber: sub}, nil
 }
@@ -121,15 +148,22 @@ func (b *optimizedInvertedBitmapMatcher) Unsubscribe(sub *Subscription) {
 				if bm, ok := cb.bitmaps[constituents[i]]; ok {
 					bm.Remove(sub.ID)
 				}
-			} else if bm, ok := cb.bitmaps[empty]; ok {
-				// Clear the trailing empty constituents padded at subscribe
-				// time; leaving them behind mis-matches shorter topics once
-				// the position is reclaimed.
-				bm.Remove(sub.ID)
+			} else {
+				// Clear the trailing filler constituents padded at subscribe
+				// time (empty for ordinary patterns, "**" for trailing-"**"
+				// patterns); leaving them behind mis-matches shorter topics
+				// once the position is reclaimed.
+				if bm, ok := cb.bitmaps[empty]; ok {
+					bm.Remove(sub.ID)
+				}
+				if bm, ok := cb.bitmaps[multiWildcard]; ok {
+					bm.Remove(sub.ID)
+				}
 			}
 		}
 		b.deletedPositions = append(b.deletedPositions, sub.ID)
 		delete(b.subscribers, sub.ID)
+		delete(b.subTopics, sub.ID)
 	}
 	b.mu.Unlock()
 }
@@ -168,7 +202,14 @@ func (b *optimizedInvertedBitmapMatcher) Lookup(topic string) []Subscriber {
 	result := roaring.FastAnd(bitmaps...)
 	subscriberSet := make(map[Subscriber]struct{}, result.GetCardinality())
 	for iter := result.Iterator(); iter.HasNext(); {
-		subscriberSet[b.subscribers[iter.Next()]] = struct{}{}
+		pos := iter.Next()
+		// The bitmap AND is a candidate filter; the candidate's original
+		// pattern is verified segment-by-segment (including the "**" tail
+		// match) so patterns whose prefixes only overlap on wildcard/filler
+		// bitmaps are not over-matched.
+		if matchCriteria(b.subTopics[pos], topic) {
+			subscriberSet[b.subscribers[pos]] = struct{}{}
+		}
 	}
 	b.mu.RUnlock()
 

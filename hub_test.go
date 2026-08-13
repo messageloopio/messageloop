@@ -8,6 +8,7 @@ import (
 	"time"
 
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
+	"github.com/messageloopio/messageloop/pkg/topics"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -967,4 +968,34 @@ func TestHub_ReplaceSession_FailureKeepsOldSessionIntact(t *testing.T) {
 	// The replacement client is registered nowhere.
 	assert.Same(t, clientB, h.LookupSession("session-2"))
 	assert.Zero(t, h.NumSubscribers("session-1"))
+}
+
+// TestHubAddSubRejectsMalformedExactChannel pins B1: the exact-subscription
+// entry must reject channels with explicit empty segments ("a.", ".a",
+// "a..b") and the empty channel with ErrBadTopic instead of silently
+// registering them.
+func TestHubAddSubRejectsMalformedExactChannel(t *testing.T) {
+	h := newHub(0, 0)
+	client := newTestClient(t, "session-1", "user-1")
+	sub := Subscriber{Client: client, Ephemeral: false}
+
+	for _, ch := range []string{"a.", ".a", "a..b", ""} {
+		_, err := h.addSub(ch, sub)
+		assert.ErrorIs(t, err, topics.ErrBadTopic, "addSub(%q)", ch)
+	}
+
+	// The rejected channels must not be registered anywhere.
+	assert.Zero(t, h.NumSubscribers("a."))
+	_, ok := h.LookupSubscriber("a.", client)
+	assert.False(t, ok)
+
+	// Valid exact channels still work, including wildcard-pattern channels
+	// that go through the matcher.
+	first, err := h.addSub("valid.channel", sub)
+	assert.NoError(t, err)
+	assert.True(t, first)
+	_, err = h.addSub("a.**", sub)
+	assert.NoError(t, err)
+	_, err = h.addSub("a.**.b", sub)
+	assert.ErrorIs(t, err, topics.ErrBadTopic, "addSub(%q)", "a.**.b")
 }
