@@ -34,6 +34,7 @@ type Metrics struct {
 	RecoveryTotal                   *prometheus.CounterVec
 	RecoveryPublications            *prometheus.HistogramVec
 	RecoveryTruncatedTotal          *prometheus.CounterVec
+	HeartbeatIdleDisconnects        prometheus.Counter
 }
 
 // NewMetrics creates and registers all Prometheus metrics.
@@ -139,6 +140,11 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name:      "recovery_truncated_total",
 			Help:      "Total number of channel recovery attempts truncated by a cap.",
 		}, []string{"path"}),
+		HeartbeatIdleDisconnects: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "messageloop",
+			Name:      "heartbeat_idle_disconnects_total",
+			Help:      "Total number of connections disconnected with 3511 by the heartbeat (idle timeout or unresponded server ping).",
+		}),
 	}
 	reg.MustRegister(
 		m.ConnectionsTotal,
@@ -160,6 +166,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.RecoveryTotal,
 		m.RecoveryPublications,
 		m.RecoveryTruncatedTotal,
+		m.HeartbeatIdleDisconnects,
 	)
 	return m
 }

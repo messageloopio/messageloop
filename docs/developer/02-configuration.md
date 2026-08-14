@@ -88,6 +88,8 @@ server:
     #   key_file: "./certs/admin.key"
   heartbeat:
     idle_timeout: "300s"        # 空或解析失败 = 回退 300s；"0s" = 禁用心跳
+    ping_interval: "0s"         # 服务端主动 ping 间隔；0/空 = 不主动 ping（默认）
+    ping_timeout: "3s"          # 服务端 ping 未应答判定；仅 ping_interval>0 时生效；空 = ping_interval
   rpc_timeout: "30s"
   limits:
     max_connections_per_user: 0
@@ -137,7 +139,9 @@ server:
 | `server.grpc_admin.tls.cert_file` / `.key_file` | string | 未设置 | 管理 gRPC 的 TLS 证书与私钥，二者必须成对设置（`Config.Validate()` 规则 3）。设置后经 `credentials.NewServerTLSFromFile` 加载（`pkg/grpcstream/server.go:56-62`） |
 | `server.grpc_admin.auth_token` | string | 未设置 | 管理 API 的 Bearer token，通过 `authorization: Bearer <token>` 头传递，采用常量时间比较（`pkg/grpcstream/server.go:81-103`）。**`server.grpc_admin.addr` 非空时，`auth_token` 与 `allow_insecure` 必须至少设置一个**（`config.go:184-189`，否则启动校验失败）；`auth_token` 为空时管理 API 不鉴权，该形态仅在 `allow_insecure: true` 下合法，生产环境不建议 |
 | `server.grpc_admin.allow_insecure` | bool | `false` | 显式放弃强制鉴权：`addr` 非空且 `auth_token` 为空时，置为 true 才能通过启动校验（`config.go:184-189`）；此时管理 API 完全不鉴权并在启动时记录 WARN 日志（`config.go:64-67`）。仅限受控环境（开发/内网） |
-| `server.heartbeat.idle_timeout` | string | 未设置 | 客户端心跳空闲超时。**为空或解析失败均回退 `DefaultHeartbeatIdleTimeout`（300s）**（`node.go:82-94`，`HeartbeatManager` 恒被创建，心跳无法通过留空禁用）；**配置为 `"0s"` 时 `HeartbeatManager.Start` 直接返回、不启动心跳 goroutine**（`heartbeat.go:27-29`），是唯一禁用心跳的方式。启用后每个客户端会话在 `idle_timeout` 内无任何活动即被断开（`DisconnectIdleTimeout`，`heartbeat.go:38-60`），对 WebSocket 与 gRPC 传输同时生效。WebSocket 读超时与其联动，见 [transport.websocket 节](#transportwebsocket-节) |
+| `server.heartbeat.idle_timeout` | string | 未设置 | 客户端空闲超时。**为空或解析失败回退 `DefaultHeartbeatIdleTimeout`（300s）**。**非 0 值必须 ≥1s**。`idle_timeout` 内无任何活动即 3511。**仅当 `idle_timeout` 与 `ping_interval` 都为 0 时** `HeartbeatManager.Start` 才不启动（只关 idle、开 ping 仍会跑探测循环）。WebSocket 读超时与其联动，见 [transport.websocket 节](#transportwebsocket-节) |
+| `server.heartbeat.ping_interval` | string | `0s`（不主动 ping） | 服务端主动探测半开连接：每 `ping_interval` 发一次 Outbound `Ping`（首次在一个 interval 之后，带 0.8~1.2 抖动防齐射），随后 `ping_timeout` 内未收到**任何**入站帧（Pong/Ping/业务均可）即断开 3511（策略 B，不等 idle；`heartbeat.go:74-96`）。**非 0 值必须 ≥1s**。**打开后旧客户端会被踢**：旧 SDK 不认识 Outbound Ping 也不回 Pong，需要同时升级 SDK（PR-08）才能开启。集群 session lease 随此值缩短，见 [集群文档](04-cluster.md) |
+| `server.heartbeat.ping_timeout` | string | 等于 `ping_interval` | 服务端 ping 的应答窗口：发出 Ping 后到「断开 3511」的最长等待。仅 `ping_interval>0` 时有意义；**留空按 `ping_interval` 取值**（`node.go:105-110`），**显式 `"0s"` 被 `Validate` 拒绝**，非 0 值必须 ≥1s |
 | `server.rpc_timeout` | string | `30s` | RPC 转发请求的超时（`proxy.DefaultRPCTimeout`，`proxy/proxy.go:155`）。节点默认取 30s；配置非空时解析，解析失败同样回退 30s（`node.go:74-80`）。每个 RPC 请求以此值创建 context 截止时间，超时向客户端返回 `RPC_TIMEOUT` 错误（`client.go:742-745, 773-789`）。与代理级超时的关系见 [三层超时](#三层超时) |
 | `server.limits.max_connections_per_user` | int | 0（不限） | 同一用户 ID 的最大并发连接数（`node.go:66`，按用户分片限制，`hub.go:386-397`）。0 = 不限 |
 | `server.limits.max_subscriptions_per_client` | int | 0（不限） | 单个客户端可订阅的频道数上限（`client.go:553-560, 954-960`）。0 = 不限 |
@@ -267,7 +271,7 @@ transport:
 | --- | --- | --- | --- |
 | `transport.websocket.addr` | string | 未设置 | WebSocket 监听地址（如 `:9080` 或 `127.0.0.1:9080`）。**必填**（`Validate()` 规则 1）：`transport.websocket.addr` 与 `transport.grpc.addr` 均必须配置 |
 | `transport.websocket.path` | string | 未设置 | 升级路径（如 `/ws`）。**注意：二进制未应用默认值**——`pkg/websocket` 包内虽有默认路径 `/ws`（`pkg/websocket/server.go:32-37`），但 `cmd/server/main.go:190-191` 直接透传配置值，空路径不会替换为 `/ws`，且空 pattern 会在 `http.ServeMux` 注册时触发 panic（`pkg/websocket/server.go:45`），因此建议始终显式配置 |
-| `transport.websocket.read_timeout` | string | 见说明 | 单次读操作的截止时间。优先级：显式配置 > 心跳联动值。具体规则（`pkg/websocket/handler.go:64-73`）：未配置时取 `2 × idle_timeout`（容忍一次心跳丢失；心跳恒启用、默认 300s，因此未配置时实际为 600s，"心跳禁用时 60s"的分支不可达）；显式配置则完全覆盖前两者。每次成功读消息后重置截止时间 |
+| `transport.websocket.read_timeout` | string | 见说明 | 单次读操作的截止时间。规则（`pkg/websocket/handler.go:81-107`）：**探测开启时**（`idle>0` 或 `ping_interval>0`）取 `max(2 × idle_timeout, 3 × ping_interval, 10s)` 作为下限，显式配置值可以放大但**不能小于该下限**；**心跳完全禁用时**（`idle=0s` 且 `ping_interval=0s`）取 60s，显式配置完全覆盖。每次成功读消息后重置截止时间 |
 | `transport.websocket.write_timeout` | string | 未设置 | 单次写操作的截止时间（`pkg/websocket/transport.go:43-52`）。为空则不设置写截止时间 |
 | `transport.websocket.allow_all_origins` | bool | `false` | 允许任意 Origin 的跨域连接（仅限开发环境，`cmd/server/main.go:201-203`）。为 true 时 `CheckOrigin` 恒返回 true |
 | `transport.websocket.allowed_origins` | string[] | 未设置 | Origin 白名单，对 `Origin` 请求头做**精确匹配**（`cmd/server/main.go:204-212`）。仅在 `allow_all_origins` 与 `check_origin` 均为 false 时生效 |
@@ -471,10 +475,12 @@ server:
 ```yaml
   heartbeat:
     idle_timeout: "300s"
+    ping_interval: "0s"   # 服务端 ping 默认关；游戏/IoT 秒级探活再打开
+    ping_timeout: "3s"
   rpc_timeout: "30s"
 ```
 
-`idle_timeout: "300s"` 显式声明 300s 空闲断开——该值恰好等于回退默认值：留空或解析失败同样按 300s 生效，心跳无法通过留空禁用；唯一禁用方式是显式配置 `"0s"`（`HeartbeatManager.Start` 直接返回，不启动心跳）。`rpc_timeout: "30s"` 与代理默认值相同，可省略。
+`idle_timeout: "300s"` 显式声明 300s 空闲断开——该值恰好等于回退默认值：留空或解析失败同样按 300s 生效，心跳无法通过留空禁用；唯一禁用方式是显式配置 `"0s"`（`HeartbeatManager.Start` 直接返回，不启动心跳）。非 0 的 `idle_timeout` / `ping_interval` / `ping_timeout` 必须 ≥1s。`ping_interval` 默认 0（不主动 ping，旧行为）；打开后服务端按 `ping_timeout` 等待应答、未应答即 3511，**必须同时升级 SDK 到能回 Pong 的版本**，否则旧客户端会被踢。集群 session lease 按公式 `max(30s, 2×idle, 3×ping_interval, idle+10s+10s)` 随心跳缩短，默认配置仍为 600s（见 [04-cluster.md](04-cluster.md)）。`rpc_timeout: "30s"` 与代理默认值相同，可省略。
 
 ```yaml
   limits:

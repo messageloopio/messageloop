@@ -13,10 +13,12 @@ import (
 const (
 	defaultClusterNodeLeaseTTL           = 90 * time.Second
 	defaultClusterNodeLeaseRenewInterval = 30 * time.Second
-	// defaultClusterSessionLeaseTTL must cover DefaultHeartbeatIdleTimeout
-	// (300s) with headroom: the owning node renews the lease only on client
-	// pings (throttled to every 10s), so a lease shorter than the idle
-	// timeout would let a live but idle session be taken over.
+	// defaultClusterSessionLeaseTTL is the expected session lease TTL for the
+	// default heartbeat config (idle=300s, ping=0): the owning node renews
+	// the lease only on ping/pong refreshes (throttled to every 10s), so a
+	// lease shorter than the idle timeout would let a live but idle session
+	// be taken over. sessionLeaseTTL() recomputes the TTL from the heartbeat
+	// config and can shrink below this constant for second-scale heartbeats.
 	defaultClusterSessionLeaseTTL    = 600 * time.Second
 	defaultClusterSessionSnapshotTTL = 24 * time.Hour
 	defaultClusterQueryProjectionTTL = 10 * time.Minute
@@ -232,7 +234,7 @@ func (n *Node) syncClusterSessionState(ctx context.Context, client *Client) erro
 	lease := n.clusterSessionLease(client)
 	snapshot := n.clusterSessionSnapshot(client)
 
-	if err := directory.PutSessionLease(ctx, lease, defaultClusterSessionLeaseTTL); err != nil {
+	if err := directory.PutSessionLease(ctx, lease, n.sessionLeaseTTL()); err != nil {
 		return err
 	}
 	return directory.PutSessionSnapshot(ctx, snapshot, defaultClusterSessionSnapshotTTL)
@@ -291,7 +293,7 @@ func (n *Node) clusterSessionLease(client *Client) *ClusterSessionLease {
 		Authenticated:  client.authenticated,
 		ConnectedAt:    client.connectedAt.UnixMilli(),
 		LastActivityAt: client.lastActivity.UnixMilli(),
-		ExpiresAt:      time.Now().Add(defaultClusterSessionLeaseTTL),
+		ExpiresAt:      time.Now().Add(n.sessionLeaseTTL()),
 	}
 }
 

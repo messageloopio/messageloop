@@ -9,7 +9,17 @@ server:
     #   cert_file: "./certs/admin.crt"
     #   key_file: "./certs/admin.key"
   heartbeat:
-    idle_timeout: "300s"  # Close idle client connections after this duration
+    idle_timeout: "300s"  # Close idle client connections after this duration.
+                          # "" or parse failure = 300s; "0s" = never kick for idle.
+                          # Non-zero values must be >= 1s.
+    # ping_interval: "0s" # Server-initiated ping interval. 0/"" = off (default).
+    #                     # When > 0 the server pings each client and disconnects
+    #                     # with 3511 if no inbound frame arrives within ping_timeout.
+    #                     # WARNING: requires SDKs that answer pings with a Pong,
+    #                     # otherwise old clients are disconnected.
+    # ping_timeout: "3s"  # How long to wait for any inbound frame after a server
+    #                     # ping. Defaults to ping_interval when left empty.
+    #                     # Non-zero values must be >= 1s; "0s" is rejected.
   rpc_timeout: "30s"      # Default timeout for proxied RPC requests
   limits:
     max_connections_per_user: 0       # 0 = unlimited

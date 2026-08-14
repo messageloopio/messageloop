@@ -67,9 +67,9 @@ func (n *Node) resumeRemoteSession(ctx context.Context, client *Client, sessionI
 		Authenticated:  lease.Authenticated,
 		ConnectedAt:    lease.ConnectedAt,
 		LastActivityAt: time.Now().UnixMilli(),
-		ExpiresAt:      time.Now().Add(defaultClusterSessionLeaseTTL),
+		ExpiresAt:      time.Now().Add(n.sessionLeaseTTL()),
 	}
-	claimed, err := directory.CompareAndSwapSessionLease(ctx, lease, desired, defaultClusterSessionLeaseTTL)
+	claimed, err := directory.CompareAndSwapSessionLease(ctx, lease, desired, n.sessionLeaseTTL())
 	if err != nil {
 		return nil, false, err
 	}

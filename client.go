@@ -90,6 +90,14 @@ type Client struct {
 	// Heartbeat fields
 	lastActivity    time.Time
 	heartbeatCancel context.CancelFunc
+	// pingDeadline is the one-shot timer armed after every outbound server
+	// ping; it disconnects with 3511 when it fires unanswered (strategy B).
+	// Guarded by mu. See heartbeat.go.
+	pingDeadline *time.Timer
+	// heartbeatDisconnectOnce makes the 3511 close idempotent: when the ping
+	// deadline and the idle ticker race, exactly one caller issues the close
+	// and counts heartbeat_idle_disconnects_total.
+	heartbeatDisconnectOnce atomic.Bool
 
 	// Tracks channels this client is subscribed to, for presence cleanup.
 	subscribedChannels  map[string]struct{}
@@ -308,6 +316,13 @@ func (c *Client) HandleMessage(ctx context.Context, in *clientpb.InboundMessage)
 	}
 	// Reset activity while holding lock to prevent TOCTOU
 	c.lastActivity = time.Now()
+	// Any inbound frame answers an outstanding server ping (strategy B): stop
+	// the ping deadline so business traffic keeps the connection alive — a
+	// pong is not the only valid response.
+	if c.pingDeadline != nil {
+		c.pingDeadline.Stop()
+		c.pingDeadline = nil
+	}
 	c.mu.Unlock()
 
 	// Serialize the message body lazily: protojson.Marshal is expensive and
@@ -363,6 +378,8 @@ func (c *Client) handleMessage(ctx context.Context, in *clientpb.InboundMessage)
 		return c.handleUnsubscribe(ctx, in, msg.Unsubscribe)
 	case *clientpb.InboundMessage_Ping:
 		return c.handlePing(ctx, in, msg.Ping)
+	case *clientpb.InboundMessage_Pong:
+		return c.handlePong(ctx, in, msg.Pong)
 	case *clientpb.InboundMessage_SubRefresh:
 		return c.handleSubRefresh(ctx, in, msg.SubRefresh)
 	case *clientpb.InboundMessage_SurveyRequest:
@@ -1338,22 +1355,7 @@ func (c *Client) handleUnsubscribe(ctx context.Context, in *clientpb.InboundMess
 
 func (c *Client) handlePing(ctx context.Context, in *clientpb.InboundMessage, ping *clientpb.Ping) error {
 	c.ResetActivity()
-
-	// Throttle the expensive presence/cluster refresh work: the refresh
-	// goroutines run at most once per pingClusterRefreshInterval. The CAS
-	// guard makes sure only one caller wins the window.
-	now := time.Now().UnixNano()
-	if last := c.lastClusterSyncNano.Load(); now-last >= int64(pingClusterRefreshInterval) &&
-		c.lastClusterSyncNano.CompareAndSwap(last, now) {
-		go c.refreshPresence()
-		go func() {
-			clusterCtx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
-			defer cancel()
-			if err := c.node.syncClusterSessionState(clusterCtx, c); err != nil {
-				log.WarnContext(clusterCtx, "failed to refresh cluster session state", "session", c.session, "error", err)
-			}
-		}()
-	}
+	c.throttledClusterRefresh()
 
 	log.DebugContext(ctx, "received ping, sending pong", "message_id", in.Id)
 	err := c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
@@ -1367,6 +1369,36 @@ func (c *Client) handlePing(ctx context.Context, in *clientpb.InboundMessage, pi
 		log.DebugContext(ctx, "pong sent successfully", "message_id", in.Id)
 	}
 	return err
+}
+
+// handlePong handles inbound pong replies to server-initiated pings. No
+// reply is sent: the pong itself only proves liveness. It must run the same
+// throttled presence / cluster refresh as handlePing — a client that only
+// answers server pings (and never sends its own) would otherwise let the
+// Redis session lease and presence member TTLs expire.
+func (c *Client) handlePong(ctx context.Context, in *clientpb.InboundMessage, pong *clientpb.Pong) error {
+	c.ResetActivity()
+	c.throttledClusterRefresh()
+	return nil
+}
+
+// throttledClusterRefresh runs the expensive presence/cluster refresh work
+// at most once per pingClusterRefreshInterval. The CAS guard makes sure only
+// one caller wins the window. Shared by handlePing and handlePong so the
+// two liveness paths refresh identically.
+func (c *Client) throttledClusterRefresh() {
+	now := time.Now().UnixNano()
+	if last := c.lastClusterSyncNano.Load(); now-last >= int64(pingClusterRefreshInterval) &&
+		c.lastClusterSyncNano.CompareAndSwap(last, now) {
+		go c.refreshPresence()
+		go func() {
+			clusterCtx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
+			defer cancel()
+			if err := c.node.syncClusterSessionState(clusterCtx, c); err != nil {
+				log.WarnContext(clusterCtx, "failed to refresh cluster session state", "session", c.session, "error", err)
+			}
+		}()
+	}
 }
 
 func (c *Client) handleSubRefresh(ctx context.Context, in *clientpb.InboundMessage, refresh *clientpb.SubRefresh) error {

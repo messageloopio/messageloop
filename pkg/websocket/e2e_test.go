@@ -58,11 +58,36 @@ func TestWebSocket_MultiClientBroadcast(t *testing.T) {
 	pubAck := readJSON(t, pub, 2*time.Second)
 	require.NotNil(t, pubAck["publish_ack"])
 
-	// All subscribers should receive the publication.
+	// All subscribers should receive the publication. Later subscribers
+	// emit presence join events to earlier ones (PR-04a), so skip those
+	// first-class envelopes until the chat publication arrives.
 	for i := 0; i < numSubscribers; i++ {
-		msg := readJSON(t, conns[i], 2*time.Second)
+		msg := readPublication(t, conns[i], 2*time.Second)
 		require.NotNil(t, msg["publication"], "subscriber %d did not receive publication", i)
 	}
+}
+
+// readPublication reads frames until a publication arrives or timeout.
+// Presence join/leave envelopes are skipped; any other envelope fails the test.
+func readPublication(t *testing.T, conn *websocket.Conn, timeout time.Duration) map[string]any {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			break
+		}
+		msg := readJSON(t, conn, remaining)
+		if msg["publication"] != nil {
+			return msg
+		}
+		if msg["presence_event"] != nil {
+			continue
+		}
+		require.FailNow(t, "expected publication", "got %v", msg)
+	}
+	require.FailNow(t, "timed out waiting for publication")
+	return nil
 }
 
 // TestWebSocket_DisconnectCleansUpSubscriptions verifies that when a client

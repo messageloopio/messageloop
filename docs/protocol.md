@@ -55,6 +55,7 @@ Envelope types:
 | `publish` | Publish | Publish a message to a channel |
 | `rpc_request` | RpcRequest | Send an RPC request to a backend |
 | `ping` | Ping | Keepalive ping |
+| `pong` | Pong | Keepalive response to a server ping |
 | `survey_request` | SurveyRequest | Initiate a survey |
 | `survey_reply` | SurveyReply | Reply to a survey |
 | `sub_refresh` | SubRefresh | Refresh subscription tokens |
@@ -71,6 +72,7 @@ Envelope types:
 | `rpc_reply` | RpcReply | RPC response from backend |
 | `sub_refresh_ack` | SubRefreshAck | SubRefresh acknowledged (subscriptions re-validated) |
 | `pong` | Pong | Keepalive response |
+| `ping` | Ping | Server-initiated keepalive ping (when `server.heartbeat.ping_interval` is enabled) |
 | `error` | Error | Error notification |
 | `survey_request` | SurveyRequest | Incoming survey from another client |
 | `survey_reply` | SurveyReply | Survey response |
@@ -333,7 +335,10 @@ RPC requests are forwarded to a proxy backend matching the channel and method pa
 
 ## Heartbeat
 
-Clients should send periodic pings to prevent idle disconnection:
+Heartbeat is **bidirectional** in v1.0:
+
+- **Client → Server**: clients send periodic `Ping` frames; the server replies with `Pong` (same `id`).
+- **Server → Client**: when `server.heartbeat.ping_interval > 0`, the server sends `Ping` frames on its own and expects any inbound frame within `ping_timeout` (a `Pong` with the same `id` is the conventional answer).
 
 ```json
 {"id": "6", "ping": {}}
@@ -344,6 +349,14 @@ Response:
 ```json
 {"id": "6", "pong": {}}
 ```
+
+Rules:
+
+- Either side that receives a `Ping` replies with a `Pong` carrying the same `id`.
+- **Any inbound frame** (Ping/Pong/publish/subscribe/business traffic) counts as liveness: it refreshes the server-side activity timestamp and disarms the outstanding server ping deadline. A pong is not the only valid answer.
+- Inbound `Pong` refreshes presence and the cluster session lease, throttled like `Ping` (at most once per 10s); a client that only answers server pings stays visible to the cluster.
+- The server disconnects with `DisconnectIdleTimeout` (3511) when either the idle timeout elapses with no activity, or a server ping goes unanswered for `ping_timeout` (strategy B — it does not wait for the idle check).
+- `ping_interval` defaults to off (0s): the server never pings, and old clients that only send their own pings are unaffected. Enabling `ping_interval` without upgrading clients to answer pings disconnects them after `ping_timeout`.
 
 ## Error Codes
 
@@ -390,7 +403,7 @@ When the server closes a connection, it sends a disconnect with a numeric code. 
 | 3507 | PermissionDenied | Yes | Not enough permissions. Reserved definition; no current trigger point |
 | 3508 | NotAvailable | Yes | Server cannot process the message type. Reserved definition; no current trigger point |
 | 3509 | TooManyErrors | Yes | Client produced too many errors. Reserved definition; no current trigger point |
-| 3511 | IdleTimeout | Yes | No activity within the heartbeat idle timeout |
+| 3511 | IdleTimeout | Yes | No activity within the heartbeat idle timeout, or an unanswered server ping within `ping_timeout` |
 | 3512 | SlowConsumer | Yes | Client cannot consume messages fast enough |
 | 3513 | Internal | Yes | Connect path internal error (e.g. cluster state sync failed), connection forced closed (`disconnectOnConnectError`, `client.go`) |
 

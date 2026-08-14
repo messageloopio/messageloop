@@ -88,17 +88,40 @@ func NewNode(cfg *config.Server) *Node {
 
 	// Idle timeout detection is always on: an unconfigured heartbeat falls
 	// back to DefaultHeartbeatIdleTimeout (300s) so idle connections cannot
-	// linger forever when the operator forgets to configure it.
+	// linger forever when the operator forgets to configure it. Server pings
+	// stay off unless ping_interval is configured (default "0s").
 	idleTimeout := DefaultHeartbeatIdleTimeout
-	if cfg != nil && cfg.Heartbeat.IdleTimeout != "" {
-		parsed, err := time.ParseDuration(cfg.Heartbeat.IdleTimeout)
-		if err != nil {
-			parsed = DefaultHeartbeatIdleTimeout
+	pingInterval := time.Duration(0)
+	pingTimeout := time.Duration(0)
+	if cfg != nil {
+		if cfg.Heartbeat.IdleTimeout != "" {
+			parsed, err := time.ParseDuration(cfg.Heartbeat.IdleTimeout)
+			if err != nil {
+				parsed = DefaultHeartbeatIdleTimeout
+			}
+			idleTimeout = parsed
 		}
-		idleTimeout = parsed
+		if cfg.Heartbeat.PingInterval != "" {
+			if parsed, err := time.ParseDuration(cfg.Heartbeat.PingInterval); err == nil {
+				pingInterval = parsed
+			}
+		}
+		if cfg.Heartbeat.PingTimeout != "" {
+			if parsed, err := time.ParseDuration(cfg.Heartbeat.PingTimeout); err == nil {
+				pingTimeout = parsed
+			}
+		}
+	}
+	// An empty ping_timeout falls back to ping_interval so that enabling
+	// server pings works without spelling out the timeout (config.Validate
+	// documents this; NewNode fills the default).
+	if pingInterval > 0 && pingTimeout <= 0 {
+		pingTimeout = pingInterval
 	}
 	node.heartbeatManager = NewHeartbeatManager(HeartbeatConfig{
-		IdleTimeout: idleTimeout,
+		IdleTimeout:  idleTimeout,
+		PingInterval: pingInterval,
+		PingTimeout:  pingTimeout,
 	})
 
 	node.broker = NewMemoryBroker(MemoryBrokerOptions{})
@@ -636,6 +659,46 @@ func (n *Node) GetHeartbeatIdleTimeout() time.Duration {
 		return n.heartbeatManager.Config().IdleTimeout
 	}
 	return 0
+}
+
+// GetHeartbeatConfig returns the parsed heartbeat configuration.
+func (n *Node) GetHeartbeatConfig() HeartbeatConfig {
+	if n.heartbeatManager != nil {
+		return n.heartbeatManager.Config()
+	}
+	return HeartbeatConfig{}
+}
+
+// sessionLeaseTTL returns the cluster session lease TTL for the configured
+// heartbeat. With second-scale idle/ping the lease shrinks below the 600s
+// default (it must be strictly longer than idle + the 10s throttled refresh
+// window plus headroom), while a disabled heartbeat keeps the 600s default
+// so a live-but-silent session is never taken over early.
+func (n *Node) sessionLeaseTTL() time.Duration {
+	idle, ping := n.heartbeatIdleAndPing()
+	if idle == 0 && ping == 0 {
+		return defaultClusterSessionLeaseTTL
+	}
+	ttl := 30 * time.Second
+	if t := 2 * idle; t > ttl {
+		ttl = t
+	}
+	if t := 3 * ping; t > ttl {
+		ttl = t
+	}
+	if t := idle + pingClusterRefreshInterval + 10*time.Second; t > ttl {
+		ttl = t
+	}
+	return ttl
+}
+
+// heartbeatIdleAndPing returns the configured idle timeout and ping interval.
+func (n *Node) heartbeatIdleAndPing() (time.Duration, time.Duration) {
+	if n.heartbeatManager == nil {
+		return 0, 0
+	}
+	cfg := n.heartbeatManager.Config()
+	return cfg.IdleTimeout, cfg.PingInterval
 }
 
 // MaxMessageSize returns the max inbound message size in bytes.

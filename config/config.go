@@ -1,9 +1,11 @@
 package config
 
 import (
+	"context"
 	"fmt"
 	"time"
 
+	"github.com/lynx-go/x/log"
 	"github.com/messageloopio/messageloop/pkg/topics"
 	"github.com/messageloopio/messageloop/proxy"
 )
@@ -115,7 +117,9 @@ type GRPCAdmin struct {
 }
 
 type Heartbeat struct {
-	IdleTimeout string `yaml:"idle_timeout" json:"idle_timeout" mapstructure:"idle_timeout"` // default: "300s"
+	IdleTimeout  string `yaml:"idle_timeout" json:"idle_timeout" mapstructure:"idle_timeout"`    // default: "300s"
+	PingInterval string `yaml:"ping_interval" json:"ping_interval" mapstructure:"ping_interval"` // default: "0s" (no server-initiated ping)
+	PingTimeout  string `yaml:"ping_timeout" json:"ping_timeout" mapstructure:"ping_timeout"`    // default: ping_interval
 }
 
 type Transport struct {
@@ -222,6 +226,8 @@ func (c *Config) Validate() error {
 		value string
 	}{
 		{"server.heartbeat.idle_timeout", c.Server.Heartbeat.IdleTimeout},
+		{"server.heartbeat.ping_interval", c.Server.Heartbeat.PingInterval},
+		{"server.heartbeat.ping_timeout", c.Server.Heartbeat.PingTimeout},
 		{"server.rpc_timeout", c.Server.RPCTimeout},
 		{"transport.websocket.read_timeout", c.Transport.WebSocket.ReadTimeout},
 		{"transport.websocket.write_timeout", c.Transport.WebSocket.WriteTimeout},
@@ -231,6 +237,54 @@ func (c *Config) Validate() error {
 			if _, err := time.ParseDuration(entry.value); err != nil {
 				return fmt.Errorf("invalid duration for %s: %w", entry.name, err)
 			}
+		}
+	}
+
+	// Heartbeat durations must be second-scale when enabled: a non-zero
+	// idle_timeout / ping_interval / ping_timeout below 1s is rejected.
+	// "0s" keeps its existing meaning (disable that probe).
+	hb := c.Server.Heartbeat
+	parsed := map[string]time.Duration{}
+	for _, entry := range []struct {
+		name  string
+		value string
+	}{
+		{"server.heartbeat.idle_timeout", hb.IdleTimeout},
+		{"server.heartbeat.ping_interval", hb.PingInterval},
+		{"server.heartbeat.ping_timeout", hb.PingTimeout},
+	} {
+		if entry.value == "" {
+			continue
+		}
+		d, err := time.ParseDuration(entry.value)
+		if err != nil {
+			return fmt.Errorf("invalid duration for %s: %w", entry.name, err)
+		}
+		parsed[entry.name] = d
+		if d != 0 && d < time.Second {
+			return fmt.Errorf("%s must be at least 1s (or 0s to disable), got %q", entry.name, entry.value)
+		}
+	}
+
+	// ping_timeout=0s is only meaningful when server pings are disabled:
+	// enabling ping_interval with an explicit zero timeout would arm a
+	// deadline that fires instantly. An empty ping_timeout falls back to
+	// ping_interval at NewNode time, so it is not an error here.
+	if interval, ok := parsed["server.heartbeat.ping_interval"]; ok && interval > 0 {
+		// An empty ping_timeout falls back to ping_interval at NewNode time.
+		effectiveTimeout := interval
+		if timeout, ok := parsed["server.heartbeat.ping_timeout"]; ok {
+			effectiveTimeout = timeout
+		}
+		if timeout, ok := parsed["server.heartbeat.ping_timeout"]; ok && timeout == 0 {
+			return fmt.Errorf("server.heartbeat.ping_timeout: 0s is not allowed when server.heartbeat.ping_interval is enabled")
+		}
+		if idle, ok := parsed["server.heartbeat.idle_timeout"]; ok && idle > 0 && idle < interval+effectiveTimeout {
+			log.WarnContext(context.Background(),
+				"server.heartbeat.idle_timeout is shorter than ping_interval+ping_timeout; unresponded pings will disconnect clients before the idle check",
+				"idle_timeout", hb.IdleTimeout,
+				"ping_interval", hb.PingInterval,
+				"ping_timeout", hb.PingTimeout)
 		}
 	}
 

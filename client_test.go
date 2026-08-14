@@ -65,7 +65,9 @@ func (c *capturingTransport) WriteMany(data ...[]byte) error {
 func (c *capturingTransport) Close(disconnect Disconnect) error {
 	c.closed.Store(true)
 	c.closeCount.Add(1)
+	c.mu.Lock()
 	c.closeReason = disconnect
+	c.mu.Unlock()
 	return nil
 }
 
@@ -83,6 +85,18 @@ func (c *capturingTransport) resetMessages() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.messages = nil
+}
+
+// snapshotMessages returns a deep copy of the captured messages so callers
+// can inspect them without holding the transport lock.
+func (c *capturingTransport) snapshotMessages() [][]byte {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([][]byte, 0, len(c.messages))
+	for _, m := range c.messages {
+		out = append(out, append([]byte(nil), m...))
+	}
+	return out
 }
 
 func (c *capturingTransport) getLastMessage() []byte {
@@ -103,6 +117,8 @@ func (c *capturingTransport) getCloseCount() int32 {
 }
 
 func (c *capturingTransport) getCloseReason() Disconnect {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return c.closeReason
 }
 

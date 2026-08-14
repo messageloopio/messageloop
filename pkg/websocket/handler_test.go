@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -142,4 +143,70 @@ func TestHandler_marshaler(t *testing.T) {
 	t.Logf("protojson marshal: %s", string(data))
 	// Verify the bytes payload matches
 	t.Logf("payload bytes: %s", string(bytes))
+}
+
+// TestHeartbeat_ReadTimeoutFloorWhenProbing pins the read deadline formula:
+// probing (idle>0 or ping>0) floors the timeout at max(2*idle, 3*ping, 10s)
+// and configured values may raise but never lower it; a fully disabled
+// heartbeat keeps 60s (no 10s floor) with configured as hard override.
+func TestHeartbeat_ReadTimeoutFloorWhenProbing(t *testing.T) {
+	cases := []struct {
+		name           string
+		idle           time.Duration
+		ping           time.Duration
+		configured     time.Duration
+		want           time.Duration
+	}{
+		{
+			name: "idle=15s ping=5s unconfigured floors at 2*idle",
+			idle: 15 * time.Second,
+			ping: 5 * time.Second,
+			want: 30 * time.Second,
+		},
+		{
+			name: "ping-only floors at 3*ping",
+			ping: 5 * time.Second,
+			want: 15 * time.Second,
+		},
+		{
+			name: "idle and ping small floors at 10s",
+			idle: 1 * time.Second,
+			ping: 1 * time.Second,
+			want: 10 * time.Second,
+		},
+		{
+			name: "disabled heartbeat unconfigured keeps 60s",
+			want: 60 * time.Second,
+		},
+		{
+			name:       "disabled heartbeat configured overrides",
+			configured: 90 * time.Second,
+			want:       90 * time.Second,
+		},
+		{
+			name:       "disabled heartbeat configured short is respected",
+			configured: 45 * time.Second,
+			want:       45 * time.Second,
+		},
+		{
+			name:       "configured below floor is raised to floor",
+			idle:       15 * time.Second,
+			ping:       5 * time.Second,
+			configured: 5 * time.Second,
+			want:       30 * time.Second,
+		},
+		{
+			name:       "configured above floor wins",
+			idle:       15 * time.Second,
+			ping:       5 * time.Second,
+			configured: 45 * time.Second,
+			want:       45 * time.Second,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, heartbeatReadTimeout(tc.idle, tc.ping, tc.configured))
+		})
+	}
 }

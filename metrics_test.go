@@ -102,6 +102,26 @@ func TestMetrics_ChannelPolicyTransientForcedRegistered(t *testing.T) {
 	require.True(t, found, "messageloop_channel_policy_transient_forced_total must be registered")
 }
 
+// TestMetrics_HeartbeatIdleDisconnectsRegistered verifies PR-05: the
+// heartbeat_idle_disconnects_total counter is registered and incremented
+// through the metrics object.
+func TestMetrics_HeartbeatIdleDisconnectsRegistered(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	metrics := NewMetrics(reg)
+
+	metrics.HeartbeatIdleDisconnects.Inc()
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.HeartbeatIdleDisconnects))
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	names := make(map[string]bool, len(families))
+	for _, family := range families {
+		names[family.GetName()] = true
+	}
+	require.True(t, names["messageloop_heartbeat_idle_disconnects_total"],
+		"messageloop_heartbeat_idle_disconnects_total must be registered")
+}
+
 // TestMetrics_RecoveryRegistered verifies PR-03: the three recovery metrics
 // are registered under their full names and record a truncated recovery.
 func TestMetrics_RecoveryRegistered(t *testing.T) {

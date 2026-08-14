@@ -198,7 +198,7 @@ cluster:
 
 | 数据 | 键 | TTL | 内容要点 |
 | --- | --- | --- | --- |
-| 会话租约 | `ml:cluster:session:lease:<sessionID>` | 600 秒（`defaultClusterSessionLeaseTTL`，须覆盖 `DefaultHeartbeatIdleTimeout`=300s 并留出余量） | `SessionID`、`NodeID`、`IncarnationID`、`UserID`、`ClientID`、`LeaseVersion`、`Authenticated`、`ConnectedAt`、`LastActivityAt`、`ExpiresAt` |
+| 会话租约 | `ml:cluster:session:lease:<sessionID>` | 默认 600 秒；按心跳配置缩短（`sessionLeaseTTL` = `max(30s, 2×idle_timeout, 3×ping_interval, idle_timeout+10s+10s)`，须覆盖心跳周期并留出续约抖动余量；心跳禁用时保持 600s） | `SessionID`、`NodeID`、`IncarnationID`、`UserID`、`ClientID`、`LeaseVersion`、`Authenticated`、`ConnectedAt`、`LastActivityAt`、`ExpiresAt` |
 | 会话快照 | `ml:cluster:session:snapshot:<sessionID>` | 24 小时（`defaultClusterSessionSnapshotTTL`） | 会话身份（user/client/protocol）、订阅列表（`Subscriptions`）、`AuthContext`；结构上还声明了 `ChannelOffsets` 与 `BrokerEpoch` 字段，但当前填充逻辑未写入（见 4.4） |
 
 会话所有权 = 「会话租约指向的节点实例正在服务该会话」。`LeaseVersion` 是所有权代际计数：新连接从 1 起，每次 resume/takeover 递增（`client.go`、`cluster_resume.go`）。它被用于接管时的版本校验，防止旧代际的接管命令误伤新代际的会话。
@@ -207,7 +207,7 @@ cluster:
 
 - 连接建立（`AddClient`）；
 - 每次订阅/退订（订阅 Saga 的 `cluster.session` 步骤，`node.go`，受 2 秒 `clusterStepTimeout` 约束，失败不阻塞客户端操作路径）；
-- 客户端 ping 触发的状态刷新，节流为最多每 10 秒一次（`pingClusterRefreshInterval`，`client.go:354-358`）。
+- 客户端 ping/pong 触发的状态刷新，节流为最多每 10 秒一次（`pingClusterRefreshInterval`，`client.go:354-358`）。
 
 会话关闭时的清理（`deleteClusterSessionState`，`cluster_state.go:217-242`）带所有权检查：只有租约已过期、或租约确属本节点实例时才删除租约与快照；若租约仍有效且属于**其他**节点实例，说明该会话已被他处接管，本地状态必须保留。
 
