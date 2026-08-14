@@ -2,6 +2,7 @@ package messageloopgo
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"sync"
@@ -195,8 +196,9 @@ type client struct {
 	offsetMu       sync.RWMutex
 
 	// Reconnection: stores connection parameters for re-dialing
-	dialURL  string // WebSocket URL (empty for gRPC)
-	dialAddr string // gRPC address (empty for WebSocket)
+	dialURL  string // WebSocket URL (empty for gRPC/QUIC)
+	dialAddr string // gRPC address (empty for WebSocket/QUIC)
+	dialQUIC string // QUIC host:port (empty for WebSocket/gRPC)
 
 	// newTransport overrides the transport factory used by reconnect (tests).
 	newTransport func() (transport, error)
@@ -244,6 +246,57 @@ func DialGRPC(addr string, opts ...Option) (Client, error) {
 	return c, nil
 }
 
+// DialQUIC creates a new QUIC client connecting to the specified host:port.
+// QUIC requires TLS 1.3; pass WithInsecureSkipVerify when the server is
+// running with transport.quic.insecure (self-signed).
+func DialQUIC(addr string, opts ...Option) (Client, error) {
+	options := defaultOptions()
+	for _, opt := range opts {
+		opt(options)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	trans, err := newQUICTransport(ctx, addr, options.Encoding, options.DialTimeout, quicTLSConfig(options))
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+
+	c := newClient(ctx, cancel, trans, options)
+	c.dialQUIC = addr
+	return c, nil
+}
+
+func quicTLSConfig(opts *Options) *tls.Config {
+	var cfg *tls.Config
+	if opts != nil && opts.TLSConfig != nil {
+		cfg = opts.TLSConfig.Clone()
+	} else {
+		cfg = &tls.Config{}
+	}
+	if opts != nil && opts.InsecureSkipVerify {
+		cfg.InsecureSkipVerify = true
+	}
+	return cfg
+}
+
+func (c *client) dialTransport() (transport, error) {
+	if c.newTransport != nil {
+		return c.newTransport()
+	}
+	if c.dialURL != "" {
+		return newWSTransport(c.dialURL, c.opts.Encoding, c.opts.DialTimeout)
+	}
+	if c.dialQUIC != "" {
+		return newQUICTransport(c.ctx, c.dialQUIC, c.opts.Encoding, c.opts.DialTimeout, quicTLSConfig(c.opts))
+	}
+	if c.dialAddr != "" {
+		return newGRPCTransport(c.ctx, c.dialAddr)
+	}
+	return nil, fmt.Errorf("no dial address configured")
+}
+
 // newClient creates a new client with the given transport.
 func newClient(ctx context.Context, cancel context.CancelFunc, trans transport, opts *Options) *client {
 	c := &client{
@@ -271,7 +324,7 @@ func newClient(ctx context.Context, cancel context.CancelFunc, trans transport, 
 // terminates its receive loop, so a retry never leaks a receive loop or
 // double-delivers from a superseded connection.
 func (c *client) Connect(ctx context.Context) error {
-	// Reuse the transport created by Dial/DialGRPC for the first attempt;
+	// Reuse the transport created by Dial/DialGRPC/DialQUIC for the first attempt;
 	// later attempts always dial a fresh transport and supersede the old one.
 	c.mu.RLock()
 	old := c.transport
@@ -285,15 +338,7 @@ func (c *client) Connect(ctx context.Context) error {
 			_ = old.Close()
 		}
 		var err error
-		if c.newTransport != nil {
-			trans, err = c.newTransport()
-		} else if c.dialURL != "" {
-			trans, err = newWSTransport(c.dialURL, c.opts.Encoding, c.opts.DialTimeout)
-		} else if c.dialAddr != "" {
-			trans, err = newGRPCTransport(c.ctx, c.dialAddr)
-		} else {
-			return fmt.Errorf("no dial address configured")
-		}
+		trans, err = c.dialTransport()
 		if err != nil {
 			return fmt.Errorf("dial failed: %w", err)
 		}
@@ -1770,17 +1815,7 @@ func (c *client) reconnect() error {
 	_ = old.Close()
 
 	// Create new transport
-	var trans transport
-	var err error
-	if c.newTransport != nil {
-		trans, err = c.newTransport()
-	} else if c.dialURL != "" {
-		trans, err = newWSTransport(c.dialURL, c.opts.Encoding, c.opts.DialTimeout)
-	} else if c.dialAddr != "" {
-		trans, err = newGRPCTransport(c.ctx, c.dialAddr)
-	} else {
-		return fmt.Errorf("no dial address configured")
-	}
+	trans, err := c.dialTransport()
 	if err != nil {
 		return err
 	}

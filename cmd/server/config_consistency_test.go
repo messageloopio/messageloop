@@ -48,6 +48,26 @@ func TestRepositoryConfigsValidateAndPrebind(t *testing.T) {
 	}
 }
 
+func TestNewQUICServer_DisabledWhenAddrEmpty(t *testing.T) {
+	cfg := &config.Config{}
+	server, err := newQUICServer(cfg, messageloop.NewNode(nil))
+	require.NoError(t, err)
+	require.Nil(t, server)
+}
+
+func TestNewQUICServer_PrebindsInsecure(t *testing.T) {
+	cfg := &config.Config{
+		Transport: config.Transport{
+			QUIC: config.QUICTransport{Addr: "127.0.0.1:0", Insecure: true},
+		},
+	}
+	server, err := newQUICServer(cfg, messageloop.NewNode(nil))
+	require.NoError(t, err)
+	require.NotNil(t, server)
+	require.NotEmpty(t, server.Addr())
+	require.NoError(t, server.Close())
+}
+
 func TestBuildWebSocketOptions_ReadTimeoutApplied(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	cfg := &config.Config{

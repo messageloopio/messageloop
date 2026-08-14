@@ -100,7 +100,7 @@ type Limits struct {
 	MaxConnectionsPerUser     int `yaml:"max_connections_per_user" json:"max_connections_per_user" mapstructure:"max_connections_per_user"`             // 0 = unlimited
 	MaxSubscriptionsPerClient int `yaml:"max_subscriptions_per_client" json:"max_subscriptions_per_client" mapstructure:"max_subscriptions_per_client"` // 0 = unlimited
 	MaxPublishesPerSecond     int `yaml:"max_publishes_per_second" json:"max_publishes_per_second" mapstructure:"max_publishes_per_second"`             // 0 = unlimited
-	MaxMessageSize            int `yaml:"max_message_size" json:"max_message_size" mapstructure:"max_message_size"`                                     // bytes, 0 = default (64KB), applies uniformly to WebSocket and gRPC transports
+	MaxMessageSize            int `yaml:"max_message_size" json:"max_message_size" mapstructure:"max_message_size"`                                     // bytes, 0 = default (64KB), applies uniformly to WebSocket, gRPC, and QUIC transports
 }
 
 type HttpServer struct {
@@ -126,6 +126,7 @@ type Heartbeat struct {
 type Transport struct {
 	WebSocket WebSocketTransport `yaml:"websocket" json:"websocket" mapstructure:"websocket"`
 	GRPC      GRPCTransport      `yaml:"grpc" json:"grpc" mapstructure:"grpc"`
+	QUIC      QUICTransport      `yaml:"quic" json:"quic" mapstructure:"quic"`
 }
 
 type TLSConfig struct {
@@ -150,6 +151,17 @@ type WebSocketTransport struct {
 type GRPCTransport struct {
 	Addr         string    `yaml:"addr" json:"addr" mapstructure:"addr"`
 	WriteTimeout string    `yaml:"write_timeout" json:"write_timeout" mapstructure:"write_timeout"` // duration string, e.g. "10s"
+	TLS          TLSConfig `yaml:"tls" json:"tls" mapstructure:"tls"`
+}
+
+// QUICTransport configures the optional QUIC client listener. An empty Addr
+// disables the listener. QUIC always requires TLS 1.3: provide cert/key or
+// set Insecure to generate an ephemeral self-signed certificate (dev only).
+type QUICTransport struct {
+	Addr         string    `yaml:"addr" json:"addr" mapstructure:"addr"`
+	WriteTimeout string    `yaml:"write_timeout" json:"write_timeout" mapstructure:"write_timeout"`
+	ReadTimeout  string    `yaml:"read_timeout" json:"read_timeout" mapstructure:"read_timeout"`
+	Insecure     bool      `yaml:"insecure" json:"insecure" mapstructure:"insecure"`
 	TLS          TLSConfig `yaml:"tls" json:"tls" mapstructure:"tls"`
 }
 
@@ -207,10 +219,11 @@ type RedisConfig struct {
 
 // Validate checks the configuration for common errors and returns a descriptive error if any are found.
 func (c *Config) Validate() error {
-	// The startup wiring always constructs both transports: a WebSocket
-	// listener (newWebSocketServer) and a client gRPC listener
-	// (prepareGRPCServers). Validate the addresses here so a configuration
-	// that would mis-bind or panic at startup is rejected up front.
+	// The startup wiring always constructs the WebSocket listener
+	// (newWebSocketServer) and the client gRPC listener (prepareGRPCServers).
+	// QUIC is optional: an empty transport.quic.addr leaves it disabled.
+	// Validate the required addresses here so a configuration that would
+	// mis-bind or panic at startup is rejected up front.
 	if c.Transport.WebSocket.Addr == "" {
 		return fmt.Errorf("transport.websocket.addr is required")
 	}
@@ -219,6 +232,12 @@ func (c *Config) Validate() error {
 	}
 	if c.Transport.GRPC.Addr == "" {
 		return fmt.Errorf("transport.grpc.addr is required")
+	}
+	if c.Transport.QUIC.Addr != "" {
+		hasCert := c.Transport.QUIC.TLS.CertFile != "" || c.Transport.QUIC.TLS.KeyFile != ""
+		if !c.Transport.QUIC.Insecure && !hasCert {
+			return fmt.Errorf("transport.quic requires tls cert_file and key_file, or set insecure: true to use a self-signed certificate")
+		}
 	}
 
 	// Validate duration fields.
@@ -233,6 +252,8 @@ func (c *Config) Validate() error {
 		{"transport.websocket.read_timeout", c.Transport.WebSocket.ReadTimeout},
 		{"transport.websocket.write_timeout", c.Transport.WebSocket.WriteTimeout},
 		{"transport.grpc.write_timeout", c.Transport.GRPC.WriteTimeout},
+		{"transport.quic.write_timeout", c.Transport.QUIC.WriteTimeout},
+		{"transport.quic.read_timeout", c.Transport.QUIC.ReadTimeout},
 	} {
 		if entry.value != "" {
 			if _, err := time.ParseDuration(entry.value); err != nil {
@@ -297,6 +318,7 @@ func (c *Config) Validate() error {
 		{"server.grpc_admin.tls", c.Server.GRPCAdmin.TLS},
 		{"transport.websocket.tls", c.Transport.WebSocket.TLS},
 		{"transport.grpc.tls", c.Transport.GRPC.TLS},
+		{"transport.quic.tls", c.Transport.QUIC.TLS},
 	} {
 		if (entry.tls.CertFile == "") != (entry.tls.KeyFile == "") {
 			return fmt.Errorf("%s: cert_file and key_file must both be set or both be empty", entry.name)

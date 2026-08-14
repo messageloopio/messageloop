@@ -1,6 +1,6 @@
 # Client Protocol Reference
 
-MessageLoop uses a bidirectional message protocol over WebSocket or gRPC streaming. All messages are wrapped in `InboundMessage` (client → server) and `OutboundMessage` (server → client) envelopes.
+MessageLoop uses a bidirectional message protocol over WebSocket, gRPC streaming, or QUIC. All messages are wrapped in `InboundMessage` (client → server) and `OutboundMessage` (server → client) envelopes.
 
 ## Transport Negotiation
 
@@ -21,6 +21,18 @@ GET /ws HTTP/1.1
 Upgrade: websocket
 Sec-WebSocket-Protocol: messageloop+json
 ```
+
+### QUIC
+
+The optional QUIC listener (`transport.quic.addr`) carries the same envelopes over one bidirectional QUIC stream. Each frame is a 4-byte big-endian length prefix followed by the payload. Encoding is negotiated via TLS ALPN:
+
+| ALPN | Encoding |
+| --- | --- |
+| `messageloop+json` | JSON (protobuf-compatible JSON mapping) |
+| `messageloop` | JSON (alias) |
+| `messageloop+proto` | Protobuf binary |
+
+QUIC requires TLS 1.3. Disconnect reasons are delivered both as a `DISCONNECT_ERROR` envelope (same metadata as gRPC) and as a QUIC application error code matching the numeric disconnect code.
 
 ### gRPC
 

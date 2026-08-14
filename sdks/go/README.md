@@ -1,6 +1,6 @@
 # MessageLoop Go SDK
 
-MessageLoop 的官方 Go 客户端 SDK，独立 Go module（`github.com/messageloopio/messageloop/sdks/go`），支持 WebSocket 与 gRPC 双传输、代理（proxy）后端支持。
+MessageLoop 的官方 Go 客户端 SDK，独立 Go module（`github.com/messageloopio/messageloop/sdks/go`），支持 WebSocket、gRPC 与 QUIC 三种传输、代理（proxy）后端支持。
 
 - 详细使用指南见 `docs/developer/07-sdk-go.md`（仓库文档）。
 - 旧 CloudEvents 写法纠正见 `MIGRATION_GUIDE.md`。
@@ -16,7 +16,9 @@ go get github.com/messageloopio/messageloop/sdks/go
 ```go
 import messageloopgo "github.com/messageloopio/messageloop/sdks/go"
 
-client, err := messageloopgo.Dial("ws://localhost:8001/ws", messageloopgo.WithClientID("app-1"))
+client, err := messageloopgo.Dial("ws://localhost:9080/ws", messageloopgo.WithClientID("app-1"))
+// 或 messageloopgo.DialGRPC("localhost:9090", ...)
+// 或 messageloopgo.DialQUIC("localhost:4433", messageloopgo.WithInsecureSkipVerify(), ...)
 if err != nil {
     panic(err)
 }
@@ -85,7 +87,7 @@ fmt.Println("committed at offset", offset)
 
 ## 带数值码的断连错误
 
-服务端主动断连时会下发带数值断连码（3000、3500-3513）的通知：WebSocket 路径走 close frame，gRPC 路径走 `DISCONNECT_ERROR` 信封的 `metadata.disconnect_code`。SDK 把两条路径统一为 `*DisconnectError`，可用 `errors.As` 取出：
+服务端主动断连时会下发带数值断连码（3000、3500-3513）的通知：WebSocket 路径走 close frame，gRPC / QUIC 路径走 `DISCONNECT_ERROR` 信封的 `metadata.disconnect_code`（QUIC 同时用 application error code 携带该数值）。SDK 把这些路径统一为 `*DisconnectError`，可用 `errors.As` 取出：
 
 ```go
 client.OnError(func(err error) {

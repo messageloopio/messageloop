@@ -1,6 +1,7 @@
 package messageloopgo
 
 import (
+	"crypto/tls"
 	"time"
 )
 
@@ -72,6 +73,14 @@ type Options struct {
 	ReconnectBackoffFactor float64
 	// ReconnectMaxAttempts is the maximum number of reconnect attempts (0 = unlimited).
 	ReconnectMaxAttempts int
+
+	// TLSConfig is the TLS configuration used by DialQUIC. QUIC requires
+	// TLS 1.3; leave nil to use a default config (NextProtos filled from
+	// Encoding). Combine with InsecureSkipVerify for self-signed servers.
+	TLSConfig *tls.Config
+	// InsecureSkipVerify skips server certificate verification on QUIC
+	// dials. Intended for local development against transport.quic.insecure.
+	InsecureSkipVerify bool
 }
 
 // Option is a function that modifies Options.
@@ -189,5 +198,19 @@ func WithReconnectBackoff(initial, max time.Duration, factor float64) Option {
 func WithReconnectMaxAttempts(max int) Option {
 	return func(o *Options) {
 		o.ReconnectMaxAttempts = max
+	}
+}
+
+// WithTLSConfig sets the TLS configuration used by DialQUIC.
+func WithTLSConfig(cfg *tls.Config) Option {
+	return func(o *Options) {
+		o.TLSConfig = cfg
+	}
+}
+
+// WithInsecureSkipVerify skips TLS certificate verification on DialQUIC.
+func WithInsecureSkipVerify() Option {
+	return func(o *Options) {
+		o.InsecureSkipVerify = true
 	}
 }

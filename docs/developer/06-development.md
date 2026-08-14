@@ -26,10 +26,11 @@
 | `shared/` | 独立 Go 模块 `github.com/messageloopio/messageloop/shared`；`genproto/` 为生成代码，`marshaler.go` 为 JSON/Protobuf 序列化器 |
 | `pkg/websocket/` | WebSocket 传输实现（含集成测试） |
 | `pkg/grpcstream/` | gRPC 流式传输（客户端流 `client_server.go`、管理 API `admin_server.go`、公共准备逻辑 `server.go`） |
+| `pkg/quicstream/` | 可选 QUIC 客户端传输（一条双向流 + 长度前缀帧，TLS 1.3 / ALPN 协商编码） |
 | `pkg/topics/` | 主题匹配器：`cstrie`（默认并发实现）、`trie`、`naive`、`inverted_bitmap` 等 |
 | `pkg/redisbroker/` | Redis broker 实现：Streams 历史、Pub/Sub 实时分发、Redis 支撑的 presence 与集群命令总线 |
 | `proxy/` | RPC 代理后端集成（HTTP/gRPC 后端、路由、超时） |
-| `sdks/go/` | 独立 Go 模块 `github.com/messageloopio/messageloop/sdks/go`：客户端 SDK（`client.go`、`websocket.go`、`grpc.go`、`proxy.go`、`mux.go`、`options.go`）与 `example/` 示例 |
+| `sdks/go/` | 独立 Go 模块 `github.com/messageloopio/messageloop/sdks/go`：客户端 SDK（`client.go`、`websocket.go`、`grpc.go`、`quic.go`、`proxy.go`、`mux.go`、`options.go`）与 `example/` 示例 |
 | `sdks/ts/` | TypeScript SDK（`@messageloop/sdk`），含 `src/`、`test/` 与生成的 `src/proto/` |
 | `docs/` | 文档：根目录为英文版协议与部署文档，`developer/` 为本开发者文档套件 |
 | `Taskfile.yml`、`buf.yaml`、`buf.gen.yaml`、`buf.lock` | 任务定义与 buf 配置 |
@@ -205,6 +206,7 @@ go run ./cmd/server --config ./config.yaml
 | --- | --- | --- |
 | WebSocket 客户端流量 | `transport.websocket.addr` | 无默认（必填） |
 | 客户端 gRPC 流 | `transport.grpc.addr` | 无默认（必填） |
+| 客户端 QUIC | `transport.quic.addr` | 空（不启动） |
 | gRPC 管理 API | `server.grpc_admin.addr` | 无默认（必填，启动预检阶段无条件预绑定） |
 | HTTP 健康检查与指标 | `server.http.addr` | `127.0.0.1:8080` |
 

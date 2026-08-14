@@ -63,9 +63,10 @@ task release-sdk-ts # Build and publish TypeScript SDK to npm
 
 ## Listener Model
 
-The server exposes four distinct listeners:
+The server exposes four required listeners plus an optional QUIC listener:
 - `transport.websocket.addr` — WebSocket client traffic (`:9080`, path `/ws`)
 - `transport.grpc.addr` — Client gRPC streaming (`:9090`)
+- `transport.quic.addr` — Optional QUIC client traffic (`:4433`, UDP; empty disables)
 - `server.grpc_admin.addr` — Server-side gRPC admin API (`127.0.0.1:9091`, exposes `messageloop.server.v1.APIService`)
 - `server.http.addr` — Health check and Prometheus metrics (`127.0.0.1:8080`)
 
@@ -73,7 +74,7 @@ The server exposes four distinct listeners:
 
 Config structure defined in `config/config.go` with example in `config-example.yaml`:
 - **server** - Admin HTTP address, admin gRPC address, heartbeat idle timeout (default: `300s`), RPC timeout (default: `30s`), per-user and per-client limits, built-in ACL rules, optional `require_auth`
-- **transport** - WebSocket and client gRPC streaming listeners, plus optional TLS, compression, and write timeouts
+- **transport** - WebSocket, client gRPC streaming, and optional QUIC listeners, plus TLS, compression, and write timeouts
 - **broker** - Type selection (`memory` or `redis`) with Redis connection, stream, and history settings
 - **cluster** - Optional Redis-backed distributed control plane with `enabled`, `node_id`, and `backend`
 - **proxy** - Backend RPC proxy configurations with routes, timeout, and HTTP/gRPC backends
@@ -149,6 +150,12 @@ The system abstracts connection handling via the **Transport** interface (`trans
 - Handler detects encoding from WebSocket subprotocol (`messageloop`, `messageloop+json`, `messageloop+proto`)
 - Integrates with `lynx` framework for lifecycle management
 
+**QUIC** (`pkg/quicstream/`) - Optional UDP/QUIC client listener:
+- One QUIC connection per client, one bidirectional stream
+- Length-prefixed frames (`uint32be` + payload); ALPN selects encoding (`messageloop+json` / `messageloop+proto`)
+- Requires TLS 1.3 (`tls.cert_file`/`tls.key_file`, or `insecure: true` for a self-signed dev cert)
+- Go SDK: `DialQUIC(addr, opts...)`
+
 **gRPC Stream** (`pkg/grpcstream/`) - Bidirectional gRPC streaming:
 - `client_server.go` - Client streaming listener, manages per-connection streams
 - `admin_server.go` - Admin gRPC API server (separate listener from client traffic)
@@ -199,6 +206,7 @@ Typed `Disconnect` errors (`disconnect.go`) signal intentional connection termin
 - `genproto/` - Generated protobuf (local replace to shared/)
 - `pkg/websocket/` - WebSocket transport implementation
 - `pkg/grpcstream/` - gRPC streaming transport implementation
+- `pkg/quicstream/` - QUIC client transport implementation
 - `pkg/topics/` - Topic matching algorithms for wildcard subscriptions
 - `pkg/redisbroker/` - Redis-based distributed broker implementation
 - `proxy/` - RPC proxy backend integration
@@ -210,7 +218,7 @@ Typed `Disconnect` errors (`disconnect.go`) signal intentional connection termin
 
 1. **Sharding** - Hub uses 64 shards, subscription locks use 16384 shards to reduce contention
 2. **Protocol abstraction** - Core logic independent of transport; WebSocket and gRPC are pluggable
-3. **Marshaler selection** - WebSocket negotiates encoding via subprotocol; gRPC uses protobuf only
+3. **Marshaler selection** - WebSocket negotiates encoding via subprotocol; QUIC via ALPN; gRPC uses protobuf only
 4. **Disconnect handling** - Uses typed `Disconnect` errors implementing the `error` interface
 5. **Payload format** - Publish and RPC operations use Payload with Binary/Text/Json data
 6. **StreamPosition recovery** - History streams use offset + epoch semantics for reliable recovery

@@ -1,12 +1,12 @@
 # MessageLoop
 
-MessageLoop is a real-time messaging server written in Go. It provides channel-based pub/sub, request/response RPC, presence, history, and session-aware connection management over WebSocket and gRPC.
+MessageLoop is a real-time messaging server written in Go. It provides channel-based pub/sub, request/response RPC, presence, history, and session-aware connection management over WebSocket, gRPC, and optional QUIC.
 
 The project supports a simple single-node setup with in-memory components and can be extended with Redis for distributed delivery, durable history, and an optional Redis-backed control plane for multi-node deployments.
 
 ## Highlights
 
-- WebSocket and gRPC client transports
+- WebSocket, gRPC, and optional QUIC client transports
 - JSON and protobuf wire encodings
 - Channel pub/sub with wildcard topic matching
 - Request/response RPC routed to HTTP or gRPC backends
@@ -25,7 +25,7 @@ The project supports a simple single-node setup with in-memory components and ca
 | `Node` | Central coordinator for transports, broker, proxy, presence, surveys, and the cluster control plane |
 | `Hub` | Sharded in-memory registry for sessions and subscriptions |
 | `Broker` | Pub/sub backend, implemented by in-memory broker or Redis broker |
-| `Transport` | Connection abstraction used by WebSocket and gRPC streaming servers |
+| `Transport` | Connection abstraction used by WebSocket, gRPC streaming, and QUIC servers |
 | `Proxy` | RPC/auth/ACL/lifecycle delegation to HTTP or gRPC backends |
 | `Cluster` | Optional Redis-backed control plane for multi-node session ownership and coordination |
 
@@ -73,6 +73,7 @@ Default endpoints:
 
 - WebSocket: `ws://localhost:9080/ws`
 - gRPC streaming: `localhost:9090`
+- QUIC (optional): enable `transport.quic.addr` (e.g. `:4433`) and dial with `DialQUIC`
 - gRPC admin API: `127.0.0.1:9091`
 - Health: `http://localhost:8080/health`
 - Prometheus metrics: `http://localhost:8080/metrics`

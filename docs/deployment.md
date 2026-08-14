@@ -13,12 +13,13 @@ go build -o messageloop ./cmd/server
 
 ## Listener Model
 
-A single MessageLoop process exposes four network listeners:
+A single MessageLoop process exposes four required network listeners plus an optional QUIC listener:
 
 | Listener | Config Key | Purpose | Default |
 | --- | --- | --- | --- |
 | WebSocket | `transport.websocket.addr` | Client pub/sub traffic | None (required) |
 | gRPC streaming | `transport.grpc.addr` | Client pub/sub traffic | None (required) |
+| QUIC | `transport.quic.addr` | Client pub/sub traffic over UDP | Empty (disabled) |
 | gRPC admin | `server.grpc_admin.addr` | Server-side admin API | None (required) |
 | HTTP admin | `server.http.addr` | Health checks and Prometheus metrics | `127.0.0.1:8080` |
 
@@ -26,7 +27,7 @@ Bind client-facing listeners to public interfaces and admin listeners to private
 
 ## TLS Configuration
 
-Each listener supports optional TLS:
+WebSocket, gRPC, and admin listeners support optional TLS. QUIC always requires TLS 1.3 (`tls` cert/key, or `insecure: true` for a self-signed development certificate).
 
 ```yaml
 transport:

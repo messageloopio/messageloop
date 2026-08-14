@@ -90,6 +90,14 @@ transport:
     # tls:
     #   cert_file: "./certs/server.crt"
     #   key_file: "./certs/server.key"
+  # quic:                         # Optional UDP/QUIC client listener (disabled when addr is empty)
+  #   addr: ":4433"
+  #   insecure: true              # Dev only: ephemeral self-signed cert. Production must set tls.
+  #   # write_timeout: "10s"
+  #   # read_timeout: "60s"
+  #   # tls:
+  #   #   cert_file: "./certs/server.crt"
+  #   #   key_file: "./certs/server.key"
 
 broker:
   type: redis  # Use "memory" for a single-node in-process broker

@@ -10,6 +10,7 @@ Current listener model:
 
 - WebSocket client traffic on `transport.websocket.addr`.
 - Client gRPC streaming on `transport.grpc.addr`.
+- Optional client QUIC on `transport.quic.addr` (UDP, TLS 1.3; empty addr disables it).
 - Server-side gRPC admin API on `server.grpc_admin.addr`.
 - Admin HTTP health/metrics on `server.http.addr`.
 
@@ -153,4 +154,5 @@ func TestCSTrieMatcher(t *testing.T) {
 - `pkg/grpcstream/client_server.go`: Client gRPC streaming server component
 - `pkg/grpcstream/admin_server.go`: Admin gRPC server component
 - `pkg/grpcstream/server.go`: Shared gRPC server preparation and listener lifecycle
+- `pkg/quicstream/`: Optional QUIC client transport (length-prefixed frames over one bidirectional stream)
 - `pkg/topics/`: Topic matcher implementations (cstrie, trie, naive, inverted_bitmap)

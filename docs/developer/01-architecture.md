@@ -8,7 +8,7 @@
 
 MessageLoop 的核心设计目标可以归纳为四点：
 
-- **传输无关的核心**：连接管理、订阅、消息路由等核心逻辑全部构建在 `Transport` 接口之上，WebSocket 与 gRPC 流只是可替换的传输实现，核心代码不感知具体传输。
+- **传输无关的核心**：连接管理、订阅、消息路由等核心逻辑全部构建在 `Transport` 接口之上，WebSocket、gRPC 流与可选的 QUIC 只是可替换的传输实现，核心代码不感知具体传输。
 - **可插拔的 Broker**：发布/订阅与历史存储通过 `Broker` 接口抽象，提供进程内内存实现（`memory`）与 Redis 实现（`redis`），二者在接口层面完全等价。
 - **分片并发模型**：连接注册表与订阅注册表各自分为 64 个分片，订阅变更用 16384 把通道级锁串行化，减少全局锁竞争。
 - **会话感知的连接管理**：连接以服务端生成的会话 ID（`session ID`）为标识，支持断线恢复（resume）、新连接接管旧会话（takeover）与集群内跨节点恢复。
@@ -18,6 +18,7 @@ MessageLoop 的核心设计目标可以归纳为四点：
 ```
 客户端 ──► WebSocket 监听器 (transport.websocket.addr) ──┐
 客户端 ──► gRPC 流监听器  (transport.grpc.addr)        ──┤
+客户端 ──► QUIC 监听器    (transport.quic.addr, 可选)  ──┤
 管理工具 ─► gRPC 管理 API  (server.grpc_admin.addr)     ──┼─► Node（中央协调者）
 运维系统 ─► HTTP 健康/指标  (server.http.addr)          ──┘
                                                               │

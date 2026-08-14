@@ -85,7 +85,7 @@ type Client struct {
 	authenticated bool
 
 	// Connection metadata
-	protocol    string // ws or grpc
+	protocol    string // ws, grpc, or quic
 	connectedAt time.Time
 
 	// Heartbeat fields
@@ -919,9 +919,9 @@ func (c *Client) ClientInfo() *ClientInfo {
 	return info
 }
 
-// TransportLabel returns the transport label value ("ws" or "grpc") for the
-// connections metric. The protocol is fixed at construction (WithProtocol by
-// the transport packages); anything unknown defaults to "ws".
+// TransportLabel returns the transport label value ("ws", "grpc", or "quic")
+// for the connections metric. The protocol is fixed at construction
+// (WithProtocol by the transport packages); anything unknown defaults to "ws".
 func (c *Client) TransportLabel() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()

@@ -1,19 +1,19 @@
 # Go SDK 指南
 
-本文介绍官方 Go 客户端 SDK 的安装与使用。SDK 位于仓库 `sdks/go/` 目录，是一个独立的 Go module，包含客户端（WebSocket / gRPC 两种传输）、消息类型以及代理（proxy）后端支持。协议层面的细节（子协议、消息信封、断连码）请参阅[《客户端协议参考》](../protocol.md)，本文不再重复。
+本文介绍官方 Go 客户端 SDK 的安装与使用。SDK 位于仓库 `sdks/go/` 目录，是一个独立的 Go module，包含客户端（WebSocket / gRPC / QUIC 三种传输）、消息类型以及代理（proxy）后端支持。协议层面的细节（子协议、消息信封、断连码）请参阅[《客户端协议参考》](../protocol.md)，本文不再重复。
 
 ## 概述
 
 - **模块路径**：`github.com/messageloopio/messageloop/sdks/go`（见 `sdks/go/go.mod`）。
 - **Go 版本要求**：`go 1.25.5`。
 - **功能范围**：
-  - WebSocket 客户端与 gRPC 客户端，共享同一套 `Client` 接口与消息模型；
+  - WebSocket、gRPC 与 QUIC 客户端，共享同一套 `Client` 接口与消息模型；
   - 订阅/退订、发布、请求-响应式 RPC；
   - 自动重连与会话恢复（session resumption，携带 epoch 与逐频道 offset）；
   - 恢复订阅（`WithRecover`）、Presence（事件/快照/查询）、Survey（发起与应答）；
   - 心跳（ping/pong，含服务端 Ping 应答）；
   - 代理后端支持：在业务服务中以 gRPC 实现 RPC 处理、认证、ACL 与生命周期钩子，供服务端回调。
-- **依赖**：`gorilla/websocket`、`google.golang.org/grpc`、`google.golang.org/protobuf`、`github.com/google/uuid`，以及同仓库的 `github.com/messageloopio/messageloop/shared`（生成代码与序列化器）。仓库内通过 `replace github.com/messageloopio/messageloop/shared => ./../../shared` 指向本地目录。
+- **依赖**：`gorilla/websocket`、`google.golang.org/grpc`、`github.com/quic-go/quic-go`、`google.golang.org/protobuf`、`github.com/google/uuid`，以及同仓库的 `github.com/messageloopio/messageloop/shared`（生成代码与序列化器）。仓库内通过 `replace github.com/messageloopio/messageloop/shared => ./../../shared` 指向本地目录。
 - **与其他 SDK 的关系**：TypeScript SDK 提供等价能力，API 设计与本文描述的概念一一对应，参见[《TypeScript SDK 指南》](08-sdk-ts.md)。
 
 ## 安装
@@ -106,11 +106,11 @@ func main() {
 - 建议在 `Connect` 之前注册 `OnConnected` / `OnMessage` / `OnError` 等回调，避免错过连接成功事件。
 - `Subscribe` / `Publish` / `Unsubscribe` / `RPC` 在未连接时返回错误（`not connected`）。
 
-gRPC 客户端的用法与 WebSocket 完全一致，只是把 `Dial` 换成 `DialGRPC(addr, opts...)`（见 [example/basicgrpc](../../sdks/go/example/basicgrpc)）。
+gRPC 客户端的用法与 WebSocket 完全一致，只是把 `Dial` 换成 `DialGRPC(addr, opts...)`（见 [example/basicgrpc](../../sdks/go/example/basicgrpc)）。QUIC 客户端同样共享 `Client` 接口，入口是 `DialQUIC(addr, opts...)`（见 [example/basicquic](../../sdks/go/example/basicquic)）。QUIC 强制 TLS 1.3：对接 `transport.quic.insecure` 的开发服务器时传 `WithInsecureSkipVerify()`。
 
 ## 客户端选项
 
-所有选项均为函数式选项（`Option func(*Options)`），通过 `Dial` / `DialGRPC` 的变参传入。完整列表见 `options.go`：
+所有选项均为函数式选项（`Option func(*Options)`），通过 `Dial` / `DialGRPC` / `DialQUIC` 的变参传入。完整列表见 `options.go`：
 
 | 选项函数 | 参数 | 作用 | 默认值 |
 | --- | --- | --- | --- |
@@ -126,6 +126,8 @@ gRPC 客户端的用法与 WebSocket 完全一致，只是把 `Dial` 换成 `Dia
 | `WithAutoReconnect` | `bool` | 断线后自动重连并尝试会话恢复 | `false` |
 | `WithReconnectBackoff` | `initial, max time.Duration, factor float64` | 重连退避：初始延迟、最大延迟、指数因子 | `1s` / `30s` / `2.0` |
 | `WithReconnectMaxAttempts` | `int` | 最大重连次数，`0` 表示不限次 | `0` |
+| `WithTLSConfig` | `*tls.Config` | QUIC 拨号使用的 TLS 配置（会按 Encoding 补 `NextProtos`） | `nil` |
+| `WithInsecureSkipVerify` | （无） | QUIC 跳过服务端证书校验（仅开发） | 关 |
 
 示例：
 

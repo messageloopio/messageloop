@@ -17,7 +17,7 @@
 
 包同时输出 ESM（`dist/esm`）、CommonJS（`dist/cjs`）与类型声明（`dist/types`），并在 `exports` 中按 `import` / `require` 条件分发。运行时依赖仅 `@bufbuild/protobuf`（`^2.0.0`）。
 
-与 [Go SDK 指南](07-sdk-go.md) 对应：两者共享同一份 `shared/genproto` 协议定义与线上协议（见[《客户端协议参考》](../protocol.md)）；本 SDK 目前仅实现 WebSocket 传输，不暴露 gRPC 传输。
+与 [Go SDK 指南](07-sdk-go.md) 对应：两者共享同一份 `shared/genproto` 协议定义与线上协议（见[《客户端协议参考》](../protocol.md)）；本 SDK 目前仅实现 WebSocket 传输，不暴露 gRPC / QUIC 传输（QUIC 客户端见 Go SDK 的 `DialQUIC`）。
 
 ## 2. 安装
 

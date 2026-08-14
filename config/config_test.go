@@ -147,6 +147,50 @@ func TestValidate_AdminRequiresAuthToken(t *testing.T) {
 	assert.NoError(t, cfg.Validate(), "a configured auth token must pass validation")
 }
 
+func TestValidate_QUICOptionalWhenEmpty(t *testing.T) {
+	cfg := &Config{Transport: validTransport()}
+	assert.NoError(t, cfg.Validate())
+}
+
+func TestValidate_QUICRequiresTLSOrInsecure(t *testing.T) {
+	cfg := &Config{
+		Transport: Transport{
+			WebSocket: WebSocketTransport{Addr: ":9080", Path: "/ws"},
+			GRPC:      GRPCTransport{Addr: ":9090"},
+			QUIC:      QUICTransport{Addr: ":4433"},
+		},
+	}
+	assert.ErrorContains(t, cfg.Validate(), "transport.quic requires tls")
+
+	cfg.Transport.QUIC.Insecure = true
+	assert.NoError(t, cfg.Validate())
+}
+
+func TestValidate_QUICTLSPair(t *testing.T) {
+	cfg := &Config{
+		Transport: Transport{
+			WebSocket: WebSocketTransport{Addr: ":9080", Path: "/ws"},
+			GRPC:      GRPCTransport{Addr: ":9090"},
+			QUIC: QUICTransport{
+				Addr: ":4433",
+				TLS:  TLSConfig{CertFile: "cert.pem"},
+			},
+		},
+	}
+	assert.ErrorContains(t, cfg.Validate(), "cert_file and key_file must both be set")
+}
+
+func TestValidate_QUICInvalidDuration(t *testing.T) {
+	cfg := &Config{
+		Transport: Transport{
+			WebSocket: WebSocketTransport{Addr: ":9080", Path: "/ws"},
+			GRPC:      GRPCTransport{Addr: ":9090"},
+			QUIC:      QUICTransport{Addr: ":4433", Insecure: true, WriteTimeout: "nope"},
+		},
+	}
+	assert.ErrorContains(t, cfg.Validate(), "transport.quic.write_timeout")
+}
+
 func TestProxyConfig_ToProxyConfig_ParsesTimeout(t *testing.T) {
 	pc := &ProxyConfig{Name: "p", Endpoint: "127.0.0.1:1", Timeout: "30s"}
 	got, err := pc.ToProxyConfig()

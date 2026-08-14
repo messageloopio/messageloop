@@ -15,6 +15,7 @@ import (
 	lynxhttp "github.com/lynx-go/lynx/server/http"
 	"github.com/messageloopio/messageloop"
 	"github.com/messageloopio/messageloop/config"
+	"github.com/messageloopio/messageloop/pkg/quicstream"
 	"github.com/messageloopio/messageloop/pkg/redisbroker"
 	"github.com/messageloopio/messageloop/pkg/websocket"
 	proxyproxy "github.com/messageloopio/messageloop/proxy"
@@ -88,16 +89,26 @@ func main() {
 
 		wsServer := newWebSocketServer(cfg, node, app.Logger())
 		adminServer := newAdminServer(cfg, node, reg)
+		quicServer, err := newQUICServer(cfg, node)
+		if err != nil {
+			return err
+		}
 
 		app.OnStart(node.Run)
 		components := []lynx.Service{wsServer, adminServer}
 		components = append(components, grpcServers.Components()...)
+		if quicServer != nil {
+			components = append(components, quicServer)
+		}
 		app.Register(components...)
 		app.OnStop(func(ctx context.Context) error {
 			// Drain all client connections before shutting down.
 			node.Shutdown()
-			// Release the pre-bound gRPC listeners as a defensive measure.
+			// Release the pre-bound gRPC / QUIC listeners as a defensive measure.
 			grpcServers.Close()
+			if quicServer != nil {
+				_ = quicServer.Close()
+			}
 			return nil
 		})
 
@@ -260,6 +271,43 @@ func buildWebSocketOptions(cfg *config.Config, logger *slog.Logger) websocket.Op
 // newWebSocketServer builds the WebSocket server component from config.
 func newWebSocketServer(cfg *config.Config, node *messageloop.Node, logger *slog.Logger) *websocket.Server {
 	return websocket.NewServer(buildWebSocketOptions(cfg, logger), node)
+}
+
+// newQUICServer builds the optional QUIC client listener. A nil server is
+// returned (without error) when transport.quic.addr is empty.
+func newQUICServer(cfg *config.Config, node *messageloop.Node) (*quicstream.Server, error) {
+	if cfg.Transport.QUIC.Addr == "" {
+		return nil, nil
+	}
+	opts := quicstream.Options{
+		Addr:        cfg.Transport.QUIC.Addr,
+		TLSCertFile: cfg.Transport.QUIC.TLS.CertFile,
+		TLSKeyFile:  cfg.Transport.QUIC.TLS.KeyFile,
+		Insecure:    cfg.Transport.QUIC.Insecure,
+	}
+	if cfg.Transport.QUIC.WriteTimeout == "" {
+		opts.WriteTimeout = quicstream.DefaultWriteTimeout
+	} else if d, err := time.ParseDuration(cfg.Transport.QUIC.WriteTimeout); err == nil {
+		opts.WriteTimeout = d
+	}
+	if cfg.Transport.QUIC.ReadTimeout != "" {
+		if d, err := time.ParseDuration(cfg.Transport.QUIC.ReadTimeout); err == nil {
+			opts.ReadTimeout = d
+		}
+	}
+	hb := node.GetHeartbeatConfig()
+	if hb.IdleTimeout > 0 {
+		// Keep the QUIC idle timeout above the application heartbeat so the
+		// protocol-level idle check (3511) fires first.
+		opts.MaxIdleTimeout = 2 * hb.IdleTimeout
+		if opts.MaxIdleTimeout < quicstream.DefaultMaxIdleTimeout {
+			opts.MaxIdleTimeout = quicstream.DefaultMaxIdleTimeout
+		}
+	}
+	if hb.PingInterval > 0 {
+		opts.KeepAlivePeriod = hb.PingInterval
+	}
+	return quicstream.NewServer(opts, node)
 }
 
 // newAdminServer builds the HTTP admin server component (health + metrics).

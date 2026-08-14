@@ -16,22 +16,26 @@
 
 `Validate()`（`config/config.go:157-242`）按以下顺序检查，返回第一条错误：
 
-1. **传输地址必填**：`transport.websocket.addr`、`transport.websocket.path` 与 `transport.grpc.addr` 均必填。启动接线无条件构造两个传输监听器（`newWebSocketServer` 与 `prepareGRPCServers`），缺失地址会错绑或 panic，故在此提前拒绝（`config/config.go:162-170`）：
+1. **传输地址必填**：`transport.websocket.addr`、`transport.websocket.path` 与 `transport.grpc.addr` 均必填。启动接线无条件构造 WebSocket 与客户端 gRPC 监听器（`newWebSocketServer` 与 `prepareGRPCServers`），缺失地址会错绑或 panic，故在此提前拒绝。`transport.quic.addr` 可选，空值表示不启动 QUIC：
    - `transport.websocket.addr` 为空 → `transport.websocket.addr is required`；
    - `transport.websocket.path` 为空 → `transport.websocket.path is required when websocket transport is enabled`（空 path 会在 `http.ServeMux` 注册时 panic，见 [transport.websocket 节](#transportwebsocket-节)）；
-   - `transport.grpc.addr` 为空 → `transport.grpc.addr is required`。
+   - `transport.grpc.addr` 为空 → `transport.grpc.addr is required`；
+   - `transport.quic.addr` 非空且未配置 TLS 成对证书、也未设 `insecure: true` → `transport.quic requires tls cert_file and key_file, or set insecure: true...`。
 2. **时长格式**：以下字段若非空必须是合法的 Go duration 字符串（如 `"30s"`、`"1m30s"`）：
    - `server.heartbeat.idle_timeout`
    - `server.rpc_timeout`
    - `transport.websocket.read_timeout`
    - `transport.websocket.write_timeout`
    - `transport.grpc.write_timeout`
+   - `transport.quic.write_timeout`
+   - `transport.quic.read_timeout`
    
    注意：`proxy[].timeout` 与 `broker.redis.*` 各时长字段**不在** `Validate()` 检查范围内，它们在启动阶段解析（见各节）。
-3. **TLS 证书/密钥成对**：以下三处的 `cert_file` 与 `key_file` 必须同时设置或同时为空：
+3. **TLS 证书/密钥成对**：以下四处的 `cert_file` 与 `key_file` 必须同时设置或同时为空：
    - `server.grpc_admin.tls`
    - `transport.websocket.tls`
    - `transport.grpc.tls`
+   - `transport.quic.tls`
 4. **管理 gRPC 鉴权**：`server.grpc_admin.addr` 非空时，`auth_token` 与 `allow_insecure` 必须至少设置一个，否则报 `server.grpc_admin requires auth_token, or set allow_insecure: true to explicitly run without authentication`（`config.go:207-209`）。
 5. **broker 校验**：
    - `broker.type` 必须为 `memory` 或 `redis`（空等价于 `memory`），否则报 `unknown broker.type: ...`；
@@ -59,7 +63,7 @@
 
 ```yaml
 server:      # 服务端行为：管理 HTTP、管理 gRPC、心跳、限流、ACL
-transport:   # 客户端监听器：WebSocket 与 gRPC
+transport:   # 客户端监听器：WebSocket、gRPC 与可选 QUIC
 broker:      # 发布/订阅后端：memory 或 redis
 cluster:     # 分布式控制面（可选）
 proxy:       # 后端代理数组（可选）
@@ -68,7 +72,7 @@ proxy:       # 后端代理数组（可选）
 | 小节 | 类型 | 说明 |
 | --- | --- | --- |
 | `server` | 对象 | 管理接口、心跳、RPC 超时、限流、ACL、认证要求，见 [server 节](#server-节) |
-| `transport` | 对象 | 客户端接入监听器，见 [transport.websocket 节](#transportwebsocket-节) 与 [transport.grpc 节](#transportgrpc-节) |
+| `transport` | 对象 | 客户端接入监听器，见 [transport.websocket 节](#transportwebsocket-节)、[transport.grpc 节](#transportgrpc-节) 与 [transport.quic 节](#transportquic-节) |
 | `broker` | 对象 | 消息路由后端，见 [broker 节](#broker-节) |
 | `cluster` | 对象 | 多节点控制面，见 [cluster 节](#cluster-节) |
 | `proxy` | 数组 | 后端代理与路由规则，见 [proxy 节](#proxy-节) |
@@ -307,6 +311,30 @@ transport:
 | `transport.grpc.tls.cert_file` / `.key_file` | string | 未设置 | 为 gRPC 监听器启用 TLS，二者必须成对设置（`Validate()` 规则 3） |
 
 该监听器的 `MaxRecvMsgSize` 由 `server.limits.max_message_size` 统一决定（`cmd/server/runtime.go:46`），无需单独配置。
+
+## transport.quic 节
+
+```yaml
+transport:
+  quic:
+    addr: ":4433"           # 空 = 不启动 QUIC 监听器
+    write_timeout: "10s"
+    read_timeout: "60s"
+    insecure: false         # 仅开发：生成临时自签名证书
+    # tls:
+    #   cert_file: "./certs/server.crt"
+    #   key_file: "./certs/server.key"
+```
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `transport.quic.addr` | string | 空 | UDP 监听地址。**可选**：空值不启动 QUIC。启动接线见 `cmd/server/main.go` 的 `newQUICServer` |
+| `transport.quic.write_timeout` | string | `10s` | 单次写帧截止时间。空则用 `pkg/quicstream.DefaultWriteTimeout`（10s） |
+| `transport.quic.read_timeout` | string | 见说明 | 单次读帧截止时间。规则与 WebSocket 相同：心跳开启时取 `max(2×idle, 3×ping, 10s)` 为下限，显式配置只能放大 |
+| `transport.quic.insecure` | bool | `false` | 未配置 TLS 文件时生成进程内自签名证书（仅开发/测试）。生产必须配置 `tls` |
+| `transport.quic.tls.cert_file` / `.key_file` | string | 未设置 | QUIC 强制 TLS 1.3；二者必须成对。`addr` 非空时必须提供证书对或 `insecure: true` |
+
+QUIC 会话是一条双向流上的长度前缀帧（4 字节大端长度 + payload）。TLS ALPN 协商编码：`messageloop+proto` 为二进制 protobuf，`messageloop+json` / `messageloop` 为 protojson。入站帧大小受 `server.limits.max_message_size` 约束。Go SDK 用 `DialQUIC(addr, opts...)` 连接。
 
 ### 启动要求
 

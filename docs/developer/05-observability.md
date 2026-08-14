@@ -61,7 +61,7 @@ curl -s http://127.0.0.1:8080/health
 
 - 指标注册在进程内新建的 `prometheus.NewRegistry()` 上：除 `messageloop.Metrics` 定义的指标外，还注册了 Go runtime 与 process 默认采集器（`collectors.NewGoCollector()`、`collectors.NewProcessCollector(...)`，`cmd/server/main.go:44-47`），因此 `/metrics` 同时暴露 `go_*`、`process_*` 系列指标；
 - `node.SetMetrics(metrics)` 后，`Node` 与 `Hub` 在运行路径中更新指标；集群模式下指标对象同时注入 Redis 命令总线与投影修复器；
-- `messageloop_*` 指标以 `messageloop` 为命名空间；**cluster 启用且配置 `node_id` 时，指标带 `node_id` 标签**（`prometheus.WrapRegistererWith`，`cmd/server/main.go:49-53`）；`messageloop_connections_total` 另带 `transport` 标签（`ws`/`grpc`，见 §3.1）。v1.0 起部分指标带自己的语义标签（`recovery_*` 的 `path`/`result`、`admin_user_fanout` 的 `op`、`survey_client_total` 的 `result`、`presence_failures_total` 的 `op`），其余指标无标签。
+- `messageloop_*` 指标以 `messageloop` 为命名空间；**cluster 启用且配置 `node_id` 时，指标带 `node_id` 标签**（`prometheus.WrapRegistererWith`，`cmd/server/main.go:49-53`）；`messageloop_connections_total` 另带 `transport` 标签（`ws`/`grpc`/`quic`，见 §3.1）。v1.0 起部分指标带自己的语义标签（`recovery_*` 的 `path`/`result`、`admin_user_fanout` 的 `op`、`survey_client_total` 的 `result`、`presence_failures_total` 的 `op`），其余指标无标签。
 
 快速查看示例：
 
@@ -73,7 +73,7 @@ curl -s http://127.0.0.1:8080/metrics | grep '^messageloop_'
 
 | 指标名 | 类型 | 标签 | 含义 |
 | --- | --- | --- | --- |
-| `messageloop_connections_total` | gauge | `transport`（`ws`/`grpc`） | 当前活跃客户端连接数。`Node.AddClient` 成功后按连接来源 +1（`node.go`，label 由 `WithProtocol` 设定的协议决定，`client.go` `TransportLabel`），会话关闭时 -1（`client.go` `close`） |
+| `messageloop_connections_total` | gauge | `transport`（`ws`/`grpc`/`quic`） | 当前活跃客户端连接数。`Node.AddClient` 成功后按连接来源 +1（`node.go`，label 由 `WithProtocol` 设定的协议决定，`client.go` `TransportLabel`），会话关闭时 -1（`client.go` `close`） |
 | `messageloop_subscriptions_total` | gauge | 无 | 当前活跃频道订阅数（含通配订阅）。订阅/退订时增减（`node.go`），会话恢复（resume）路径同样维护（`cluster_resume.go`） |
 | `messageloop_active_channels` | gauge | 无 | 当前至少有一个订阅者的频道数。频道首个订阅者加入时 +1，最后一名退出时 -1（`node.go`） |
 

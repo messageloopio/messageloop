@@ -26,20 +26,28 @@ func TestMetrics_ConnectionsTotal_TransportLabels(t *testing.T) {
 	grpcClient, _, err := NewClient(ctx, node, noopTransport{}, JSONMarshaler{}, WithProtocol("grpc"))
 	require.NoError(t, err)
 	grpcClient.ForceTestIDs("sess-grpc", "user-grpc", "client-grpc")
+	quicClient, _, err := NewClient(ctx, node, noopTransport{}, JSONMarshaler{}, WithProtocol("quic"))
+	require.NoError(t, err)
+	quicClient.ForceTestIDs("sess-quic", "user-quic", "client-quic")
 
 	require.NoError(t, node.AddClient(wsClient))
 	require.NoError(t, node.AddClient(grpcClient))
+	require.NoError(t, node.AddClient(quicClient))
 	// Mirror the production connect path: only clients that passed AddClient
 	// are counted, and MarkMetricsCharged arms the close() decrement.
 	wsClient.MarkMetricsCharged()
 	grpcClient.MarkMetricsCharged()
+	quicClient.MarkMetricsCharged()
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.ConnectionsTotal.WithLabelValues("ws")))
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.ConnectionsTotal.WithLabelValues("grpc")))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.ConnectionsTotal.WithLabelValues("quic")))
 
 	require.NoError(t, wsClient.Close(Disconnect{}))
 	require.NoError(t, grpcClient.Close(Disconnect{}))
+	require.NoError(t, quicClient.Close(Disconnect{}))
 	require.Equal(t, float64(0), testutil.ToFloat64(metrics.ConnectionsTotal.WithLabelValues("ws")))
 	require.Equal(t, float64(0), testutil.ToFloat64(metrics.ConnectionsTotal.WithLabelValues("grpc")))
+	require.Equal(t, float64(0), testutil.ToFloat64(metrics.ConnectionsTotal.WithLabelValues("quic")))
 }
 
 // TestMetricsTransportLabel pins the protocol-to-label mapping.
@@ -47,6 +55,7 @@ func TestMetricsTransportLabel(t *testing.T) {
 	require.Equal(t, "ws", MetricsTransportLabel(""))
 	require.Equal(t, "ws", MetricsTransportLabel("ws"))
 	require.Equal(t, "grpc", MetricsTransportLabel("grpc"))
+	require.Equal(t, "quic", MetricsTransportLabel("quic"))
 	require.Equal(t, "ws", MetricsTransportLabel("unknown"))
 }
 
