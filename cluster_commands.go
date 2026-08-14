@@ -16,6 +16,13 @@ const (
 	clusterCommandMetaDisconnectReason = "disconnect_reason"
 	clusterCommandMetaSurveyTimeoutMS  = "survey_timeout_ms"
 	clusterCommandMetaSurveyResults    = "survey_results"
+	// clusterCommandMetaSurveyCountOnly marks a survey command as a pure
+	// subscriber-count preflight (client survey gate): the receiving node
+	// returns its local matching count and never runs localSurvey.
+	clusterCommandMetaSurveyCountOnly = "count_only"
+	// clusterCommandMetaSurveyCount carries the local matching subscriber
+	// count in a count_only reply.
+	clusterCommandMetaSurveyCount = "count"
 )
 
 // ClusterCommandHandler returns the node-local cluster command handler.
@@ -307,6 +314,14 @@ func (n *Node) handleClusterTakeoverCommand(ctx context.Context, cmd *ClusterCom
 }
 
 func (n *Node) handleClusterSurveyCommand(ctx context.Context, cmd *ClusterCommand, result *ClusterCommandResult) *ClusterCommandResult {
+	// count_only preflight (client survey gate): return the local matching
+	// subscriber count and return without ever running localSurvey. The
+	// Admin Node.Survey path never sets count_only and is unaffected.
+	if cmd.Metadata[clusterCommandMetaSurveyCountOnly] == "true" {
+		result.Metadata[clusterCommandMetaSurveyCount] = strconv.Itoa(len(n.hub.GetMatchingSubscribers(cmd.Channel)))
+		return result
+	}
+
 	timeout := 5 * time.Second
 	if rawTimeout, ok := cmd.Metadata[clusterCommandMetaSurveyTimeoutMS]; ok && rawTimeout != "" {
 		if timeoutMS, err := strconv.ParseInt(rawTimeout, 10, 64); err == nil && timeoutMS > 0 {

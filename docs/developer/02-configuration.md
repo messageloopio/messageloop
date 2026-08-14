@@ -151,6 +151,7 @@ server:
 | `server.acl.rules[].channel_pattern` | string | 必填 | 频道匹配模式，使用 Go `path.Match` 语法（`*` 匹配单段、`**` 匹配多段，`acl.go:84`）。无匹配规则默认放行 |
 | `server.acl.rules[].allow_subscribe` | string[] | 未设置 | 允许订阅该频道的用户 ID 列表；`"*"` 表示任何已认证用户（`acl.go:49-53`）。未设置该字段的规则不参与订阅判定 |
 | `server.acl.rules[].allow_publish` | string[] | 未设置 | 允许发布的用户 ID 列表；`"*"` 表示任何已认证用户。未设置该字段的规则不参与发布判定 |
+| `server.acl.rules[].allow_survey` | string[] | 未设置 | PR-07 起：允许在该频道发起客户端 Survey 的用户 ID 列表；`"*"` 表示任何已认证用户。**未设置 = 不打开 survey**：`CanSurvey` 默认拒绝（`acl.go`），与 subscribe/publish 的默认放行相反。Admin `Node.Survey` 不走 `CanSurvey` |
 | `server.acl.rules[].deny_all` | bool | `false` | 为 true 时阻断匹配频道上的一切订阅与发布 |
 | `server.require_auth` | bool | `false` | 拒绝空 token 的连接（`config.go:32` 注释：Reject connections with empty token）。开启后：连接未携带 token 直接拒绝（`AUTH_REQUIRED`，`client.go:405-416`）；携带 token 但**没有**匹配 `$authenticate` 路由的代理时同样拒绝——非空 token 不得绕过认证（`client.go:389-404`）。实际认证总是由代理后端完成，见 [proxy 节](#proxy-节) |
 | `server.presence.cluster_emit` | bool | `false` | 进程级 presence 开关（不是频道策略）。`false`（默认）：join/leave 只在本节点投递（PR-04a）。`true`（PR-04b）：join/leave 经 broker `PublishTransient` 到**精确业务频道**（`ml.type=presence` 帧），各节点改写回一等 `presence_event`——本节点与对端统一经 broker，**禁止**与本地投递叠用（内存 broker 同步进 handler、Redis 本进程 offset 0 不去重，叠用 = 本节点每人两条）。**只有全部节点升级到 PR-04a+ 后才能置 true**：混部旧节点会把 `ml.type=presence` 帧当作聊天 `publication` 投递给订阅者 |
@@ -161,8 +162,8 @@ server:
 
 - **最严格者优先**：任一匹配规则设置 `deny_all` 即拒绝，与规则顺序无关——宽松规则无法绕过后续的 `deny_all`；
 - **最后写入者生效**：否则由最后一条匹配且带 allow 列表的规则决定（按配置顺序遍历）；只匹配到不带 allow 列表的规则时仅贡献其 `deny_all` 标志；
-- **默认放行**：没有任何规则匹配该频道时允许访问；
-- `"*"` 在 `allow_subscribe` / `allow_publish` 中表示任何已认证用户。
+- **默认放行**：没有任何规则匹配该频道时**订阅与发布**允许访问；**Survey 相反**——`CanSurvey` 默认拒绝，只有带 `allow_survey` 名单的规则才打开；
+- `"*"` 在 `allow_subscribe` / `allow_publish` / `allow_survey` 中表示任何已认证用户。
 
 未配置任何 ACL 规则且无代理时，订阅与发布默认全部放行（内置引擎仅在 `rules` 非空时构建，`node.go:94-105`）。被拒绝的订阅/发布向客户端返回 `ACL_DENIED` 错误信封。
 
@@ -210,11 +211,11 @@ server:
 | `channels.policies[].history_ttl` | string | 空 = broker 全局 | 历史保留时长（Redis：每次发布后 `EXPIRE` 刷新）。**memory broker 无 TTL，配置了打 Warn 并忽略** |
 | `channels.policies[].presence` | bool | `true` | presence 开关。PR-04a 起由 `shouldTrackPresence` 读取：`false` 的频道不存 presence、不发 join/leave、无快照，`PresenceQuery` 返回 `POLICY_DENIED` |
 | `channels.policies[].recover` | bool | `true` | 恢复开关。PR-03 起由 `recoverSubscription` 读取：`false` 时恢复被跳过（客户端要了 recover 则返回 `RECOVER_SKIPPED`） |
-| `channels.policies[].survey` | bool | `false` | 客户端 survey 开关（KD-6 默认关）。**本版本只进入策略对象，尚未在 survey 路径读取**（PR-05/PR-07 生效） |
+| `channels.policies[].survey` | bool | `false` | 客户端 survey 开关（KD-6 默认关）。**PR-07 起由 `handleSurvey` 读取**：`false` 时客户端 `SurveyRequest` 返回 `SURVEY_DISABLED` 且零下发；`true` 时还须 ACL `allow_survey` 与频道覆盖（`sessionCoversChannel`）全部通过才能发起 |
 | `channels.policies[].transient_only` | bool | `false` | 强制瞬时：发布只实时投递、绝不写历史。**隐含 History=false、Recover=false**（即使漏写）。对客户端：不带 `transient` 标志的发布也改走 `PublishTransient`、ack offset=0、不报错；对 Admin：`add_history=true` 被**拒绝**（计失败、不发布），`add_history=false` 仍可瞬时发布 |
 | `channels.policies[].recover_limit` | int | 0 = `MaxRecoveredPublications` | 恢复条数上限。PR-03 起由 `recoverSubscription` 读取：命中该上限（或请求级配额耗尽）时恢复结果标记 `truncated=true` |
-| `channels.policies[].max_survey_subscribers` | int | 256 | survey 订阅者上限。**本版本只进入策略对象** |
-| `channels.policies[].max_survey_timeout` | string | `5s` | survey 超时上限。**本版本只进入策略对象** |
+| `channels.policies[].max_survey_subscribers` | int | 256 | survey 订阅者上限。**PR-07 起在客户端 Survey 路径生效**：发起方本节点订阅者数（快路径，含通配命中）或集群预检总数超过该值 → `SURVEY_TOO_MANY_SUBSCRIBERS`、**零条** outbound `SurveyRequest`。`0` = 不限制。**Admin `Node.Survey` 不受此门限制** |
+| `channels.policies[].max_survey_timeout` | string | `5s` | 客户端 Survey 超时上限。**PR-07 起生效**：请求 `timeout_ms` 被钳制在 `[100ms, min(本值||5s, 10s)]`；`timeout_ms<=0` 用本值（默认 5s） |
 | `channels.policies[].legacy_presence_channel` | bool | `false` | PR-04a 起生效：为 `true` 时 join/leave 额外以旧 JSON 瞬时发布到精确频道的 `ch/__presence` 伴生频道（通配订阅从不写伴生）。默认不写伴生 |
 | `channels.policies[].presence_snapshot_limit` | int | 256 | PR-04a 起生效：`Connected.presence` / `SubscribeAck.presence` / `PresenceQuery` 快照的 clients 条数上限；`occupancy` 仍是全量计数，超出置 `truncated=true`。`0` = 全局默认 `MaxPresenceSnapshotClients`（256） |
 

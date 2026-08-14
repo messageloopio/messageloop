@@ -56,8 +56,8 @@ Envelope types:
 | `rpc_request` | RpcRequest | Send an RPC request to a backend |
 | `ping` | Ping | Keepalive ping |
 | `pong` | Pong | Keepalive response to a server ping |
-| `survey_request` | SurveyRequest | Initiate a survey |
-| `survey_reply` | SurveyReply | Reply to a survey |
+| `survey_request` | SurveyRequest | Initiate a survey on a channel (client-initiated, PR-07) |
+| `survey_reply` | SurveyReply | Reply to a survey the session was asked |
 | `sub_refresh` | SubRefresh | Refresh subscription tokens |
 
 ### OutboundMessage (Server → Client)
@@ -74,8 +74,9 @@ Envelope types:
 | `pong` | Pong | Keepalive response |
 | `ping` | Ping | Server-initiated keepalive ping (when `server.heartbeat.ping_interval` is enabled) |
 | `error` | Error | Error notification |
-| `survey_request` | SurveyRequest | Incoming survey from another client |
+| `survey_request` | SurveyRequest | Survey forwarded to a channel subscriber (server-generated `request_id`; the subscriber replies with `survey_reply`) |
 | `survey_reply` | SurveyReply | Survey response |
+| `survey_result` | SurveyResult | Aggregated survey answers (async reply to a client-initiated survey) |
 
 ## Connection Lifecycle
 
@@ -333,6 +334,58 @@ exact numeric values are not.
 
 RPC requests are forwarded to a proxy backend matching the channel and method patterns. The server applies a timeout (default 30s, configurable via `server.rpc_timeout`).
 
+## Client Survey
+
+A client can ask every subscriber of a channel to answer, and collects the
+answers asynchronously. This is a separate, client-initiated flow from the
+admin `Survey` RPC.
+
+```json
+{
+  "id": "7",
+  "survey_request": {
+    "request_id": "my-survey-1",
+    "channel": "game.room.1",
+    "payload": {"text": "ready?"},
+    "timeout_ms": 2000
+  }
+}
+```
+
+Rules (PR-07):
+
+- The channel must be an **exact** channel: an empty channel or a wildcard
+  pattern is rejected with `BAD_REQUEST` (`request_error`). A wildcard
+  **subscription** covers exact channels for survey initiation.
+- The session must cover the channel (exact subscription or a matching
+  wildcard pattern): otherwise `PERMISSION_DENIED` (`acl_error`).
+- Survey is **off by default** (channel policy `survey: false`): the request
+  fails with `SURVEY_DISABLED` (`policy_error`). Enable it per channel
+  prefix via `server.channels` and grant users via ACL `allow_survey`.
+- Each subscriber receives an outbound `survey_request` whose `request_id`
+  is the **server-generated** survey id (not the client's); subscribers
+  answer with an inbound `survey_reply` carrying that id. Answers from
+  sessions that were not asked are dropped.
+- The initiator is not blocked: the server validates synchronously, then a
+  worker collects answers. The initiator's own `survey_reply` is read by its
+  (free) read loop, and the aggregate arrives later as an outbound
+  `survey_result` echoing the client's `request_id` (a missing one is
+  server-generated and echoed back).
+- `timeout_ms` is clamped to `[100ms, min(policy.max_survey_timeout || 5s,
+  10s)]`; `timeout_ms <= 0` uses the policy cap (5s default).
+- One survey per session at a time, rate-limited to 1/s (burst 1): further
+  requests fail with `RATE_LIMITED` (`rate_limit`).
+- When the channel's subscriber count (local fast path, then a cluster-wide
+  count preflight) exceeds `max_survey_subscribers` (default 256), the
+  survey fails with `SURVEY_TOO_MANY_SUBSCRIBERS` (`survey_error`) and
+  **zero** `survey_request` frames are delivered. The admin `Survey` RPC is
+  not subject to this cap.
+- A single answer payload is capped at 4096 bytes; larger answers become a
+  `SURVEY_ANSWER_TOO_LARGE` error with an empty payload. The whole encoded
+  result is capped at 256 KiB; answers beyond the cap are truncated the same
+  way. `user_id` is carried in answer `metadata.entries["user_id"]`.
+- Failures never disconnect the client and never revoke subscriptions.
+
 ## Heartbeat
 
 Heartbeat is **bidirectional** in v1.0:
@@ -385,6 +438,9 @@ Common error codes:
 | `INTERNAL_ERROR` | `server_error` | Internal server error while handling the request |
 | `BAD_REQUEST` | `client_error` | Frame could not be decoded |
 | `DISCONNECT_ERROR` | `transport_error` | Connection being terminated |
+| `SURVEY_DISABLED` | `policy_error` | Client survey refused by channel policy (off by default) |
+| `SURVEY_TOO_MANY_SUBSCRIBERS` | `survey_error` | Client survey refused: subscriber count above the cap |
+| `SURVEY_ANSWER_TOO_LARGE` | `survey_error` | A survey answer (or result) exceeded the size cap and was truncated |
 
 ## Disconnect Codes
 

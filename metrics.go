@@ -36,6 +36,7 @@ type Metrics struct {
 	RecoveryTruncatedTotal          *prometheus.CounterVec
 	HeartbeatIdleDisconnects        prometheus.Counter
 	AdminUserFanout                 *prometheus.HistogramVec
+	SurveyClientTotal               *prometheus.CounterVec
 }
 
 // NewMetrics creates and registers all Prometheus metrics.
@@ -154,6 +155,11 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			// ladder instead of DefBuckets (a duration scale).
 			Buckets: []float64{1, 2, 5, 10, 25, 50, 100, 250, 500, 1000},
 		}, []string{"op"}),
+		SurveyClientTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "messageloop",
+			Name:      "survey_client_total",
+			Help:      "Total number of client-initiated surveys by result (ok or the top-level error code).",
+		}, []string{"result"}),
 	}
 	reg.MustRegister(
 		m.ConnectionsTotal,
@@ -177,6 +183,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.RecoveryTruncatedTotal,
 		m.HeartbeatIdleDisconnects,
 		m.AdminUserFanout,
+		m.SurveyClientTotal,
 	)
 	return m
 }

@@ -21,7 +21,12 @@ type ACLRule struct {
 	// AllowPublish lists user IDs allowed to publish. Use "*" for any authenticated user.
 	AllowPublish []string `yaml:"allow_publish" json:"allow_publish"`
 
-	// DenyAll blocks all subscribe and publish operations on matching channels.
+	// AllowSurvey lists user IDs allowed to initiate client surveys. Use "*"
+	// for any authenticated user. Unset means the rule does not open survey;
+	// CanSurvey defaults to deny, unlike subscribe/publish.
+	AllowSurvey []string `yaml:"allow_survey" json:"allow_survey"`
+
+	// DenyAll blocks subscribe, publish, and client survey on matching channels.
 	DenyAll bool `yaml:"deny_all" json:"deny_all"`
 }
 
@@ -29,8 +34,10 @@ type aclEntry struct {
 	pattern        string
 	allowSubscribe map[string]bool // nil means no rule; empty means deny all
 	allowPublish   map[string]bool
+	allowSurvey    map[string]bool
 	wildcardSub    bool // true if AllowSubscribe contains "*"
 	wildcardPub    bool // true if AllowPublish contains "*"
+	wildcardSurvey bool // true if AllowSurvey contains "*"
 	denyAll        bool
 }
 
@@ -64,6 +71,15 @@ func NewACLEngine(rules []ACLRule) *ACLEngine {
 					e.wildcardPub = true
 				}
 				e.allowPublish[u] = true
+			}
+		}
+		if len(r.AllowSurvey) > 0 {
+			e.allowSurvey = make(map[string]bool, len(r.AllowSurvey))
+			for _, u := range r.AllowSurvey {
+				if u == "*" {
+					e.wildcardSurvey = true
+				}
+				e.allowSurvey[u] = true
 			}
 		}
 		entries = append(entries, e)
@@ -119,6 +135,32 @@ func (e *ACLEngine) CanPublish(channel, userID string) bool {
 			}
 			if entry.allowPublish != nil {
 				allowed = entry.wildcardPub || entry.allowPublish[userID]
+			}
+		}
+	}
+	return allowed
+}
+
+// CanSurvey returns true if userID is allowed to initiate a client survey on
+// the channel. Same structure as CanSubscribe (denyAll short-circuits, the
+// last matching rule with an allow list wins), but the default is deny:
+//   - No matching rule, or a matching rule that only lists allow_subscribe /
+//     allow_publish without allow_survey, never opens survey (allowed=false).
+//   - denyAll on any matching rule denies regardless of rule order.
+//   - The last matching rule that specifies an allow_survey list decides.
+//
+// Admin Node.Survey does NOT go through CanSurvey.
+func (e *ACLEngine) CanSurvey(channel, userID string) bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	allowed := false
+	for _, entry := range e.entries {
+		if matchChannelPattern(entry.pattern, channel) {
+			if entry.denyAll {
+				return false
+			}
+			if entry.allowSurvey != nil {
+				allowed = entry.wildcardSurvey || entry.allowSurvey[userID]
 			}
 		}
 	}

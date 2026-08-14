@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 func validTransport() Transport {
@@ -287,6 +288,21 @@ func TestValidate_ChannelPolicyValid(t *testing.T) {
 		},
 	}
 	assert.NoError(t, cfg.Validate())
+}
+
+// TestACLRule_AllowSurvey verifies the ACLRule.allow_survey field (PR-07)
+// round-trips through YAML.
+func TestACLRule_AllowSurvey(t *testing.T) {
+	raw := []byte("channel_pattern: chat.**\nallow_survey:\n  - \"*\"\n  - alice\n")
+	var rule ACLRule
+	require.NoError(t, yaml.Unmarshal(raw, &rule))
+	require.Equal(t, "chat.**", rule.ChannelPattern)
+	require.Equal(t, []string{"*", "alice"}, rule.AllowSurvey)
+
+	var cfg Config
+	require.NoError(t, yaml.Unmarshal([]byte("server:\n  acl:\n    rules:\n      - channel_pattern: chat.**\n        allow_survey: [\"*\"]\n"), &cfg))
+	require.Len(t, cfg.Server.ACL.Rules, 1)
+	require.Equal(t, []string{"*"}, cfg.Server.ACL.Rules[0].AllowSurvey)
 }
 
 // TestValidate_PresenceClusterEmit verifies server.presence.cluster_emit

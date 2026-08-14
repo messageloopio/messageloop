@@ -413,18 +413,13 @@ func respondToSurvey(t *testing.T, ctx context.Context, client *messageloop.Clie
 		return surveyRequest != nil
 	}, 5*time.Second, 25*time.Millisecond)
 
-	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
-		Id: surveyRequest.RequestId,
-		Envelope: &clientpb.InboundMessage_SurveyRequest{
-			SurveyRequest: surveyRequest,
-		},
-	}))
-	transport.clearMessages()
+	// Reply to the survey using the outbound SurveyRequest.request_id; the
+	// inbound SurveyRequest echo is gone since PR-07.
 	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
 		Id: "reply-" + client.SessionID(),
 		Envelope: &clientpb.InboundMessage_SurveyReply{
 			SurveyReply: &clientpb.SurveyReply{
-				RequestId: client.LastSurveyRequestID(),
+				RequestId: surveyRequest.RequestId,
 				Payload: &sharedpb.Payload{
 					Data: &sharedpb.Payload_Binary{Binary: payload},
 				},

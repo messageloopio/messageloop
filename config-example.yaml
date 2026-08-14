@@ -31,6 +31,10 @@ server:
       - channel_pattern: "chat.public.*"
         allow_subscribe: ["*"]
         allow_publish: ["alice", "bob"]
+        # allow_survey: ["*"]   # PR-07: users allowed to initiate client surveys
+                                # on matching channels. Unset = survey denied
+                                # (CanSurvey defaults to deny), even when the
+                                # channel policy sets survey: true.
       - channel_pattern: "chat.private.*"
         deny_all: true
   # presence:

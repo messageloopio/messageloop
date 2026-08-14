@@ -143,7 +143,7 @@ MessageLoop 的核心设计目标可以归纳为四点：
 | `Unsubscribe` | `handleUnsubscribe` | 移除订阅、presence 清理 + leave 事件、代理 `OnUnsubscribed` 通知 |
 | `Ping` | `handlePing` | 刷新活动时间，回 `Pong`；presence/集群状态刷新被节流（`pingClusterRefreshInterval` 10s，CAS 保证单次） |
 | `SubRefresh` | `handleSubRefresh` | 重新校验订阅 ACL，失败的频道被撤销并发布 leave |
-| `SurveyRequest` | `handleSurvey` | 记录请求 ID，默认回显请求 Payload 作为应答 |
+| `SurveyRequest` | `handleSurvey` | 同步校验后派 worker 调 `Node.Survey`，异步回 `SurveyResult`（不阻塞读循环；默认策略关 + `CanSurvey` deny） |
 | `SurveyReply` | `handleSurveyReply` | 校验请求 ID 后写入对应 Survey（`node.AddSurveyResponse`） |
 
 **限制执行**：

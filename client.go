@@ -33,6 +33,7 @@ func NewClient(ctx context.Context, node *Node, t Transport, marshaler Marshaler
 		lastActivity:       time.Now(),
 		connectedAt:        time.Now(),
 		subscribedChannels: make(map[string]struct{}),
+		surveyLimiter:      rate.NewLimiter(rate.Limit(1), 1),
 	}
 
 	// Apply options
@@ -106,8 +107,11 @@ type Client struct {
 	// Rate limiter for publish operations.
 	publishLimiter *rate.Limiter
 
-	// Survey field - stores the last received survey request ID
-	lastSurveyRequestID string
+	// surveyInFlight guards against a second client survey while the first
+	// worker is still collecting responses (KD-15: one survey per session).
+	surveyInFlight atomic.Bool
+	// surveyLimiter rate-limits client survey initiation: 1/s, burst 1.
+	surveyLimiter *rate.Limiter
 
 	// metricsCharged is set once AddClient has counted this connection in
 	// ConnectionsTotal; close() only decrements the gauge when it is set.
@@ -1443,48 +1447,144 @@ func (c *Client) handleSubRefresh(ctx context.Context, in *clientpb.InboundMessa
 	}))
 }
 
-// handleSurvey handles incoming survey requests from the server.
-// The client should process the survey request and send a response back.
+// handleSurvey starts a client-initiated survey on an exact channel. Every
+// rejection path sends a top-level error envelope (no disconnect, no
+// subscription revocation) and returns; the accepted path never blocks the
+// read loop — the session is marked in-flight and a worker goroutine runs
+// Node.Survey asynchronously, then sends the aggregated SurveyResult
+// (KD-15: the initiator's own SurveyReply arrives as the next inbound frame
+// on the same connection, so waiting here would deadlock the read loop).
 func (c *Client) handleSurvey(ctx context.Context, in *clientpb.InboundMessage, req *clientpb.SurveyRequest) error {
-	c.ResetActivity()
+	ch := req.GetChannel()
+	if ch == "" || isWildcard(ch) {
+		return c.sendSurveyError(ctx, in, "BAD_REQUEST", "request_error", "survey channel must be an exact channel")
+	}
+	if !c.sessionCoversChannel(ch) {
+		return c.sendSurveyError(ctx, in, "PERMISSION_DENIED", "acl_error", "survey denied: channel not covered by session")
+	}
+	pol := c.node.ChannelPolicy(ch)
+	if !pol.Survey {
+		return c.sendSurveyError(ctx, in, "SURVEY_DISABLED", "policy_error", "survey disabled by channel policy")
+	}
+	if c.node.acl != nil && !c.node.acl.CanSurvey(ch, c.user) {
+		return c.sendSurveyError(ctx, in, "PERMISSION_DENIED", "acl_error", "survey denied by ACL rule")
+	}
+	if !c.surveyInFlight.CompareAndSwap(false, true) {
+		return c.sendSurveyError(ctx, in, "RATE_LIMITED", "rate_limit", "a survey is already in flight for this session")
+	}
+	if !c.surveyLimiter.Allow() {
+		c.surveyInFlight.Store(false)
+		return c.sendSurveyError(ctx, in, "RATE_LIMITED", "rate_limit", "survey rate limit exceeded")
+	}
 
-	// Store the request ID for response routing
-	c.mu.Lock()
-	c.lastSurveyRequestID = req.RequestId
-	c.mu.Unlock()
-
-	// Extract payload from the survey request
 	var payload []byte
 	if req.Payload != nil {
 		pub, err := PublicationFromPayload("", nil, req.Payload)
 		if err != nil {
+			c.surveyInFlight.Store(false)
 			return err
 		}
 		payload = pub.Payload
 	}
 
-	// Send survey response - by default, echo back the same payload
-	// In a real implementation, the client application would handle this differently
+	// timeout = clamp(req.TimeoutMs, 100ms, min(policy.MaxSurveyTimeout||5s, 10s)).
+	// TimeoutMs <= 0 uses the policy cap (5s default).
+	timeout := pol.MaxSurveyTimeout
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	if timeout > 10*time.Second {
+		timeout = 10 * time.Second
+	}
+	if req.TimeoutMs > 0 {
+		requested := time.Duration(req.TimeoutMs) * time.Millisecond
+		if requested > timeout {
+			requested = timeout
+		}
+		if requested < 100*time.Millisecond {
+			requested = 100 * time.Millisecond
+		}
+		timeout = requested
+	}
+
+	// Fast path: the local subscriber set already exceeds the cap, so the
+	// survey can never run — reject synchronously with zero outbound
+	// SurveyRequests. The worker re-checks the cluster-wide count.
+	if limit := pol.MaxSurveySubscribers; limit > 0 && len(c.node.hub.GetMatchingSubscribers(ch)) > limit {
+		c.surveyInFlight.Store(false)
+		return c.sendSurveyError(ctx, in, "SURVEY_TOO_MANY_SUBSCRIBERS", "survey_error", "survey refused: too many subscribers")
+	}
+
+	requestID := req.RequestId
+	if requestID == "" {
+		requestID = uuid.NewString()
+	}
+	c.runSurveyWorker(requestID, ch, payload, timeout)
+	return nil
+}
+
+// sendSurveyError sends a top-level error envelope for a rejected client
+// survey, counts it in survey_client_total, and returns nil (no disconnect).
+func (c *Client) sendSurveyError(ctx context.Context, in *clientpb.InboundMessage, code, errType, message string) error {
+	if c.node.metrics != nil {
+		c.node.metrics.SurveyClientTotal.WithLabelValues(code).Inc()
+	}
 	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
-		out.Envelope = &clientpb.OutboundMessage_SurveyReply{
-			SurveyReply: &clientpb.SurveyReply{
-				RequestId: req.RequestId,
-				Payload: &sharedpb.Payload{
-					Data: &sharedpb.Payload_Binary{
-						Binary: payload,
-					},
-				},
-			},
+		out.Envelope = &clientpb.OutboundMessage_Error{
+			Error: &sharedpb.Error{Code: code, Type: errType, Message: message},
 		}
 	}))
 }
 
-// LastSurveyRequestID returns the last received survey request ID.
-// This is useful for testing purposes.
-func (c *Client) LastSurveyRequestID() string {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.lastSurveyRequestID
+// sendSurveyTopError is the worker-side twin of sendSurveyError for
+// asynchronously discovered failures (no inbound message id to echo).
+func (c *Client) sendSurveyTopError(code, errType, message string) {
+	if c.node.metrics != nil {
+		c.node.metrics.SurveyClientTotal.WithLabelValues(code).Inc()
+	}
+	_ = c.Send(c.ctx, MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
+		out.Envelope = &clientpb.OutboundMessage_Error{
+			Error: &sharedpb.Error{Code: code, Type: errType, Message: message},
+		}
+	}))
+}
+
+// runSurveyWorker runs the survey off the read loop: cluster-wide subscriber
+// count preflight, Node.Survey (local + cluster aggregation), answer
+// truncation, then the outbound SurveyResult. The in-flight flag is cleared
+// when the worker finishes.
+func (c *Client) runSurveyWorker(requestID, channel string, payload []byte, timeout time.Duration) {
+	go func() {
+		defer c.surveyInFlight.Store(false)
+		ctx := c.ctx
+
+		total, err := c.node.countMatchingSubscribers(ctx, channel)
+		if err != nil {
+			log.WarnContext(ctx, "survey subscriber count failed", "channel", channel, "error", err)
+			c.sendSurveyTopError("INTERNAL_ERROR", "server_error", "survey subscriber count failed: "+err.Error())
+			return
+		}
+		if limit := c.node.ChannelPolicy(channel).MaxSurveySubscribers; limit > 0 && total > limit {
+			c.sendSurveyTopError("SURVEY_TOO_MANY_SUBSCRIBERS", "survey_error", "survey refused: too many subscribers")
+			return
+		}
+
+		results, err := c.node.Survey(ctx, channel, payload, timeout)
+		if err != nil {
+			log.WarnContext(ctx, "survey execution failed", "channel", channel, "error", err)
+			c.sendSurveyTopError("INTERNAL_ERROR", "server_error", err.Error())
+			return
+		}
+		if c.node.metrics != nil {
+			c.node.metrics.SurveyClientTotal.WithLabelValues("ok").Inc()
+		}
+		result := c.node.buildClientSurveyResult(requestID, channel, results)
+		if err := c.Send(ctx, MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
+			out.Envelope = &clientpb.OutboundMessage_SurveyResult{SurveyResult: result}
+		})); err != nil {
+			log.WarnContext(ctx, "failed to send survey result", "request_id", requestID, "error", err)
+		}
+	}()
 }
 
 // handleSurveyReply handles incoming survey replies from clients.
@@ -1512,9 +1612,9 @@ func (c *Client) handleSurveyReply(ctx context.Context, in *clientpb.InboundMess
 		}
 	}
 
-	// The reply must carry its own request ID: routing through the client's
-	// single lastSurveyRequestID slot would misroute concurrent survey
-	// responses across requests.
+	// The reply must carry its own request ID: it is the server-generated
+	// survey id from the outbound SurveyRequest (or the initiator's id for
+	// its own survey), and AddSurveyResponse routes on it.
 	if reply.RequestId == "" {
 		log.WarnContext(ctx, "survey reply without request id dropped", "session", c.session)
 		return nil

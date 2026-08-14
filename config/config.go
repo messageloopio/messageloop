@@ -92,6 +92,7 @@ type ACLRule struct {
 	ChannelPattern string   `yaml:"channel_pattern" json:"channel_pattern" mapstructure:"channel_pattern"`
 	AllowSubscribe []string `yaml:"allow_subscribe" json:"allow_subscribe" mapstructure:"allow_subscribe"`
 	AllowPublish   []string `yaml:"allow_publish" json:"allow_publish" mapstructure:"allow_publish"`
+	AllowSurvey    []string `yaml:"allow_survey" json:"allow_survey" mapstructure:"allow_survey"`
 	DenyAll        bool     `yaml:"deny_all" json:"deny_all" mapstructure:"deny_all"`
 }
 

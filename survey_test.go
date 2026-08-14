@@ -2,15 +2,17 @@ package messageloop
 
 import (
 	"context"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/messageloopio/messageloop/config"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/types/known/structpb"
 )
 
 func TestSurvey_NewSurvey(t *testing.T) {
@@ -244,7 +246,10 @@ func TestNode_Survey_Basic(t *testing.T) {
 	subscribers := node.Hub().GetSubscribers("survey-channel-basic")
 	t.Logf("Subscribers after survey started: %d", len(subscribers))
 
-	// Process survey requests from transports and send responses
+	// Process survey requests from transports: read the outbound
+	// SurveyRequest.request_id (never feed the inbound request back — the
+	// echo is gone since PR-07).
+	requestIDs := make([]string, numClients)
 	for i := 0; i < numClients; i++ {
 		msgCount := transports[i].getMessageCount()
 		if msgCount > 0 {
@@ -255,43 +260,22 @@ func TestNode_Survey_Basic(t *testing.T) {
 				var m JSONMarshaler
 				if err := m.Unmarshal(data, &msg); err == nil {
 					if sr := msg.GetSurveyRequest(); sr != nil {
-						// Simulate client processing the survey request
-						inboundMsg := &clientpb.InboundMessage{
-							Id: sr.RequestId,
-							Envelope: &clientpb.InboundMessage_SurveyRequest{
-								SurveyRequest: sr,
-							},
-						}
-						_ = clients[i].HandleMessage(ctx, inboundMsg)
+						requestIDs[i] = sr.RequestId
 					}
 				}
 			}
 		}
 	}
 
-	// Give handleSurvey time to process
-	time.Sleep(100 * time.Millisecond)
-
-	// Clear transport messages from survey responses
-	for i := 0; i < numClients; i++ {
-		transports[i].messages = nil
-	}
-
 	// Send survey responses back
 	for i := 0; i < numClients; i++ {
-		requestID := clients[i].LastSurveyRequestID()
-		respData, _ := structpb.NewStruct(map[string]interface{}{
-			"message": "response from client " + string(rune('0'+i)),
-		})
 		responseMsg := &clientpb.InboundMessage{
 			Id: "msg-survey-resp-" + string(rune('0'+i)),
 			Envelope: &clientpb.InboundMessage_SurveyReply{
 				SurveyReply: &clientpb.SurveyReply{
-					RequestId: requestID,
+					RequestId: requestIDs[i],
 					Payload: &sharedpb.Payload{
-						Data: &sharedpb.Payload_Json{
-							Json: respData,
-						},
+						Data: &sharedpb.Payload_Binary{Binary: []byte("response from client " + string(rune('0'+i)))},
 					},
 				},
 			},
@@ -387,6 +371,7 @@ func TestNode_Survey_AllClientsRespond(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	// Debug: Check message counts
+	requestIDs := make([]string, numClients)
 	for i := 0; i < numClients; i++ {
 		msgCount := transports[i].getMessageCount()
 		t.Logf("Client %d: %d messages received", i, msgCount)
@@ -401,46 +386,24 @@ func TestNode_Survey_AllClientsRespond(t *testing.T) {
 				if err := m.Unmarshal(data, &msg); err == nil {
 					if sr := msg.GetSurveyRequest(); sr != nil {
 						t.Logf("Client %d: parsed request ID: %s", i, sr.RequestId)
-						// Now simulate the client receiving and processing the survey request
-						// This calls handleSurvey which stores the request ID
-						inboundMsg := &clientpb.InboundMessage{
-							Id: sr.RequestId,
-							Envelope: &clientpb.InboundMessage_SurveyRequest{
-								SurveyRequest: sr,
-							},
-						}
-						_ = clients[i].HandleMessage(ctx, inboundMsg)
+						requestIDs[i] = sr.RequestId
 					}
 				}
 			}
 		}
 	}
 
-	// Give handleSurvey time to process and send responses
-	time.Sleep(100 * time.Millisecond)
-
-	// Clear transport messages from survey responses (they were sent by clients)
-	for i := 0; i < numClients; i++ {
-		transports[i].messages = nil
-	}
-
 	// Now send the survey responses back to the server
 	for i := 0; i < numClients; i++ {
-		requestID := clients[i].LastSurveyRequestID()
-		t.Logf("Client %d: sending response with request ID: %s", i, requestID)
+		t.Logf("Client %d: sending response with request ID: %s", i, requestIDs[i])
 
-		respData, _ := structpb.NewStruct(map[string]interface{}{
-			"message": "response from client " + string(rune('0'+i)),
-		})
 		responseMsg := &clientpb.InboundMessage{
 			Id: "msg-survey-resp-" + string(rune('0'+i)),
 			Envelope: &clientpb.InboundMessage_SurveyReply{
 				SurveyReply: &clientpb.SurveyReply{
-					RequestId: requestID,
+					RequestId: requestIDs[i],
 					Payload: &sharedpb.Payload{
-						Data: &sharedpb.Payload_Json{
-							Json: respData,
-						},
+						Data: &sharedpb.Payload_Binary{Binary: []byte("response from client " + string(rune('0'+i)))},
 					},
 				},
 			},
@@ -575,7 +538,8 @@ func TestNode_Survey_ConcurrentClients(t *testing.T) {
 	// Give survey requests time to be sent
 	time.Sleep(500 * time.Millisecond)
 
-	// Process survey requests and send responses
+	// Read the outbound SurveyRequest ids, then respond to each survey.
+	requestIDs := make([]string, numClients)
 	for i := 0; i < numClients; i++ {
 		if transports[i].getMessageCount() > 0 {
 			// Parse the received message
@@ -585,43 +549,22 @@ func TestNode_Survey_ConcurrentClients(t *testing.T) {
 				var m JSONMarshaler
 				if err := m.Unmarshal(data, &msg); err == nil {
 					if sr := msg.GetSurveyRequest(); sr != nil {
-						// Simulate client processing
-						inboundMsg := &clientpb.InboundMessage{
-							Id: sr.RequestId,
-							Envelope: &clientpb.InboundMessage_SurveyRequest{
-								SurveyRequest: sr,
-							},
-						}
-						_ = clients[i].HandleMessage(ctx, inboundMsg)
+						requestIDs[i] = sr.RequestId
 					}
 				}
 			}
 		}
 	}
 
-	// Give handleSurvey time to process
-	time.Sleep(100 * time.Millisecond)
-
-	// Clear transport messages
-	for i := 0; i < numClients; i++ {
-		transports[i].messages = nil
-	}
-
 	// Send responses
 	for i := 0; i < numClients; i++ {
-		requestID := clients[i].LastSurveyRequestID()
-		respData, _ := structpb.NewStruct(map[string]interface{}{
-			"message": "response from client " + string(rune('0'+i)),
-		})
 		responseMsg := &clientpb.InboundMessage{
 			Id: "msg-survey-resp-" + string(rune('0'+i)),
 			Envelope: &clientpb.InboundMessage_SurveyReply{
 				SurveyReply: &clientpb.SurveyReply{
-					RequestId: requestID,
+					RequestId: requestIDs[i],
 					Payload: &sharedpb.Payload{
-						Data: &sharedpb.Payload_Json{
-							Json: respData,
-						},
+						Data: &sharedpb.Payload_Binary{Binary: []byte("response from client " + string(rune('0'+i)))},
 					},
 				},
 			},
@@ -922,4 +865,506 @@ func TestNode_RegisterSurveyRegistryLimit(t *testing.T) {
 	require.True(t, node.registerSurvey(ctx, NewSurvey("reg-2", "ch", nil, time.Second)))
 	require.False(t, node.registerSurvey(ctx, NewSurvey("reg-3", "ch", nil, time.Second)),
 		"registration beyond the cap must be rejected")
+}
+
+// --- PR-07: client-initiated Survey ---
+
+// decodeOutboundMessages decodes every outbound message captured by the
+// transport (JSON marshaler, same as the tests above).
+func decodeOutboundMessages(t *testing.T, transport *capturingTransport) []*clientpb.OutboundMessage {
+	t.Helper()
+	transport.mu.Lock()
+	raw := append([][]byte(nil), transport.messages...)
+	transport.mu.Unlock()
+	var messages []*clientpb.OutboundMessage
+	for _, data := range raw {
+		var msg clientpb.OutboundMessage
+		if err := (JSONMarshaler{}).Unmarshal(data, &msg); err == nil {
+			messages = append(messages, &msg)
+		}
+	}
+	return messages
+}
+
+func waitForOutbound(t *testing.T, transport *capturingTransport, match func(*clientpb.OutboundMessage) bool) *clientpb.OutboundMessage {
+	t.Helper()
+	var found *clientpb.OutboundMessage
+	require.Eventually(t, func() bool {
+		for _, msg := range decodeOutboundMessages(t, transport) {
+			if match(msg) {
+				found = msg
+				return true
+			}
+		}
+		return false
+	}, 5*time.Second, 10*time.Millisecond)
+	return found
+}
+
+func countOutbound(t *testing.T, transport *capturingTransport, match func(*clientpb.OutboundMessage) bool) int {
+	count := 0
+	for _, msg := range decodeOutboundMessages(t, transport) {
+		if match(msg) {
+			count++
+		}
+	}
+	return count
+}
+
+func waitForSurveyRequest(t *testing.T, transport *capturingTransport) *clientpb.SurveyRequest {
+	t.Helper()
+	msg := waitForOutbound(t, transport, func(msg *clientpb.OutboundMessage) bool {
+		return msg.GetSurveyRequest() != nil
+	})
+	return msg.GetSurveyRequest()
+}
+
+func waitForSurveyResult(t *testing.T, transport *capturingTransport) *clientpb.SurveyResult {
+	t.Helper()
+	msg := waitForOutbound(t, transport, func(msg *clientpb.OutboundMessage) bool {
+		return msg.GetSurveyResult() != nil
+	})
+	return msg.GetSurveyResult()
+}
+
+func waitForError(t *testing.T, transport *capturingTransport, code string) *sharedpb.Error {
+	t.Helper()
+	msg := waitForOutbound(t, transport, func(msg *clientpb.OutboundMessage) bool {
+		return msg.GetError() != nil && msg.GetError().GetCode() == code
+	})
+	return msg.GetError()
+}
+
+func surveyRequestMessage(channel string, timeoutMs int32) *clientpb.InboundMessage {
+	return &clientpb.InboundMessage{
+		Id: "survey-" + channel,
+		Envelope: &clientpb.InboundMessage_SurveyRequest{
+			SurveyRequest: &clientpb.SurveyRequest{
+				Channel:   channel,
+				Payload:   &sharedpb.Payload{Data: &sharedpb.Payload_Binary{Binary: []byte("ping")}},
+				TimeoutMs: timeoutMs,
+			},
+		},
+	}
+}
+
+func replyWith(t *testing.T, ctx context.Context, client *Client, requestID string, payload []byte) {
+	t.Helper()
+	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
+		Id: "reply-" + requestID,
+		Envelope: &clientpb.InboundMessage_SurveyReply{
+			SurveyReply: &clientpb.SurveyReply{
+				RequestId: requestID,
+				Payload:   &sharedpb.Payload{Data: &sharedpb.Payload_Binary{Binary: payload}},
+			},
+		},
+	}))
+}
+
+func answerPayload(answer *clientpb.SurveyAnswer) []byte {
+	if answer.GetPayload() == nil {
+		return nil
+	}
+	return answer.GetPayload().GetBinary()
+}
+
+// newSurveyTestClient connects a fresh client and subscribes it to channel,
+// then clears the transport so tests only see survey traffic.
+func newSurveyTestClient(t *testing.T, node *Node, channel string) (*Client, *capturingTransport) {
+	t.Helper()
+	ctx := context.Background()
+	transport := &capturingTransport{}
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
+	require.NoError(t, err)
+	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
+		Id: "connect-" + uuid.NewString(),
+		Envelope: &clientpb.InboundMessage_Connect{
+			Connect: &clientpb.Connect{ClientId: "client-" + uuid.NewString()},
+		},
+	}))
+	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
+		Id: "sub-" + uuid.NewString(),
+		Envelope: &clientpb.InboundMessage_Subscribe{
+			Subscribe: &clientpb.Subscribe{Subscriptions: []*clientpb.Subscription{{Channel: channel}}},
+		},
+	}))
+	transport.resetMessages()
+	return client, transport
+}
+
+// newSurveyClient wires a client with deterministic session/user ids before
+// AddClient (so the hub session map matches) and subscribes it to channel.
+func newSurveyClient(t *testing.T, node *Node, sessionID, userID, channel string) (*Client, *capturingTransport) {
+	t.Helper()
+	ctx := context.Background()
+	transport := &capturingTransport{}
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
+	require.NoError(t, err)
+	client.ForceTestIDs(sessionID, userID, userID)
+	require.NoError(t, node.AddClient(client))
+	require.NoError(t, node.AddSubscription(ctx, channel, NewSubscriber(client, false)))
+	transport.resetMessages()
+	return client, transport
+}
+
+// TestClientSurvey_RoundTrip: policy + ACL on, A/B subscribe an exact
+// channel. A surveys; B (and A) answer according to the outbound
+// SurveyRequest.request_id; A receives the aggregated SurveyResult.
+func TestClientSurvey_RoundTrip(t *testing.T) {
+	node := NewNode(&config.Server{
+		Channels: config.ChannelConfig{Default: config.ChannelPolicySpec{Survey: policyBoolPtr(true)}},
+		ACL: config.ACLConfig{Rules: []config.ACLRule{
+			{ChannelPattern: "survey.**", AllowSurvey: []string{"*"}},
+		}},
+	})
+	require.NoError(t, node.Run(context.Background()))
+	ctx := context.Background()
+
+	// Deterministic session/user ids are set before AddClient so the hub
+	// session map matches and the answer metadata user_id entry (the proto
+	// has no user_id field) is observable.
+	clientA, transportA := newSurveyClient(t, node, "sess-survey-a", "user-survey-a", "survey.room.1")
+	clientB, transportB := newSurveyClient(t, node, "sess-survey-b", "user-survey-b", "survey.room.1")
+
+	requestID := "srv-1"
+	require.NoError(t, clientA.HandleMessage(ctx, &clientpb.InboundMessage{
+		Id: "survey-initiate",
+		Envelope: &clientpb.InboundMessage_SurveyRequest{
+			SurveyRequest: &clientpb.SurveyRequest{
+				RequestId: requestID,
+				Channel:   "survey.room.1",
+				Payload:   &sharedpb.Payload{Data: &sharedpb.Payload_Binary{Binary: []byte("ping")}},
+				TimeoutMs: 300,
+			},
+		},
+	}))
+
+	// Both subscribers receive the outbound SurveyRequest (channel filled,
+	// server-generated request id); they reply to it.
+	reqA := waitForSurveyRequest(t, transportA)
+	reqB := waitForSurveyRequest(t, transportB)
+	require.Equal(t, "survey.room.1", reqA.GetChannel())
+	require.Equal(t, "survey.room.1", reqB.GetChannel())
+	require.Equal(t, reqA.GetRequestId(), reqB.GetRequestId())
+	require.NotEmpty(t, reqA.GetRequestId())
+	replyWith(t, ctx, clientB, reqB.GetRequestId(), []byte("pong"))
+	replyWith(t, ctx, clientA, reqA.GetRequestId(), []byte("self"))
+
+	// A receives the async SurveyResult echoing its own request id.
+	result := waitForSurveyResult(t, transportA)
+	require.Equal(t, requestID, result.GetRequestId())
+	require.Equal(t, "survey.room.1", result.GetChannel())
+	answers := make(map[string]*clientpb.SurveyAnswer, len(result.GetAnswers()))
+	for _, answer := range result.GetAnswers() {
+		answers[answer.GetSessionId()] = answer
+	}
+	require.Contains(t, answers, clientB.SessionID(), "B's answer must be in the result")
+	require.Equal(t, []byte("pong"), answerPayload(answers[clientB.SessionID()]))
+	require.Contains(t, answers, clientA.SessionID(), "the initiator's own answer may be included")
+	require.Equal(t, []byte("self"), answerPayload(answers[clientA.SessionID()]))
+	require.Equal(t, "user-survey-b", answers[clientB.SessionID()].GetMetadata().GetEntries()["user_id"],
+		"user_id must be carried in answer metadata (no proto field)")
+}
+
+// TestClientSurvey_DefaultDisabled: default config (survey=false) rejects
+// with SURVEY_DISABLED and delivers zero SurveyRequests.
+func TestClientSurvey_DefaultDisabled(t *testing.T) {
+	node := NewNode(nil)
+	require.NoError(t, node.Run(context.Background()))
+	ctx := context.Background()
+
+	clientA, transportA := newSurveyTestClient(t, node, "plain.ch")
+	require.NoError(t, clientA.HandleMessage(ctx, surveyRequestMessage("plain.ch", 300)))
+
+	require.NotNil(t, waitForError(t, transportA, "SURVEY_DISABLED"))
+	time.Sleep(200 * time.Millisecond)
+	require.Zero(t, countOutbound(t, transportA, func(msg *clientpb.OutboundMessage) bool {
+		return msg.GetSurveyRequest() != nil
+	}), "no SurveyRequest may be delivered when survey is disabled")
+}
+
+// TestClientSurvey_NotCovered: a session may only survey channels it
+// subscribes to (exact or wildcard); otherwise PERMISSION_DENIED with zero
+// delivery.
+func TestClientSurvey_NotCovered(t *testing.T) {
+	node := NewNode(&config.Server{
+		Channels: config.ChannelConfig{Default: config.ChannelPolicySpec{Survey: policyBoolPtr(true)}},
+		ACL: config.ACLConfig{Rules: []config.ACLRule{
+			{ChannelPattern: "**", AllowSurvey: []string{"*"}},
+		}},
+	})
+	require.NoError(t, node.Run(context.Background()))
+	ctx := context.Background()
+
+	clientA, transportA := newSurveyTestClient(t, node, "a.ch")
+	require.NoError(t, clientA.HandleMessage(ctx, surveyRequestMessage("b.ch", 300)))
+
+	require.NotNil(t, waitForError(t, transportA, "PERMISSION_DENIED"))
+	time.Sleep(200 * time.Millisecond)
+	require.Zero(t, countOutbound(t, transportA, func(msg *clientpb.OutboundMessage) bool {
+		return msg.GetSurveyRequest() != nil
+	}), "an uncovered channel must produce zero outbound SurveyRequests")
+}
+
+// TestClientSurvey_TooManyLocal: a single node with > MaxSurveySubscribers
+// subscribers rejects synchronously with SURVEY_TOO_MANY_SUBSCRIBERS and
+// zero outbound SurveyRequests.
+func TestClientSurvey_TooManyLocal(t *testing.T) {
+	node := NewNode(&config.Server{
+		Channels: config.ChannelConfig{Default: config.ChannelPolicySpec{Survey: policyBoolPtr(true)}},
+	})
+	require.NoError(t, node.Run(context.Background()))
+	ctx := context.Background()
+
+	clientA, transportA := newSurveyTestClient(t, node, "big.ch")
+	transports := []*capturingTransport{transportA}
+	for i := 0; i < 256; i++ {
+		transport := &capturingTransport{}
+		client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
+		require.NoError(t, err)
+		require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
+			Id: "connect-" + strconv.Itoa(i),
+			Envelope: &clientpb.InboundMessage_Connect{
+				Connect: &clientpb.Connect{ClientId: "c-" + strconv.Itoa(i)},
+			},
+		}))
+		require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
+			Id: "sub-" + strconv.Itoa(i),
+			Envelope: &clientpb.InboundMessage_Subscribe{
+				Subscribe: &clientpb.Subscribe{
+					Subscriptions: []*clientpb.Subscription{{Channel: "big.ch", Ephemeral: true}},
+				},
+			},
+		}))
+		transports = append(transports, transport)
+	}
+	require.Equal(t, 257, node.Hub().NumSubscribers("big.ch"))
+
+	require.NoError(t, clientA.HandleMessage(ctx, surveyRequestMessage("big.ch", 300)))
+	require.NotNil(t, waitForError(t, transportA, "SURVEY_TOO_MANY_SUBSCRIBERS"))
+	time.Sleep(200 * time.Millisecond)
+	for i, transport := range transports {
+		require.Zero(t, countOutbound(t, transport, func(msg *clientpb.OutboundMessage) bool {
+			return msg.GetSurveyRequest() != nil
+		}), "no outbound SurveyRequest expected (subscriber %d)", i)
+	}
+}
+
+// recordingSurveyCommandBus wraps the shared fake bus so broadcasts (which
+// the fake does not record) are observable for the count_only preflight.
+type recordingSurveyCommandBus struct {
+	*fakeClusterCommandBus
+	broadcasts []*ClusterCommand
+}
+
+func (r *recordingSurveyCommandBus) BroadcastCommand(ctx context.Context, cmd *ClusterCommand) ([]*ClusterCommandResult, error) {
+	r.broadcasts = append(r.broadcasts, cmd)
+	return r.fakeClusterCommandBus.broadcastResults, r.fakeClusterCommandBus.broadcastErr
+}
+
+// TestClientSurvey_CountOnlyCluster: with a cluster, the client survey
+// preflight broadcasts a count_only ClusterCommandSurvey (exclude_self) and
+// never runs localSurvey; a remote count over the cap rejects with zero
+// outbound SurveyRequests.
+func TestClientSurvey_CountOnlyCluster(t *testing.T) {
+	bus := &recordingSurveyCommandBus{
+		fakeClusterCommandBus: &fakeClusterCommandBus{broadcastResults: []*ClusterCommandResult{
+			{
+				NodeID:        "node-b",
+				IncarnationID: "inc-b",
+				Status:        ClusterCommandStatusSucceeded,
+				Metadata:      map[string]string{"count": "300"},
+			},
+		}},
+	}
+
+	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-a", Backend: "memory"}, ClusterDependencies{
+		CommandBus: bus,
+		QueryStore: fakeQueryStore{},
+	})
+	require.NoError(t, err)
+
+	node := NewNode(&config.Server{
+		Channels: config.ChannelConfig{Default: config.ChannelPolicySpec{Survey: policyBoolPtr(true)}},
+	})
+	node.SetCluster(runtime)
+	ctx := context.Background()
+
+	transport := &capturingTransport{}
+	clientA, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
+	require.NoError(t, err)
+	clientA.ForceTestIDs("sess-survey-a", "user-survey-a", "client-survey-a")
+	require.NoError(t, node.AddClient(clientA))
+	require.NoError(t, node.AddSubscription(ctx, "count.ch", NewSubscriber(clientA, false)))
+	transport.resetMessages()
+
+	require.NoError(t, clientA.HandleMessage(ctx, surveyRequestMessage("count.ch", 300)))
+	require.NotNil(t, waitForError(t, transport, "SURVEY_TOO_MANY_SUBSCRIBERS"))
+
+	require.Len(t, bus.broadcasts, 1, "exactly one preflight broadcast expected")
+	cmd := bus.broadcasts[0]
+	require.Equal(t, ClusterCommandSurvey, cmd.Type)
+	require.Equal(t, "count.ch", cmd.Channel)
+	require.Equal(t, "true", cmd.Metadata["count_only"])
+	require.Equal(t, "true", cmd.Metadata["exclude_self"])
+
+	node.surveyMu.RLock()
+	require.Empty(t, node.surveys, "count_only must not register a survey (no localSurvey)")
+	node.surveyMu.RUnlock()
+	time.Sleep(200 * time.Millisecond)
+	require.Zero(t, countOutbound(t, transport, func(msg *clientpb.OutboundMessage) bool {
+		return msg.GetSurveyRequest() != nil
+	}), "count_only path must not send any SurveyRequest")
+}
+
+// TestClientSurvey_WildcardCoverExact: a wildcard subscription covers exact
+// channels for survey initiation; surveying a wildcard pattern is a
+// BAD_REQUEST.
+func TestClientSurvey_WildcardCoverExact(t *testing.T) {
+	node := NewNode(&config.Server{
+		Channels: config.ChannelConfig{Default: config.ChannelPolicySpec{Survey: policyBoolPtr(true)}},
+	})
+	require.NoError(t, node.Run(context.Background()))
+	ctx := context.Background()
+
+	transport := &capturingTransport{}
+	clientA, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
+	require.NoError(t, err)
+	require.NoError(t, clientA.HandleMessage(ctx, &clientpb.InboundMessage{
+		Id: "connect-1",
+		Envelope: &clientpb.InboundMessage_Connect{
+			Connect: &clientpb.Connect{ClientId: "wildcard-client"},
+		},
+	}))
+	require.NoError(t, clientA.HandleMessage(ctx, &clientpb.InboundMessage{
+		Id: "sub-wildcard",
+		Envelope: &clientpb.InboundMessage_Subscribe{
+			Subscribe: &clientpb.Subscribe{
+				Subscriptions: []*clientpb.Subscription{{Channel: "game.**"}},
+			},
+		},
+	}))
+	transport.resetMessages()
+
+	// game.** covers game.room.1, so surveying the exact channel is allowed.
+	require.NoError(t, clientA.HandleMessage(ctx, surveyRequestMessage("game.room.1", 300)))
+	req := waitForSurveyRequest(t, transport)
+	require.Equal(t, "game.room.1", req.GetChannel())
+
+	// Surveying a pattern itself is rejected.
+	require.NoError(t, clientA.HandleMessage(ctx, surveyRequestMessage("game.**", 300)))
+	require.NotNil(t, waitForError(t, transport, "BAD_REQUEST"))
+	time.Sleep(200 * time.Millisecond)
+	require.Zero(t, countOutbound(t, transport, func(msg *clientpb.OutboundMessage) bool {
+		return msg.GetSurveyRequest() != nil && msg.GetSurveyRequest().GetChannel() == "game.**"
+	}), "no SurveyRequest may be issued for a wildcard pattern")
+}
+
+// TestClientSurvey_NoDeadlockSelfAnswer: the initiator is also a subscriber.
+// While the worker is collecting, the read loop must still process the
+// initiator's own SurveyReply and a Ping; the SurveyResult arrives
+// asynchronously (KD-15).
+func TestClientSurvey_NoDeadlockSelfAnswer(t *testing.T) {
+	node := NewNode(&config.Server{
+		Channels: config.ChannelConfig{Default: config.ChannelPolicySpec{Survey: policyBoolPtr(true)}},
+	})
+	require.NoError(t, node.Run(context.Background()))
+	ctx := context.Background()
+
+	clientA, transportA := newSurveyTestClient(t, node, "self.ch")
+	require.NoError(t, clientA.HandleMessage(ctx, surveyRequestMessage("self.ch", 500)))
+
+	// The initiator receives its own SurveyRequest.
+	req := waitForSurveyRequest(t, transportA)
+
+	// While the worker is still running (the 500ms wait has not elapsed),
+	// the read loop must stay responsive: reply and ping handled promptly.
+	start := time.Now()
+	replyWith(t, ctx, clientA, req.GetRequestId(), []byte("self"))
+	require.NoError(t, clientA.HandleMessage(ctx, &clientpb.InboundMessage{
+		Id:       "ping-during-survey",
+		Envelope: &clientpb.InboundMessage_Ping{Ping: &clientpb.Ping{}},
+	}))
+	require.Less(t, time.Since(start), time.Second,
+		"the read loop must not block while the survey worker runs")
+	require.NotNil(t, waitForOutbound(t, transportA, func(msg *clientpb.OutboundMessage) bool {
+		return msg.GetPong() != nil
+	}))
+
+	// The SurveyResult arrives asynchronously with the self answer.
+	result := waitForSurveyResult(t, transportA)
+	require.Len(t, result.GetAnswers(), 1)
+	require.Equal(t, clientA.SessionID(), result.GetAnswers()[0].GetSessionId())
+	require.Equal(t, []byte("self"), answerPayload(result.GetAnswers()[0]))
+}
+
+// TestClientSurvey_AnswerTooLarge: an 8KiB answer is truncated to a
+// SURVEY_ANSWER_TOO_LARGE error with no payload.
+func TestClientSurvey_AnswerTooLarge(t *testing.T) {
+	node := NewNode(&config.Server{
+		Channels: config.ChannelConfig{Default: config.ChannelPolicySpec{Survey: policyBoolPtr(true)}},
+	})
+	require.NoError(t, node.Run(context.Background()))
+	ctx := context.Background()
+
+	clientA, transportA := newSurveyTestClient(t, node, "large.ch")
+	clientB, transportB := newSurveyTestClient(t, node, "large.ch")
+
+	require.NoError(t, clientA.HandleMessage(ctx, surveyRequestMessage("large.ch", 300)))
+	reqB := waitForSurveyRequest(t, transportB)
+	replyWith(t, ctx, clientB, reqB.GetRequestId(), make([]byte, 8*1024))
+
+	result := waitForSurveyResult(t, transportA)
+	var bAnswer *clientpb.SurveyAnswer
+	for _, answer := range result.GetAnswers() {
+		if answer.GetSessionId() == clientB.SessionID() {
+			bAnswer = answer
+		}
+	}
+	require.NotNil(t, bAnswer)
+	require.NotNil(t, bAnswer.GetError())
+	require.Equal(t, "SURVEY_ANSWER_TOO_LARGE", bAnswer.GetError().GetCode())
+	require.Nil(t, bAnswer.GetPayload(), "an oversized answer must carry no payload")
+}
+
+// TestClientSurvey_EchoGone: an inbound SurveyRequest never produces a
+// SurveyReply echo anymore.
+func TestClientSurvey_EchoGone(t *testing.T) {
+	node := NewNode(nil)
+	require.NoError(t, node.Run(context.Background()))
+	ctx := context.Background()
+
+	clientA, transportA := newSurveyTestClient(t, node, "echo.ch")
+	require.NoError(t, clientA.HandleMessage(ctx, surveyRequestMessage("echo.ch", 300)))
+
+	require.NotNil(t, waitForError(t, transportA, "SURVEY_DISABLED"))
+	time.Sleep(200 * time.Millisecond)
+	require.Zero(t, countOutbound(t, transportA, func(msg *clientpb.OutboundMessage) bool {
+		return msg.GetSurveyReply() != nil
+	}), "inbound SurveyRequest must no longer echo a SurveyReply")
+}
+
+// TestACL_CanSurveyDefaultDeny: CanSurvey defaults to deny — no rules and
+// rules that only list allow_subscribe never open survey; an explicit
+// allow_survey list opens it; deny_all short-circuits.
+func TestACL_CanSurveyDefaultDeny(t *testing.T) {
+	empty := NewACLEngine(nil)
+	require.True(t, empty.CanSubscribe("any.ch", "user-1"))
+	require.False(t, empty.CanSurvey("any.ch", "user-1"), "no rules must default to deny")
+
+	subOnly := NewACLEngine([]ACLRule{{ChannelPattern: "chat.**", AllowSubscribe: []string{"*"}}})
+	require.True(t, subOnly.CanSubscribe("chat.room", "user-1"))
+	require.False(t, subOnly.CanSurvey("chat.room", "user-1"),
+		"a rule that only lists allow_subscribe must not open survey")
+
+	open := NewACLEngine([]ACLRule{{ChannelPattern: "chat.**", AllowSurvey: []string{"*"}}})
+	require.True(t, open.CanSurvey("chat.room", "user-1"))
+
+	gated := NewACLEngine([]ACLRule{{ChannelPattern: "chat.**", AllowSurvey: []string{"alice"}}})
+	require.True(t, gated.CanSurvey("chat.room", "alice"))
+	require.False(t, gated.CanSurvey("chat.room", "bob"))
+
+	denied := NewACLEngine([]ACLRule{{ChannelPattern: "chat.**", AllowSurvey: []string{"*"}, DenyAll: true}})
+	require.False(t, denied.CanSurvey("chat.room", "user-1"),
+		"deny_all must deny survey even with allow_survey")
 }

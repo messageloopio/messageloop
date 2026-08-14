@@ -16,6 +16,7 @@ import (
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	"github.com/prometheus/client_golang/prometheus"
+	"google.golang.org/protobuf/proto"
 )
 
 type Node struct {
@@ -133,6 +134,7 @@ func NewNode(cfg *config.Server) *Node {
 				ChannelPattern: r.ChannelPattern,
 				AllowSubscribe: r.AllowSubscribe,
 				AllowPublish:   r.AllowPublish,
+				AllowSurvey:    r.AllowSurvey,
 				DenyAll:        r.DenyAll,
 			}
 		}
@@ -888,6 +890,125 @@ func decodeClusterSurveyResults(encoded string) ([]clusterSurveyResultRecord, er
 	return records, nil
 }
 
+// countMatchingSubscribers returns the cluster-wide number of subscribers
+// matching ch. Without a cluster this is the local matching subscriber count.
+// With a cluster each node is asked for its local count only (count_only)
+// and never runs localSurvey. The count is a soft gate: the documented
+// TOCTOU between counting and sending is accepted, and a node that fails to
+// answer is skipped (its subscribers are not counted).
+func (n *Node) countMatchingSubscribers(ctx context.Context, ch string) (int, error) {
+	local := len(n.hub.GetMatchingSubscribers(ch))
+	if !n.ClusterEnabled() {
+		return local, nil
+	}
+
+	results, err := n.clusterCommandBus().BroadcastCommand(ctx, &ClusterCommand{
+		Type:    ClusterCommandSurvey,
+		Channel: ch,
+		Metadata: map[string]string{
+			clusterCommandMetaSurveyCountOnly: "true",
+			"exclude_self":                    "true",
+		},
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	total := local
+	for _, result := range results {
+		if result == nil || result.Status != ClusterCommandStatusSucceeded {
+			log.WarnContext(ctx, "survey subscriber count skipped for failed node",
+				"node", resultNodeID(result))
+			continue
+		}
+		if count, err := strconv.Atoi(result.Metadata[clusterCommandMetaSurveyCount]); err == nil && count > 0 {
+			total += count
+		}
+	}
+	return total, nil
+}
+
+func resultNodeID(result *ClusterCommandResult) string {
+	if result == nil {
+		return ""
+	}
+	return result.NodeID
+}
+
+// buildClientSurveyResult assembles the client-facing SurveyResult from the
+// aggregated server-side results. Each answer carries its session id, the
+// payload (binary variant) and, for locally known sessions, a user_id
+// metadata entry (the proto has no user_id field). A single answer whose
+// payload exceeds MaxSurveyAnswerBytes becomes a SURVEY_ANSWER_TOO_LARGE
+// error with an empty payload; when the whole encoded result exceeds
+// MaxSurveyResultBytes, subsequent answers are stripped of their payload and
+// turned into errors (dropped entirely if even that stays over the cap).
+func (n *Node) buildClientSurveyResult(requestID, channel string, results []*SurveyResult) *clientpb.SurveyResult {
+	out := &clientpb.SurveyResult{
+		RequestId: requestID,
+		Channel:   channel,
+	}
+	for _, result := range results {
+		answer := n.surveyAnswerFor(result)
+		out.Answers = append(out.Answers, answer)
+		if encodedSurveyResultSize(out) > MaxSurveyResultBytes {
+			answer.Payload = nil
+			if answer.Error == nil {
+				answer.Error = surveyTooLargeError("survey result exceeds size limit")
+			}
+			if encodedSurveyResultSize(out) > MaxSurveyResultBytes {
+				out.Answers = out.Answers[:len(out.Answers)-1]
+			}
+		}
+	}
+	return out
+}
+
+func (n *Node) surveyAnswerFor(result *SurveyResult) *clientpb.SurveyAnswer {
+	answer := &clientpb.SurveyAnswer{SessionId: result.SessionID}
+	if result.Error != nil {
+		answer.Error = &sharedpb.Error{
+			Code:    "SURVEY_FAILED",
+			Type:    "survey_error",
+			Message: result.Error.Error(),
+		}
+		return answer
+	}
+	if len(result.Payload) > MaxSurveyAnswerBytes {
+		answer.Error = surveyTooLargeError("answer exceeds size limit")
+		return answer
+	}
+	if len(result.Payload) > 0 {
+		answer.Payload = &sharedpb.Payload{
+			Data: &sharedpb.Payload_Binary{
+				Binary: append([]byte(nil), result.Payload...),
+			},
+		}
+	}
+	if sess := n.hub.LookupSession(result.SessionID); sess != nil && sess.UserID() != "" {
+		answer.Metadata = &sharedpb.Metadata{Entries: map[string]string{"user_id": sess.UserID()}}
+	}
+	return answer
+}
+
+func surveyTooLargeError(message string) *sharedpb.Error {
+	return &sharedpb.Error{
+		Code:    "SURVEY_ANSWER_TOO_LARGE",
+		Type:    "survey_error",
+		Message: message,
+	}
+}
+
+// encodedSurveyResultSize returns the canonical binary encoding size of the
+// outbound SurveyResult, used for the whole-result cap.
+func encodedSurveyResultSize(result *clientpb.SurveyResult) int {
+	encoded, err := proto.Marshal(result)
+	if err != nil {
+		return 1 << 30
+	}
+	return len(encoded)
+}
+
 func (n *Node) sendSurveyRequest(ctx context.Context, session *Client, survey *Survey) {
 	var payload *sharedpb.Payload
 	if len(survey.Payload()) > 0 {
@@ -902,6 +1023,7 @@ func (n *Node) sendSurveyRequest(ctx context.Context, session *Client, survey *S
 		out.Envelope = &clientpb.OutboundMessage_SurveyRequest{
 			SurveyRequest: &clientpb.SurveyRequest{
 				RequestId: survey.ID(),
+				Channel:   survey.Channel(),
 				Payload:   payload,
 			},
 		}

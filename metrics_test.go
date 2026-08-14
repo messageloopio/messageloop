@@ -140,6 +140,29 @@ func TestMetrics_AdminUserFanoutRegistered(t *testing.T) {
 	require.Equal(t, uint64(1), observed["unsubscribe"])
 }
 
+// TestMetrics_SurveyClientTotalRegistered verifies PR-07: the
+// survey_client_total counter vector is registered with the result label.
+func TestMetrics_SurveyClientTotalRegistered(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	metrics := NewMetrics(reg)
+
+	metrics.SurveyClientTotal.WithLabelValues("ok").Inc()
+	metrics.SurveyClientTotal.WithLabelValues("SURVEY_DISABLED").Inc()
+	metrics.SurveyClientTotal.WithLabelValues("SURVEY_TOO_MANY_SUBSCRIBERS").Inc()
+
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.SurveyClientTotal.WithLabelValues("ok")))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.SurveyClientTotal.WithLabelValues("SURVEY_DISABLED")))
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	names := make(map[string]bool, len(families))
+	for _, family := range families {
+		names[family.GetName()] = true
+	}
+	require.True(t, names["messageloop_survey_client_total"],
+		"messageloop_survey_client_total must be registered")
+}
+
 // TestMetrics_HeartbeatIdleDisconnectsRegistered verifies PR-05: the
 // heartbeat_idle_disconnects_total counter is registered and incremented
 // through the metrics object.

@@ -1811,8 +1811,7 @@ func TestClient_SurveyReply_WithoutRequestID_Dropped(t *testing.T) {
 	node.surveys["survey-1"] = survey
 	node.surveyMu.Unlock()
 
-	// A reply without a request ID must be dropped, not routed through the
-	// client's single lastSurveyRequestID slot.
+	// A reply without a request ID must be dropped (no last-request fallback).
 	replyNoID := &clientpb.InboundMessage{
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_SurveyReply{
