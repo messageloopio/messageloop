@@ -355,6 +355,8 @@ npm test
 
 ## Repository Guide
 
+- [ROADMAP.md](ROADMAP.md): product roadmap (v0.2 preview → v1.0 → v1.x) and schedule
+- [docs/design](docs/design/README.md): approved design for v1.0 platform gaps
 - [docs/developer](docs/developer/README.md): developer documentation suite (Chinese) — architecture, configuration reference, admin API, distributed cluster, observability, development workflow, and SDK guides
 - [config-example.yaml](config-example.yaml): fuller Redis and proxy example
 - [docs/deployment.md](docs/deployment.md): production deployment guide, TLS, Docker, multi-node

@@ -12,6 +12,7 @@
 | --- | --- |
 | 新加入的开发者 | [开发指南](06-development.md) → [架构指南](01-architecture.md) → [配置参考](02-configuration.md) |
 | 理解系统设计 | [架构指南](01-architecture.md) → [分布式集群指南](04-cluster.md) → [客户端协议参考](../protocol.md) |
+| 看 v1.0 做什么 | [产品 ROADMAP](../../ROADMAP.md) → [v1.0 功能缺口设计](../design/v1.0-platform-gaps.md) |
 | 部署与运维 | [配置参考](02-configuration.md) → [部署指南](../deployment.md) → [可观测性指南](05-observability.md) → [分布式集群指南](04-cluster.md) |
 | 服务端集成（管理操作） | [管理 API 参考](03-admin-api.md) + [客户端协议参考](../protocol.md) |
 | SDK 用户 | [Go SDK 指南](07-sdk-go.md) 或 [TypeScript SDK 指南](08-sdk-ts.md) → [客户端协议参考](../protocol.md) |
@@ -29,8 +30,10 @@
 | [Go SDK 指南](07-sdk-go.md) | Go 客户端 SDK：安装、快速开始、客户端选项、消息 API、传输、重连与会话恢复、RPC 与代理后端、RPCMux |
 | [TypeScript SDK 指南](08-sdk-ts.md) | TS/JS 客户端 SDK（`@messageloop/sdk`）：安装、快速开始（Node/浏览器）、客户端与选项、消息 API、编解码、重连与恢复 |
 
-## 相关文档（docs/ 根目录，英文）
+## 相关文档（docs/ 根目录）
 
+- [产品 ROADMAP](../../ROADMAP.md)：v0.2 → v1.0 缺口与排期
+- [v1.0 功能缺口设计](../design/v1.0-platform-gaps.md)：协议、服务端、SDK、集群与验收
 - [客户端协议参考](../protocol.md)：传输协商、消息信封（`InboundMessage` / `OutboundMessage`）、连接生命周期、错误码与断连码、频道命名
 - [部署指南](../deployment.md)：单二进制部署、监听器模型、TLS、管理 API 鉴权、Docker、多节点部署
 
