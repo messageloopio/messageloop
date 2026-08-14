@@ -465,12 +465,12 @@ func requireClusterRedis(t *testing.T, db int) config.RedisConfig {
 	return redisCfg
 }
 
-func newClusterRedisTestNode(t *testing.T, parent context.Context, redisCfg config.RedisConfig, nodeID string) *messageloop.Node {
+// newClusterRedisTestNodeWithConfig builds a Redis-backed cluster node with
+// a caller-supplied server config (policy/ACL overrides for client survey).
+func newClusterRedisTestNodeWithConfig(t *testing.T, parent context.Context, redisCfg config.RedisConfig, nodeID string, cfg *config.Server) *messageloop.Node {
 	t.Helper()
 
-	// Cluster test nodes require authentication: session takeover/resume is
-	// only allowed for authenticated connects (see Task 9).
-	node := messageloop.NewNode(&config.Server{RequireAuth: true})
+	node := messageloop.NewNode(cfg)
 	node.SetBroker(redisbroker.New(redisCfg))
 	node.SetPresenceStore(redisbroker.NewPresenceStore(redisCfg))
 
@@ -504,6 +504,14 @@ func newClusterRedisTestNode(t *testing.T, parent context.Context, redisCfg conf
 	})
 	require.NoError(t, node.Run(ctx))
 	return node
+}
+
+func newClusterRedisTestNode(t *testing.T, parent context.Context, redisCfg config.RedisConfig, nodeID string) *messageloop.Node {
+	t.Helper()
+
+	// Cluster test nodes require authentication: session takeover/resume is
+	// only allowed for authenticated connects (see Task 9).
+	return newClusterRedisTestNodeWithConfig(t, parent, redisCfg, nodeID, &config.Server{RequireAuth: true})
 }
 
 // Task 11b: Node.Run must not return before the Redis broker signals ready.
@@ -613,7 +621,7 @@ func TestPresence_ClusterEmitRedisExactlyOne(t *testing.T) {
 			Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: clientID}},
 		}))
 		require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
-			Id:       "subscribe-" + clientID,
+			Id: "subscribe-" + clientID,
 			Envelope: &clientpb.InboundMessage_Subscribe{
 				Subscribe: &clientpb.Subscribe{Subscriptions: []*clientpb.Subscription{{Channel: ch}}},
 			},

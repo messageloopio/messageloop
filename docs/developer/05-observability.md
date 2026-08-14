@@ -61,7 +61,7 @@ curl -s http://127.0.0.1:8080/health
 
 - 指标注册在进程内新建的 `prometheus.NewRegistry()` 上：除 `messageloop.Metrics` 定义的指标外，还注册了 Go runtime 与 process 默认采集器（`collectors.NewGoCollector()`、`collectors.NewProcessCollector(...)`，`cmd/server/main.go:44-47`），因此 `/metrics` 同时暴露 `go_*`、`process_*` 系列指标；
 - `node.SetMetrics(metrics)` 后，`Node` 与 `Hub` 在运行路径中更新指标；集群模式下指标对象同时注入 Redis 命令总线与投影修复器；
-- `messageloop_*` 指标以 `messageloop` 为命名空间；**cluster 启用且配置 `node_id` 时，指标带 `node_id` 标签**（`prometheus.WrapRegistererWith`，`cmd/server/main.go:49-53`）；`messageloop_connections_total` 另带 `transport` 标签（`ws`/`grpc`，见 §3.1）；其余指标无标签。
+- `messageloop_*` 指标以 `messageloop` 为命名空间；**cluster 启用且配置 `node_id` 时，指标带 `node_id` 标签**（`prometheus.WrapRegistererWith`，`cmd/server/main.go:49-53`）；`messageloop_connections_total` 另带 `transport` 标签（`ws`/`grpc`，见 §3.1）。v1.0 起部分指标带自己的语义标签（`recovery_*` 的 `path`/`result`、`admin_user_fanout` 的 `op`、`survey_client_total` 的 `result`、`presence_failures_total` 的 `op`），其余指标无标签。
 
 快速查看示例：
 
@@ -103,6 +103,20 @@ curl -s http://127.0.0.1:8080/metrics | grep '^messageloop_'
 | `messageloop_cluster_command_unknown_final_state_total` | counter | 无 | 集群命令进入 `unknown_final_state` 的次数（同一文件） |
 | `messageloop_cluster_projection_repairs_total` | counter | 无 | 投影修复（projection repair）成功的轮次（`cluster_projection_repair.go`） |
 | `messageloop_cluster_projection_repair_failures_total` | counter | 无 | 投影修复失败的轮次（同一文件） |
+
+### 3.5 v1.0 行为指标
+
+| 指标名 | 类型 | 标签 | 含义 |
+| --- | --- | --- | --- |
+| `messageloop_channel_policy_transient_forced_total` | counter | 无 | 客户端发布因频道策略（`transient_only` / `history=false`）被强制转为瞬时投递的次数（`handlePublish` 路径） |
+| `messageloop_recovery_total` | counter | `path`（`connect`/`subscribe`）、`result`（`ok`/`truncated`/`failed`/`skipped`） | 频道恢复尝试次数，按路径与结果分类（`recover.go` `finishRecovery`） |
+| `messageloop_recovery_publications` | histogram | `path` | 每次频道恢复交付的 publication 条数；桶为计数刻度 `[1..1000]`，不是时长刻度（`recover.go`） |
+| `messageloop_recovery_truncated_total` | counter | `path` | 命中上限（请求级配额或策略 `recover_limit`）被截断的频道恢复次数（`recover.go`） |
+| `messageloop_heartbeat_idle_disconnects_total` | counter | 无 | 心跳以 3511 断开的连接数：idle 超时或服务端 ping 未应答（`heartbeat.go`，`heartbeatDisconnectOnce` 保证只计一次） |
+| `messageloop_admin_user_fanout` | histogram | `op`（`publish`/`disconnect`/`subscribe`/`unsubscribe`） | 按 user 定向的 Admin 操作一次扇出的 session 数；桶为计数刻度 `[1..1000]`（`pkg/grpcstream/api_handler.go`） |
+| `messageloop_survey_client_total` | counter | `result`（`ok` 或顶层错误码，如 `SURVEY_DISABLED`/`PERMISSION_DENIED`/`SURVEY_TOO_MANY_SUBSCRIBERS`/`RATE_LIMITED`） | 客户端发起的 Survey 按结果计数（`client.go` `handleSurvey` 与 worker） |
+| `messageloop_presence_publish_failures_total` | counter | 无 | presence join/leave **伴生频道**发布失败累计（`node.go` `PublishPresenceJoin`/`PublishPresenceLeave`） |
+| `messageloop_presence_failures_total` | counter | `op`（`deliver`/`store`/`rewrite`/`companion`/`emit`） | presence 按操作分类的失败次数：投递、store 读写、`ml.type=presence` 帧改写、伴生发布、`cluster_emit` 发布（`node.go` / `hub.go`） |
 
 ## 4. 日志
 
@@ -167,7 +181,7 @@ curl -s http://127.0.0.1:8080/metrics | grep '^messageloop_'
 
 - 3510 在代码中未定义；
 - 收到 35xx 终态码时，除 3503 外均可在修正根因后重连；重连策略与错误展示的协议细节见 [../protocol.md](../protocol.md) 的 Error Codes 与 Disconnect Codes 章节；
-- 服务端目前**没有**按断连码输出的指标，按码统计断连数需要从客户端侧聚合断连事件（SDK 在收到断开通知时可上报，见[《Go SDK 指南》](07-sdk-go.md)、[《TypeScript SDK 指南》](08-sdk-ts.md)）。
+- 服务端只有 3511 一个按码断连指标：`messageloop_heartbeat_idle_disconnects_total`（§3.5，心跳路径计数，idle 超时或服务端 ping 未应答）。其余码的断连统计需要从客户端侧聚合断连事件（SDK 在收到断开通知时可上报，见[《Go SDK 指南》](07-sdk-go.md)、[《TypeScript SDK 指南》](08-sdk-ts.md)）。
 
 ## 6. 监控建议
 
@@ -182,7 +196,7 @@ curl -s http://127.0.0.1:8080/metrics | grep '^messageloop_'
 | 集群节点离线 | 外部探测：每个节点的 `/health`；集群节点数与租约状态见[《分布式集群指南》](04-cluster.md) | 节点 `/health` 连续 N 次 503 即告警；注意非集群模式下 `/health` 不会探测 Redis，`redis` 字段为 `not applicable` |
 | 集群命令健康 | `messageloop_cluster_command_timeouts_total`、`messageloop_cluster_command_unknown_final_state_total` | 两者速率 > 0 即排查：Redis 延迟、命令总线故障、节点租约丢失 |
 | 投影修复失败 | `messageloop_cluster_projection_repair_failures_total` | 速率 > 0 即告警：查询投影与真实状态不一致的风险 |
-| 心跳超时断连 | 无专用指标：用日志（`idle timeout` 相关）或客户端侧 3511 断连码计数 | 大量 3511 说明客户端未按时 Ping，检查客户端保活逻辑 |
+| 心跳超时断连 | `messageloop_heartbeat_idle_disconnects_total`（§3.5） | 速率 > 0 即排查：客户端未按时 Ping，或服务端 ping 未应答（配合 `ping_interval`/`ping_timeout` 配置）；辅以日志与客户端侧 3511 断连码计数 |
 
 ### 6.2 生产注意事项
 

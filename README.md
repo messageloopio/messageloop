@@ -208,7 +208,7 @@ The client protocol supports these core flows:
 ### Presence And History
 
 - Presence is tracked per channel through a pluggable presence store.
-- Presence join and leave events are published to an internal `/<channel>/__presence`-style companion channel.
+- Subscribers receive join/leave as first-class `presence_event` envelopes on the channel they subscribed to (snapshots ride on `connected.presence` / `subscribe_ack.presence` and `PresenceQuery`). A `/<channel>/__presence` companion channel is only written when the channel policy sets `legacy_presence_channel: true`, and cross-node event delivery requires `server.presence.cluster_emit: true`.
 - History can be queried from the broker and is exposed through the server-side gRPC admin API.
 
 ### Server-Side gRPC Admin API

@@ -146,7 +146,7 @@ gantt
 | 07 | 客户端 Survey 真实现 | 01, 02 | [规格](docs/design/tasks/pr-07-survey.md) · [prompt](docs/design/tasks/pr-07-prompt.md) |
 | 08 | Go SDK v1.0 API | 03–07 | [规格](docs/design/tasks/pr-08-sdk-go.md) · [prompt](docs/design/tasks/pr-08-prompt.md) |
 | 09 | TypeScript SDK v1.0 API | 同 08，可并行 | [规格](docs/design/tasks/pr-09-sdk-ts.md) · [prompt](docs/design/tasks/pr-09-prompt.md) |
-| 10 | 文档与集群 e2e | 08（09 可后到） | |
+| 10 | 文档与集群 e2e | 08（09 可后到） | [规格](docs/design/tasks/pr-10-docs.md) · [prompt](docs/design/tasks/pr-10-prompt.md) |
 
 ```mermaid
 flowchart LR

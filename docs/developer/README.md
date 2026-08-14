@@ -28,7 +28,7 @@
 | [可观测性指南](05-observability.md) | 健康检查、Prometheus 指标全集、日志、断连码参考、监控告警建议、故障排查 |
 | [开发指南](06-development.md) | 环境要求、仓库布局、构建/测试/lint、Protobuf 工作流、代码风格、发布流程 |
 | [Go SDK 指南](07-sdk-go.md) | Go 客户端 SDK：安装、快速开始、客户端选项、消息 API、传输、重连与会话恢复、RPC 与代理后端、RPCMux |
-| [TypeScript SDK 指南](08-sdk-ts.md) | TS/JS 客户端 SDK（`@messageloop/sdk`）：安装、快速开始（Node/浏览器）、客户端与选项、消息 API、编解码、重连与恢复 |
+| [TypeScript SDK 指南](08-sdk-ts.md) | TS/JS 客户端 SDK（`@messageloop/sdk`）：安装、快速开始（Node/浏览器）、客户端与选项、消息 API、编解码、重连与恢复、Survey 应答/发起与 Presence 事件 |
 
 ## 相关文档（docs/ 根目录）
 

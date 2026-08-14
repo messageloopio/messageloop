@@ -186,7 +186,14 @@ MessageLoop 的核心设计目标可以归纳为四点：
 
 `PresenceInfo` 含 `ClientID`、`UserID`、`ConnectedAt`。默认实现为 `NewMemoryPresenceStore`（进程内 map）；集群模式用 Redis 实现（pkg/redisbroker/presence_redis.go）：每（频道, 客户端）一个带 TTL 的键（`PresenceTTL` 默认 60s）+ 每频道一个集合索引，`Get` 时清理过期成员。
 
-join/leave 事件经伴生频道分发：`presenceChannel(ch) = ch + "/__presence"`。`PublishPresenceJoin`/`PublishPresenceLeave` 以 JSON 序列化 `PresenceEvent`（`__type: "presence"`、`action: join|leave`、`channel`、`client_id`、`user_id`、`timestamp`），并走 `PublishTransient`——事件只实时投递、永不进入 broker 历史，因此不会混入恢复消息流。
+join/leave 事件默认以**一等 `presence_event` 信封**分发，不走伴生频道。订阅了精确频道 `C` 的客户端默认就能收到 `C` 上的 join/leave 与快照（`Connected.presence` / `SubscribeAck.presence`，或主动发 `PresenceQuery`）；通配订阅者收到其 pattern 覆盖的每个**精确频道**上的事件。
+
+投递入口是 `emitPresence`（node.go），两条路径**互斥**、禁止叠用：
+
+- `server.presence.cluster_emit=false`（默认，PR-04a）：只调 `deliverPresenceEvent` 在本节点扇出——遍历精确频道订阅者（`subShard`，保留 ephemeral 标志）+ matcher 命中的通配订阅者，按会话去重，跳过 ephemeral 订阅与事件主体（加入者/离开者不收自己的事件），且**不计** `MessagesDelivered`。
+- `cluster_emit=true`（PR-04b，需全部节点升级后才能开）：**唯一**投递路径是 `PublishTransient(精确业务频道, ml.type=presence 帧)`，本节点与对端节点统一经 broker → `broadcastPublication` 改写回一等 `presence_event`（`hub.go` 的 presence 分支：跳过 ephemeral、不 `MessagesDelivered++`、写出 `presence_event`，**不当** `publication` 投递）。
+
+事件只实时投递、永不进入 broker 历史，因此不会混入恢复消息流。只有频道策略 `legacy_presence_channel=true` 时，才额外把旧 JSON 格式（`__type: "presence"`、`action`、`channel`、`client_id`、`user_id`、`timestamp`）瞬时发布到 `presenceChannel(ch) = ch + "/__presence"` 伴生频道（`PublishPresenceJoin`/`PublishPresenceLeave`，仅精确频道，通配从不写伴生）。
 
 ### 3.6 Survey（survey.go、node.go）
 
@@ -199,15 +206,21 @@ join/leave 事件经伴生频道分发：`presenceChannel(ch) = ch + "/__presenc
 5. `survey.Wait(ctx)` 收集应答直到超时或 ctx 取消；`timeout <= 0` 时回退到 `defaultSurveyWaitTimeout`（5s）；
 6. 集群模式下经命令总线广播 `ClusterCommandSurvey`，汇总各节点结果并统一排序。
 
+**客户端发起的 Survey（`handleSurvey`，client.go，PR-07）**：客户端可对**精确频道**发起 Survey 并异步收集应答，与 Admin 流程独立：
+
+1. 同步校验，任一失败即回顶层 Error 信封（不断连、不撤订阅）：channel 为空或是通配 → `BAD_REQUEST`；`sessionCoversChannel` 未覆盖（精确订阅或通配命中，ACL 放行不能偷看未加入的频道）→ `PERMISSION_DENIED`；频道策略 `survey=false`（默认关，KD-6）→ `SURVEY_DISABLED`；ACL `CanSurvey` 默认 deny，规则未配 `allow_survey` → `PERMISSION_DENIED`；同会话已有一笔在途 Survey 或超过 1/s 限流 → `RATE_LIMITED`。
+2. 通过校验后**不阻塞读循环**（KD-15）：标记 in-flight，worker goroutine 先做 `countMatchingSubscribers` 集群 `count_only` 预检（本地快路径 + 广播，超过 `max_survey_subscribers` → `SURVEY_TOO_MANY_SUBSCRIBERS`，**零**条 outbound `SurveyRequest`），再调 `Node.Survey`，汇总后异步回 `SurveyResult`（回显发起方 `request_id`）。
+3. **Admin `Node.Survey` 不受 `CanSurvey` 与 `max_survey_subscribers` 门限制约**（无订阅者上限）。
+
 ### 3.7 ACL（acl.go）
 
-`ACLRule` 由三个维度组成：`ChannelPattern`（glob 模式，如 `chat.public.*`）、`AllowSubscribe`/`AllowPublish`（用户 ID 白名单，`"*"` 表示任意已认证用户）、`DenyAll`（整条规则封禁）。频道匹配用 Go 标准库 `path.Match`。
+`ACLRule` 由四个维度组成：`ChannelPattern`（glob 模式，如 `chat.public.*`）、`AllowSubscribe`/`AllowPublish`/`AllowSurvey`（用户 ID 白名单，`"*"` 表示任意已认证用户）、`DenyAll`（整条规则封禁）。频道匹配用分段 glob `matchChannelPattern`（acl.go）：按 `.` 分段后逐段比对，`*` 只匹配**恰好一个非空段**（与订阅 matcher 一致，`chat.*` 不匹配 `chat.rooms.1`），`**` 匹配零或多段（ACL 还允许 `**` 出现在中间，如 `a.**.b`）——刻意取代 Go 标准库 `path.Match`（其 `*` 会跨 `.` 匹配，使 `chat.*` 与 `chat.**` 行为一致，与 CSTrie 单段通配不一致）。
 
-`CanSubscribe`/`CanPublish` 采用"最严格者优先"（worst-match-first）语义：
+`CanSubscribe`/`CanPublish`/`CanSurvey` 采用"最严格者优先"（worst-match-first）语义：
 
 - 任一匹配规则设置 `DenyAll` → 直接拒绝（宽松规则无法绕过）；
 - 否则由最后一条带白名单的匹配规则决定（确定性的 last-write-wins）；
-- 没有规则匹配时默认放行。
+- 没有规则匹配时，订阅与发布**默认放行**；**Survey 相反**——`CanSurvey` 默认拒绝：无匹配规则、或匹配规则只列 `allow_subscribe`/`allow_publish` 而没有 `allow_survey`，都不打开 Survey。Admin `Node.Survey` 不走 `CanSurvey`。
 
 **与代理 ACL 的优先级**：订阅/发布先查代理——`FindProxy(channel, "subscribe")` / `FindProxy(channel, "publish")` 命中则调用 `SubscribeAcl`/`PublishAcl`，以代理结论为准；内置规则仅在无代理匹配时作为回退生效（见 `checkSubscribeACL` 与 `handlePublish`）。
 
@@ -224,7 +237,7 @@ join/leave 事件经伴生频道分发：`presenceChannel(ch) = ch + "/__presenc
 
 ### 3.9 Metrics（metrics.go）
 
-`Metrics` 注册一组 Prometheus 指标：连接/订阅/活跃频道 gauge、发布/投递计数、发布与 RPC 耗时直方图、投递失败计数，以及集群命令去重命中、命令超时、投影修复等集群指标。采集与暴露细节见《可观测性指南》。
+`Metrics` 注册一组 Prometheus 指标：连接/订阅/活跃频道 gauge、发布/投递计数、发布与 RPC 耗时直方图、投递失败计数，以及集群命令去重命中、命令超时、投影修复等集群指标。v1.0 另有策略强制瞬时、恢复、心跳 3511、Admin 按 user 扇出、客户端 Survey、presence 失败等（`channel_policy_transient_forced_total`、`recovery_*`、`heartbeat_idle_disconnects_total`、`admin_user_fanout`、`survey_client_total`、`presence_*_failures_total`）。采集、标签与完整表见[《可观测性指南》](05-observability.md) §3 / §3.5。
 
 ## 4. 传输层
 
@@ -352,9 +365,10 @@ Hub 的 `wcSubs` 记录每个通配符订阅（键 `sessionID:channel`），广�
   │                   │  代理错误→PROXY_ERROR）                  │
 ```
 
-### (d) Survey 请求 / 回复
+### (d) Survey 请求 / 回复（Admin 与客户端两条路径）
 
 ```
+Admin 路径：
 管理方               Node (Survey)          SurveyRegistry        订阅客户端
   │── Survey ───────►│                       │                      │
   │                  │── GetMatchingSubscribers
@@ -365,20 +379,45 @@ Hub 的 `wcSubs` 记录每个通配符订阅（键 `sessionID:channel`），广�
   │                  │   （仅 expected 会话可应答，否则丢弃）        │
   │                  │── survey.Wait(超时) → 排序
   │◄── 汇总结果 ──────┤  （集群模式：广播 ClusterCommandSurvey 再合并）
+
+客户端路径（handleSurvey，PR-07）：
+客户端 A              Node                         订阅客户端 B
+  │── SurveyRequest ─►│                              │
+  │ (channel,payload) │── 同步校验：channel 精确 /    │
+  │   timeout_ms      │   sessionCoversChannel /     │
+  │                   │   策略 survey / CanSurvey /   │
+  │                   │   限流（任一失败 → 顶层 Error）│
+  │                   │── worker：count_only 集群预检  │
+  │                   │── Node.Survey ── Outbound ───►│
+  │                   │   SurveyRequest（服务端 request_id）
+  │                   │◄──── Inbound SurveyReply ─────┤
+  │◄── SurveyResult ──┤（异步，回显发起方 request_id；  │
+  │                   │  读循环不被阻塞，KD-15）        │
 ```
 
-### (e) presence 加入 / 离开事件
+### (e) presence 加入 / 离开事件（一等信封，默认本地投递）
 
 ```
-订阅客户端            Node                     伴生频道 ch/__presence     观察者
-  │── Subscribe ────►│                            │                        │
-  │                  │── presence.Add(ch, info)   │                        │
-  │                  │── PublishPresenceJoin ────►│                        │
-  │                  │   （PublishTransient：      │── 实时投递 ───────────►│
-  │                  │     不进历史/恢复流）        │                        │
-  │── Unsubscribe ──►│                            │                        │
-  │                  │── presence.Remove          │                        │
-  │                  │── PublishPresenceLeave ───►│── 实时投递 ───────────►│
+订阅客户端            Node                             其他订阅者
+  │── Subscribe ────►│                                  │
+  │                  │── presence.Add(ch, info)         │
+  │◄── SubscribeAck ─┤（含 presence 快照，含自己；       │
+  │                  │  无 self-join 事件）              │
+  │                  │── emitPresence(ch, join) ───────►│
+  │                  │    cluster_emit=false（默认）：    │  deliverPresenceEvent：
+  │                  │    deliverPresenceEvent 本节点扇出 │  跳过 ephemeral 与事件主体，
+  │                  │    （精确 + matcher 通配命中，      │  不计 MessagesDelivered
+  │                  │     按会话去重）                   │
+  │── Unsubscribe ──►│                                  │
+  │                  │── presence.Remove                 │
+  │                  │── emitPresence(ch, leave) ───────►│
+  │                  │                                  │
+  │                  │    cluster_emit=true 时唯一路径：   │
+  │                  │    PublishTransient(ch, ml.type=presence 帧) → broker
+  │                  │    → 各节点 broadcastPublication 改写回一等 presence_event
+  │                  │    （不再调 deliverPresenceEvent；通配订阅者经 matcher
+  │                  │     收精确频道事件；事件不进历史/恢复流）
+  │                  │    仅 legacy_presence_channel=true 时额外写 ch/__presence 伴生
 ```
 
 ### (f) 经管理 API 查询历史

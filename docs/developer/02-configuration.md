@@ -148,7 +148,7 @@ server:
 | `server.limits.max_publishes_per_second` | int | 0（不限） | 单客户端发布速率上限（令牌桶，`client.go:516-518, 855`），超限返回 `RATE_LIMITED`。0 = 不限 |
 | `server.limits.max_message_size` | int | 0 = 默认 64 KB | 入站消息大小上限（字节）。0 时取 `DefaultMaxMessageSize`（64 KB，`defaults.go:8`，`node.go:564-569`）；非 0 即用配置值。该限制同时作用于 WebSocket（`conn.SetReadLimit`，`pkg/websocket/handler.go:60-62`）与 gRPC（`grpc.MaxRecvMsgSize`，`cmd/server/runtime.go:46`），两个传输保持一致。注意 0 的语义是"默认值"而非"不限" |
 | `server.acl.rules` | 数组 | 空 | 内置频道访问控制规则，见下 |
-| `server.acl.rules[].channel_pattern` | string | 必填 | 频道匹配模式，使用 Go `path.Match` 语法（`*` 匹配单段、`**` 匹配多段，`acl.go:84`）。无匹配规则默认放行 |
+| `server.acl.rules[].channel_pattern` | string | 必填 | 频道匹配模式，使用分段 glob `matchChannelPattern`（acl.go）：按 `.` 分段后逐段比对，`*` 匹配恰好一个非空段（与订阅 matcher 一致）、`**` 匹配零或多段（ACL 还允许 `**` 出现在中间，如 `a.**.b`）——不是 Go `path.Match`（其 `*` 会跨 `.` 匹配）。无匹配规则默认放行（Survey 例外：`CanSurvey` 默认拒绝） |
 | `server.acl.rules[].allow_subscribe` | string[] | 未设置 | 允许订阅该频道的用户 ID 列表；`"*"` 表示任何已认证用户（`acl.go:49-53`）。未设置该字段的规则不参与订阅判定 |
 | `server.acl.rules[].allow_publish` | string[] | 未设置 | 允许发布的用户 ID 列表；`"*"` 表示任何已认证用户。未设置该字段的规则不参与发布判定 |
 | `server.acl.rules[].allow_survey` | string[] | 未设置 | PR-07 起：允许在该频道发起客户端 Survey 的用户 ID 列表；`"*"` 表示任何已认证用户。**未设置 = 不打开 survey**：`CanSurvey` 默认拒绝（`acl.go`），与 subscribe/publish 的默认放行相反。Admin `Node.Survey` 不走 `CanSurvey` |
