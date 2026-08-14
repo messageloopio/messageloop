@@ -23,6 +23,34 @@ server:
         allow_publish: ["alice", "bob"]
       - channel_pattern: "chat.private.*"
         deny_all: true
+  # Channel prefix policies: first-match (more specific patterns first).
+  # Unset = the compiled default below (history/presence on, survey off).
+  # NOTE: policy matching is first-match, while ACL rules are last-write-wins.
+  # channels:
+  #   default:
+  #     history: true
+  #     history_size: 0            # 0 = broker global (memory 256 / redis stream_max_length)
+  #     history_ttl: ""            # empty = broker global; the memory broker ignores it with a warning
+  #     presence: true
+  #     recover: true
+  #     survey: false              # client survey off by default (KD-6)
+  #     max_survey_subscribers: 256
+  #     max_survey_timeout: "5s"
+  #     legacy_presence_channel: false
+  #     presence_snapshot_limit: 256
+  #   policies:
+  #     - pattern: "game.tick.**"  # game ticks: forced transient, never written to history
+  #       history: false
+  #       presence: false
+  #       recover: false
+  #       survey: false
+  #       transient_only: true
+  #     - pattern: "im.**"         # IM: large per-channel history (use the Redis broker)
+  #       history: true
+  #       history_size: 5000
+  #       presence: true
+  #       recover: true
+  #       survey: false
 
 transport:
   websocket:

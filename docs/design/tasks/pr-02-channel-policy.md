@@ -3,7 +3,7 @@
 | 字段 | 值 |
 | --- | --- |
 | 标题 | `server: add ChannelPolicyEngine and per-prefix history/presence/recover/survey switches` |
-| 状态 | 待实现 |
+| 状态 | **Accepted**（2026-08-14 主 agent 终验通过，尚未 commit） |
 | 依赖 | **无**。可与 PR-01 并行。不要等 proto。 |
 | 设计来源 | [v1.0-platform-gaps.md](../v1.0-platform-gaps.md) 缺口 7、KD-6/KD-8 |
 | 验收人 | 主 agent |

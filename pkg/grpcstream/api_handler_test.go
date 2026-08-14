@@ -97,6 +97,137 @@ func (m *mockTransport) RemoteAddr() string {
 	return "127.0.0.1:12345"
 }
 
+// probeBroker records every Publish call so tests can assert whether the
+// history-writing path was exercised.
+type probeBroker struct {
+	publishCalls   int
+	publishChannel string
+}
+
+func (b *probeBroker) Start(ctx context.Context, handler messageloop.PublicationHandler) error {
+	<-ctx.Done()
+	return nil
+}
+
+func (b *probeBroker) Subscribe(ch string) error   { return nil }
+func (b *probeBroker) Unsubscribe(ch string) error { return nil }
+
+func (b *probeBroker) Publish(ch string, pub *messageloop.Publication) (uint64, error) {
+	b.publishCalls++
+	b.publishChannel = ch
+	return 1, nil
+}
+
+func (b *probeBroker) PublishTransient(ch string, pub *messageloop.Publication) error { return nil }
+
+func (b *probeBroker) History(ch string, sinceOffset uint64, limit int) ([]*messageloop.Publication, error) {
+	return nil, nil
+}
+
+func policyBoolPtr(v bool) *bool { return &v }
+
+// TestAPIServiceHandler_AddHistoryDeniedByPolicy verifies that an admin
+// publish with add_history=true to a policy-disabled-history channel is
+// counted as failed and never reaches a history-writing broker, while other
+// channels in the same request still succeed (partial-success semantics).
+func TestAPIServiceHandler_AddHistoryDeniedByPolicy(t *testing.T) {
+	ctx := context.Background()
+	node := messageloop.NewNode(&config.Server{
+		Channels: config.ChannelConfig{
+			Policies: []config.ChannelPolicyRule{
+				{Pattern: "game.tick.**", ChannelPolicySpec: config.ChannelPolicySpec{TransientOnly: policyBoolPtr(true)}},
+				{Pattern: "no-history.**", ChannelPolicySpec: config.ChannelPolicySpec{History: policyBoolPtr(false)}},
+			},
+		},
+	})
+	probe := &probeBroker{}
+	node.SetBroker(probe)
+	handler := NewAPIServiceHandler(node)
+
+	req := &serverpb.PublishRequest{
+		RequestId: uuid.NewString(),
+		Publications: []*serverpb.Publication{
+			{
+				Id: "admin-tick",
+				Destination: &serverpb.Publication_Destination{
+					Channels: []string{"ok-channel", "game.tick.fps", "no-history.ch"},
+				},
+				Payload: &sharedpb.Payload{Data: &sharedpb.Payload_Text{Text: "x"}},
+				Options: &serverpb.Publication_Options{AddHistory: true},
+			},
+		},
+	}
+
+	resp, err := handler.Publish(ctx, req)
+	require.NoError(t, err, "the denied channels must not fail the whole RPC (partial success)")
+	require.NotNil(t, resp)
+	require.Equal(t, 1, probe.publishCalls, "broker.Publish must be called only for the allowed channel")
+	require.Equal(t, "ok-channel", probe.publishChannel)
+
+	// A single add_history publication on a disabled channel: all attempts
+	// fail, so the RPC itself reports an error (existing all-failed
+	// semantics), and the broker is still never called.
+	probe2 := &probeBroker{}
+	node2 := messageloop.NewNode(&config.Server{
+		Channels: config.ChannelConfig{
+			Policies: []config.ChannelPolicyRule{
+				{Pattern: "game.tick.**", ChannelPolicySpec: config.ChannelPolicySpec{TransientOnly: policyBoolPtr(true)}},
+			},
+		},
+	})
+	node2.SetBroker(probe2)
+	handler2 := NewAPIServiceHandler(node2)
+	_, err = handler2.Publish(ctx, &serverpb.PublishRequest{
+		RequestId: uuid.NewString(),
+		Publications: []*serverpb.Publication{
+			{
+				Id: "admin-tick-only",
+				Destination: &serverpb.Publication_Destination{
+					Channels: []string{"game.tick.fps"},
+				},
+				Payload: &sharedpb.Payload{Data: &sharedpb.Payload_Text{Text: "x"}},
+				Options: &serverpb.Publication_Options{AddHistory: true},
+			},
+		},
+	})
+	require.Error(t, err, "when every attempt fails the RPC must report the failure")
+	require.Equal(t, codes.Internal, status.Code(err))
+	require.Equal(t, 0, probe2.publishCalls, "the history-writing broker must not be called")
+}
+
+// TestAPIServiceHandler_PublishToChannelsWithoutAddHistoryOnDisabledChannel
+// verifies that a transient admin publish (no add_history) on a
+// policy-disabled-history channel is still delivered.
+func TestAPIServiceHandler_PublishToChannelsWithoutAddHistoryOnDisabledChannel(t *testing.T) {
+	ctx := context.Background()
+	node := messageloop.NewNode(&config.Server{
+		Channels: config.ChannelConfig{
+			Policies: []config.ChannelPolicyRule{
+				{Pattern: "game.tick.**", ChannelPolicySpec: config.ChannelPolicySpec{TransientOnly: policyBoolPtr(true)}},
+			},
+		},
+	})
+	probe := &probeBroker{}
+	node.SetBroker(probe)
+	handler := NewAPIServiceHandler(node)
+
+	resp, err := handler.Publish(ctx, &serverpb.PublishRequest{
+		RequestId: uuid.NewString(),
+		Publications: []*serverpb.Publication{
+			{
+				Id: "admin-tick-transient",
+				Destination: &serverpb.Publication_Destination{
+					Channels: []string{"game.tick.fps"},
+				},
+				Payload: &sharedpb.Payload{Data: &sharedpb.Payload_Text{Text: "x"}},
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, 0, probe.publishCalls, "transient admin publish must not call the history-writing broker")
+}
+
 func TestAPIServiceHandler_PublishToSessions(t *testing.T) {
 	ctx := context.Background()
 	node := messageloop.NewNode(nil)

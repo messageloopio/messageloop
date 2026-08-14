@@ -425,6 +425,85 @@ func TestMemoryBroker_History_MultiChannel_Isolated(t *testing.T) {
 	}
 }
 
+// TestMemoryBroker_PerChannelHistorySize verifies PR-02: a ring allocated on
+// the channel's first publish honors the publication's HistorySize, keeping
+// only the last N entries.
+func TestMemoryBroker_PerChannelHistorySize(t *testing.T) {
+	b := NewMemoryBroker(MemoryBrokerOptions{})
+	for i := 0; i < 5; i++ {
+		pub := publishPub([]byte{'a' + byte(i)}, false)
+		pub.HistorySize = 3
+		_, err := b.Publish("cap-ch", pub)
+		require.NoError(t, err)
+	}
+	pubs, err := b.History("cap-ch", 0, 0)
+	require.NoError(t, err)
+	require.Len(t, pubs, 3, "ring with per-channel HistorySize=3 must keep only the last 3 entries")
+	require.Equal(t, "c", string(pubs[0].Payload))
+	require.Equal(t, "e", string(pubs[2].Payload))
+}
+
+// TestMemoryBroker_ExistingRingKeepsCap verifies the design rule: an already
+// allocated ring is never resized by a later HistorySize; it keeps its
+// original capacity until it is reclaimed.
+func TestMemoryBroker_ExistingRingKeepsCap(t *testing.T) {
+	b := NewMemoryBroker(MemoryBrokerOptions{})
+	_, err := b.Publish("keep-cap", publishPub([]byte("first"), false))
+	require.NoError(t, err)
+
+	for i := 0; i < defaultMemoryHistorySize+5; i++ {
+		pub := publishPub([]byte(fmt.Sprintf("m-%d", i)), false)
+		pub.HistorySize = 2
+		_, err := b.Publish("keep-cap", pub)
+		require.NoError(t, err)
+	}
+	pubs, err := b.History("keep-cap", 0, 0)
+	require.NoError(t, err)
+	require.Len(t, pubs, defaultMemoryHistorySize,
+		"an existing ring must keep the broker default cap, not the later HistorySize=2")
+}
+
+// TestMemoryBroker_ReclaimedRingUsesNewSize verifies that after the ring is
+// reclaimed (last subscriber left, ring empty) the next publish allocates
+// with the new size. Rings are retained while subscribers may return for
+// recovery, so the only way to reclaim a live ring is the empty-ring path in
+// Unsubscribe; here we exercise the same white-box state.
+func TestMemoryBroker_ReclaimedRingUsesNewSize(t *testing.T) {
+	b := NewMemoryBroker(MemoryBrokerOptions{})
+	_, err := b.Publish("reclaim-ch", publishPub([]byte("first"), false))
+	require.NoError(t, err)
+	mb := b.(*memoryBroker)
+	mb.mu.Lock()
+	delete(mb.history, "reclaim-ch")
+	mb.mu.Unlock()
+
+	pub := publishPub([]byte("second"), false)
+	pub.HistorySize = 2
+	_, err = b.Publish("reclaim-ch", pub)
+	require.NoError(t, err)
+	_, err = b.Publish("reclaim-ch", publishPub([]byte("third"), false))
+	require.NoError(t, err)
+	_, err = b.Publish("reclaim-ch", publishPub([]byte("fourth"), false))
+	require.NoError(t, err)
+
+	pubs, err := b.History("reclaim-ch", 0, 0)
+	require.NoError(t, err)
+	require.Len(t, pubs, 2, "reclaimed ring must be reallocated with the new HistorySize=2")
+	require.Equal(t, "third", string(pubs[0].Payload))
+	require.Equal(t, "fourth", string(pubs[1].Payload))
+}
+
+// TestMemoryBroker_HistoryTTLIgnored verifies the memory broker accepts a
+// history_ttl override without failing (it warns and ignores it).
+func TestMemoryBroker_HistoryTTLIgnored(t *testing.T) {
+	b := NewMemoryBroker(MemoryBrokerOptions{})
+	pub := publishPub([]byte("msg"), false)
+	pub.HistoryTTL = time.Hour
+	offset, err := b.Publish("ttl-ch", pub)
+	require.NoError(t, err)
+	require.NotZero(t, offset)
+}
+
 // --- node integration ---
 
 func TestMemoryBroker_IntegrationWithNode(t *testing.T) {

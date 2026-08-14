@@ -1,7 +1,9 @@
 package redisbroker
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/messageloopio/messageloop"
 	"github.com/stretchr/testify/assert"
@@ -32,9 +34,59 @@ func TestParseStreamOffsetRoundTrip(t *testing.T) {
 	}
 }
 
+// TestRedisBroker_PerPublishHistorySize verifies the per-publication
+// HistorySize override (channel policy): the XADD MAXLEN uses
+// pub.HistorySize when set, so a small cap keeps only the last N entries.
+// Exact trimming is forced so the assertion is deterministic.
+func TestRedisBroker_PerPublishHistorySize(t *testing.T) {
+	redisCfg := requireCommandBusRedis(t)
+	broker := New(redisCfg).(*redisBroker)
+	t.Cleanup(func() { _ = broker.client.Close() })
+	broker.opts.StreamApproximate = false
+
+	ch := "per-pub-cap"
+	for i := 0; i < 5; i++ {
+		_, err := broker.Publish(ch, &messageloop.Publication{
+			Payload:     []byte{byte('a' + i)},
+			Kind:        messageloop.PayloadKindBinary,
+			HistorySize: 3,
+		})
+		require.NoError(t, err)
+	}
+	pubs, err := broker.History(ch, 0, 0)
+	require.NoError(t, err)
+	require.Len(t, pubs, 3, "per-publication HistorySize=3 must cap the stream to the last 3 entries")
+	require.Equal(t, "c", string(pubs[0].Payload))
+	require.Equal(t, "e", string(pubs[2].Payload))
+}
+
+// TestRedisBroker_PerPublishHistoryTTL verifies the per-publication
+// HistoryTTL override (channel policy): the EXPIRE after XADD uses
+// pub.HistoryTTL when set.
+func TestRedisBroker_PerPublishHistoryTTL(t *testing.T) {
+	redisCfg := requireCommandBusRedis(t)
+	broker := New(redisCfg).(*redisBroker)
+	t.Cleanup(func() { _ = broker.client.Close() })
+
+	ch := "per-pub-ttl"
+	_, err := broker.Publish(ch, &messageloop.Publication{
+		Payload:    []byte("msg"),
+		Kind:       messageloop.PayloadKindBinary,
+		HistoryTTL: 10 * time.Second,
+	})
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	ttl, err := broker.client.TTL(ctx, broker.opts.StreamPrefix+ch).Result()
+	require.NoError(t, err)
+	require.Greater(t, ttl, 5*time.Second, "stream TTL must reflect the per-publication override")
+	require.LessOrEqual(t, ttl, 10*time.Second)
+}
+
 func TestParseStreamOffsetNoCollisionAtTsBoundary(t *testing.T) {
 	const (
-		ts = uint64(1750000000000)
+		ts     = uint64(1750000000000)
 		maxSeq = uint64(0xFFFFF)
 	)
 

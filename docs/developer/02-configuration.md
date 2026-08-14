@@ -39,6 +39,7 @@
    - `broker.redis.consumer_group` 非空 → 直接拒绝：`broker.redis.consumer_group is not implemented; remove it from the configuration`（该字段声明但从未被消费，见 [broker.redis 字段](#brokerredis-字段)）；
    - `broker.redis.stream_approximate` 非 true（含显式 false）→ 直接拒绝：`broker.redis.stream_approximate: false is not supported (only approximate trimming is implemented); remove the field or set it to true`（`config.go:222-231`）。
 6. **cluster 前置条件**：`cluster.enabled: true` 要求 `broker.type: redis`，否则报 `cluster requires broker.type=redis`。
+7. **频道策略**（`server.channels`，见 [server.channels 节](#serverchannels-节)）：`policies[].pattern` 非空且是合法 topic（`**` 只允许在末尾，`a.**.b` 非法，与订阅 matcher 对齐）；`history_size` 设置时 `>= 0`；`history_ttl` / `max_survey_timeout` 非空时必须是合法 Go duration。
 
 `cluster.node_id` 是否必填不在 `Validate()` 中，而在 `ClusterOptions.normalize()`（`cluster.go:27-30`）检查：启用集群时 `node_id` 为空直接报错。
 
@@ -101,6 +102,32 @@ server:
       - channel_pattern: "chat.private.*"
         deny_all: true
   require_auth: false
+  channels:                 # 按频道前缀的策略，见下节；可省略
+    default:
+      history: true
+      history_size: 0       # 0 = broker 全局（memory 256 / redis stream_max_length）
+      history_ttl: ""       # 空 = broker 全局；memory broker 忽略并 Warn
+      presence: true
+      recover: true
+      survey: false         # 客户端 survey 默认关（KD-6）
+      recover_limit: 0      # 0 = MaxRecoveredPublications
+      max_survey_subscribers: 256
+      max_survey_timeout: "5s"
+      legacy_presence_channel: false
+      presence_snapshot_limit: 256
+    policies:
+      - pattern: "game.tick.**"   # 更具体的必须写在前面（first-match）
+        history: false
+        presence: false
+        recover: false
+        survey: false
+        transient_only: true
+      - pattern: "im.**"
+        history: true
+        history_size: 5000
+        presence: true
+        recover: true
+        survey: false
 ```
 
 | 字段 | 类型 | 默认值 | 说明 |
@@ -133,6 +160,88 @@ server:
 - `"*"` 在 `allow_subscribe` / `allow_publish` 中表示任何已认证用户。
 
 未配置任何 ACL 规则且无代理时，订阅与发布默认全部放行（内置引擎仅在 `rules` 非空时构建，`node.go:94-105`）。被拒绝的订阅/发布向客户端返回 `ACL_DENIED` 错误信封。
+
+### server.channels 频道策略
+
+`server.channels` 按**频道前缀**配置 history / presence / recover / survey / transient 等行为开关，让一台集群同时服务不同场景（IM 要历史、游戏 tick 强制瞬时、IoT 可关 presence）。**未配置 `server.channels` 时行为与现网完全一致**：引擎仍存在，解析结果即下表 `default`（history 开、presence 开、survey 关）。
+
+```yaml
+server:
+  channels:
+    default:              # 所有未命中策略频道的兜底（可省略，省略即下表默认）
+      history: true
+      history_size: 0     # 0 = broker 全局（memory 256 / redis stream_max_length）
+      history_ttl: ""     # 空 = broker 全局；memory broker 忽略并 Warn
+      presence: true
+      recover: true
+      survey: false       # 客户端 survey 默认关（KD-6）
+      recover_limit: 0    # 0 = MaxRecoveredPublications
+      max_survey_subscribers: 256
+      max_survey_timeout: "5s"
+      legacy_presence_channel: false
+      presence_snapshot_limit: 256
+    policies:             # 按配置顺序 first-match，更具体的必须写在前面
+      - pattern: "game.tick.**"
+        history: false
+        presence: false
+        recover: false
+        survey: false
+        transient_only: true
+      - pattern: "im.**"
+        history: true
+        history_size: 5000
+        presence: true
+        recover: true
+        survey: false
+```
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `channels.default` | 对象 | 见下表各字段默认 | 未命中任何 `policies` 的频道的兜底策略。各字段均可用 `*`（指针）覆盖 default；`history_ttl` / `max_survey_timeout` 用字符串以区分「未设置」与 `"0s"` |
+| `channels.policies` | 数组 | 空 | 按前缀匹配的规则表，**first-match**（见下）。`pattern` 使用与订阅 matcher / ACL 同一套分段 glob 语法，但只允许末尾 `**`（`a.**.b` 会被 `Validate()` 拒绝） |
+| `channels.policies[].pattern` | string | 必填 | 频道 glob 模式，如 `game.tick.**`、`im.**`。**更具体的 pattern 必须写在前面** |
+| `channels.policies[].history` | bool | `true` | 是否写历史。`false` 与 `transient_only: true` 效果相同：发布改走瞬时（见下） |
+| `channels.policies[].history_size` | int | 0 = broker 全局 | 该前缀频道的历史容量：memory broker 每频道 ring 容量 / Redis 每条 `XADD` 的 `MAXLEN`。**只在该频道 ring 首次创建时生效**：已存在的内存 ring 不会因改大/改小立即重建，直到频道被回收；**改小 `history_size` 对已有频道不立即生效** |
+| `channels.policies[].history_ttl` | string | 空 = broker 全局 | 历史保留时长（Redis：每次发布后 `EXPIRE` 刷新）。**memory broker 无 TTL，配置了打 Warn 并忽略** |
+| `channels.policies[].presence` | bool | `true` | presence 开关。**本版本只进入策略对象，尚未在订阅路径读取**（PR-04 生效） |
+| `channels.policies[].recover` | bool | `true` | 恢复开关。**本版本只进入策略对象，尚未在恢复路径读取**（PR-03 生效） |
+| `channels.policies[].survey` | bool | `false` | 客户端 survey 开关（KD-6 默认关）。**本版本只进入策略对象，尚未在 survey 路径读取**（PR-05/PR-07 生效） |
+| `channels.policies[].transient_only` | bool | `false` | 强制瞬时：发布只实时投递、绝不写历史。**隐含 History=false、Recover=false**（即使漏写）。对客户端：不带 `transient` 标志的发布也改走 `PublishTransient`、ack offset=0、不报错；对 Admin：`add_history=true` 被**拒绝**（计失败、不发布），`add_history=false` 仍可瞬时发布 |
+| `channels.policies[].recover_limit` | int | 0 = `MaxRecoveredPublications` | 恢复条数上限。**本版本只进入策略对象** |
+| `channels.policies[].max_survey_subscribers` | int | 256 | survey 订阅者上限。**本版本只进入策略对象** |
+| `channels.policies[].max_survey_timeout` | string | `5s` | survey 超时上限。**本版本只进入策略对象** |
+| `channels.policies[].legacy_presence_channel` | bool | `false` | 是否写伴生 `__presence` 频道。**本版本只进入策略对象** |
+| `channels.policies[].presence_snapshot_limit` | int | 256 | presence 快照条数上限。**本版本只进入策略对象** |
+
+以上 `default` 与每条 `policies[].pattern` 均由 `Validate()` 校验：pattern 非空且合法（末尾 `**`）、`history_size >= 0`、两个 duration 可解析（`config/config.go` 的 `validateChannelPolicySpec`）。
+
+**匹配语义：first-match，与 ACL 相反。** 策略表按配置顺序求值，第一条 pattern 命中的规则生效（`ChannelPolicyEngine.For`，`channel_policy.go`）；ACL 是 denyAll 短路 + 最后一条带名单的规则胜出（last-write-wins，见 [内置 ACL 求值语义](#内置-acl-求值语义)）。同一套 glob 语法，两种顺序——**策略更具体的必须写前面，ACL 更具体的应写后面**。示例：
+
+```yaml
+server:
+  channels:
+    policies:
+      - pattern: "game.tick.**"    # 先写更具体：tick 命中它，不是 game.**
+        transient_only: true
+        recover: false
+      - pattern: "game.**"
+        history: true
+        survey: true
+```
+
+`game.tick.fps` 命中 `game.tick.**` → 强制瞬时、不可恢复。`game.room.1` 不匹配第一条，命中 `game.**` → history + survey 开。
+
+**transient_only 对客户端与 Admin 的差异**：
+
+- **客户端 Publish**（`client.go` `handlePublish`）：策略强制瞬时时，即使客户端没带 `transient` 标志，也改走 `PublishTransient`，返回 ack `offset=0`，**不报错**；同时 `messageloop_channel_policy_transient_forced_total` 指标 +1（客户端显式 `transient: true` 不计数）。消息不写历史，实时订阅者仍能收到。
+- **Admin Publish**（`pkg/grpcstream/api_handler.go`）：`add_history=true` 但策略禁历史 → Warn「admin add_history denied by channel policy」、**计失败、不发布**（避免误以为写入了）；`add_history=false`（或缺省）仍走 `PublishTransient`。若同请求其他发布成功，RPC 仍成功（部分成功语义），只有全部失败才返回错误。
+
+**容量与部署建议**：
+
+- `history_size` 只影响 `Publish` 路径（`Node.Publish` 把策略注入 `Publication.HistorySize`，broker 首次建 ring / 每条 `XADD` 时读取）。
+- **memory broker 无 TTL**：配置 `history_ttl` 会在该频道首次带 TTL 发布时打一次 Warn 并忽略。
+- **内存 ring 不因新配置重建**：已存在的频道保持旧容量直到回收，改小 `history_size` 对已有频道不立即生效。
+- **IM 大容量历史请使用 Redis broker**：memory 按 `history_size × 平均负载 × 频道数` 占内存（5000 × 512B × 1000 频道 ≈ 2.5 GB），单节点 memory 不适合大 IM；Redis 侧 `im.**` 5000 × 1KB ≈ 5 MB/频道，并可用 `history_ttl` 控制留存。`game.tick.**` 强制瞬时则对 Redis 零 Stream 写入，只剩 Pub/Sub。
 
 ## transport.websocket 节
 

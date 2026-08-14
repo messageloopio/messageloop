@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lynx-go/x/log"
 	"github.com/messageloopio/messageloop/pkg/topics"
 )
 
@@ -38,10 +39,12 @@ func NewMemoryBroker(opts MemoryBrokerOptions) Broker {
 // channelHistory is a fixed-capacity ring buffer for one channel.
 type channelHistory struct {
 	mu      sync.Mutex
-	entries []*Publication // ring buffer; len == broker.historySize
+	entries []*Publication // ring buffer; len == size
+	size    int            // ring capacity, fixed at first publish for this channel
 	head    int            // index of oldest valid entry
 	count   int            // number of valid entries
 	nextOff uint64         // next offset to assign (1-based)
+	ttlWarn sync.Once      // one history_ttl ignore warning per channel
 }
 
 type memoryBroker struct {
@@ -120,10 +123,28 @@ func (b *memoryBroker) Publish(ch string, pub *Publication) (uint64, error) {
 	b.mu.Lock()
 	h, ok := b.history[ch]
 	if !ok {
-		h = &channelHistory{entries: make([]*Publication, b.historySize)}
+		// The ring capacity is decided on the channel's first publish: a
+		// per-publication HistorySize wins, otherwise the broker global.
+		// Existing rings are never resized by later HistorySize values;
+		// they are reclaimed (and re-created with the new size) only when
+		// the last subscriber leaves and the ring is empty.
+		cap := b.historySize
+		if pub.HistorySize > 0 {
+			cap = pub.HistorySize
+		}
+		h = &channelHistory{entries: make([]*Publication, cap), size: cap}
 		b.history[ch] = h
 	}
 	b.mu.Unlock()
+
+	if pub.HistoryTTL != 0 {
+		// The memory broker has no history TTL; the warning is emitted once
+		// per channel to avoid log spam on high-frequency channels.
+		h.ttlWarn.Do(func() {
+			log.WarnContext(context.Background(), "memory broker: history_ttl is not supported, ignoring",
+				"channel", ch, "history_ttl", pub.HistoryTTL)
+		})
+	}
 
 	h.mu.Lock()
 	h.nextOff++
@@ -134,11 +155,11 @@ func (b *memoryBroker) Publish(ch string, pub *Publication) (uint64, error) {
 	stored.Epoch = b.epoch
 	stored.Time = time.Now().UnixMilli()
 	pub.Offset = offset
-	slot := (h.head + h.count) % b.historySize
-	if h.count == b.historySize {
+	slot := (h.head + h.count) % h.size
+	if h.count == h.size {
 		// Buffer full: overwrite oldest entry and advance head.
 		h.entries[h.head] = &stored
-		h.head = (h.head + 1) % b.historySize
+		h.head = (h.head + 1) % h.size
 	} else {
 		h.entries[slot] = &stored
 		h.count++
@@ -186,7 +207,7 @@ func (b *memoryBroker) History(ch string, sinceOffset uint64, limit int) ([]*Pub
 
 	var result []*Publication
 	for i := 0; i < h.count; i++ {
-		pub := h.entries[(h.head+i)%b.historySize]
+		pub := h.entries[(h.head+i)%h.size]
 		if pub == nil || pub.Offset < sinceOffset {
 			continue
 		}

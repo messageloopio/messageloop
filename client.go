@@ -1105,7 +1105,16 @@ func (c *Client) handlePublish(ctx context.Context, in *clientpb.InboundMessage,
 		pub.Metadata = publish.Metadata.Entries
 	}
 
-	if publish.Transient {
+	pol := c.node.ChannelPolicy(channel)
+	forceTransient := publish.Transient || pol.TransientOnly || !pol.History
+	if forceTransient {
+		// Channel policy forces transient delivery (e.g. game tick
+		// channels): the publish must still succeed — no error, ack with
+		// offset 0 — it just never writes history. Count the forced
+		// conversions (a client-declared transient is not forced).
+		if !publish.Transient && c.node.metrics != nil {
+			c.node.metrics.ChannelPolicyTransientForced.Inc()
+		}
 		if err := c.node.PublishTransient(channel, pub); err != nil {
 			return err
 		}

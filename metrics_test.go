@@ -49,3 +49,26 @@ func TestMetricsTransportLabel(t *testing.T) {
 	require.Equal(t, "grpc", MetricsTransportLabel("grpc"))
 	require.Equal(t, "ws", MetricsTransportLabel("unknown"))
 }
+
+// TestMetrics_ChannelPolicyTransientForcedRegistered verifies PR-02: the
+// channel-policy transient-forced counter is registered under its full name
+// and increments through the metrics object.
+func TestMetrics_ChannelPolicyTransientForcedRegistered(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	metrics := NewMetrics(reg)
+
+	metrics.ChannelPolicyTransientForced.Inc()
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.ChannelPolicyTransientForced))
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	found := false
+	for _, family := range families {
+		if family.GetName() == "messageloop_channel_policy_transient_forced_total" {
+			found = true
+			require.Len(t, family.GetMetric(), 1)
+			require.Equal(t, float64(1), family.GetMetric()[0].GetCounter().GetValue())
+		}
+	}
+	require.True(t, found, "messageloop_channel_policy_transient_forced_total must be registered")
+}

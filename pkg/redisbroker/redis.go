@@ -236,17 +236,27 @@ func (b *redisBroker) Publish(ch string, pub *messageloop.Publication) (uint64, 
 	if err != nil {
 		return 0, err
 	}
+	// Per-publication history cap and TTL overrides (from channel policy):
+	// a non-zero value wins over the broker global.
+	maxLen := b.opts.StreamMaxLength
+	if pub.HistorySize > 0 {
+		maxLen = int64(pub.HistorySize)
+	}
+	ttl := b.opts.HistoryTTL
+	if pub.HistoryTTL > 0 {
+		ttl = pub.HistoryTTL
+	}
 	stream := b.opts.StreamPrefix + ch
 	id, err := b.client.XAdd(ctx, &redis.XAddArgs{
 		Stream: stream,
-		MaxLen: b.opts.StreamMaxLength,
+		MaxLen: maxLen,
 		Approx: b.opts.StreamApproximate,
 		Values: map[string]interface{}{"data": streamData},
 	}).Result()
 	if err != nil {
 		return 0, err
 	}
-	if err := b.client.Expire(ctx, stream, b.opts.HistoryTTL).Err(); err != nil {
+	if err := b.client.Expire(ctx, stream, ttl).Err(); err != nil {
 		log.WarnContext(ctx, "failed to set stream TTL", "stream", stream, "error", err)
 	}
 

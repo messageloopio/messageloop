@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/messageloopio/messageloop/pkg/topics"
 	"github.com/messageloopio/messageloop/proxy"
 )
 
@@ -23,13 +24,49 @@ type ClusterConfig struct {
 }
 
 type Server struct {
-	Http        HttpServer `yaml:"http" json:"http" mapstructure:"http"`
-	GRPCAdmin   GRPCAdmin  `yaml:"grpc_admin" json:"grpc_admin" mapstructure:"grpc_admin"`
-	Heartbeat   Heartbeat  `yaml:"heartbeat" json:"heartbeat" mapstructure:"heartbeat"`
-	RPCTimeout  string     `yaml:"rpc_timeout" json:"rpc_timeout" mapstructure:"rpc_timeout"` // default: "30s"
-	Limits      Limits     `yaml:"limits" json:"limits" mapstructure:"limits"`
-	ACL         ACLConfig  `yaml:"acl" json:"acl" mapstructure:"acl"`
-	RequireAuth bool       `yaml:"require_auth" json:"require_auth" mapstructure:"require_auth"` // Reject connections with empty token
+	Http        HttpServer    `yaml:"http" json:"http" mapstructure:"http"`
+	GRPCAdmin   GRPCAdmin     `yaml:"grpc_admin" json:"grpc_admin" mapstructure:"grpc_admin"`
+	Heartbeat   Heartbeat     `yaml:"heartbeat" json:"heartbeat" mapstructure:"heartbeat"`
+	RPCTimeout  string        `yaml:"rpc_timeout" json:"rpc_timeout" mapstructure:"rpc_timeout"` // default: "30s"
+	Limits      Limits        `yaml:"limits" json:"limits" mapstructure:"limits"`
+	ACL         ACLConfig     `yaml:"acl" json:"acl" mapstructure:"acl"`
+	RequireAuth bool          `yaml:"require_auth" json:"require_auth" mapstructure:"require_auth"` // Reject connections with empty token
+	Channels    ChannelConfig `yaml:"channels" json:"channels" mapstructure:"channels"`
+}
+
+// ChannelConfig configures per-channel-prefix behavior switches
+// (history/presence/recover/survey/transient). When omitted entirely the
+// engine still exists and resolves to the pre-policy defaults (history on,
+// presence on, survey off).
+type ChannelConfig struct {
+	Default  ChannelPolicySpec   `yaml:"default" json:"default" mapstructure:"default"`
+	Policies []ChannelPolicyRule `yaml:"policies" json:"policies" mapstructure:"policies"`
+}
+
+// ChannelPolicyRule is one first-match policy rule: the first rule whose
+// pattern matches a channel wins. Note this is the opposite of the ACL
+// engine's last-write-wins evaluation.
+type ChannelPolicyRule struct {
+	Pattern           string `yaml:"pattern" json:"pattern" mapstructure:"pattern"`
+	ChannelPolicySpec `yaml:",inline" mapstructure:",squash"`
+}
+
+// ChannelPolicySpec is one policy overlay. Pointer fields mean "not
+// overridden" (nil leaves the compiled default untouched). HistoryTTL and
+// MaxSurveyTimeout use strings to distinguish "unset" from an explicit "0s".
+type ChannelPolicySpec struct {
+	History               *bool  `yaml:"history" json:"history" mapstructure:"history"`
+	HistorySize           *int   `yaml:"history_size" json:"history_size" mapstructure:"history_size"`
+	HistoryTTL            string `yaml:"history_ttl" json:"history_ttl" mapstructure:"history_ttl"`
+	Presence              *bool  `yaml:"presence" json:"presence" mapstructure:"presence"`
+	Recover               *bool  `yaml:"recover" json:"recover" mapstructure:"recover"`
+	Survey                *bool  `yaml:"survey" json:"survey" mapstructure:"survey"`
+	TransientOnly         *bool  `yaml:"transient_only" json:"transient_only" mapstructure:"transient_only"`
+	RecoverLimit          *int   `yaml:"recover_limit" json:"recover_limit" mapstructure:"recover_limit"`
+	MaxSurveySubscribers  *int   `yaml:"max_survey_subscribers" json:"max_survey_subscribers" mapstructure:"max_survey_subscribers"`
+	MaxSurveyTimeout      string `yaml:"max_survey_timeout" json:"max_survey_timeout" mapstructure:"max_survey_timeout"`
+	LegacyPresenceChannel *bool  `yaml:"legacy_presence_channel" json:"legacy_presence_channel" mapstructure:"legacy_presence_channel"`
+	PresenceSnapshotLimit *int   `yaml:"presence_snapshot_limit" json:"presence_snapshot_limit" mapstructure:"presence_snapshot_limit"`
 }
 
 // ACLConfig defines built-in channel access control rules.
@@ -47,10 +84,10 @@ type ACLRule struct {
 }
 
 type Limits struct {
-	MaxConnectionsPerUser     int `yaml:"max_connections_per_user" json:"max_connections_per_user" mapstructure:"max_connections_per_user"`         // 0 = unlimited
+	MaxConnectionsPerUser     int `yaml:"max_connections_per_user" json:"max_connections_per_user" mapstructure:"max_connections_per_user"`             // 0 = unlimited
 	MaxSubscriptionsPerClient int `yaml:"max_subscriptions_per_client" json:"max_subscriptions_per_client" mapstructure:"max_subscriptions_per_client"` // 0 = unlimited
-	MaxPublishesPerSecond     int `yaml:"max_publishes_per_second" json:"max_publishes_per_second" mapstructure:"max_publishes_per_second"`         // 0 = unlimited
-	MaxMessageSize            int `yaml:"max_message_size" json:"max_message_size" mapstructure:"max_message_size"`                                 // bytes, 0 = default (64KB), applies uniformly to WebSocket and gRPC transports
+	MaxPublishesPerSecond     int `yaml:"max_publishes_per_second" json:"max_publishes_per_second" mapstructure:"max_publishes_per_second"`             // 0 = unlimited
+	MaxMessageSize            int `yaml:"max_message_size" json:"max_message_size" mapstructure:"max_message_size"`                                     // bytes, 0 = default (64KB), applies uniformly to WebSocket and gRPC transports
 }
 
 type HttpServer struct {
@@ -84,10 +121,10 @@ type TLSConfig struct {
 type WebSocketTransport struct {
 	Addr            string    `yaml:"addr" json:"addr" mapstructure:"addr"`
 	Path            string    `yaml:"path" json:"path" mapstructure:"path"`
-	ReadTimeout     string    `yaml:"read_timeout" json:"read_timeout" mapstructure:"read_timeout"`           // duration string
-	WriteTimeout    string    `yaml:"write_timeout" json:"write_timeout" mapstructure:"write_timeout"`         // duration string, e.g. "10s"
+	ReadTimeout     string    `yaml:"read_timeout" json:"read_timeout" mapstructure:"read_timeout"`                // duration string
+	WriteTimeout    string    `yaml:"write_timeout" json:"write_timeout" mapstructure:"write_timeout"`             // duration string, e.g. "10s"
 	AllowAllOrigins bool      `yaml:"allow_all_origins" json:"allow_all_origins" mapstructure:"allow_all_origins"` // Allow any origin (development only)
-	AllowedOrigins  []string  `yaml:"allowed_origins" json:"allowed_origins" mapstructure:"allowed_origins"`   // Whitelist of allowed origins
+	AllowedOrigins  []string  `yaml:"allowed_origins" json:"allowed_origins" mapstructure:"allowed_origins"`       // Whitelist of allowed origins
 	TLS             TLSConfig `yaml:"tls" json:"tls" mapstructure:"tls"`
 	Compression     bool      `yaml:"compression" json:"compression" mapstructure:"compression"` // Enable permessage-deflate
 
@@ -238,5 +275,45 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("cluster requires broker.type=redis")
 	}
 
+	// Validate channel policy config: the default spec and every policy
+	// rule. Policy patterns must be valid topics (trailing "**" only, no
+	// explicit empty segments); the matcher is the same segment-based glob
+	// as the ACL layer, but policy evaluation is first-match while ACL is
+	// last-write-wins.
+	if err := validateChannelPolicySpec("server.channels.default", c.Server.Channels.Default); err != nil {
+		return err
+	}
+	for i, policy := range c.Server.Channels.Policies {
+		prefix := fmt.Sprintf("server.channels.policies[%d]", i)
+		if policy.Pattern == "" {
+			return fmt.Errorf("%s.pattern is required", prefix)
+		}
+		if err := topics.ValidateTopic(policy.Pattern); err != nil {
+			return fmt.Errorf("%s.pattern %q: %w", prefix, policy.Pattern, err)
+		}
+		if err := validateChannelPolicySpec(prefix, policy.ChannelPolicySpec); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// validateChannelPolicySpec validates the scalar constraints shared by the
+// default spec and each policy rule.
+func validateChannelPolicySpec(prefix string, spec ChannelPolicySpec) error {
+	if spec.HistorySize != nil && *spec.HistorySize < 0 {
+		return fmt.Errorf("%s.history_size must be >= 0", prefix)
+	}
+	if spec.HistoryTTL != "" {
+		if _, err := time.ParseDuration(spec.HistoryTTL); err != nil {
+			return fmt.Errorf("invalid duration for %s.history_ttl: %w", prefix, err)
+		}
+	}
+	if spec.MaxSurveyTimeout != "" {
+		if _, err := time.ParseDuration(spec.MaxSurveyTimeout); err != nil {
+			return fmt.Errorf("invalid duration for %s.max_survey_timeout: %w", prefix, err)
+		}
+	}
 	return nil
 }

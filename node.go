@@ -32,6 +32,7 @@ type Node struct {
 	surveys          map[string]*Survey
 	surveyMu         sync.RWMutex
 	acl              *ACLEngine
+	channelPolicy    *ChannelPolicyEngine
 	requireAuth      bool
 	healthCheck      func(context.Context) error
 }
@@ -108,6 +109,23 @@ func NewNode(cfg *config.Server) *Node {
 		}
 		node.acl = NewACLEngine(rules)
 	}
+
+	// Channel policy engine: an empty server.channels (or a nil cfg) compiles
+	// to the pre-policy defaults (history on, presence on, survey off), so an
+	// unconfigured server behaves exactly as before. Invalid durations are
+	// rejected by config.Validate; the engine falls back to defaults with a
+	// warning. An engine build failure (invalid pattern) must not take the
+	// server down, so fall back to the empty engine.
+	channels := config.ChannelConfig{}
+	if cfg != nil {
+		channels = cfg.Channels
+	}
+	engine, err := NewChannelPolicyEngine(channels)
+	if err != nil {
+		log.WarnContext(context.Background(), "channel policy engine build failed, falling back to defaults", "error", err)
+		engine, _ = NewChannelPolicyEngine(config.ChannelConfig{})
+	}
+	node.channelPolicy = engine
 
 	return node
 }
@@ -236,6 +254,17 @@ func (n *Node) Hub() *Hub {
 // SetMetrics sets the Prometheus metrics collector for the node.
 func (n *Node) SetMetrics(m *Metrics) {
 	n.metrics = m
+}
+
+// ChannelPolicy returns the effective channel policy for ch: the first
+// matching policy rule overlaid on the compiled default. An engine that was
+// never built (should not happen after NewNode) resolves to the pre-policy
+// defaults.
+func (n *Node) ChannelPolicy(ch string) ChannelPolicy {
+	if n.channelPolicy == nil {
+		return DefaultChannelPolicy()
+	}
+	return n.channelPolicy.For(ch)
 }
 
 // AddClient adds a client session to the node's hub.
@@ -483,6 +512,20 @@ func (n *Node) Publish(ch string, pub *Publication) (uint64, error) {
 	if n.metrics != nil {
 		timer := prometheus.NewTimer(n.metrics.PublishDuration)
 		defer timer.ObserveDuration()
+	}
+	pol := n.ChannelPolicy(ch)
+	if pol.TransientOnly || !pol.History {
+		// History is disabled for this channel: callers must use
+		// PublishTransient (the client path does this transparently).
+		return 0, ErrHistoryDisabled
+	}
+	// Per-policy history sizing: a caller-specified value wins, otherwise
+	// the policy cap (0 on both sides means the broker global default).
+	if pub.HistorySize == 0 && pol.HistorySize > 0 {
+		pub.HistorySize = pol.HistorySize
+	}
+	if pub.HistoryTTL == 0 && pol.HistoryTTL > 0 {
+		pub.HistoryTTL = pol.HistoryTTL
 	}
 	offset, err := n.broker.Publish(ch, pub)
 	if err == nil && n.metrics != nil {

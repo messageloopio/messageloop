@@ -76,7 +76,25 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverpb.PublishRe
 				failed++
 				continue
 			}
-			if opts := pub.GetOptions(); opts != nil && opts.AddHistory {
+			opts := pub.GetOptions()
+			pol := h.node.ChannelPolicy(channel)
+			if pol.TransientOnly || !pol.History {
+				// Channel policy disables history: add_history cannot be
+				// honored. Count the failure and do not publish at all so
+				// the caller does not assume the message was written.
+				// Transient delivery is still allowed.
+				if opts != nil && opts.AddHistory {
+					log.WarnContext(ctx, "admin add_history denied by channel policy", "channel", channel)
+					failed++
+					continue
+				}
+				if err := h.node.PublishTransient(channel, brokerPub); err != nil {
+					log.ErrorContext(ctx, "failed to publish transient to channel", err, "channel", channel)
+					failed++
+				}
+				continue
+			}
+			if opts != nil && opts.AddHistory {
 				if _, err := h.node.Publish(channel, brokerPub); err != nil {
 					log.ErrorContext(ctx, "failed to publish to channel", err, "channel", channel)
 					failed++

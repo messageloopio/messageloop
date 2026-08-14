@@ -165,3 +165,126 @@ func TestProxyConfig_ToProxyConfig_InvalidTimeout(t *testing.T) {
 	_, err := pc.ToProxyConfig()
 	assert.ErrorContains(t, err, "invalid timeout")
 }
+
+func boolPtr(v bool) *bool    { return &v }
+func intPtr(v int) *int       { return &v }
+func strPtr(v string) *string { return &v }
+
+// TestValidate_ChannelHistoryTTL verifies PR-02: an unparsable history_ttl
+// on a channel policy rule fails Validate().
+func TestValidate_ChannelHistoryTTL(t *testing.T) {
+	cfg := &Config{
+		Transport: validTransport(),
+		Server: Server{
+			Channels: ChannelConfig{
+				Policies: []ChannelPolicyRule{
+					{Pattern: "im.**", ChannelPolicySpec: ChannelPolicySpec{HistoryTTL: "not-a-duration"}},
+				},
+			},
+		},
+	}
+	assert.ErrorContains(t, cfg.Validate(), "server.channels.policies[0].history_ttl")
+}
+
+// TestChannelPolicy_ValidateEmptyPattern verifies that a policy rule without
+// a pattern fails Validate().
+func TestChannelPolicy_ValidateEmptyPattern(t *testing.T) {
+	cfg := &Config{
+		Transport: validTransport(),
+		Server: Server{
+			Channels: ChannelConfig{
+				Policies: []ChannelPolicyRule{{Pattern: ""}},
+			},
+		},
+	}
+	assert.ErrorContains(t, cfg.Validate(), "server.channels.policies[0].pattern is required")
+}
+
+// TestValidate_ChannelPolicyMiddleDoubleStarRejected pins the policy pattern
+// contract: policy patterns are aligned with the topic matcher, so "**" is
+// only allowed as the final segment ("a.**.b" is invalid) — unlike ACL
+// patterns which additionally allow middle "**".
+func TestValidate_ChannelPolicyMiddleDoubleStarRejected(t *testing.T) {
+	cfg := &Config{
+		Transport: validTransport(),
+		Server: Server{
+			Channels: ChannelConfig{
+				Policies: []ChannelPolicyRule{{Pattern: "a.**.b"}},
+			},
+		},
+	}
+	assert.ErrorContains(t, cfg.Validate(), "server.channels.policies[0].pattern")
+}
+
+// TestValidate_ChannelPolicyNegativeHistorySize verifies history_size < 0 is
+// rejected for both the default spec and policy rules.
+func TestValidate_ChannelPolicyNegativeHistorySize(t *testing.T) {
+	cfg := &Config{
+		Transport: validTransport(),
+		Server: Server{
+			Channels: ChannelConfig{
+				Default: ChannelPolicySpec{HistorySize: intPtr(-1)},
+			},
+		},
+	}
+	assert.ErrorContains(t, cfg.Validate(), "server.channels.default.history_size must be >= 0")
+
+	cfg = &Config{
+		Transport: validTransport(),
+		Server: Server{
+			Channels: ChannelConfig{
+				Policies: []ChannelPolicyRule{
+					{Pattern: "im.**", ChannelPolicySpec: ChannelPolicySpec{HistorySize: intPtr(-5)}},
+				},
+			},
+		},
+	}
+	assert.ErrorContains(t, cfg.Validate(), "server.channels.policies[0].history_size must be >= 0")
+}
+
+// TestValidate_ChannelPolicyMaxSurveyTimeout verifies an unparsable
+// max_survey_timeout fails Validate().
+func TestValidate_ChannelPolicyMaxSurveyTimeout(t *testing.T) {
+	cfg := &Config{
+		Transport: validTransport(),
+		Server: Server{
+			Channels: ChannelConfig{
+				Default: ChannelPolicySpec{MaxSurveyTimeout: "soon"},
+			},
+		},
+	}
+	assert.ErrorContains(t, cfg.Validate(), "server.channels.default.max_survey_timeout")
+}
+
+// TestValidate_ChannelPolicyValid verifies a full, valid server.channels
+// block passes validation.
+func TestValidate_ChannelPolicyValid(t *testing.T) {
+	cfg := &Config{
+		Transport: validTransport(),
+		Server: Server{
+			Channels: ChannelConfig{
+				Default: ChannelPolicySpec{
+					History:          boolPtr(true),
+					HistorySize:      intPtr(0),
+					HistoryTTL:       "24h",
+					Presence:         boolPtr(true),
+					Recover:          boolPtr(true),
+					Survey:           boolPtr(false),
+					MaxSurveyTimeout: "5s",
+				},
+				Policies: []ChannelPolicyRule{
+					{Pattern: "game.tick.**", ChannelPolicySpec: ChannelPolicySpec{
+						History:       boolPtr(false),
+						Presence:      boolPtr(false),
+						TransientOnly: boolPtr(true),
+					}},
+					{Pattern: "im.**", ChannelPolicySpec: ChannelPolicySpec{
+						History:     boolPtr(true),
+						HistorySize: intPtr(5000),
+					}},
+				},
+			},
+		},
+	}
+	assert.NoError(t, cfg.Validate())
+}

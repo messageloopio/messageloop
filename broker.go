@@ -3,6 +3,7 @@ package messageloop
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -32,6 +33,14 @@ type Publication struct {
 	Offset      uint64
 	Time        int64 // Unix milliseconds
 	Epoch       string
+	// HistorySize caps this publication's channel history ring/stream when
+	// the channel is first created. 0 = the broker global default. Only
+	// Publish uses it; PublishTransient never writes history.
+	HistorySize int
+	// HistoryTTL overrides the broker's history retention TTL for this
+	// publication (Redis only; the memory broker ignores it and warns once
+	// per channel). 0 = the broker global default.
+	HistoryTTL time.Duration
 }
 
 // PayloadProto rebuilds the shared Payload message from the publication,

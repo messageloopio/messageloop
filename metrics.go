@@ -29,6 +29,7 @@ type Metrics struct {
 	ClusterProjectionRepairs        prometheus.Counter
 	ClusterProjectionRepairFailures prometheus.Counter
 	PresencePublishFailures         prometheus.Counter
+	ChannelPolicyTransientForced    prometheus.Counter
 }
 
 // NewMetrics creates and registers all Prometheus metrics.
@@ -106,6 +107,11 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name:      "presence_publish_failures_total",
 			Help:      "Total number of failed presence join/leave event publications.",
 		}),
+		ChannelPolicyTransientForced: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "messageloop",
+			Name:      "channel_policy_transient_forced_total",
+			Help:      "Total number of client publications forced to transient delivery by channel policy.",
+		}),
 	}
 	reg.MustRegister(
 		m.ConnectionsTotal,
@@ -122,6 +128,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.ClusterProjectionRepairs,
 		m.ClusterProjectionRepairFailures,
 		m.PresencePublishFailures,
+		m.ChannelPolicyTransientForced,
 	)
 	return m
 }
