@@ -10,7 +10,8 @@
   - WebSocket 客户端与 gRPC 客户端，共享同一套 `Client` 接口与消息模型；
   - 订阅/退订、发布、请求-响应式 RPC；
   - 自动重连与会话恢复（session resumption，携带 epoch 与逐频道 offset）；
-  - 心跳（ping/pong）；
+  - 恢复订阅（`WithRecover`）、Presence（事件/快照/查询）、Survey（发起与应答）；
+  - 心跳（ping/pong，含服务端 Ping 应答）；
   - 代理后端支持：在业务服务中以 gRPC 实现 RPC 处理、认证、ACL 与生命周期钩子，供服务端回调。
 - **依赖**：`gorilla/websocket`、`google.golang.org/grpc`、`google.golang.org/protobuf`、`github.com/google/uuid`，以及同仓库的 `github.com/messageloopio/messageloop/shared`（生成代码与序列化器）。仓库内通过 `replace github.com/messageloopio/messageloop/shared => ./../../shared` 指向本地目录。
 - **与其他 SDK 的关系**：TypeScript SDK 提供等价能力，API 设计与本文描述的概念一一对应，参见[《TypeScript SDK 指南》](08-sdk-ts.md)。
@@ -121,7 +122,7 @@ gRPC 客户端的用法与 WebSocket 完全一致，只是把 `Dial` 换成 `Dia
 | `WithVersion` | `string` | 客户端版本号 | `"1.0.0"` |
 | `WithAutoSubscribe` | `...string` | 连接建立时自动订阅的频道列表 | 无 |
 | `WithPingInterval` | `time.Duration` | 心跳 Ping 的发送间隔；`<= 0` 时禁用心跳 | `30s` |
-| `WithPingTimeout` | `time.Duration` | 等待 Pong 的超时。**当前版本仅保存该配置，未强制实施超时判定** | `10s` |
+| `WithPingTimeout` | `time.Duration` | 等待 Pong 的超时：超时未收到 Pong 时连接视为半开，SDK 关闭 transport 并（若开启自动重连）进入重连流程 | `10s` |
 | `WithAutoReconnect` | `bool` | 断线后自动重连并尝试会话恢复 | `false` |
 | `WithReconnectBackoff` | `initial, max time.Duration, factor float64` | 重连退避：初始延迟、最大延迟、指数因子 | `1s` / `30s` / `2.0` |
 | `WithReconnectMaxAttempts` | `int` | 最大重连次数，`0` 表示不限次 | `0` |
@@ -228,7 +229,76 @@ client.OnMessage(func(msgs []*messageloopgo.Message) {
 
 ### 心跳
 
-开启后（`PingInterval > 0`，默认 30s），客户端按固定间隔发送 Ping 协议消息；收到 Pong 仅作存活确认（`handlePong` 目前为空实现）。
+开启后（`PingInterval > 0`，默认 30s），客户端按固定间隔发送 Ping 协议消息；收到 Pong 作为存活确认（`handlePong` 记录时间戳并解除本次 Ping 的超时计时）。`PingTimeout`（默认 10s）内未收到对应 Pong，连接视为半开：SDK 关闭当前 transport，接收循环观察到失败后（若开启自动重连）进入重连流程。
+
+**服务端 Ping**：服务端也会主动向客户端发送 Ping（如开启 `server.heartbeat.ping_interval` 运维探测）。SDK 收到 Outbound `Ping` 会立即以**同 id** 的 Inbound `Pong` 应答，并把该次交换计为存活证据（与收到 Pong 同等处理），避免「服务端在 ping、客户端自己的 PingTimeout 却把连接掐了」。开启服务端 `ping_interval` 必须使用本版本 SDK——旧 SDK 会静默丢弃 Outbound Ping。
+
+## 恢复订阅（Recover）
+
+`SubscribeWith(channel, WithRecover(offset, epoch))` 按历史位置恢复订阅：
+
+```go
+// 从 chat.recover 的 offset 42（epoch "ep"）之后恢复
+if err := client.SubscribeWith("chat.recover", messageloopgo.WithRecover(42, "ep")); err != nil {
+    panic(err)
+}
+```
+
+- 选项会设置订阅的 `recover=true`、`offset` 与 `epoch`；传 `0` / `""` 仍会发送 `recover=true`（新鲜订阅从头恢复，由服务端策略决定）。
+- 恢复消息随 `SubscribeAck.publications`（以及 `Connected.publications`）到达，走与普通消息**同一条** `OnMessage` 投递路径，并按消息 offset 推进本地恢复游标；`SubscribeAck.recover_results` / `Connected.recover_results` 中服务端回显的 cursor 也会写回本地（空批不回退）。
+- **没有** `OnRecover` 回调：恢复消息就是 `OnMessage`。
+- 重连时的会话恢复（`resumeSubscriptions`）仍自动携带 `Recover=true` + offset + epoch，本选项只影响首次订阅。
+
+## Presence
+
+SDK 暴露事件、快照与查询三类 Presence 能力：
+
+```go
+// join/leave 事件
+client.OnPresence(func(ev messageloopgo.PresenceEvent) {
+    // ev.Channel / ev.Action ("join" | "leave") / ev.Info.{SessionID,UserID,ClientID,ConnectedAt}
+})
+
+// 快照：Connected / SubscribeAck 携带，以及 Presence() 查询结果
+client.OnPresenceSnapshot(func(snap messageloopgo.PresenceSnapshot) {
+    // snap.Channel / snap.Clients []PresenceInfo / snap.Truncated / snap.Occupancy
+})
+
+// 主动查询（阻塞，等待服务端快照回复）
+snap, err := client.Presence(ctx, "room.x")
+```
+
+- Outbound `presence_event`（oneof 15）→ `OnPresence`；未知 `action` 仍投递。
+- `Connected.presence` 与 `SubscribeAck.presence` 的每条快照在连接/订阅状态写回之后各调一次 `OnPresenceSnapshot`。
+- `Presence(ctx, channel)` 发送 Inbound `PresenceQuery{channel}`，等待**同入站 id** 的 `OutboundMessage.presence`（oneof 14）快照返回，并再调一次 `OnPresenceSnapshot`；失败（如 `PERMISSION_DENIED`）返回带服务端 code/message 的错误。空 channel 交给服务端（服务端回 `BAD_REQUEST`）。断连与 `Close` 会清掉 pending 查询。
+- 未连接时返回 `not connected`。
+
+## Survey（发起与应答）
+
+### 客户端发起
+
+```go
+answers, err := client.Survey(ctx, "chat.x", reqMsg, 2*time.Second)
+for _, a := range answers {
+    // a.SessionID / a.UserID（来自 metadata.entries["user_id"]）/ a.Payload / a.Error
+}
+```
+
+- 发送 Inbound `SurveyRequest{request_id, channel, payload, timeout_ms}`；`timeout <= 0` 时 `timeout_ms=0`，由服务端策略上限决定。
+- **等待发生在调用方 goroutine**，接收循环只负责填充 pending 结果；结果按 `request_id` 与 `SurveyResult`（oneof 18）匹配，同步拒绝（如 `SURVEY_DISABLED`）以同 id 顶层 Error 返回；服务端 worker 失败可能不带 id——此时仅当恰好一个 in-flight `Survey()` 时按拒绝码（`SURVEY_DISABLED` / `SURVEY_TOO_MANY_SUBSCRIBERS` / `BAD_REQUEST` / `PERMISSION_DENIED` / `RATE_LIMITED` / `INTERNAL_ERROR`）交给它。
+- `SurveyResult.error` 非空时整个调用返回该错误（answers 仍附带）。`ctx` 取消/超时、`Close()`、断连都会让 pending Survey 失败。
+- `SurveyAnswer.UserID` 从 `metadata.entries["user_id"]` 读取（proto 无该字段），缺失时为空。
+
+### 应答侧
+
+```go
+client.OnSurvey(func(requestID string, req *Message) (*Message, error) { ... })        // 旧签名，兼容
+client.OnSurveyRequest(func(requestID, channel string, req *Message) (*Message, error) { ... }) // 新签名，带频道
+```
+
+收到 Outbound `SurveyRequest`：设了 `OnSurveyRequest` 用新签名（带 `req.Channel`）；否则有 `OnSurvey` 用旧签名（忽略频道）；都没有则默认 echo 请求 payload（`SendSurveyReply`）。旧 `OnSurvey` 签名不变，现有应用无需改动。
+
+**重要**：`RPC` / `Survey` / `Presence` 都会阻塞等待接收循环投递结果，因此**禁止**在收包回调（`OnMessage` / `OnPresence` / `OnPresenceSnapshot` / `OnSurvey` / `OnSurveyRequest`）里同步调用它们——否则读循环被卡死，调用永远等不到回复。需要时请另起 goroutine。
 
 ## 发布/订阅与动态订阅
 

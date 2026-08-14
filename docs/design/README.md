@@ -14,5 +14,6 @@
 | [PR-05 实现规格](tasks/pr-05-heartbeat.md) | Accepted | 服务端 ping + 秒级 idle；[第三方 prompt](tasks/pr-05-prompt.md) |
 | [PR-06 实现规格](tasks/pr-06-admin-user.md) | Accepted | Admin 按 user 投递/断开/订阅；[第三方 prompt](tasks/pr-06-prompt.md) |
 | [PR-07 实现规格](tasks/pr-07-survey.md) | Accepted | 客户端发起 Survey；[第三方 prompt](tasks/pr-07-prompt.md) |
+| [PR-08 实现规格](tasks/pr-08-sdk-go.md) | Accepted | Go SDK v1.0 API；[第三方 prompt](tasks/pr-08-prompt.md) |
 
 历史设计（已归档实现记录）见 [docs/archive](../archive/) 与 [docs/superpowers/specs](../superpowers/specs/)。

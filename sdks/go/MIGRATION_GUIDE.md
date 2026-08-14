@@ -70,6 +70,15 @@ client.OnMessage(func(messages []*messageloopgo.Message) {
 
 以下能力为增量 API，不影响既有调用方；详细用法见 `README.md`。
 
+### v1.0：Recover / Presence / Survey / 服务端 Ping
+
+- `SubscribeWith(channel, WithRecover(offset, epoch))`：按 offset 恢复订阅，恢复消息走 `OnMessage`。
+- `OnPresence(fn func(PresenceEvent))` / `OnPresenceSnapshot(fn func(PresenceSnapshot))` / `Presence(ctx, channel) (*PresenceSnapshot, error)`。
+- `Survey(ctx, channel, payload, timeout) ([]SurveyAnswer, error)`：发起频道级调查；`OnSurveyRequest(fn func(requestID, channel string, req *Message) (*Message, error))` 带频道的应答 handler。
+- **`OnSurvey` 签名不变**，旧 handler 与默认 echo 行为照旧；`OnSurveyRequest` 设置时优先于 `OnSurvey`。
+- 服务端 Outbound Ping 现在会被自动应答（同 id Inbound Pong）并计为存活证据——开启 `server.heartbeat.ping_interval` 必须使用本版本 SDK。
+- 注意：`RPC` / `Survey` / `Presence` 都阻塞等待接收循环，禁止在 `OnMessage` / `OnPresence` / `OnPresenceSnapshot` / `OnSurvey*` 里同步调用。
+
 ### 订阅级 / 发布级 token
 
 - `SubscribeWith(channel, WithSubscriptionToken("..."))`：订阅时携带订阅级鉴权 token，服务端会将其传给订阅 ACL proxy。重连恢复订阅时 token 随订阅状态一并保存与恢复。
@@ -107,10 +116,14 @@ OnUnsubscribed(ctx context.Context, sessionID, channel, username string) error
 
 `Client` 接口新增以下方法，自定义实现（如 mock）需要补全：
 
-- `SubscribeWith(channel string, opts ...SubscribeOption) error`：按订阅选项订阅单个频道（如 `WithEphemeral`）
+- `SubscribeWith(channel string, opts ...SubscribeOption) error`：按订阅选项订阅单个频道（如 `WithEphemeral`、`WithRecover`）
 - `SubRefresh(ctx context.Context, channels ...string) error`：请求服务端重新校验订阅（如后端 ACL 变更后）
 - `SendSurveyReply(ctx context.Context, requestID string, reply *Message, replyErr error) error`：回复服务端下发的 survey 请求
 - `OnSurvey(fn func(requestID string, req *Message) (*Message, error))`：设置 survey 处理器；未设置时默认把请求 payload 原样回显给服务端
+- `OnSurveyRequest(fn func(requestID, channel string, req *Message) (*Message, error))`：带频道的 survey 处理器，优先于 `OnSurvey`
+- `Survey(ctx context.Context, channel string, payload *Message, timeout time.Duration) ([]SurveyAnswer, error)`：发起频道级调查
+- `OnPresence(fn func(PresenceEvent))` / `OnPresenceSnapshot(fn func(PresenceSnapshot))`：presence 事件/快照回调
+- `Presence(ctx context.Context, channel string) (*PresenceSnapshot, error)`：主动查询频道 presence 快照
 
 ### RPC 默认超时
 

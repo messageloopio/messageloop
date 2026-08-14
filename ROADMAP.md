@@ -144,7 +144,7 @@ gantt
 | 05 | 服务端 ping + 可配秒级 idle | 01 | [规格](docs/design/tasks/pr-05-heartbeat.md) · [prompt](docs/design/tasks/pr-05-prompt.md) |
 | 06 | Admin 按 user 投递/断开/订阅 | 01 | [规格](docs/design/tasks/pr-06-admin-user.md) · [prompt](docs/design/tasks/pr-06-prompt.md) |
 | 07 | 客户端 Survey 真实现 | 01, 02 | [规格](docs/design/tasks/pr-07-survey.md) · [prompt](docs/design/tasks/pr-07-prompt.md) |
-| 08 | Go SDK v1.0 API | 03–07 | |
+| 08 | Go SDK v1.0 API | 03–07 | [规格](docs/design/tasks/pr-08-sdk-go.md) · [prompt](docs/design/tasks/pr-08-prompt.md) |
 | 09 | TypeScript SDK v1.0 API | 同 08，可并行 | |
 | 10 | 文档与集群 e2e | 08（09 可后到） | |
 

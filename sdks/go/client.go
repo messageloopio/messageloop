@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 )
@@ -60,6 +61,24 @@ type Client interface {
 	// handler returns the response payload. When no handler is set, the
 	// request payload is echoed back to the server.
 	OnSurvey(fn func(requestID string, req *Message) (*Message, error))
+	// OnSurveyRequest sets the handler for survey requests from the server,
+	// additionally receiving the request channel. When set it takes
+	// precedence over the handler registered with OnSurvey.
+	OnSurveyRequest(fn func(requestID, channel string, req *Message) (*Message, error))
+	// Survey initiates a survey on an exact channel and waits for the
+	// aggregated answers. The call waits on the caller's goroutine; the
+	// receive loop fills the pending result. timeout<=0 lets the server
+	// apply its policy cap.
+	Survey(ctx context.Context, channel string, payload *Message, timeout time.Duration) ([]SurveyAnswer, error)
+	// OnPresence sets the handler for presence events (join/leave).
+	OnPresence(fn func(PresenceEvent))
+	// OnPresenceSnapshot sets the handler for presence snapshots delivered
+	// with Connected / SubscribeAck, and for the snapshot returned by a
+	// Presence query.
+	OnPresenceSnapshot(fn func(PresenceSnapshot))
+	// Presence queries the current presence snapshot of an exact channel and
+	// waits for the server's reply on the caller's goroutine.
+	Presence(ctx context.Context, channel string) (*PresenceSnapshot, error)
 	// SessionID returns the session ID
 	SessionID() string
 	// IsConnected returns the connection status
@@ -100,6 +119,27 @@ type ackResult struct {
 	err    error
 }
 
+// surveyPending tracks a pending client-initiated survey and its result
+// channel. The once guard makes resolve idempotent so concurrent delivery and
+// disconnect or Close cleanup cannot double-send on the channel.
+type surveyPending struct {
+	requestID string
+	ch        chan surveyPendingResult
+	once      sync.Once
+}
+
+// surveyPendingResult is the outcome of a pending survey: either a
+// SurveyResult envelope or a top-level error.
+type surveyPendingResult struct {
+	result *clientpb.SurveyResult
+	err    error
+}
+
+// resolve delivers the pending survey outcome, at most once.
+func (s *surveyPending) resolve(res surveyPendingResult) {
+	s.once.Do(func() { s.ch <- res })
+}
+
 // resolve delivers the broker-assigned offset, at most once.
 func (a *ackPending) resolve(offset uint64) {
 	a.once.Do(func() { a.ch <- ackResult{offset: offset} })
@@ -112,35 +152,42 @@ func (a *ackPending) reject(err error) {
 
 // client is the implementation of the Client interface.
 type client struct {
-	mu                  sync.RWMutex
-	ctx                 context.Context
-	cancel              context.CancelFunc
-	transport           transport
-	opts                *Options
-	sessionID           string
-	connected           atomic.Bool
-	closed              atomic.Bool
-	reconnecting        atomic.Bool
-	generation          atomic.Uint64 // Connection generation, advanced on every reconnect
-	connectedCh         chan struct{} // Closed when connection is established
-	connectErrCh        chan error    // For connection errors
-	handlerMu           sync.RWMutex
-	msgHandler          func([]*Message)
-	errorHandler        func(error)
-	connectedHandler    func(string)
-	reconnectingHandler func(int)
-	reconnectedHandler  func(string)
-	surveyHandler       func(requestID string, req *Message) (*Message, error)
-	pendingRPC          map[string]*rpcPending
-	pendingRPCMu        sync.RWMutex
-	pendingAck          map[string]*ackPending // Publish id -> pending publish awaiting its PublishAck
-	pendingAckMu        sync.RWMutex
-	nextMsgID           atomic.Uint64
-	subscriptions       map[string]*subscriptionState // Channel -> subscription state
-	subMu               sync.RWMutex
-	pingCancel          context.CancelFunc
-	pongCh              chan struct{} // Signals pong receipt to the ping loop
-	lastPong            atomic.Int64  // UnixNano of the last received pong
+	mu                      sync.RWMutex
+	ctx                     context.Context
+	cancel                  context.CancelFunc
+	transport               transport
+	opts                    *Options
+	sessionID               string
+	connected               atomic.Bool
+	closed                  atomic.Bool
+	reconnecting            atomic.Bool
+	generation              atomic.Uint64 // Connection generation, advanced on every reconnect
+	connectedCh             chan struct{} // Closed when connection is established
+	connectErrCh            chan error    // For connection errors
+	handlerMu               sync.RWMutex
+	msgHandler              func([]*Message)
+	errorHandler            func(error)
+	connectedHandler        func(string)
+	reconnectingHandler     func(int)
+	reconnectedHandler      func(string)
+	surveyHandler           func(requestID string, req *Message) (*Message, error)
+	surveyRequestHandler    func(requestID, channel string, req *Message) (*Message, error)
+	presenceHandler         func(PresenceEvent)
+	presenceSnapshotHandler func(PresenceSnapshot)
+	pendingRPC              map[string]*rpcPending
+	pendingRPCMu            sync.RWMutex
+	pendingAck              map[string]*ackPending // Publish id -> pending publish awaiting its PublishAck
+	pendingAckMu            sync.RWMutex
+	pendingPresence         map[string]*rpcPending // PresenceQuery id -> pending query
+	pendingPresenceMu       sync.RWMutex
+	pendingSurvey           map[string]*surveyPending // Survey inbound id -> pending survey
+	pendingSurveyMu         sync.RWMutex
+	nextMsgID               atomic.Uint64
+	subscriptions           map[string]*subscriptionState // Channel -> subscription state
+	subMu                   sync.RWMutex
+	pingCancel              context.CancelFunc
+	pongCh                  chan struct{} // Signals pong receipt to the ping loop
+	lastPong                atomic.Int64  // UnixNano of the last received pong
 
 	// Session resumption state
 	epoch          string
@@ -200,17 +247,19 @@ func DialGRPC(addr string, opts ...Option) (Client, error) {
 // newClient creates a new client with the given transport.
 func newClient(ctx context.Context, cancel context.CancelFunc, trans transport, opts *Options) *client {
 	c := &client{
-		ctx:            ctx,
-		cancel:         cancel,
-		transport:      trans,
-		opts:           opts,
-		connectedCh:    make(chan struct{}),
-		connectErrCh:   make(chan error, 1),
-		pendingRPC:     make(map[string]*rpcPending),
-		pendingAck:     make(map[string]*ackPending),
-		subscriptions:  make(map[string]*subscriptionState),
-		channelOffsets: make(map[string]uint64),
-		pongCh:         make(chan struct{}, 1),
+		ctx:             ctx,
+		cancel:          cancel,
+		transport:       trans,
+		opts:            opts,
+		connectedCh:     make(chan struct{}),
+		connectErrCh:    make(chan error, 1),
+		pendingRPC:      make(map[string]*rpcPending),
+		pendingAck:      make(map[string]*ackPending),
+		pendingPresence: make(map[string]*rpcPending),
+		pendingSurvey:   make(map[string]*surveyPending),
+		subscriptions:   make(map[string]*subscriptionState),
+		channelOffsets:  make(map[string]uint64),
+		pongCh:          make(chan struct{}, 1),
 	}
 	return c
 }
@@ -393,10 +442,13 @@ func (c *client) receiveLoop(trans transport, gen uint64) {
 				isConnError := !c.connected.Load()
 				c.handleError(fmt.Errorf("receive error: %w", err), isConnError)
 				c.connected.Store(false)
-				// Pending publishes can no longer be acked on the lost
-				// connection: fail them so callers can retry instead of
-				// hanging until their context deadline.
+				// Pending publishes / surveys / presence queries can no
+				// longer complete on the lost connection: fail them so
+				// callers can retry instead of hanging until their context
+				// deadline.
 				c.rejectPendingAcks(err)
+				c.rejectPendingSurveys(err)
+				c.rejectPendingPresence(err)
 				// Attempt reconnection if enabled
 				if c.opts.AutoReconnect && !c.closed.Load() {
 					go c.reconnectLoop()
@@ -416,11 +468,11 @@ func (c *client) handleMessage(msg *clientpb.OutboundMessage, gen uint64) {
 		c.handleConnected(env.Connected, gen)
 
 	case *clientpb.OutboundMessage_Error:
-		// If the error references a pending RPC request or a pending
-		// publish, deliver it to the waiting caller so the call fails fast
-		// with the server error instead of hanging until the context
-		// deadline.
-		if !c.deliverPending(msg) && !c.rejectPendingAck(msg) {
+		// If the error references a pending RPC request, a pending
+		// publish, a pending presence query or a pending survey, deliver it
+		// to the waiting caller so the call fails fast with the server error
+		// instead of hanging until the context deadline.
+		if !c.deliverPending(msg) && !c.rejectPendingAck(msg) && !c.deliverPresence(msg) && !c.deliverSurveyError(msg) {
 			if dis, ok := disconnectFromError(env.Error); ok {
 				// The gRPC stream has no close frame: the server encodes the
 				// numeric disconnect code in the error envelope metadata, and
@@ -452,6 +504,20 @@ func (c *client) handleMessage(msg *clientpb.OutboundMessage, gen uint64) {
 		// Handle pong response from server
 		c.handlePong()
 
+	case *clientpb.OutboundMessage_Ping:
+		// The server probes us: answer with a pong carrying the same id.
+		c.handleServerPing(msg)
+
+	case *clientpb.OutboundMessage_PresenceEvent:
+		c.handlePresenceEvent(env.PresenceEvent)
+
+	case *clientpb.OutboundMessage_Presence:
+		// Snapshot reply to our PresenceQuery, matched by the inbound id.
+		c.deliverPresence(msg)
+
+	case *clientpb.OutboundMessage_SurveyResult:
+		c.handleSurveyResult(env.SurveyResult)
+
 	case *clientpb.OutboundMessage_SubRefreshAck:
 		// The server acknowledged our SubRefresh request; there is nothing
 		// to do client-side.
@@ -460,8 +526,10 @@ func (c *client) handleMessage(msg *clientpb.OutboundMessage, gen uint64) {
 		c.handleSurveyRequest(env.SurveyRequest)
 
 	case *clientpb.OutboundMessage_SurveyReply:
-		// The SDK does not initiate surveys, so replies from the server to a
-		// survey we never sent are ignored.
+		// Outbound SurveyReply is a legacy server echo of a survey reply;
+		// the SDK answers surveys with inbound SurveyReply messages and
+		// aggregates client-initiated surveys via SurveyResult, so replies
+		// from the server are ignored.
 	}
 }
 
@@ -526,25 +594,13 @@ func (c *client) handleConnected(connected *clientpb.Connected, gen uint64) {
 	}
 	c.subMu.Unlock()
 
-	// Handle initial publications (recovery messages)
-	for _, pub := range connected.GetPublications() {
-		// Update offsets from recovered publications
-		for _, env := range pub.GetMessages() {
-			if env != nil && env.GetOffset() > 0 {
-				c.offsetMu.Lock()
-				c.channelOffsets[env.GetChannel()] = env.GetOffset()
-				c.offsetMu.Unlock()
-			}
-		}
-		msgs := wrapPublicationToMessages(pub)
-		if len(msgs) > 0 {
-			c.handlerMu.RLock()
-			handler := c.msgHandler
-			c.handlerMu.RUnlock()
-			if handler != nil {
-				handler(msgs)
-			}
-		}
+	// Handle initial publications (recovery messages) and presence snapshots
+	// delivered with the connection. Snapshots are dispatched after the
+	// authoritative subscription write-back above.
+	c.handlePublications(connected.GetPublications())
+	c.applyRecoverResults(connected.GetRecoverResults())
+	for _, snap := range connected.GetPresence() {
+		c.notifyPresenceSnapshot(snap)
 	}
 
 	// Start ping loop
@@ -566,7 +622,10 @@ func (c *client) handleConnected(connected *clientpb.Connected, gen uint64) {
 	}
 }
 
-// handleSubscribeAck handles the SubscribeAck message.
+// handleSubscribeAck handles the SubscribeAck message: it writes back the
+// authoritative subscription state, delivers recovered publications through
+// the same path as Connected publications, records recover-result cursors and
+// dispatches presence snapshots.
 func (c *client) handleSubscribeAck(ack *clientpb.SubscribeAck) {
 	for _, sub := range ack.GetSubscriptions() {
 		state := c.subscriptions[sub.GetChannel()]
@@ -582,6 +641,72 @@ func (c *client) handleSubscribeAck(ack *clientpb.SubscribeAck) {
 		c.subMu.Lock()
 		c.subscriptions[sub.GetChannel()] = state
 		c.subMu.Unlock()
+	}
+
+	// Recovered messages take the same delivery path as Connected
+	// publications: OnMessage plus per-message offset tracking.
+	c.handlePublications(ack.GetPublications())
+
+	// Recover results echo the per-channel cursor: keep it so a reconnect
+	// resumes from the server-confirmed position. An empty batch (offset 0)
+	// must not wipe a known position.
+	c.applyRecoverResults(ack.GetRecoverResults())
+
+	// Presence snapshots ride the subscribe ack; dispatch after the
+	// subscription state write-back above.
+	for _, snap := range ack.GetPresence() {
+		c.notifyPresenceSnapshot(snap)
+	}
+}
+
+// applyRecoverResults writes back server-echoed recovery cursors. An empty
+// batch (offset 0) must not wipe a known position.
+func (c *client) applyRecoverResults(results []*clientpb.RecoverResult) {
+	for _, rr := range results {
+		if rr != nil && rr.GetOffset() > 0 {
+			c.offsetMu.Lock()
+			c.channelOffsets[rr.GetChannel()] = rr.GetOffset()
+			c.offsetMu.Unlock()
+		}
+	}
+}
+
+// handlePublications updates per-channel offsets and delivers each batch to
+// the OnMessage handler. It is shared by Connected, SubscribeAck and live
+// Publication messages so every delivery path behaves identically.
+func (c *client) handlePublications(pubs []*clientpb.Publication) {
+	for _, pub := range pubs {
+		// Update per-channel offsets for session resumption
+		for _, env := range pub.GetMessages() {
+			if env != nil && env.GetOffset() > 0 {
+				c.offsetMu.Lock()
+				c.channelOffsets[env.GetChannel()] = env.GetOffset()
+				c.offsetMu.Unlock()
+			}
+		}
+		msgs := wrapPublicationToMessages(pub)
+		if len(msgs) > 0 {
+			c.handlerMu.RLock()
+			handler := c.msgHandler
+			c.handlerMu.RUnlock()
+			if handler != nil {
+				handler(msgs)
+			}
+		}
+	}
+}
+
+// notifyPresenceSnapshot dispatches one snapshot to the OnPresenceSnapshot
+// handler, if any.
+func (c *client) notifyPresenceSnapshot(snap *clientpb.PresenceSnapshot) {
+	if snap == nil {
+		return
+	}
+	c.handlerMu.RLock()
+	handler := c.presenceSnapshotHandler
+	c.handlerMu.RUnlock()
+	if handler != nil {
+		handler(presenceSnapshotFromPB(snap))
 	}
 }
 
@@ -602,23 +727,7 @@ func (c *client) handleUnsubscribeAck(ack *clientpb.UnsubscribeAck) {
 
 // handlePublication handles the Publication message.
 func (c *client) handlePublication(pub *clientpb.Publication) {
-	// Update per-channel offsets for session resumption
-	for _, env := range pub.GetMessages() {
-		if env != nil && env.GetOffset() > 0 {
-			c.offsetMu.Lock()
-			c.channelOffsets[env.GetChannel()] = env.GetOffset()
-			c.offsetMu.Unlock()
-		}
-	}
-	msgs := wrapPublicationToMessages(pub)
-	if len(msgs) > 0 {
-		c.handlerMu.RLock()
-		handler := c.msgHandler
-		c.handlerMu.RUnlock()
-		if handler != nil {
-			handler(msgs)
-		}
-	}
+	c.handlePublications([]*clientpb.Publication{pub})
 }
 
 // handleRPCReply handles the RPC reply message.
@@ -702,6 +811,28 @@ func (c *client) rejectPendingAck(msg *clientpb.OutboundMessage) bool {
 	return ok
 }
 
+// rejectPendingPresence fails all pending Presence queries when the
+// connection is lost before their snapshot arrives.
+func (c *client) rejectPendingPresence(err error) {
+	c.pendingPresenceMu.Lock()
+	for id, rp := range c.pendingPresence {
+		delete(c.pendingPresence, id)
+		select {
+		case rp.ch <- &clientpb.OutboundMessage{
+			Envelope: &clientpb.OutboundMessage_Error{
+				Error: &sharedpb.Error{
+					Code:    "INTERNAL_ERROR",
+					Type:    "server_error",
+					Message: "connection lost before presence snapshot: " + err.Error(),
+				},
+			},
+		}:
+		default:
+		}
+	}
+	c.pendingPresenceMu.Unlock()
+}
+
 // rejectPendingAcks fails all pending publishes when the connection is lost
 // before their acks arrive.
 func (c *client) rejectPendingAcks(err error) {
@@ -755,6 +886,19 @@ func WithEphemeral(ephemeral bool) SubscribeOption {
 func WithSubscriptionToken(token string) SubscribeOption {
 	return func(s *clientpb.Subscription) {
 		s.Token = token
+	}
+}
+
+// WithRecover enables history recovery for the subscription: the server
+// replays messages published after the given offset (interpreted in the given
+// broker epoch) through SubscribeAck publications, delivered via OnMessage.
+// Pass offset 0 / empty epoch for a fresh subscription that recovers from the
+// start, subject to server policy; the recover flag is always sent.
+func WithRecover(offset uint64, epoch string) SubscribeOption {
+	return func(s *clientpb.Subscription) {
+		s.Recover = true
+		s.Offset = offset
+		s.Epoch = epoch
 	}
 }
 
@@ -1134,6 +1278,45 @@ func (c *client) OnSurvey(fn func(requestID string, req *Message) (*Message, err
 	c.handlerMu.Unlock()
 }
 
+// OnSurveyRequest sets the handler for survey requests from the server,
+// additionally receiving the request channel. When set it takes precedence
+// over the OnSurvey handler. When no handler at all is set, the request
+// payload is echoed back to the server.
+func (c *client) OnSurveyRequest(fn func(requestID, channel string, req *Message) (*Message, error)) {
+	c.handlerMu.Lock()
+	c.surveyRequestHandler = fn
+	c.handlerMu.Unlock()
+}
+
+// OnPresence sets the handler for presence events (join/leave).
+func (c *client) OnPresence(fn func(PresenceEvent)) {
+	c.handlerMu.Lock()
+	c.presenceHandler = fn
+	c.handlerMu.Unlock()
+}
+
+// OnPresenceSnapshot sets the handler for presence snapshots delivered with
+// Connected / SubscribeAck and for the snapshot returned by a Presence query.
+func (c *client) OnPresenceSnapshot(fn func(PresenceSnapshot)) {
+	c.handlerMu.Lock()
+	c.presenceSnapshotHandler = fn
+	c.handlerMu.Unlock()
+}
+
+// handlePresenceEvent dispatches a presence event to the OnPresence handler.
+// Unknown actions are still delivered.
+func (c *client) handlePresenceEvent(ev *clientpb.PresenceEvent) {
+	if ev == nil {
+		return
+	}
+	c.handlerMu.RLock()
+	handler := c.presenceHandler
+	c.handlerMu.RUnlock()
+	if handler != nil {
+		handler(presenceEventFromPB(ev))
+	}
+}
+
 // SubRefresh asks the server to re-validate the subscriptions for the given
 // channels (e.g. after an ACL change on the backend).
 func (c *client) SubRefresh(ctx context.Context, channels ...string) error {
@@ -1158,6 +1341,97 @@ func (c *client) SubRefresh(ctx context.Context, channels ...string) error {
 	}
 
 	return nil
+}
+
+// Presence queries the current presence snapshot of an exact channel. The
+// server replies with a single snapshot matched by this query's id, which is
+// returned and also dispatched to the OnPresenceSnapshot handler. An empty or
+// wildcard channel is handed to the server, which rejects it (BAD_REQUEST);
+// otherwise failures surface as an error carrying the server code/message.
+// The wait happens on the caller's goroutine, so it must not be invoked
+// synchronously from receive-loop callbacks (OnMessage, OnPresence,
+// OnSurvey*, OnPresenceSnapshot).
+func (c *client) Presence(ctx context.Context, channel string) (*PresenceSnapshot, error) {
+	if !c.connected.Load() {
+		return nil, fmt.Errorf("not connected")
+	}
+
+	id := c.generateID()
+	rp := &rpcPending{ch: make(chan *clientpb.OutboundMessage, 1)}
+
+	// Register the pending query before sending so the reply can never be
+	// missed between the send and the registration.
+	c.pendingPresenceMu.Lock()
+	c.pendingPresence[id] = rp
+	c.pendingPresenceMu.Unlock()
+	defer func() {
+		c.pendingPresenceMu.Lock()
+		delete(c.pendingPresence, id)
+		c.pendingPresenceMu.Unlock()
+		rp.close()
+	}()
+
+	msg := &clientpb.InboundMessage{
+		Id: id,
+		Envelope: &clientpb.InboundMessage_PresenceQuery{
+			PresenceQuery: &clientpb.PresenceQuery{Channel: channel},
+		},
+	}
+
+	c.mu.RLock()
+	trans := c.transport
+	c.mu.RUnlock()
+	if err := trans.Send(c.ctx, msg); err != nil {
+		return nil, fmt.Errorf("presence query failed: %w", err)
+	}
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case outMsg := <-rp.ch:
+		if outMsg == nil {
+			return nil, fmt.Errorf("presence failed: no response")
+		}
+		if err := outMsg.GetError(); err != nil {
+			return nil, fmt.Errorf("presence error: %s (code: %s)", err.GetMessage(), err.GetCode())
+		}
+		snap := outMsg.GetPresence()
+		if snap == nil {
+			return nil, fmt.Errorf("presence failed: no snapshot")
+		}
+		ps := presenceSnapshotFromPB(snap)
+		c.handlerMu.RLock()
+		handler := c.presenceSnapshotHandler
+		c.handlerMu.RUnlock()
+		if handler != nil {
+			handler(ps)
+		}
+		return &ps, nil
+	}
+}
+
+// deliverPresence routes a snapshot or error envelope whose id matches a
+// pending PresenceQuery to the waiting caller, and removes the entry. It
+// reports whether the message was routed. Delivery is non-blocking and
+// happens under the pendingPresence write lock, mirroring deliverPending.
+func (c *client) deliverPresence(msg *clientpb.OutboundMessage) bool {
+	id := msg.GetId()
+	if id == "" {
+		return false
+	}
+
+	c.pendingPresenceMu.Lock()
+	rp, ok := c.pendingPresence[id]
+	if ok {
+		delete(c.pendingPresence, id)
+		select {
+		case rp.ch <- msg:
+		default:
+			// Channel is full, discard
+		}
+	}
+	c.pendingPresenceMu.Unlock()
+	return ok
 }
 
 // SendSurveyReply sends a reply to a survey request issued by the server.
@@ -1208,28 +1482,211 @@ func (c *client) SendSurveyReply(ctx context.Context, requestID string, reply *M
 }
 
 // handleSurveyRequest handles a SurveyRequest from the server, dispatching to
-// the user survey handler or echoing the payload back by default.
+// the OnSurveyRequest handler (with channel), falling back to the OnSurvey
+// handler (without channel), or echoing the payload back by default.
 func (c *client) handleSurveyRequest(req *clientpb.SurveyRequest) {
 	requestID := req.GetRequestId()
+	channel := req.GetChannel()
 	reqMsg := PayloadToMessage(req.GetPayload(), "")
 
 	c.handlerMu.RLock()
-	handler := c.surveyHandler
+	onRequest := c.surveyRequestHandler
+	onSurvey := c.surveyHandler
 	c.handlerMu.RUnlock()
 
-	if handler == nil {
-		// Default: echo the request payload back, mirroring the server's own
-		// default survey behavior.
-		_ = c.SendSurveyReply(context.Background(), requestID, reqMsg, nil)
+	if onRequest != nil {
+		reply, err := onRequest(requestID, channel, reqMsg)
+		if err != nil {
+			_ = c.SendSurveyReply(context.Background(), requestID, nil, err)
+			return
+		}
+		_ = c.SendSurveyReply(context.Background(), requestID, reply, nil)
 		return
 	}
 
-	reply, err := handler(requestID, reqMsg)
-	if err != nil {
-		_ = c.SendSurveyReply(context.Background(), requestID, nil, err)
+	if onSurvey != nil {
+		reply, err := onSurvey(requestID, reqMsg)
+		if err != nil {
+			_ = c.SendSurveyReply(context.Background(), requestID, nil, err)
+			return
+		}
+		_ = c.SendSurveyReply(context.Background(), requestID, reply, nil)
 		return
 	}
-	_ = c.SendSurveyReply(context.Background(), requestID, reply, nil)
+
+	// Default: echo the request payload back to the server so the initiator
+	// collects an answer even when no application handler is registered.
+	_ = c.SendSurveyReply(context.Background(), requestID, reqMsg, nil)
+}
+
+// Survey initiates a survey on an exact channel and waits for the aggregated
+// answers. A timeout<=0 sends 0 and lets the server apply its policy cap. The
+// wait happens on the caller's goroutine: the receive loop fills the pending
+// result, so this must not be invoked synchronously from receive-loop
+// callbacks (OnMessage, OnPresence, OnSurvey*, OnPresenceSnapshot).
+//
+// Completion conditions, first match wins:
+//   - a SurveyResult carrying the generated request_id;
+//   - a top-level error whose id equals this request's inbound id
+//     (synchronous rejections such as SURVEY_DISABLED);
+//   - a top-level error without a matchable id whose code is a survey
+//     rejection code, when exactly one Survey() is in flight (server worker
+//     failures may not echo the request id; the server allows one in-flight
+//     survey per session).
+//
+// When the SurveyResult itself carries an error, the answers (if any) are
+// returned alongside it. ctx cancellation/timeout, Close and disconnect all
+// fail the pending survey.
+func (c *client) Survey(ctx context.Context, channel string, payload *Message, timeout time.Duration) ([]SurveyAnswer, error) {
+	if !c.connected.Load() {
+		return nil, fmt.Errorf("not connected")
+	}
+
+	var pbPayload *sharedpb.Payload
+	if payload != nil {
+		p, err := payload.ToPayload()
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert survey payload: %w", err)
+		}
+		pbPayload = p
+	}
+
+	requestID := uuid.NewString()
+	id := c.generateID()
+	sp := &surveyPending{requestID: requestID, ch: make(chan surveyPendingResult, 1)}
+
+	// Register the pending survey before sending so the result can never be
+	// missed between the send and the registration.
+	c.pendingSurveyMu.Lock()
+	c.pendingSurvey[id] = sp
+	c.pendingSurveyMu.Unlock()
+	defer func() {
+		c.pendingSurveyMu.Lock()
+		delete(c.pendingSurvey, id)
+		c.pendingSurveyMu.Unlock()
+	}()
+
+	surveyReq := &clientpb.SurveyRequest{
+		RequestId: requestID,
+		Channel:   channel,
+		Payload:   pbPayload,
+	}
+	if timeout > 0 {
+		surveyReq.TimeoutMs = int32(timeout.Milliseconds())
+	}
+
+	msg := &clientpb.InboundMessage{
+		Id: id,
+		Envelope: &clientpb.InboundMessage_SurveyRequest{
+			SurveyRequest: surveyReq,
+		},
+	}
+
+	c.mu.RLock()
+	trans := c.transport
+	c.mu.RUnlock()
+	if err := trans.Send(c.ctx, msg); err != nil {
+		return nil, fmt.Errorf("survey failed: %w", err)
+	}
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case res := <-sp.ch:
+		if res.err != nil {
+			return nil, res.err
+		}
+		answers := make([]SurveyAnswer, 0, len(res.result.GetAnswers()))
+		for _, a := range res.result.GetAnswers() {
+			answers = append(answers, surveyAnswerFromPB(a))
+		}
+		if err := res.result.GetError(); err != nil {
+			return answers, fmt.Errorf("survey error: %s (code: %s)", err.GetMessage(), err.GetCode())
+		}
+		return answers, nil
+	}
+}
+
+// handleSurveyResult routes a SurveyResult envelope to the pending survey
+// with the matching request_id, if any, and removes the entry. Results that
+// arrive after the pending survey was cleaned up (ctx timeout, Close) are
+// dropped.
+func (c *client) handleSurveyResult(result *clientpb.SurveyResult) {
+	if result == nil {
+		return
+	}
+
+	c.pendingSurveyMu.Lock()
+	var sp *surveyPending
+	for id, p := range c.pendingSurvey {
+		if p.requestID == result.GetRequestId() {
+			sp = p
+			delete(c.pendingSurvey, id)
+			break
+		}
+	}
+	c.pendingSurveyMu.Unlock()
+
+	if sp != nil {
+		sp.resolve(surveyPendingResult{result: result})
+	}
+}
+
+// surveyRejectCodes are the top-level error codes the server may use to
+// reject a client survey without echoing the request id (asynchronous worker
+// failures).
+var surveyRejectCodes = map[string]bool{
+	"SURVEY_DISABLED":             true,
+	"SURVEY_TOO_MANY_SUBSCRIBERS": true,
+	"BAD_REQUEST":                 true,
+	"PERMISSION_DENIED":           true,
+	"RATE_LIMITED":                true,
+	"INTERNAL_ERROR":              true,
+}
+
+// deliverSurveyError routes a top-level error envelope to a pending Survey.
+// The id match covers synchronous rejections (the server echoes the inbound
+// id); the no-id fallback covers worker failures, which are delivered only
+// when exactly one Survey() is in flight — the server allows one in-flight
+// survey per session. It reports whether the error was routed to a survey.
+func (c *client) deliverSurveyError(msg *clientpb.OutboundMessage) bool {
+	err := msg.GetError()
+	if err == nil {
+		return false
+	}
+	code := err.GetCode()
+
+	c.pendingSurveyMu.Lock()
+	defer c.pendingSurveyMu.Unlock()
+
+	if id := msg.GetId(); id != "" {
+		if sp, ok := c.pendingSurvey[id]; ok {
+			delete(c.pendingSurvey, id)
+			sp.resolve(surveyPendingResult{err: fmt.Errorf("survey error: %s (code: %s)", err.GetMessage(), code)})
+			return true
+		}
+		return false
+	}
+
+	if len(c.pendingSurvey) == 1 && surveyRejectCodes[code] {
+		for id, sp := range c.pendingSurvey {
+			delete(c.pendingSurvey, id)
+			sp.resolve(surveyPendingResult{err: fmt.Errorf("survey error: %s (code: %s)", err.GetMessage(), code)})
+		}
+		return true
+	}
+	return false
+}
+
+// rejectPendingSurveys fails all pending surveys when the connection is lost
+// before their results arrive.
+func (c *client) rejectPendingSurveys(err error) {
+	c.pendingSurveyMu.Lock()
+	for id, sp := range c.pendingSurvey {
+		delete(c.pendingSurvey, id)
+		sp.resolve(surveyPendingResult{err: fmt.Errorf("connection lost before survey result: %w", err)})
+	}
+	c.pendingSurveyMu.Unlock()
 }
 
 // SessionID returns the session ID.
@@ -1449,6 +1906,22 @@ func (c *client) Close() error {
 		rp.close()
 	}
 	c.pendingRPCMu.Unlock()
+
+	// Clean up pending presence queries
+	c.pendingPresenceMu.Lock()
+	for id, rp := range c.pendingPresence {
+		delete(c.pendingPresence, id)
+		rp.close()
+	}
+	c.pendingPresenceMu.Unlock()
+
+	// Clean up pending surveys
+	c.pendingSurveyMu.Lock()
+	for id, sp := range c.pendingSurvey {
+		delete(c.pendingSurvey, id)
+		sp.resolve(surveyPendingResult{err: errors.New("client closed before survey result")})
+	}
+	c.pendingSurveyMu.Unlock()
 
 	// Clean up pending publish acks
 	c.pendingAckMu.Lock()
@@ -1765,4 +2238,25 @@ func (c *client) handlePong() {
 	case c.pongCh <- struct{}{}:
 	default:
 	}
+}
+
+// handleServerPing answers a server-issued ping with a pong carrying the same
+// id (an empty id still gets a pong), and records the exchange as liveness
+// evidence through the same lastPong/pongCh path as handlePong, so the
+// client's own PingTimeout cannot kill a connection the server is actively
+// probing.
+func (c *client) handleServerPing(msg *clientpb.OutboundMessage) {
+	pong := &clientpb.InboundMessage{
+		Id: msg.GetId(),
+		Envelope: &clientpb.InboundMessage_Pong{
+			Pong: &clientpb.Pong{},
+		},
+	}
+	c.mu.RLock()
+	trans := c.transport
+	c.mu.RUnlock()
+	if trans != nil {
+		_ = trans.Send(c.ctx, pong)
+	}
+	c.handlePong()
 }

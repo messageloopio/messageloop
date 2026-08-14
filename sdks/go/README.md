@@ -96,6 +96,46 @@ client.OnError(func(err error) {
 })
 ```
 
+## 恢复订阅
+
+`SubscribeWith(channel, messageloopgo.WithRecover(offset, epoch))`：从指定 offset 恢复订阅，恢复消息随 `SubscribeAck.publications` 走普通 `OnMessage` 路径。传 `0` / `""` 仍发送 `recover=true`。
+
+```go
+if err := client.SubscribeWith("chat.recover", messageloopgo.WithRecover(42, "ep")); err != nil {
+    panic(err)
+}
+```
+
+## Presence
+
+```go
+client.OnPresence(func(ev messageloopgo.PresenceEvent) { ... })                       // join/leave
+client.OnPresenceSnapshot(func(snap messageloopgo.PresenceSnapshot) { ... })          // Connected/Ack 快照
+snap, err := client.Presence(ctx, "room.x")                                            // 主动查询
+```
+
+`Connected.presence` / `SubscribeAck.presence` 快照在状态写回后触发 `OnPresenceSnapshot`；`Presence(ctx, channel)` 返回同 id 快照并再触发一次该回调。
+
+## Survey
+
+```go
+answers, err := client.Survey(ctx, "chat.x", reqMsg, 2*time.Second)
+// a.SessionID / a.UserID（metadata.entries["user_id"]）/ a.Payload / a.Error
+
+client.OnSurvey(func(requestID string, req *Message) (*Message, error) { ... })                    // 旧签名
+client.OnSurveyRequest(func(requestID, channel string, req *Message) (*Message, error) { ... })    // 新签名（带频道）
+```
+
+`Survey` 按 `request_id` 收回 `SurveyResult`；同步拒绝（如 `SURVEY_DISABLED`）与异步 worker 失败以顶层 Error 返回。`timeout<=0` 由服务端策略决定。旧 `OnSurvey` 签名不变；无 handler 时默认 echo 请求 payload。
+
+## 服务端 Ping
+
+SDK 收到服务端 Outbound `Ping` 会立即以同 id 的 Inbound `Pong` 应答并计为存活证据。开启 `server.heartbeat.ping_interval` 必须使用本版本 SDK。
+
+## 收包回调限制
+
+`RPC` / `Survey` / `Presence` 会阻塞等待接收循环，**不要**在 `OnMessage` / `OnPresence` / `OnPresenceSnapshot` / `OnSurvey` / `OnSurveyRequest` 里同步调用它们；需要时另起 goroutine。
+
 ## 测试
 
 ```bash
