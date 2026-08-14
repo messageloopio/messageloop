@@ -599,26 +599,38 @@ type presenceRecipient struct {
 // subscription's ephemeral flag.
 func (h *Hub) presenceRecipients(ch string) []presenceRecipient {
 	recipients := make(map[string]presenceRecipient)
+	add := func(client *Client, ephemeral bool) {
+		if client == nil {
+			return
+		}
+		sid := client.SessionID()
+		if existing, ok := recipients[sid]; ok {
+			// A session covered by any non-ephemeral subscription must
+			// receive events. An ephemeral exact sub must not hide a
+			// tracked wildcard (or the reverse).
+			if existing.ephemeral && !ephemeral {
+				recipients[sid] = presenceRecipient{client: client, ephemeral: false}
+			}
+			return
+		}
+		recipients[sid] = presenceRecipient{client: client, ephemeral: ephemeral}
+	}
 
 	shard := h.subShards[index(ch, numHubShards)]
 	shard.mu.RLock()
 	if subs, ok := shard.subs[ch]; ok {
 		for _, sub := range subs {
-			recipients[sub.Client.SessionID()] = presenceRecipient{client: sub.Client, ephemeral: sub.Ephemeral}
+			add(sub.Client, sub.Ephemeral)
 		}
 	}
 	shard.mu.RUnlock()
 
 	for _, candidate := range h.matcher.Lookup(ch) {
 		sub, ok := candidate.(Subscriber)
-		if !ok || sub.Client == nil {
+		if !ok {
 			continue
 		}
-		sid := sub.Client.SessionID()
-		if _, exists := recipients[sid]; exists {
-			continue
-		}
-		recipients[sid] = presenceRecipient{client: sub.Client, ephemeral: sub.Ephemeral}
+		add(sub.Client, sub.Ephemeral)
 	}
 
 	result := make([]presenceRecipient, 0, len(recipients))

@@ -263,7 +263,8 @@ func (n *Node) handleClusterUnsubscribeCommand(ctx context.Context, cmd *Cluster
 		return clusterCommandSessionNotFound(result)
 	}
 
-	_, alreadySubscribed := n.hub.LookupSubscriber(cmd.Channel, client)
+	stored, alreadySubscribed := n.hub.LookupSubscriber(cmd.Channel, client)
+	ephemeral := alreadySubscribed && stored.Ephemeral
 	if err := n.RemoveSubscription(cmd.Channel, client); err != nil {
 		result.Status = ClusterCommandStatusFailed
 		result.ErrorCode = "SESSION_UNSUBSCRIBE_FAILED"
@@ -271,7 +272,9 @@ func (n *Node) handleClusterUnsubscribeCommand(ctx context.Context, cmd *Cluster
 		return result
 	}
 	if alreadySubscribed {
-		n.presenceLeave(ctx, cmd.Channel, client.SessionID(), client.UserID(), false)
+		// Read Ephemeral before RemoveSubscription: a locally created
+		// ephemeral subscription unsubscribed via Admin must not emit leave.
+		n.presenceLeave(ctx, cmd.Channel, client.SessionID(), client.UserID(), ephemeral)
 	}
 	return result
 }

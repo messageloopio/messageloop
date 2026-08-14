@@ -536,3 +536,53 @@ func TestPresence_ResubscribeSnapshotNoSecondJoin(t *testing.T) {
 	require.Equal(t, 2, len(snapshots[0].GetClients()))
 	require.NotNil(t, clientA)
 }
+
+// TestPresence_EphemeralExactDoesNotHideWildcardCoverage verifies that a
+// session subscribed both ephemerally to the exact channel and persistently
+// via a wildcard still receives join events (dedupe prefers non-ephemeral).
+func TestPresence_EphemeralExactDoesNotHideWildcardCoverage(t *testing.T) {
+	ctx := context.Background()
+	node := NewNode(nil)
+	require.NoError(t, node.Run(ctx))
+
+	const ch = "chat.room.mix"
+	clientA, transportA := connectAndSubscribe(t, node, "client-a",
+		&clientpb.Subscription{Channel: "chat.**"},
+		&clientpb.Subscription{Channel: ch, Ephemeral: true},
+	)
+	transportA.messages = nil
+
+	clientB, _ := connectAndSubscribe(t, node, "client-b", &clientpb.Subscription{Channel: ch})
+
+	events := presenceEventsOf(t, transportA)
+	require.Len(t, events, 1, "wildcard coverage must still deliver the exact-channel join")
+	require.Equal(t, ch, events[0].GetChannel())
+	require.Equal(t, clientB.SessionID(), events[0].GetInfo().GetSessionId())
+	require.NotNil(t, clientA)
+}
+
+// TestPresence_ClusterUnsubscribeEphemeralEmitsNoLeave verifies Admin
+// unsubscribe of a locally created ephemeral subscription does not emit leave.
+func TestPresence_ClusterUnsubscribeEphemeralEmitsNoLeave(t *testing.T) {
+	ctx := context.Background()
+	node := NewNode(nil)
+	require.NoError(t, node.Run(ctx))
+
+	const ch = "admin.eph.ch"
+	_, transportA := connectAndSubscribe(t, node, "client-a", &clientpb.Subscription{Channel: ch})
+	clientB, _ := connectAndSubscribe(t, node, "client-b", &clientpb.Subscription{Channel: ch, Ephemeral: true})
+	transportA.messages = nil
+
+	result := node.handleClusterUnsubscribeCommand(ctx, &ClusterCommand{
+		Type:      ClusterCommandUnsubscribe,
+		SessionID: clientB.SessionID(),
+		Channel:   ch,
+	}, &ClusterCommandResult{})
+	require.NotEqual(t, ClusterCommandStatusFailed, result.Status)
+
+	require.Empty(t, presenceEventsOf(t, transportA),
+		"unsubscribing an ephemeral member via Admin must not emit leave")
+	present, err := node.Presence(ctx, ch)
+	require.NoError(t, err)
+	require.NotContains(t, present, clientB.SessionID())
+}
