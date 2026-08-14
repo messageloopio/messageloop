@@ -237,10 +237,10 @@ npm run lint       # ESLint 检查 src/
 
 ## 发布流程
 
-版本变量定义在 `Taskfile.yml` 顶部：`Version: v0.1.1` 与 `Comment: "release v0.1.1"`。发布前更新这两个变量。
+版本变量定义在 `Taskfile.yml` 顶部：`Version: v0.2.0` 与 `Comment: "release v0.2.0"`。发布前更新这两个变量。
 
-- `task release-all`：依次为三个模块打 annotated tag 并推送：`v0.1.1`（根）、`shared/v0.1.1`（shared 模块）、`sdks/go/v0.1.1`（Go SDK）。标签格式为 `git tag -a <tag> -m <comment>` 后 `git push origin <tag>`，三组标签共享同一版本号，用目录前缀区分模块。
-- `task release-tag`：单独打一个标签并推送（`task release-tag Version=v0.1.1` 形式覆盖变量）。
+- `task release-all`：依次为三个模块打 annotated tag 并推送：`v0.2.0`（根）、`shared/v0.2.0`（shared 模块）、`sdks/go/v0.2.0`（Go SDK）。标签格式为 `git tag -a <tag> -m <comment>` 后 `git push origin <tag>`，三组标签共享同一版本号，用目录前缀区分模块。
+- `task release-tag`：单独打一个标签并推送（`task release-tag Version=v0.2.0` 形式覆盖变量）。
 - `task release-sdk-ts`：在 `sdks/ts/` 下执行 `npm exec rimraf -- dist` 清理、`npm run build` 构建、`npm publish --access public --registry https://registry.npmjs.org/` 发布。注意 npm 包版本（`package.json` 的 `version`，当前 `1.1.0`）独立于 Go 侧标签，需要单独递增。
 - `task upgrade-lynx`：批量升级 `lynx` 框架及 contrib 依赖（`go get -u github.com/lynx-go/x` 等）后 `go mod tidy`。
 

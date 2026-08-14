@@ -12,7 +12,7 @@ require (
 	github.com/lynx-go/lynx v1.2.0
 	github.com/lynx-go/lynx/contrib/zap v1.2.0
 	github.com/lynx-go/x v0.1.0
-	github.com/messageloopio/messageloop/shared v0.1.0
+	github.com/messageloopio/messageloop/shared v0.2.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/quic-go/quic-go v0.61.0
 	github.com/redis/go-redis/v9 v9.18.0
