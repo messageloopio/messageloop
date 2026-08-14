@@ -1237,6 +1237,9 @@ func (f *fakeHistoryBroker) History(ch string, sinceOffset uint64, limit int) ([
 	result := make([]*Publication, 0, len(f.pubs))
 	for _, p := range f.pubs {
 		if p.Offset >= sinceOffset {
+			if limit > 0 && len(result) >= limit {
+				break
+			}
 			result = append(result, p)
 		}
 	}
@@ -1374,6 +1377,19 @@ func TestNode_Connect_RecoveryCap(t *testing.T) {
 	msgs := connected.GetPublications()[0].GetMessages()
 	require.NotEmpty(t, msgs)
 	assert.Equal(t, fmt.Sprintf("cap-ch-%d", msgs[0].GetOffset()), msgs[0].GetId())
+
+	// PR-03: the cap must be visible: truncated=true and a recover_result
+	// carrying the last delivered offset.
+	require.True(t, connected.GetTruncated(), "hitting the recovery cap must set Connected.truncated")
+	require.NotEmpty(t, connected.GetRecoverResults(), "recover_results must cover every recovered channel")
+	res := connected.GetRecoverResults()[0]
+	require.Equal(t, "cap-ch", res.GetChannel())
+	require.True(t, res.GetRecovered())
+	require.True(t, res.GetTruncated())
+	lastMsgs := connected.GetPublications()[len(connected.GetPublications())-1].GetMessages()
+	require.NotEmpty(t, lastMsgs)
+	assert.Equal(t, lastMsgs[0].GetOffset(), res.GetOffset(),
+		"truncated offset must be the last delivered publication's offset")
 }
 
 // --- P1-4: PublishAck.Offset must carry the broker-assigned offset ---

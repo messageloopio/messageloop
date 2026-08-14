@@ -30,6 +30,9 @@ type Metrics struct {
 	ClusterProjectionRepairFailures prometheus.Counter
 	PresencePublishFailures         prometheus.Counter
 	ChannelPolicyTransientForced    prometheus.Counter
+	RecoveryTotal                   *prometheus.CounterVec
+	RecoveryPublications            *prometheus.HistogramVec
+	RecoveryTruncatedTotal          *prometheus.CounterVec
 }
 
 // NewMetrics creates and registers all Prometheus metrics.
@@ -112,6 +115,24 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name:      "channel_policy_transient_forced_total",
 			Help:      "Total number of client publications forced to transient delivery by channel policy.",
 		}),
+		RecoveryTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "messageloop",
+			Name:      "recovery_total",
+			Help:      "Total number of channel recovery attempts by path and result (ok/truncated/failed/skipped).",
+		}, []string{"path", "result"}),
+		RecoveryPublications: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: "messageloop",
+			Name:      "recovery_publications",
+			Help:      "Number of publications delivered per channel recovery attempt.",
+			// Count scale up to MaxRecoveredPublications. DefBuckets is a
+			// duration scale and would dump almost every observation into +Inf.
+			Buckets: []float64{1, 2, 5, 10, 25, 50, 100, 250, 500, 1000},
+		}, []string{"path"}),
+		RecoveryTruncatedTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "messageloop",
+			Name:      "recovery_truncated_total",
+			Help:      "Total number of channel recovery attempts truncated by a cap.",
+		}, []string{"path"}),
 	}
 	reg.MustRegister(
 		m.ConnectionsTotal,
@@ -129,6 +150,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.ClusterProjectionRepairFailures,
 		m.PresencePublishFailures,
 		m.ChannelPolicyTransientForced,
+		m.RecoveryTotal,
+		m.RecoveryPublications,
+		m.RecoveryTruncatedTotal,
 	)
 	return m
 }

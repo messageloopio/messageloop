@@ -127,7 +127,17 @@ To resume a previous session, include `session_id` in the Connect message:
 }
 ```
 
-If resumption succeeds, the response includes `resumed: true` and any missed publications since the last known offset.
+If resumption succeeds, the response includes `resumed: true`. Connect
+uses the same recovery helper as Subscribe: the recovery set is the
+ordered union of ACL-passed `connect.subscriptions` plus any snapshot-only
+channels from the resumed session. Each channel appears in
+`connected.recover_results`.
+
+On a **fresh** (non-resumed) Connect, `recover=true` + `offset=0` replays
+from the beginning of history. During session resume the server trusts its
+own recorded per-channel offset; a channel without one is skipped
+(`RECOVER_SKIPPED`) and history is never replayed from scratch. Subscribe
+is never a session resume — those offset rules apply only here.
 
 ## Pub/Sub
 
@@ -169,6 +179,34 @@ Subscription options:
 | `offset` | `0` | Resume from this offset (0 = latest) |
 | `recover` | `false` | Request missed messages since offset |
 | `epoch` | — | Broker epoch for offset validation |
+
+Recovery (PR-03): when `recover=true`, the `subscribe_ack` additionally
+carries `publications` (the missed messages, with the same stable
+`channel-offset` IDs as realtime delivery) and `recover_results`, one entry
+per subscribed channel:
+
+- `recovered=true` — History was read successfully (an empty batch means the
+  client is caught up; `offset` echoes the requested cursor).
+- `truncated=true` — the batch hit the request-level cap
+  (`MaxRecoveredPublications`, shared across all channels of the request or
+  the policy `recover_limit`); `offset` is the last delivered message and the
+  client may issue another `recover` from there.
+- `error.code=RECOVER_FAILED` — the broker history read failed. The
+  subscription **stays active**: a history hiccup never disconnects the
+  client or revokes the subscription.
+- `error.code=RECOVER_SKIPPED` — the client asked for recovery
+  (`recover=true`) but History was not called: a wildcard channel, or
+  channel policy denies history / recovery (`history=false` or
+  `transient_only`).
+
+Without `recover`, the ack still carries a `recover_results` entry per
+channel (`recovered=false`, **no** error). Old clients that ignore the new
+fields keep working: the subscription succeeds either way.
+
+`offset=0` with `recover=true` on Subscribe replays from the beginning of
+history (Subscribe is never a session resume). Resume offset rules — server
+recorded offset wins, missing offset is skipped — apply only to Connect;
+see [Session Resumption](#session-resumption).
 
 ### Unsubscribe
 

@@ -322,10 +322,11 @@ func TestClient_RemoteResume_SnapshotEpochMismatchForcesFullRecovery(t *testing.
 		"a snapshot epoch mismatch must force full recovery")
 }
 
-// TestClient_RemoteResume_FallsBackToClientOffset verifies the fallback: when
-// the snapshot carries no ChannelOffsets for the channel, the resume uses the
-// client-reported offset with the existing epoch validation.
-func TestClient_RemoteResume_FallsBackToClientOffset(t *testing.T) {
+// TestClient_RemoteResume_MissingOffsetSkipped verifies the resume rule
+// (PR-03, §5.1): when the snapshot carries no ChannelOffsets for the channel,
+// recovery is skipped entirely — the client-reported offset is never used to
+// replay history, and nothing is replayed from the beginning.
+func TestClient_RemoteResume_MissingOffsetSkipped(t *testing.T) {
 	snapshot := &ClusterSessionSnapshot{
 		SessionID:     "sess-off-resume",
 		UserID:        "user-1",
@@ -335,6 +336,6 @@ func TestClient_RemoteResume_FallsBackToClientOffset(t *testing.T) {
 	}
 	node := remoteResumeTestNode(t, snapshot, makeOffsetPubs(1, 10), "v2")
 	offsets := connectOffsets(t, node, &capturingTransport{}, 2, "v2")
-	assert.Equal(t, []uint64{3, 4, 5, 6, 7, 8, 9, 10}, offsets,
-		"without server-recorded offsets the client-reported offset is used")
+	assert.Empty(t, offsets,
+		"without a server-recorded offset the resume must skip recovery, not replay from the client offset")
 }

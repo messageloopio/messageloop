@@ -72,3 +72,45 @@ func TestMetrics_ChannelPolicyTransientForcedRegistered(t *testing.T) {
 	}
 	require.True(t, found, "messageloop_channel_policy_transient_forced_total must be registered")
 }
+
+// TestMetrics_RecoveryRegistered verifies PR-03: the three recovery metrics
+// are registered under their full names and record a truncated recovery.
+func TestMetrics_RecoveryRegistered(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	metrics := NewMetrics(reg)
+
+	metrics.RecoveryTotal.WithLabelValues("connect", "truncated").Inc()
+	metrics.RecoveryPublications.WithLabelValues("connect").Observe(1000)
+	metrics.RecoveryTruncatedTotal.WithLabelValues("connect").Inc()
+	metrics.RecoveryTotal.WithLabelValues("subscribe", "skipped").Inc()
+
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.RecoveryTotal.WithLabelValues("connect", "truncated")))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.RecoveryTruncatedTotal.WithLabelValues("connect")))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.RecoveryTotal.WithLabelValues("subscribe", "skipped")))
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	names := make(map[string]bool, len(families))
+	for _, family := range families {
+		names[family.GetName()] = true
+	}
+	require.True(t, names["messageloop_recovery_total"], "messageloop_recovery_total must be registered")
+	require.True(t, names["messageloop_recovery_publications"], "messageloop_recovery_publications must be registered")
+	require.True(t, names["messageloop_recovery_truncated_total"], "messageloop_recovery_truncated_total must be registered")
+
+	foundCapBucket := false
+	for _, family := range families {
+		if family.GetName() != "messageloop_recovery_publications" {
+			continue
+		}
+		require.NotEmpty(t, family.GetMetric())
+		for _, b := range family.GetMetric()[0].GetHistogram().GetBucket() {
+			if b.GetUpperBound() == 1000 {
+				foundCapBucket = true
+				require.Equal(t, uint64(1), b.GetCumulativeCount(),
+					"Observe(1000) must land in the 1000 bucket, not +Inf")
+			}
+		}
+	}
+	require.True(t, foundCapBucket, "messageloop_recovery_publications must include a 1000 bucket")
+}

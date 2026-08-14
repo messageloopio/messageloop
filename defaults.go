@@ -15,8 +15,9 @@ const (
 	DefaultHistoryLimit = 1000
 
 	// MaxRecoveredPublications caps the total number of publications delivered
-	// to a client during connect-time history recovery. Exceeding publications
-	// are truncated and logged.
+	// during history recovery for a single Connect or Subscribe request
+	// (shared across all channels in that request). Exceeding publications are
+	// truncated and surfaced in RecoverResult.truncated.
 	MaxRecoveredPublications = 1000
 
 	// DefaultShutdownTimeout is the maximum time to wait for graceful shutdown.

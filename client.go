@@ -664,6 +664,13 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 		currentEpoch = epocher.Epoch()
 	}
 
+	// Ordered recovery union (PR-03): ACL-passed request subscriptions first,
+	// then snapshot-only channels from a resumed session. Snapshot-only
+	// channels carry a synthetic recover subscription; the server-recorded
+	// ChannelOffsets drives the actual cursor.
+	recoverySubs := make([]*clientpb.Subscription, 0, len(subs))
+	seenRecovery := make(map[string]struct{}, len(subs))
+
 	for _, sub := range subs {
 		// Per-channel ACL check. Denied channels get an error envelope and are
 		// skipped; the connection stays up.
@@ -674,6 +681,11 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 				}
 			}))
 			continue
+		}
+
+		if _, dup := seenRecovery[sub.Channel]; !dup {
+			seenRecovery[sub.Channel] = struct{}{}
+			recoverySubs = append(recoverySubs, sub)
 		}
 
 		alreadySubscribed := c.hasSubscription(sub.Channel)
@@ -722,84 +734,56 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 				go c.node.PublishPresenceJoin(sub.Channel, c.session, c.user)
 			}
 		}
+	}
 
-		// Handle message recovery if requested.
-		if sub.Recover && sub.Offset > 0 {
-			sinceOffset := sub.Offset + 1
-			// Cross-node resume: the snapshot records the last offset this
-			// session actually received on each channel (delivered by the
-			// old node), which is more trustworthy than the client-reported
-			// offset (may be missing or forged). It wins when present.
-			serverRecorded := false
-			if resumeSnapshot != nil {
-				if serverOffset, ok := resumeSnapshot.ChannelOffsets[sub.Channel]; ok {
-					sinceOffset = serverOffset + 1
-					serverRecorded = true
-				}
-			}
-			if serverRecorded {
-				// The snapshot records the broker epoch it was taken under:
-				// a mismatch means the broker restarted since, so the
-				// recorded offsets belong to an invalidated history and
-				// recovery must start over.
-				if currentEpoch != "" && resumeSnapshot.BrokerEpoch != currentEpoch {
-					sinceOffset = 0
-				}
-			} else {
-				// Epoch validation: if the broker has restarted, the client's offset is invalid.
-				// A client that carries no epoch (older SDK) cannot prove its offset belongs
-				// to the current broker generation, so it is treated conservatively: recover
-				// from the beginning instead of silently skipping messages.
-				if currentEpoch != "" && sub.Epoch != currentEpoch {
-					if sub.Epoch == "" {
-						log.WarnContext(ctx, "client sent no epoch but broker epoch is set; recovering from the beginning",
-							"channel", sub.Channel, "broker_epoch", currentEpoch)
-					}
-					// Epoch mismatch or unknown — recover from the beginning
-					sinceOffset = 0
-				}
-			}
-			historyPubs, err := c.node.broker.History(sub.Channel, sinceOffset, 0)
-			if err != nil {
-				log.WarnContext(ctx, "failed to recover messages", "channel", sub.Channel, "error", err)
+	// Cross-node resume: channels the snapshot subscribed but this Connect
+	// request did not list are recovered too. They resume from the
+	// server-recorded ChannelOffsets; a channel missing an offset is skipped
+	// (never replayed from the beginning).
+	if resumeSnapshot != nil {
+		for _, snap := range resumeSnapshot.Subscriptions {
+			if _, dup := seenRecovery[snap.Channel]; dup {
 				continue
 			}
-			// Convert publications to protobuf format. The total number of
-			// recovered messages is capped to keep the Connected envelope bounded.
-			for _, pub := range historyPubs {
-				if len(pubs) >= MaxRecoveredPublications {
-					log.WarnContext(ctx, "recovery truncated",
-						"channel", sub.Channel, "limit", MaxRecoveredPublications)
-					break
-				}
-				pubs = append(pubs, &clientpb.Publication{
-					Messages: []*clientpb.Message{
-						{
-							Id:      publicationID(sub.Channel, pub.Offset),
-							Channel: sub.Channel,
-							Offset:  pub.Offset,
-							Payload: pub.PayloadProto(),
-							Metadata: func() *sharedpb.Metadata {
-								if len(pub.Metadata) == 0 {
-									return nil
-								}
-								return &sharedpb.Metadata{Entries: pub.Metadata}
-							}(),
-						},
-					},
-				})
-			}
+			seenRecovery[snap.Channel] = struct{}{}
+			recoverySubs = append(recoverySubs, &clientpb.Subscription{
+				Channel: snap.Channel,
+				Recover: true,
+				Offset:  0,
+			})
+		}
+	}
+
+	// Recover every channel in the union through the shared helper: one
+	// quota per Connect request, publications appended in union order
+	// (request channels first, then snapshot-only channels).
+	quota := newRecoverQuota()
+	var results []*clientpb.RecoverResult
+	recoveredAny := false
+	truncatedAny := false
+	for _, rs := range recoverySubs {
+		rec := c.node.recoverSubscription(ctx, rs, resumeSnapshot, quota, "connect")
+		pubs = append(pubs, rec.Publications...)
+		results = append(results, rec.RecoverResult())
+		if rec.Status == RecoverOK || rec.Status == RecoverTruncated || rec.Status == RecoverEpochReset {
+			recoveredAny = true
+		}
+		if rec.Status == RecoverTruncated {
+			truncatedAny = true
 		}
 	}
 
 	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_Connected{
 			Connected: &clientpb.Connected{
-				SessionId:     c.SessionID(),
-				Resumed:       resumed,
-				Epoch:         currentEpoch,
-				Publications:  pubs,
-				Subscriptions: c.subscriptionList(),
+				SessionId:      c.SessionID(),
+				Resumed:        resumed,
+				Epoch:          currentEpoch,
+				Publications:   pubs,
+				Subscriptions:  c.subscriptionList(),
+				Recovered:      recoveredAny,
+				Truncated:      truncatedAny,
+				RecoverResults: results,
 			},
 		}
 	}))
@@ -1146,6 +1130,17 @@ func (c *Client) handleSubscribe(ctx context.Context, in *clientpb.InboundMessag
 	subs := []*clientpb.Subscription{}
 	addedChannels := make([]string, 0, len(sub.Subscriptions))
 	addedPresence := make([]string, 0, len(sub.Subscriptions))
+
+	// Get current broker epoch for recovery validation.
+	var currentEpoch string
+	if epocher, ok := c.node.broker.(interface{ Epoch() string }); ok {
+		currentEpoch = epocher.Epoch()
+	}
+	// One quota shared by every channel in this Subscribe request.
+	quota := newRecoverQuota()
+	var pubs []*clientpb.Publication
+	var results []*clientpb.RecoverResult
+
 	for _, ch := range sub.Subscriptions {
 		alreadySubscribed := c.hasSubscription(ch.Channel)
 		// Proxy ACL check - check if there's a proxy configured for subscription ACL
@@ -1208,11 +1203,22 @@ func (c *Client) handleSubscribe(ctx context.Context, in *clientpb.InboundMessag
 			}
 			_, _ = p.OnSubscribed(ctx, subscribedReq) // Ignore error for notification
 		}
+
+		// Recover through the shared helper (PR-03): every ACL-passed,
+		// successfully subscribed channel gets a result; a re-subscribe with
+		// recover=true is a legitimate catch-up. The subscription stays even
+		// when recovery fails.
+		rec := c.node.recoverSubscription(ctx, ch, nil, quota, "subscribe")
+		pubs = append(pubs, rec.Publications...)
+		results = append(results, rec.RecoverResult())
 	}
 	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_SubscribeAck{
 			SubscribeAck: &clientpb.SubscribeAck{
-				Subscriptions: subs,
+				Subscriptions:  subs,
+				Publications:   pubs,
+				RecoverResults: results,
+				Epoch:          currentEpoch,
 			},
 		}
 	}))

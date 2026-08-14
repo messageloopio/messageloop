@@ -863,6 +863,9 @@ func (f *fakeEpochHistoryBroker) History(ch string, sinceOffset uint64, limit in
 	result := make([]*Publication, 0, len(f.pubs))
 	for _, p := range f.pubs {
 		if p.Offset >= sinceOffset {
+			if limit > 0 && len(result) >= limit {
+				break
+			}
 			result = append(result, p)
 		}
 	}
