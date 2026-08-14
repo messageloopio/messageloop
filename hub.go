@@ -348,7 +348,14 @@ func (h *Hub) broadcastPublication(ch string, pub *Publication) error {
 			evt.Channel = ch
 		}
 		if h.node != nil {
-			h.node.deliverPresenceEvent(evt.Channel, evt, "")
+			// Exclude the event subject itself: with cluster_emit the joiner
+			// is already subscribed to the exact channel, so without this the
+			// rewritten event would be a self-join.
+			exclude := ""
+			if evt.Info != nil {
+				exclude = evt.Info.GetSessionId()
+			}
+			h.node.deliverPresenceEvent(evt.Channel, evt, exclude)
 		}
 		return nil
 	}

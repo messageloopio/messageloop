@@ -23,6 +23,11 @@ server:
         allow_publish: ["alice", "bob"]
       - channel_pattern: "chat.private.*"
         deny_all: true
+  # presence:
+  #   cluster_emit: false   # Process-wide presence switch (not a channel policy).
+  #                         # true = publish join/leave through the broker so other
+  #                         # nodes deliver them. Change to true only after EVERY node
+  #                         # is on PR-04a+; older nodes deliver these frames as chat.
   # Channel prefix policies: first-match (more specific patterns first).
   # Unset = the compiled default below (history/presence on, survey off).
   # NOTE: policy matching is first-match, while ACL rules are last-write-wins.

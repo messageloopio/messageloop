@@ -32,6 +32,16 @@ type Server struct {
 	ACL         ACLConfig     `yaml:"acl" json:"acl" mapstructure:"acl"`
 	RequireAuth bool          `yaml:"require_auth" json:"require_auth" mapstructure:"require_auth"` // Reject connections with empty token
 	Channels    ChannelConfig `yaml:"channels" json:"channels" mapstructure:"channels"`
+	Presence    Presence      `yaml:"presence" json:"presence" mapstructure:"presence"`
+}
+
+// Presence is the process-wide presence control-plane switch.
+// It is not a channel policy (those stay under server.channels).
+type Presence struct {
+	// ClusterEmit, when true, publishes first-class presence events
+	// through the broker so other nodes can rewrite them. Default false.
+	// Turn on only after every node is on PR-04a+.
+	ClusterEmit bool `yaml:"cluster_emit" json:"cluster_emit" mapstructure:"cluster_emit"`
 }
 
 // ChannelConfig configures per-channel-prefix behavior switches

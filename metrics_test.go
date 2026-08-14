@@ -50,9 +50,9 @@ func TestMetricsTransportLabel(t *testing.T) {
 	require.Equal(t, "ws", MetricsTransportLabel("unknown"))
 }
 
-// TestMetrics_PresenceFailuresRegistered verifies PR-04a: the
+// TestMetrics_PresenceFailuresRegistered verifies PR-04a/04b: the
 // presence_failures_total counter vector is registered with the op label and
-// counts each failure operation.
+// counts each failure operation (deliver/store/rewrite/companion/emit).
 func TestMetrics_PresenceFailuresRegistered(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	metrics := NewMetrics(reg)
@@ -61,11 +61,13 @@ func TestMetrics_PresenceFailuresRegistered(t *testing.T) {
 	metrics.PresenceFailures.WithLabelValues("deliver").Inc()
 	metrics.PresenceFailures.WithLabelValues("rewrite").Inc()
 	metrics.PresenceFailures.WithLabelValues("companion").Inc()
+	metrics.PresenceFailures.WithLabelValues("emit").Inc()
 
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.PresenceFailures.WithLabelValues("store")))
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.PresenceFailures.WithLabelValues("deliver")))
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.PresenceFailures.WithLabelValues("rewrite")))
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.PresenceFailures.WithLabelValues("companion")))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.PresenceFailures.WithLabelValues("emit")))
 
 	families, err := reg.Gather()
 	require.NoError(t, err)

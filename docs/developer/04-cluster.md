@@ -284,7 +284,20 @@ hash 的字段是频道名、值是本节点在该频道的订阅者计数。增
 
 聚合原理：所有节点把 presence 写入**同一个 Redis 命名空间**，因此任何节点调用 `Get` 拿到的都是全集群的在线集合——Presence 天然按频道聚合，无需额外协议。成员 TTL 由订阅侧通过 `Add` 刷新（客户端 ping 触发的刷新经节流，见 4.1），异常退出的会话会在 TTL 内自然消失。
 
-**加入/离开事件**：订阅/退订时经伴生频道分发实时事件——`presenceChannel(ch) = ch + "/__presence"`，事件为 JSON 化的 `PresenceEvent`（`__type: "presence"`、`action: join|leave`、`channel`、`client_id`、`user_id`、`timestamp`，`presence_event.go`）。事件走 `PublishTransient`，只实时投递、**永不写入历史**，不会混入恢复消息流。远端订阅（经命令总线，见 3.4）同样会触发 presence 登记与 join 事件，因此集群视图完整一致。
+**加入/离开事件**：默认走一等 `presence_event`（PR-04a），不再写 `ch/__presence`。本节点投递还是经 broker 跨节点，见下面 7.1。只有频道策略 `legacy_presence_channel: true` 时，精确频道才会额外把旧 JSON 瞬时发到伴生频道。事件不进历史，不会混入恢复流。远端订阅（经命令总线，见 3.4）同样走 `shouldTrackPresence` 门闩。
+
+### 7.1 Presence 跨节点（`server.presence.cluster_emit`）
+
+一等 `presence_event` 的跨节点投递由 `server.presence.cluster_emit`（PR-04b）门闩控制，与本节开头描述的红利 store 聚合（读侧）无关——它控制的是 join/leave 事件（写侧）的扇出：
+
+- **`false`（默认）**：join/leave 只在本节点 `deliverPresenceEvent`（本节点精确 + 通配订阅者）。其他节点上的订阅者收不到一等事件。
+- **`true`**：join/leave 的**唯一**投递路径是 `PublishTransient(精确业务频道, ml.type=presence 帧)`。本节点与其他节点都从 broker 收到该帧，经 `broadcastPublication` 改写回一等 `presence_event` 后按各自订阅者投递；改写会排除事件主体（`evt.Info.SessionId`），加入者/离开者不会收到自己的事件。
+
+**为什么禁止叠用**：`true` 时若再本地 `deliverPresenceEvent`，本节点每个订阅者会收到两条（内存 broker 的 `PublishTransient` 同步进 handler；Redis 的 `PSubscribe` 把本进程自己的 `PUBLISH` 也扇回来，offset 0 的 `deliverOnce` 不去重），对端节点只有一条。presence 事件没有稳定 ID，客户端无法按 ID 去重。
+
+**与 `cluster.enabled` 相互独立**：`cluster_emit` 只依赖 broker 管道——控制面（`cluster.enabled`）关着也能靠 Redis broker 把 presence 事件扇到共享同一 Redis 的节点；反之 `cluster.enabled: true` 但 `cluster_emit: false` 时事件仍只在本节点投递（store 侧仍全集群聚合）。
+
+**升级前提**：只有全部节点都已升级到 PR-04a+（`broadcastPublication` 能识别 `ml.type=presence` 帧）后才能置 `true`。混部旧节点会把该帧当作普通 `publication`（聊天消息）投递给订阅者。开启时节点启动打一条 Warn 提示。
 
 ## 8. 历史消息
 

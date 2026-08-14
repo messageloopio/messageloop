@@ -114,7 +114,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		PresenceFailures: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "messageloop",
 			Name:      "presence_failures_total",
-			Help:      "Total number of presence failures by operation (deliver/store/rewrite/companion).",
+			Help:      "Total number of presence failures by operation (deliver/store/rewrite/companion/emit).",
 		}, []string{"op"}),
 		ChannelPolicyTransientForced: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: "messageloop",

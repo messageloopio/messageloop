@@ -35,6 +35,11 @@ type Node struct {
 	channelPolicy    *ChannelPolicyEngine
 	requireAuth      bool
 	healthCheck      func(context.Context) error
+	// presenceClusterEmitFlag mirrors server.presence.cluster_emit: when true
+	// first-class presence events are published through the broker instead of
+	// being delivered locally (PR-04b). False keeps the PR-04a local-only
+	// path.
+	presenceClusterEmitFlag bool
 }
 
 const (
@@ -127,6 +132,15 @@ func NewNode(cfg *config.Server) *Node {
 		engine, _ = NewChannelPolicyEngine(config.ChannelConfig{})
 	}
 	node.channelPolicy = engine
+
+	if cfg != nil {
+		node.presenceClusterEmitFlag = cfg.Presence.ClusterEmit
+	}
+	if node.presenceClusterEmitFlag {
+		log.WarnContext(context.Background(),
+			"presence cluster_emit enabled: every node must already run PR-04a+ or presence events are delivered as chat publications",
+			"presence.cluster_emit", true)
+	}
 
 	return node
 }
@@ -1015,11 +1029,44 @@ func (n *Node) presenceLeave(ctx context.Context, ch, sessionID, userID string, 
 	}
 }
 
-// emitPresence is the Phase 1 presence emission path: first-class events are
-// delivered locally only. Cross-node emit is PR-04b and is intentionally not
-// reserved here — this function must never publish a transient ml.type=presence
-// frame.
+// presenceClusterEmit reports whether first-class presence events are
+// published through the broker (server.presence.cluster_emit, PR-04b)
+// instead of being delivered locally (PR-04a).
+func (n *Node) presenceClusterEmit() bool {
+	return n.presenceClusterEmitFlag
+}
+
+// emitPresence is the presence emission path. With cluster_emit=false
+// (default, PR-04a) first-class events are delivered locally only. With
+// cluster_emit=true (PR-04b) the ONLY delivery path is a transient
+// publication on the exact business channel, which every node (including
+// this one) rewrites back into first-class events; the two paths must never
+// stack — the memory broker runs the handler synchronously and Redis
+// delivers its own PUBLISH back via PSubscribe with offset 0 (no dedupe),
+// so stacking would double-deliver on this node.
 func (n *Node) emitPresence(ch string, evt *clientpb.PresenceEvent, excludeSession string) {
+	if n.presenceClusterEmit() {
+		if isWildcard(ch) || evt == nil {
+			return
+		}
+		pub := presencePublication(evt)
+		if pub == nil {
+			if n.metrics != nil {
+				n.metrics.PresenceFailures.WithLabelValues("emit").Inc()
+			}
+			return
+		}
+		// Publish through the broker directly: Node.PublishTransient also
+		// increments MessagesPublished, and presence frames are not chat.
+		if err := n.broker.PublishTransient(ch, pub); err != nil {
+			log.WarnContext(context.Background(), "failed to emit presence",
+				err, "channel", ch)
+			if n.metrics != nil {
+				n.metrics.PresenceFailures.WithLabelValues("emit").Inc()
+			}
+		}
+		return
+	}
 	n.deliverPresenceEvent(ch, evt, excludeSession)
 }
 

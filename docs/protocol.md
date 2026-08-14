@@ -414,7 +414,7 @@ Presence is tracked per subscribed channel. A subscription is tracked only when 
 - Wildcard patterns, ephemeral subscriptions and `presence=false` channels produce no store entry, no snapshot entry and no events.
 - Presence failures never disconnect the client and never revoke a subscription.
 - By default no companion channel is written. With `legacy_presence_channel: true` (exact channels only), join/leave is additionally published transiently on `<channel>/__presence` in the legacy JSON format.
-- Phase 1 delivers presence events locally only (no cross-node emit).
+- Phase 1 delivers presence events locally only (no cross-node emit). With `server.presence.cluster_emit: true` (default `false`; enable only after every node runs PR-04a+) join/leave events are published through the broker on the exact channel and rewritten by every node, so members on other nodes receive them too; the joiner/leaver still never receives its own event.
 
 Presence state is also served via the admin `GetPresence` API (backed by the presence store).
 

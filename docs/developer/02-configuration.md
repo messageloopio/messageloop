@@ -149,6 +149,7 @@ server:
 | `server.acl.rules[].allow_publish` | string[] | 未设置 | 允许发布的用户 ID 列表；`"*"` 表示任何已认证用户。未设置该字段的规则不参与发布判定 |
 | `server.acl.rules[].deny_all` | bool | `false` | 为 true 时阻断匹配频道上的一切订阅与发布 |
 | `server.require_auth` | bool | `false` | 拒绝空 token 的连接（`config.go:32` 注释：Reject connections with empty token）。开启后：连接未携带 token 直接拒绝（`AUTH_REQUIRED`，`client.go:405-416`）；携带 token 但**没有**匹配 `$authenticate` 路由的代理时同样拒绝——非空 token 不得绕过认证（`client.go:389-404`）。实际认证总是由代理后端完成，见 [proxy 节](#proxy-节) |
+| `server.presence.cluster_emit` | bool | `false` | 进程级 presence 开关（不是频道策略）。`false`（默认）：join/leave 只在本节点投递（PR-04a）。`true`（PR-04b）：join/leave 经 broker `PublishTransient` 到**精确业务频道**（`ml.type=presence` 帧），各节点改写回一等 `presence_event`——本节点与对端统一经 broker，**禁止**与本地投递叠用（内存 broker 同步进 handler、Redis 本进程 offset 0 不去重，叠用 = 本节点每人两条）。**只有全部节点升级到 PR-04a+ 后才能置 true**：混部旧节点会把 `ml.type=presence` 帧当作聊天 `publication` 投递给订阅者 |
 
 ### 内置 ACL 求值语义
 

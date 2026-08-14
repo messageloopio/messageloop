@@ -140,7 +140,7 @@ gantt
 | 02 | 频道前缀策略引擎 | 可与 01 并行 | [规格](docs/design/tasks/pr-02-channel-policy.md) · [prompt](docs/design/tasks/pr-02-prompt.md) |
 | 03 | Subscribe/Connect 共用恢复 + 可见结果 | 01, 02 | [规格](docs/design/tasks/pr-03-recover.md) · [prompt](docs/design/tasks/pr-03-prompt.md) |
 | 04a | Presence 识别与本节点投递（不 emit） | 01, 02, 建议 03 | [规格](docs/design/tasks/pr-04a-presence.md) · [prompt](docs/design/tasks/pr-04a-prompt.md) |
-| 04b | 打开 `cluster_emit`（舰队齐后） | 04a 全节点 | |
+| 04b | 打开 `cluster_emit`（舰队齐后） | 04a 全节点 | [规格](docs/design/tasks/pr-04b-presence-emit.md) · [prompt](docs/design/tasks/pr-04b-prompt.md) |
 | 05 | 服务端 ping + 可配秒级 idle | 01 | |
 | 06 | Admin 按 user 投递/断开/订阅 | 01 | |
 | 07 | 客户端 Survey 真实现 | 01, 02 | |

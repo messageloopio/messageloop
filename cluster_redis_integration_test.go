@@ -544,3 +544,116 @@ func TestClusterRedis_NodeRun_WaitsForBrokerReady(t *testing.T) {
 		t.Fatal("Node.Run did not return after broker ready")
 	}
 }
+
+// integrationPresenceEventsOf decodes every presence_event envelope captured
+// by the transport (publications and acks are ignored).
+func integrationPresenceEventsOf(transport *integrationCapturingTransport) []*clientpb.PresenceEvent {
+	transport.mu.Lock()
+	messages := append([][]byte(nil), transport.messages...)
+	transport.mu.Unlock()
+
+	var events []*clientpb.PresenceEvent
+	for _, data := range messages {
+		var out clientpb.OutboundMessage
+		if err := (messageloop.JSONMarshaler{}).Unmarshal(data, &out); err != nil {
+			continue
+		}
+		if evt := out.GetPresenceEvent(); evt != nil {
+			events = append(events, evt)
+		}
+	}
+	return events
+}
+
+// integrationPublicationCount counts publication envelopes on the transport.
+func integrationPublicationCount(transport *integrationCapturingTransport) int {
+	transport.mu.Lock()
+	messages := append([][]byte(nil), transport.messages...)
+	transport.mu.Unlock()
+
+	count := 0
+	for _, data := range messages {
+		var out clientpb.OutboundMessage
+		if err := (messageloop.JSONMarshaler{}).Unmarshal(data, &out); err != nil {
+			continue
+		}
+		if out.GetPublication() != nil {
+			count++
+		}
+	}
+	return count
+}
+
+// TestPresence_ClusterEmitRedisExactlyOne proves cross-node presence emit
+// (PR-04b) over the shared Redis broker with no double delivery: A (node 1)
+// and C (node 2) are subscribed to the same exact channel, B joins on node
+// 1. A and C each receive exactly one join for B; B receives no self-join.
+// The cluster control plane is deliberately OFF — presence emit only needs
+// the Redis pub/sub pipe.
+func TestPresence_ClusterEmitRedisExactlyOne(t *testing.T) {
+	redisCfg := requireClusterRedis(t, clusterRedisIntegrationDB)
+	ctx := context.Background()
+
+	newNode := func() *messageloop.Node {
+		node := messageloop.NewNode(&config.Server{Presence: config.Presence{ClusterEmit: true}})
+		node.SetBroker(redisbroker.New(redisCfg))
+		nodeCtx, cancel := context.WithCancel(ctx)
+		t.Cleanup(func() { cancel(); node.Shutdown() })
+		require.NoError(t, node.Run(nodeCtx))
+		return node
+	}
+	node1 := newNode()
+	node2 := newNode()
+
+	const ch = "emit.redis.ch"
+	connectAndSubscribeIntegration := func(t *testing.T, node *messageloop.Node, clientID string) (*messageloop.Client, *integrationCapturingTransport) {
+		t.Helper()
+		transport := &integrationCapturingTransport{}
+		client, _, err := messageloop.NewClient(ctx, node, transport, messageloop.JSONMarshaler{})
+		require.NoError(t, err)
+		require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
+			Id:       "connect-" + clientID,
+			Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: clientID}},
+		}))
+		require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
+			Id:       "subscribe-" + clientID,
+			Envelope: &clientpb.InboundMessage_Subscribe{
+				Subscribe: &clientpb.Subscribe{Subscriptions: []*clientpb.Subscription{{Channel: ch}}},
+			},
+		}))
+		return client, transport
+	}
+
+	_, transportA := connectAndSubscribeIntegration(t, node1, "client-a")
+	_, transportC := connectAndSubscribeIntegration(t, node2, "client-c")
+
+	// C's join is delivered to A asynchronously over Redis: wait for it, then
+	// reset both transports so only B's join counts from here on.
+	require.Eventually(t, func() bool {
+		return len(integrationPresenceEventsOf(transportA)) == 1
+	}, 5*time.Second, 25*time.Millisecond, "A must receive C's join")
+	transportA.clearMessages()
+	transportC.clearMessages()
+
+	clientB, transportB := connectAndSubscribeIntegration(t, node1, "client-b")
+
+	require.Eventually(t, func() bool {
+		events := integrationPresenceEventsOf(transportA)
+		return len(events) == 1 && events[0].GetInfo().GetSessionId() == clientB.SessionID()
+	}, 5*time.Second, 25*time.Millisecond, "A must receive exactly one join for B")
+	require.Eventually(t, func() bool {
+		events := integrationPresenceEventsOf(transportC)
+		return len(events) == 1 && events[0].GetInfo().GetSessionId() == clientB.SessionID()
+	}, 5*time.Second, 25*time.Millisecond, "C must receive exactly one join for B")
+
+	// Give any (wrong) late self-join or double delivery a chance to land.
+	time.Sleep(300 * time.Millisecond)
+	require.Len(t, integrationPresenceEventsOf(transportA), 1,
+		"a stacked local+broker path would deliver a second join to A")
+	require.Len(t, integrationPresenceEventsOf(transportC), 1,
+		"a stacked local+broker path would deliver a second join to C")
+	require.Empty(t, integrationPresenceEventsOf(transportB),
+		"the joiner must not receive its own join")
+	require.Zero(t, integrationPublicationCount(transportA),
+		"presence frames must never become publications")
+}

@@ -586,3 +586,138 @@ func TestPresence_ClusterUnsubscribeEphemeralEmitsNoLeave(t *testing.T) {
 	require.NoError(t, err)
 	require.NotContains(t, present, clientB.SessionID())
 }
+
+// TestPresence_ClusterEmitDefaultLocalOnly pins the PR-04b gate: with the
+// default (or explicit false) cluster_emit, join events are delivered
+// locally and the exact channel is never PublishTransient'd.
+func TestPresence_ClusterEmitDefaultLocalOnly(t *testing.T) {
+	ctx := context.Background()
+	reg := prometheus.NewRegistry()
+	metrics := NewMetrics(reg)
+	node := NewNode(&config.Server{})
+	node.SetMetrics(metrics)
+	broker := &countingBroker{}
+	node.SetBroker(broker)
+	require.NoError(t, node.Run(ctx))
+
+	const ch = "local.emit.ch"
+	clientA, transportA := connectAndSubscribe(t, node, "client-a", &clientpb.Subscription{Channel: ch})
+	transportA.messages = nil
+
+	_, _ = connectAndSubscribe(t, node, "client-b", &clientpb.Subscription{Channel: ch})
+
+	events := presenceEventsOf(t, transportA)
+	require.Len(t, events, 1, "A must receive exactly one local join")
+	require.Equal(t, "join", events[0].GetAction())
+	require.Equal(t, ch, events[0].GetChannel())
+	assert.False(t, broker.publishedTo(ch),
+		"cluster_emit=false must never publish the exact channel transiently")
+	require.Zero(t, publicationsOf(t, transportA), "presence must not arrive as a publication")
+	require.NotNil(t, clientA)
+}
+
+// TestPresence_ClusterEmitMemoryExactlyOne exercises the cluster_emit=true
+// path on the in-process broker: A and C (subscribed to the exact channel)
+// each receive exactly one join for B, B receives no self-join, and the
+// events never count as delivered messages.
+func TestPresence_ClusterEmitMemoryExactlyOne(t *testing.T) {
+	ctx := context.Background()
+	reg := prometheus.NewRegistry()
+	metrics := NewMetrics(reg)
+	node := NewNode(&config.Server{Presence: config.Presence{ClusterEmit: true}})
+	node.SetMetrics(metrics)
+	require.NoError(t, node.Run(ctx))
+
+	const ch = "emit.memory.ch"
+	_, transportA := connectAndSubscribe(t, node, "client-a", &clientpb.Subscription{Channel: ch})
+	_, transportC := connectAndSubscribe(t, node, "client-c", &clientpb.Subscription{Channel: ch})
+	transportA.messages = nil
+	transportC.messages = nil
+
+	clientB, transportB := connectAndSubscribe(t, node, "client-b", &clientpb.Subscription{Channel: ch})
+
+	eventsA := presenceEventsOf(t, transportA)
+	require.Len(t, eventsA, 1, "A must receive exactly one join for B")
+	require.Equal(t, "join", eventsA[0].GetAction())
+	require.Equal(t, ch, eventsA[0].GetChannel())
+	require.Equal(t, clientB.SessionID(), eventsA[0].GetInfo().GetSessionId())
+
+	eventsC := presenceEventsOf(t, transportC)
+	require.Len(t, eventsC, 1, "C must receive exactly one join for B")
+	require.Equal(t, clientB.SessionID(), eventsC[0].GetInfo().GetSessionId())
+
+	require.Empty(t, presenceEventsOf(t, transportB), "the joiner must not receive its own join")
+	require.Zero(t, publicationsOf(t, transportA), "presence frames must never become publications")
+	require.Zero(t, testutil.ToFloat64(metrics.MessagesDelivered),
+		"presence delivery must not count MessagesDelivered")
+	require.Zero(t, testutil.ToFloat64(metrics.MessagesPublished),
+		"presence emit must not count MessagesPublished")
+}
+
+// TestPresence_ClusterEmitMemoryNoDoublePath guards against the forbidden
+// stacked path: if emitPresence also ran deliverPresenceEvent locally, A
+// would see two joins (one direct, one via the broker rewrite).
+func TestPresence_ClusterEmitMemoryNoDoublePath(t *testing.T) {
+	ctx := context.Background()
+	node := NewNode(&config.Server{Presence: config.Presence{ClusterEmit: true}})
+	require.NoError(t, node.Run(ctx))
+
+	const ch = "emit.nodouble.ch"
+	_, transportA := connectAndSubscribe(t, node, "client-a", &clientpb.Subscription{Channel: ch})
+	_, transportC := connectAndSubscribe(t, node, "client-c", &clientpb.Subscription{Channel: ch})
+	transportA.messages = nil
+	transportC.messages = nil
+
+	_, _ = connectAndSubscribe(t, node, "client-b", &clientpb.Subscription{Channel: ch})
+
+	require.Len(t, presenceEventsOf(t, transportA), 1,
+		"a stacked local+broker path would deliver two joins to A")
+	require.Len(t, presenceEventsOf(t, transportC), 1,
+		"a stacked local+broker path would deliver two joins to C")
+}
+
+// TestPresence_ClusterEmitWildcardStillLocalCovered verifies wildcard
+// subscribers keep receiving exact-channel events under cluster_emit=true:
+// the frame is published on the exact channel only, and the wildcard
+// subscriber is covered by the matcher through the broadcast rewrite.
+func TestPresence_ClusterEmitWildcardStillLocalCovered(t *testing.T) {
+	ctx := context.Background()
+	node := NewNode(&config.Server{Presence: config.Presence{ClusterEmit: true}})
+	require.NoError(t, node.Run(ctx))
+
+	_, transportA := connectAndSubscribe(t, node, "client-a", &clientpb.Subscription{Channel: "chat.**"})
+	transportA.messages = nil
+
+	clientB, _ := connectAndSubscribe(t, node, "client-b", &clientpb.Subscription{Channel: "chat.room.1"})
+
+	events := presenceEventsOf(t, transportA)
+	require.Len(t, events, 1, "wildcard coverage must still deliver the exact-channel join")
+	require.Equal(t, "chat.room.1", events[0].GetChannel())
+	require.Equal(t, "join", events[0].GetAction())
+	require.Equal(t, clientB.SessionID(), events[0].GetInfo().GetSessionId())
+	require.Zero(t, publicationsOf(t, transportA), "presence must not arrive as a publication")
+}
+
+// TestPresence_ClusterEmitFalseUnaffected pins the default path: with
+// cluster_emit unset the node behaves exactly as PR-04a (local delivery,
+// snapshot on subscribe, no self-join).
+func TestPresence_ClusterEmitFalseUnaffected(t *testing.T) {
+	ctx := context.Background()
+	node := NewNode(nil)
+	require.NoError(t, node.Run(ctx))
+
+	const ch = "emit.off.ch"
+	clientA, transportA := connectAndSubscribe(t, node, "client-a", &clientpb.Subscription{Channel: ch})
+	transportA.messages = nil
+
+	clientB, transportB := connectAndSubscribe(t, node, "client-b", &clientpb.Subscription{Channel: ch})
+
+	events := presenceEventsOf(t, transportA)
+	require.Len(t, events, 1, "A must receive exactly one join")
+	require.Equal(t, "join", events[0].GetAction())
+	require.Equal(t, ch, events[0].GetChannel())
+	require.Equal(t, clientB.SessionID(), events[0].GetInfo().GetSessionId())
+	require.Empty(t, presenceEventsOf(t, transportB), "the joiner must not receive its own join")
+	require.Zero(t, publicationsOf(t, transportA))
+	require.NotNil(t, clientA)
+}

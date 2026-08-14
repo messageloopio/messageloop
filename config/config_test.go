@@ -288,3 +288,21 @@ func TestValidate_ChannelPolicyValid(t *testing.T) {
 	}
 	assert.NoError(t, cfg.Validate())
 }
+
+// TestValidate_PresenceClusterEmit verifies server.presence.cluster_emit
+// parses as a plain bool: the zero value is false (PR-04a behavior) and an
+// explicit true passes Validate() without extra rules.
+func TestValidate_PresenceClusterEmit(t *testing.T) {
+	cfg := &Config{
+		Transport: validTransport(),
+	}
+	require.False(t, cfg.Server.Presence.ClusterEmit,
+		"cluster_emit must default to false (PR-04a behavior)")
+
+	cfg = &Config{
+		Transport: validTransport(),
+		Server:    Server{Presence: Presence{ClusterEmit: true}},
+	}
+	require.True(t, cfg.Server.Presence.ClusterEmit)
+	assert.NoError(t, cfg.Validate())
+}
