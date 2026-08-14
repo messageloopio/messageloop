@@ -9,16 +9,40 @@ import {
   SubscriptionSchema,
   SubRefreshSchema,
   PingSchema,
+  PongSchema,
   PublishSchema,
   RpcRequestSchema,
   SurveyReplySchema,
+  SurveyRequestSchema,
+  PresenceQuerySchema,
 } from "../proto/client/v1/service_pb";
 
 import { PayloadSchema, MetadataSchema } from "../proto/shared/v1/types_pb";
 import { ErrorSchema } from "../proto/shared/v1/errors_pb";
 
-import type { InboundMessage, OutboundMessage, Message as ProtoMessage, Publication, Publish, RpcRequest, RpcReply } from "../proto/client/v1/service_pb";
+import type {
+  InboundMessage,
+  OutboundMessage,
+  Message as ProtoMessage,
+  Publication,
+  Publish,
+  RpcRequest,
+  RpcReply,
+  PresenceEvent as PresenceEventPB,
+  PresenceSnapshot as PresenceSnapshotPB,
+  PresenceInfo as PresenceInfoPB,
+  SurveyAnswer as SurveyAnswerPB,
+} from "../proto/client/v1/service_pb";
 import type { Payload, Metadata } from "../proto/shared/v1/types_pb";
+
+import type {
+  SubscriptionSpec,
+  ChannelOrSpec,
+  PresenceEvent,
+  PresenceSnapshot,
+  PresenceInfo,
+  SurveyAnswer,
+} from "../client/types";
 
 import {
   Message,
@@ -94,25 +118,22 @@ export function createConnectMessage(
 }
 
 /**
- * Per-channel subscription spec: a plain channel name or a channel with an
- * optional subscription token (used for subscription-level authorization).
+ * Re-export the subscription spec types from the client package so the
+ * wire-level builders and the client-facing API share one definition and
+ * cannot drift apart.
  */
-export interface SubscriptionSpec {
-  /** Channel name */
-  channel: string;
-  /** Optional subscription token */
-  token?: string;
-}
-
-/**
- * A channel argument that accepts either a plain channel name or a
- * SubscriptionSpec carrying an optional per-channel token.
- */
-export type ChannelOrSpec = string | SubscriptionSpec;
+export type { SubscriptionSpec, ChannelOrSpec } from "../client/types";
+export type {
+  PresenceEvent,
+  PresenceSnapshot,
+  PresenceInfo,
+  SurveyAnswer,
+} from "../client/types";
 
 /**
  * Create an InboundMessage with Subscribe envelope.
- * @param channels - Channel names or SubscriptionSpec objects with optional per-channel tokens.
+ * @param channels - Channel names or SubscriptionSpec objects with optional
+ * per-channel tokens and recovery parameters.
  * @param ephemeral - When true, the subscriptions are ephemeral.
  */
 export function createSubscribeMessage(
@@ -126,6 +147,9 @@ export function createSubscribeMessage(
         channel: spec.channel,
         ephemeral,
         token: spec.token || "",
+        recover: spec.recover === true,
+        offset: spec.offset || BigInt(0),
+        epoch: spec.epoch || "",
       });
     }),
   });
@@ -210,6 +234,54 @@ export function createPingMessage(): InboundMessage {
 }
 
 /**
+ * Create an InboundMessage with Pong envelope answering a server-issued
+ * Ping. The id mirrors the outbound Ping's id (an empty id still produces
+ * a Pong).
+ */
+export function createPongMessage(id: string): InboundMessage {
+  return create(InboundMessageSchema, {
+    id,
+    envelope: { case: "pong", value: create(PongSchema, {}) },
+  });
+}
+
+/**
+ * Create an InboundMessage with PresenceQuery envelope for an exact channel.
+ * An empty channel is handed to the server, which rejects it.
+ */
+export function createPresenceQueryMessage(channel: string): InboundMessage {
+  const presenceQuery = create(PresenceQuerySchema, { channel });
+  return create(InboundMessageSchema, {
+    id: generateMessageId(),
+    envelope: { case: "presenceQuery", value: presenceQuery },
+  });
+}
+
+/**
+ * Create an InboundMessage with SurveyRequest envelope initiating a
+ * channel-scoped survey. A timeoutMs <= 0 sends 0 and lets the server apply
+ * its policy cap.
+ */
+export function createSurveyRequestMessage(
+  requestId: string,
+  channel: string,
+  payload: Message | null,
+  timeoutMs?: number
+): InboundMessage {
+  const surveyRequest = create(SurveyRequestSchema, {
+    requestId,
+    channel,
+    payload: payload ? messageToPayload(payload) : undefined,
+    timeoutMs: timeoutMs && timeoutMs > 0 ? timeoutMs : 0,
+  });
+
+  return create(InboundMessageSchema, {
+    id: generateMessageId(),
+    envelope: { case: "surveyRequest", value: surveyRequest },
+  });
+}
+
+/**
  * Create an InboundMessage with SubRefresh envelope.
  */
 export function createSubRefreshMessage(
@@ -283,7 +355,7 @@ export function messageToReceived(msg: ProtoMessage): ReceivedMessage {
 export function parseOutboundMessage(
   msg: OutboundMessage
 ): {
-  type: "connected" | "error" | "subscribeAck" | "unsubscribeAck" | "publishAck" | "publication" | "rpcReply" | "pong" | "subRefreshAck" | "surveyRequest" | "surveyReply";
+  type: "connected" | "error" | "subscribeAck" | "unsubscribeAck" | "publishAck" | "publication" | "rpcReply" | "pong" | "subRefreshAck" | "surveyRequest" | "surveyReply" | "presence" | "presenceEvent" | "ping" | "surveyResult";
   data: any;
   id: string;
 } {
@@ -312,9 +384,74 @@ export function parseOutboundMessage(
     return { type: "surveyRequest", data: envelope.value, id };
   } else if (envelope.case === "surveyReply") {
     return { type: "surveyReply", data: envelope.value, id };
+  } else if (envelope.case === "presence") {
+    return { type: "presence", data: envelope.value, id };
+  } else if (envelope.case === "presenceEvent") {
+    return { type: "presenceEvent", data: envelope.value, id };
+  } else if (envelope.case === "ping") {
+    return { type: "ping", data: envelope.value, id };
+  } else if (envelope.case === "surveyResult") {
+    return { type: "surveyResult", data: envelope.value, id };
   }
 
   return { type: "error", data: new Error("Unknown message type"), id };
+}
+
+/**
+ * Convert a protocol PresenceInfo to the SDK type.
+ */
+export function presenceInfoFromPB(info?: PresenceInfoPB): PresenceInfo {
+  if (!info) {
+    return { sessionId: "", userId: "", clientId: "", connectedAt: BigInt(0) };
+  }
+  return {
+    sessionId: info.sessionId,
+    userId: info.userId,
+    clientId: info.clientId,
+    connectedAt: info.connectedAt,
+  };
+}
+
+/**
+ * Convert a protocol PresenceEvent to the SDK type. Unknown actions are
+ * still delivered.
+ */
+export function presenceEventFromPB(ev: PresenceEventPB): PresenceEvent {
+  return {
+    channel: ev.channel,
+    action: ev.action,
+    info: presenceInfoFromPB(ev.info),
+  };
+}
+
+/**
+ * Convert a protocol PresenceSnapshot to the SDK type.
+ */
+export function presenceSnapshotFromPB(snap: PresenceSnapshotPB): PresenceSnapshot {
+  return {
+    channel: snap.channel,
+    clients: (snap.clients || []).map(presenceInfoFromPB),
+    truncated: snap.truncated,
+    occupancy: snap.occupancy,
+  };
+}
+
+/**
+ * Convert a protocol SurveyAnswer to the SDK type. The user id is read from
+ * metadata.entries["user_id"] (the proto has no user_id field on answers).
+ */
+export function surveyAnswerFromPB(answer: SurveyAnswerPB): SurveyAnswer {
+  const out: SurveyAnswer = {
+    sessionId: answer.sessionId,
+    userId: answer.metadata?.entries?.["user_id"] || "",
+  };
+  if (answer.payload) {
+    out.payload = payloadToMessage(answer.payload, "");
+  }
+  if (answer.error) {
+    out.error = new Error(`${answer.error.code}: ${answer.error.message}`);
+  }
+  return out;
 }
 
 /**

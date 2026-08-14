@@ -7,9 +7,11 @@ A TypeScript SDK for MessageLoop, supporting Node.js and browsers over WebSocket
 - WebSocket client for Node.js and browsers
 - JSON and protobuf encoding
 - Channel pub/sub and RPC
-- Per-channel subscription tokens
+- Per-channel subscription tokens and message recovery (`recover` + offset/epoch)
+- Presence: `onPresence` events, `onPresenceSnapshot`, and `presence(channel)` queries
+- Client-initiated surveys (`survey`) and survey answering (`onSurvey` / `onSurveyRequest`)
+- Server-initiated Ping answered with a same-id Pong
 - Ack-aware publishing (`publishWithAck`)
-- Survey request handling (`onSurvey`)
 - Subscription refresh (`subRefresh`)
 - Automatic reconnection with session resumption
 - Heartbeat and pong timeout handling
@@ -92,7 +94,10 @@ await client.close();
 
 - `close()` - Close the connection
 - `subscribe(...channels)` - Subscribe to channels; each argument is a channel
-  name or `{ channel, token? }` to pass a per-channel subscription token
+  name or `{ channel, token?, recover?, offset?, epoch? }`. With `recover:
+  true` the server replays messages published after `offset` (in `epoch`)
+  through the `SubscribeAck` publications, delivered via `onMessage` /
+  `addMessageHandler` (Go SDK `WithRecover` parity).
 - `unsubscribe(...channels)` - Unsubscribe from channels (same argument form)
 - `publish(channel, message)` - Publish a message to a channel (fire-and-forget)
 - `publishWithAck(channel, message, options?)` - Publish and await the server
@@ -100,6 +105,12 @@ await client.close();
   (`options.transient`, `options.timeout`)
 - `subRefresh(...channels)` - Ask the server to re-validate subscriptions
 - `rpc(channel, method, request, options?)` - Make an RPC call
+- `presence(channel)` - Query the presence snapshot of an exact channel;
+  resolves with `{ channel, clients, truncated, occupancy }`, rejects with a
+  server-coded error
+- `survey(channel, payload, timeoutMs?)` - Initiate a channel-scoped survey
+  and await the aggregated `SurveyAnswer[]` (`sessionId`, `userId` read from
+  `metadata.entries["user_id"]`, `payload`, `error`)
 - `getSessionId()` - Get current session ID
 - `getConnectionState()` - Get `disconnected`, `connecting`, `connected`, or `reconnecting`
 - `isConnected()` - Check connection status
@@ -128,6 +139,17 @@ series on the same event, or handlers may both fire and duplicate delivery.
   receives `(requestId, request)` and returns the reply `Message` (sync or
   async); a thrown error is sent back as an error reply. With no handler
   registered, the request payload is echoed back unchanged (Go SDK parity).
+- `onSurveyRequest(handler)` - Handle survey requests with the request
+  channel: `(requestId, channel, request)`. Takes precedence over `onSurvey`.
+- `onPresence(handler)` - Handle presence events (`{ channel, action,
+  info }`, join/leave; unknown actions still delivered)
+- `onPresenceSnapshot(handler)` - Handle presence snapshots delivered with
+  `Connected` / `SubscribeAck`, and the snapshot returned by `presence()`
+
+Note: do not `await rpc() / survey() / presence()` synchronously inside
+receive-loop callbacks (`onMessage`, `onPresence*`, `onSurvey*`) — those
+calls wait on the caller's promise while the receive loop fills the pending
+result, so a synchronous wait deadlocks.
 
 ### Message Helpers
 
@@ -162,6 +184,9 @@ npm test
   (a runtime dependency); Node 21+ and browsers use the built-in WebSocket.
 - Custom `headers` on `dial()` are honored in Node.js only (via `ws`); the
   browser WebSocket constructor does not support request headers.
+- The SDK answers server-initiated Pings with a same-id Pong and treats them
+  as liveness evidence: enable `server.heartbeat.ping_interval` only with SDK
+  version 1.1.0+.
 - Default values intentionally differ from the Go SDK in two ways (explicit
   decisions, not drift): `autoReconnect` defaults to `true` here (Go: `false`),
   and `connectTimeout` defaults to `30000ms` here (Go `DialTimeout`: `10000ms`).

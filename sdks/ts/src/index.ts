@@ -5,6 +5,12 @@ export type {
   IClient,
   ConnectionState,
   ConnectionStateChangeEvent,
+  SubscriptionSpec,
+  ChannelOrSpec,
+  PresenceInfo,
+  PresenceEvent,
+  PresenceSnapshot,
+  SurveyAnswer,
 } from "./client/types";
 
 // Transport exports
@@ -42,13 +48,14 @@ export {
   createPublishMessage,
   createRPCRequestMessage,
   createPingMessage,
+  createPongMessage,
+  createPresenceQueryMessage,
+  createSurveyRequestMessage,
   createSubRefreshMessage,
   createSurveyReplyMessage,
   generateMessageId,
   parseOutboundMessage,
   extractRpcReply,
-  type SubscriptionSpec,
-  type ChannelOrSpec,
   type Payload,
   type Metadata,
 } from "./message";

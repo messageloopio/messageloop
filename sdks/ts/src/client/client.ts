@@ -9,6 +9,9 @@ import type {
   ConnectionState,
   ConnectionStateChangeEvent,
   IClient,
+  PresenceEvent,
+  PresenceSnapshot,
+  SurveyAnswer,
 } from "./types";
 
 import { WebSocketTransport } from "../transport/websocket";
@@ -20,12 +23,32 @@ import {
   createPublishMessage,
   createRPCRequestMessage,
   createPingMessage,
+  createPongMessage,
+  createPresenceQueryMessage,
+  createSurveyRequestMessage,
   createSubRefreshMessage,
   createSurveyReplyMessage,
   parseOutboundMessage,
   payloadToMessage,
   createMessage,
+  generateMessageId,
+  presenceEventFromPB,
+  presenceSnapshotFromPB,
+  surveyAnswerFromPB,
 } from "../message";
+
+/**
+ * Top-level error codes the server may use to reject a client survey without
+ * echoing the request id (asynchronous worker failures).
+ */
+const surveyRejectCodes = new Set([
+  "SURVEY_DISABLED",
+  "SURVEY_TOO_MANY_SUBSCRIBERS",
+  "BAD_REQUEST",
+  "PERMISSION_DENIED",
+  "RATE_LIMITED",
+  "INTERNAL_ERROR",
+]);
 
 /**
  * MessageLoop client for connecting to the messaging server.
@@ -83,6 +106,36 @@ export class MessageLoopClient implements IClient {
     requestId: string,
     request: Message
   ) => Message | Promise<Message>) | null = null;
+
+  // Survey request handler with the request channel; when set it takes
+  // precedence over surveyHandler.
+  private surveyRequestHandler: ((
+    requestId: string,
+    channel: string,
+    request: Message
+  ) => Message | Promise<Message>) | null = null;
+
+  // Presence handlers
+  private presenceHandler: ((event: PresenceEvent) => void) | null = null;
+  private presenceSnapshotHandler: ((snap: PresenceSnapshot) => void) | null =
+    null;
+
+  // Presence query pending replies, keyed by the inbound message id
+  private pendingPresence: Map<
+    string,
+    { resolve: (snap: PresenceSnapshot) => void; reject: (err: Error) => void }
+  > = new Map();
+
+  // Client-initiated surveys, keyed by the inbound message id; resolved by a
+  // SurveyResult carrying the generated request id or by a top-level error.
+  private pendingSurvey: Map<
+    string,
+    {
+      requestId: string;
+      resolve: (answers: SurveyAnswer[]) => void;
+      reject: (err: Error) => void;
+    }
+  > = new Map();
 
   // Ping/Pong
   private pingTimer: ReturnType<typeof setInterval> | null = null;
@@ -268,6 +321,16 @@ export class MessageLoopClient implements IClient {
           this.deliverMessages(pub.messages || []);
         }
 
+        // Recover results echo the per-channel cursor: keep it so a reconnect
+        // resumes from the server-confirmed position.
+        this.applyRecoverResults(parsed.data.recoverResults);
+
+        // Presence snapshots ride the Connected message; dispatch one
+        // onPresenceSnapshot per entry, after the subscription write-back.
+        for (const snap of parsed.data.presence || []) {
+          this.dispatchPresenceSnapshot(presenceSnapshotFromPB(snap));
+        }
+
         // Update connection state
         const wasReconnecting = this.connectionState === "reconnecting";
         this.setConnectionState("connected");
@@ -283,6 +346,48 @@ export class MessageLoopClient implements IClient {
         // Notify connected handler
         if (this.connectedHandler && this.sessionId) {
           this.connectedHandler(this.sessionId);
+        }
+        break;
+      }
+
+      case "subscribeAck": {
+        // Keep/update the local subscription set. When the server omits the
+        // subscription token, fall back to the locally known token (same
+        // rule as the Connected handler).
+        const ackSubs: { channel: string; token: string }[] = (
+          parsed.data.subscriptions || []
+        )
+          .filter(
+            (sub: any) =>
+              sub && typeof sub.channel === "string" && sub.channel.length > 0
+          )
+          .map((sub: any) => ({
+            channel: sub.channel,
+            token:
+              typeof sub.token === "string" && sub.token
+                ? sub.token
+                : this.subscribedChannels.get(sub.channel) || "",
+          }));
+        for (const sub of ackSubs) {
+          this.subscribedChannels.set(sub.channel, sub.token);
+        }
+
+        // Recovered messages take the same delivery path as Connected
+        // publications: onMessage/addMessageHandler plus per-message offset
+        // tracking.
+        for (const pub of parsed.data.publications || []) {
+          this.deliverMessages(pub.messages || []);
+        }
+
+        // Recover results echo the per-channel cursor: keep it so a reconnect
+        // resumes from the server-confirmed position. An empty batch (offset
+        // 0) must not wipe a known position.
+        this.applyRecoverResults(parsed.data.recoverResults);
+
+        // Presence snapshots ride the subscribe ack; dispatch after the
+        // subscription write-back above.
+        for (const snap of parsed.data.presence || []) {
+          this.dispatchPresenceSnapshot(presenceSnapshotFromPB(snap));
         }
         break;
       }
@@ -325,6 +430,48 @@ export class MessageLoopClient implements IClient {
         break;
       }
 
+      case "presence": {
+        // Snapshot reply to our PresenceQuery, matched by the inbound id.
+        // The snapshot is also dispatched to onPresenceSnapshot.
+        const pending = this.pendingPresence.get(parsed.id);
+        if (pending) {
+          this.pendingPresence.delete(parsed.id);
+          const snap = presenceSnapshotFromPB(parsed.data);
+          this.dispatchPresenceSnapshot(snap);
+          pending.resolve(snap);
+        }
+        break;
+      }
+
+      case "presenceEvent": {
+        // Unknown actions are still delivered.
+        if (this.presenceHandler) {
+          this.presenceHandler(presenceEventFromPB(parsed.data));
+        }
+        break;
+      }
+
+      case "ping": {
+        // The server probes us: answer with a Pong carrying the same id
+        // (an empty id still gets a Pong) and treat the exchange as
+        // liveness: clear the client's own pong deadline so a server that
+        // is actively probing is not killed by our pingTimeout.
+        const pong = createPongMessage(parsed.id);
+        this.send(pong).catch(() => {
+          // Ignore send failures on the pong path
+        });
+        if (this.pingTimeoutTimer) {
+          clearTimeout(this.pingTimeoutTimer);
+          this.pingTimeoutTimer = null;
+        }
+        break;
+      }
+
+      case "surveyResult": {
+        this.handleSurveyResult(parsed.data);
+        break;
+      }
+
       case "surveyRequest": {
         this.handleSurveyRequest(parsed.data);
         break;
@@ -353,6 +500,36 @@ export class MessageLoopClient implements IClient {
             pending.reject(error);
             break;
           }
+        }
+
+        // Fail the pending presence query with the matching id, if any.
+        if (parsed.id && this.pendingPresence.has(parsed.id)) {
+          const pending = this.pendingPresence.get(parsed.id)!;
+          this.pendingPresence.delete(parsed.id);
+          pending.reject(error);
+          break;
+        }
+
+        // Fail the pending survey with the matching id, if any. When the
+        // error has no id and the code is a survey rejection code, deliver
+        // it to the single in-flight survey (the server allows one in-flight
+        // survey per session).
+        if (parsed.id) {
+          const pending = this.pendingSurvey.get(parsed.id);
+          if (pending) {
+            this.pendingSurvey.delete(parsed.id);
+            pending.reject(error);
+            break;
+          }
+        } else if (
+          this.pendingSurvey.size === 1 &&
+          surveyRejectCodes.has(parsed.data.code)
+        ) {
+          for (const [id, pending] of this.pendingSurvey) {
+            this.pendingSurvey.delete(id);
+            pending.reject(error);
+          }
+          break;
         }
 
         if (this.connectionState === "connecting") {
@@ -417,6 +594,70 @@ export class MessageLoopClient implements IClient {
   }
 
   /**
+   * Write back server-echoed recovery cursors. An empty batch (offset 0)
+   * must not wipe a known position.
+   */
+  private applyRecoverResults(
+    results: Array<{ channel: string; offset: bigint }> | undefined
+  ): void {
+    for (const rr of results || []) {
+      if (rr && rr.channel && rr.offset > 0n) {
+        this.channelOffsets.set(rr.channel, BigInt(rr.offset));
+      }
+    }
+  }
+
+  /**
+   * Dispatch one already-converted presence snapshot to the handler, if any.
+   */
+  private dispatchPresenceSnapshot(snap: PresenceSnapshot): void {
+    if (!this.presenceSnapshotHandler) return;
+    this.presenceSnapshotHandler(snap);
+  }
+
+  /**
+   * Route a SurveyResult envelope to the pending survey with the matching
+   * request id, if any, and remove the entry. Results that arrive after the
+   * pending survey was cleaned up (close, disconnect) are dropped. When the
+   * SurveyResult itself carries an error, the answers (if any) are attached
+   * to the rejected error's `answers` property.
+   */
+  private handleSurveyResult(result: any): void {
+    if (!result || !result.requestId) return;
+
+    for (const [id, pending] of this.pendingSurvey) {
+      if (pending.requestId === result.requestId) {
+        this.pendingSurvey.delete(id);
+        const answers = (result.answers || []).map(surveyAnswerFromPB);
+        if (result.error) {
+          const err = new Error(result.error.message || "Survey error");
+          (err as any).code = result.error.code;
+          (err as any).answers = answers;
+          pending.reject(err);
+        } else {
+          pending.resolve(answers);
+        }
+        return;
+      }
+    }
+  }
+
+  /**
+   * Reject all pending presence queries and surveys: the connection is gone,
+   * no reply will arrive.
+   */
+  private rejectPendingPresenceAndSurveys(): void {
+    for (const [_, pending] of this.pendingPresence) {
+      pending.reject(new Error("Connection closed"));
+    }
+    this.pendingPresence.clear();
+    for (const [_, pending] of this.pendingSurvey) {
+      pending.reject(new Error("Connection closed"));
+    }
+    this.pendingSurvey.clear();
+  }
+
+  /**
    * Notify the registered error handler only.
    */
   private notifyError(err: Error): void {
@@ -426,15 +667,27 @@ export class MessageLoopClient implements IClient {
   }
 
   /**
-   * Handle a survey request from the server: dispatch to the registered
-   * handler, or echo the request payload back when no handler is set
-   * (mirroring the Go SDK and the server's own default).
+   * Handle a survey request from the server: dispatch to the onSurveyRequest
+   * handler (with the request channel), fall back to the onSurvey handler
+   * (without channel), or echo the request payload back when no handler is
+   * set (the SDK answering side).
    */
   private handleSurveyRequest(req: SurveyRequest): void {
     const requestId = req.requestId;
+    const channel = req.channel || "";
     const reqMsg = req.payload
       ? payloadToMessage(req.payload, "")
       : createMessage("messageloop.message", { contentType: "", type: "binary" });
+
+    if (this.surveyRequestHandler) {
+      Promise.resolve()
+        .then(() => this.surveyRequestHandler!(requestId, channel, reqMsg))
+        .then((reply) => this.sendSurveyReply(requestId, reply, null))
+        .catch((err) =>
+          this.sendSurveyReply(requestId, null, err instanceof Error ? err : new Error(String(err)))
+        );
+      return;
+    }
 
     if (!this.surveyHandler) {
       this.sendSurveyReply(requestId, reqMsg, null).catch(() => {
@@ -529,6 +782,10 @@ export class MessageLoopClient implements IClient {
     }
     this.pendingPublish.clear();
 
+    // Reject pending presence queries and surveys: the connection is gone,
+    // no reply will arrive.
+    this.rejectPendingPresenceAndSurveys();
+
     this.setConnectionState("disconnected");
 
     // Attempt reconnection if enabled
@@ -622,14 +879,23 @@ export class MessageLoopClient implements IClient {
   }
 
   /**
-   * Resubscribe to all channels after reconnection.
+   * Resubscribe to all channels after reconnection. The session was not
+   * resumed, so every channel is re-subscribed with recover=true and the
+   * recorded per-channel offset/epoch so the server replays messages missed
+   * while disconnected (Go SDK resumeSubscriptions parity).
    */
   private async resubscribeAllChannels(): Promise<void> {
     if (this.subscribedChannels.size === 0) return;
 
     const channels: ChannelOrSpec[] = Array.from(
       this.subscribedChannels,
-      ([channel, token]) => (token ? { channel, token } : channel)
+      ([channel, token]) => ({
+        channel,
+        token,
+        recover: true,
+        offset: this.channelOffsets.get(channel) ?? BigInt(0),
+        epoch: this.epoch,
+      })
     );
     try {
       const msg = createSubscribeMessage(channels, this.options.ephemeral);
@@ -763,6 +1029,9 @@ export class MessageLoopClient implements IClient {
     }
     this.pendingPublish.clear();
 
+    // Reject pending presence queries and surveys
+    this.rejectPendingPresenceAndSurveys();
+
     // Close transport
     if (this.transport) {
       await this.transport.close();
@@ -782,7 +1051,8 @@ export class MessageLoopClient implements IClient {
   /**
    * Subscribe to one or more channels.
    * @param channels - Channel names, or SubscriptionSpec objects carrying an
-   * optional per-channel token (e.g. `{ channel: "ch1", token: "t1" }`).
+   * optional per-channel token and recovery fields (e.g.
+   * `{ channel: "ch1", token: "t1", recover: true, offset: 7n, epoch: "ep" }`).
    */
   async subscribe(...channels: ChannelOrSpec[]): Promise<void> {
     const msg = createSubscribeMessage(channels, this.options.ephemeral);
@@ -923,6 +1193,82 @@ export class MessageLoopClient implements IClient {
   }
 
   /**
+   * Query the current presence snapshot of an exact channel. The server
+   * replies with a single snapshot matched by this query's id, which is
+   * returned and also dispatched to the onPresenceSnapshot handler. An empty
+   * or wildcard channel is handed to the server, which rejects it
+   * (BAD_REQUEST); failures surface as an error carrying the server
+   * code/message. The wait happens on the caller's promise, so it must not
+   * be awaited synchronously from receive-loop callbacks (onMessage,
+   * onPresence, onSurvey*, onPresenceSnapshot). Close and disconnect reject
+   * the pending query.
+   */
+  presence(channel: string): Promise<PresenceSnapshot> {
+    if (!this.transport || !this.isConnectedFlag) {
+      return Promise.reject(new Error("Not connected"));
+    }
+
+    const msg = createPresenceQueryMessage(channel);
+    const id = msg.id;
+
+    return new Promise((resolve, reject) => {
+      // Register the pending query before sending so the reply can never be
+      // missed between the send and the registration.
+      this.pendingPresence.set(id, { resolve, reject });
+
+      this.send(msg).catch((err) => {
+        this.pendingPresence.delete(id);
+        reject(err);
+      });
+    });
+  }
+
+  /**
+   * Initiate a survey on an exact channel and wait for the aggregated
+   * answers. A timeoutMs <= 0 sends 0 and lets the server apply its policy
+   * cap. The wait happens on the caller's promise: the receive loop fills
+   * the pending result, so this must not be awaited synchronously from
+   * receive-loop callbacks (onMessage, onPresence*, onSurvey*).
+   *
+   * Completion conditions, first match wins:
+   * - a SurveyResult carrying the generated request id;
+   * - a top-level error whose id equals this request's inbound id
+   *   (synchronous rejections such as SURVEY_DISABLED);
+   * - a top-level error without a matchable id whose code is a survey
+   *   rejection code, when exactly one survey() is in flight (server worker
+   *   failures may not echo the request id; the server allows one in-flight
+   *   survey per session).
+   *
+   * When the SurveyResult itself carries an error, the answers (if any) are
+   * attached to the rejected error's `answers` property. Close and
+   * disconnect reject the pending survey.
+   */
+  survey(
+    channel: string,
+    payload: Message | null,
+    timeoutMs?: number
+  ): Promise<SurveyAnswer[]> {
+    if (!this.transport || !this.isConnectedFlag) {
+      return Promise.reject(new Error("Not connected"));
+    }
+
+    const requestId = generateMessageId();
+    const msg = createSurveyRequestMessage(requestId, channel, payload, timeoutMs);
+    const id = msg.id;
+
+    return new Promise((resolve, reject) => {
+      // Register the pending survey before sending so the result can never
+      // be missed between the send and the registration.
+      this.pendingSurvey.set(id, { requestId, resolve, reject });
+
+      this.send(msg).catch((err) => {
+        this.pendingSurvey.delete(id);
+        reject(err);
+      });
+    });
+  }
+
+  /**
    * Register the handler for survey requests from the server. The handler
    * receives the request id and the decoded request message and returns the
    * reply message; the reply is sent back with the request id. When the
@@ -936,6 +1282,38 @@ export class MessageLoopClient implements IClient {
     ) => Message | Promise<Message>
   ): void {
     this.surveyHandler = handler;
+  }
+
+  /**
+   * Register the handler for survey requests from the server, additionally
+   * receiving the request channel. When set it takes precedence over the
+   * handler registered with onSurvey. When no handler at all is registered,
+   * the request payload is echoed back unchanged.
+   */
+  onSurveyRequest(
+    handler: (
+      requestId: string,
+      channel: string,
+      request: Message
+    ) => Message | Promise<Message>
+  ): void {
+    this.surveyRequestHandler = handler;
+  }
+
+  /**
+   * Register the handler for presence events (join/leave). Unknown actions
+   * are still delivered.
+   */
+  onPresence(handler: (event: PresenceEvent) => void): void {
+    this.presenceHandler = handler;
+  }
+
+  /**
+   * Register the handler for presence snapshots delivered with Connected /
+   * SubscribeAck, and for the snapshot returned by a presence() query.
+   */
+  onPresenceSnapshot(handler: (snap: PresenceSnapshot) => void): void {
+    this.presenceSnapshotHandler = handler;
   }
 
   /**

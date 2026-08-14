@@ -9,11 +9,11 @@
 - WebSocket 客户端（浏览器原生 `WebSocket` 与 Node.js 双环境）
 - 消息构造辅助：JSON、文本（text）、二进制（binary）三种载荷
 - 频道订阅、取消订阅与发布
+- 订阅级 token、消息恢复（`recover` + offset/epoch）与 Presence（事件、快照、查询）
+- 频道级调查：`survey()` 发起、`onSurvey` / `onSurveyRequest` 应答
 - RPC 请求/回复（`client.rpc`，服务端经 proxy 转发，见[《架构指南》](01-architecture.md)）
-- 心跳（Ping/Pong）与断线自动重连、会话恢复（offset + epoch 语义，见[《架构指南》](01-architecture.md) 第 3.4 节）
+- 心跳（Ping/Pong，含服务端 Ping → 客户端 Pong）与断线自动重连、会话恢复（offset + epoch 语义，见[《架构指南》](01-architecture.md) 第 3.4 节）
 - JSON 与 protobuf 两种线上编码
-
-**不支持 Survey**：`parseOutboundMessage` 虽能识别 `surveyRequest` / `surveyReply` 信封，但 `MessageLoopClient` 不处理这两种消息，SDK 也未暴露 survey 相关 API。
 
 包同时输出 ESM（`dist/esm`）、CommonJS（`dist/cjs`）与类型声明（`dist/types`），并在 `exports` 中按 `import` / `require` 条件分发。运行时依赖仅 `@bufbuild/protobuf`（`^2.0.0`）。
 
@@ -151,14 +151,24 @@ static async dial(url: string, options?: ClientOption[]): Promise<MessageLoopCli
 | 方法 | 说明 |
 | --- | --- |
 | `connect(): Promise<void>` | 发送 `Connect` 信封进行认证；重连场景下附带 `sessionId`、每频道 `offset` 与 `epoch` 用于会话恢复 |
-| `close(): Promise<void>` | 主动关闭：停止重连与心跳、拒绝所有挂起的 RPC、关闭传输、触发 `onClosed` |
-| `subscribe(...channels): Promise<void>` | 订阅一个或多个频道，并记录进 `subscribedChannels`（重连后自动恢复） |
+| `close(): Promise<void>` | 主动关闭：停止重连与心跳、拒绝所有挂起的 RPC / Presence 查询 / Survey、关闭传输、触发 `onClosed` |
+| `subscribe(...channels): Promise<void>` | 订阅一个或多个频道，并记录进 `subscribedChannels`（重连后自动恢复）；每个参数是频道名或 `{ channel, token?, recover?, offset?, epoch? }`（见下） |
 | `unsubscribe(...channels): Promise<void>` | 取消订阅 |
 | `publish(channel: string, msg: Message): Promise<void>` | 向频道发布一条消息 |
 | `rpc(channel: string, method: string, request: Message, options?: { timeout?: number }): Promise<Message>` | 发起 RPC 请求，返回服务端回复载荷构造的 `Message`；超时（默认 `rpcTimeout`）或服务端返回错误时 reject |
+| `presence(channel: string): Promise<PresenceSnapshot>` | 查询精确频道的当前 Presence 快照；失败时 reject（error 带服务端 `code`）；空/通配频道交给服务端拒绝 |
+| `survey(channel: string, payload: Message \| null, timeoutMs?: number): Promise<SurveyAnswer[]>` | 发起频道级调查，等待聚合答案；`timeoutMs <= 0` 发 0 由服务端策略决定 |
 | `isConnected(): boolean` | 是否已连接（别名 `isConnectedToServer()`） |
 | `getSubscribedChannels(): string[]` | 当前订阅的频道列表 |
 | `disableAutoReconnect()` / `enableAutoReconnect()` | 运行时开关自动重连 |
+
+`SubscriptionSpec` 的恢复字段（与 Go SDK `WithRecover(offset, epoch)` 对应）：
+
+- `recover?: boolean` —— `true` 时服务端通过 `SubscribeAck.publications` 重放 `offset` 之后的离线消息，走与普通消息相同的 `onMessage` / `addMessageHandler` 投递路径。
+- `offset?: bigint` —— 恢复起点（proto `uint64`，用 `bigint` 表示）；`0n` 表示从最新开始（由服务端策略决定）。
+- `epoch?: string` —— 该 offset 所属的 broker epoch。
+
+`recover: true` 且 `offset = 0n` / `epoch = ""` 仍会发出 `recover=true`（新鲜订阅从头恢复）。纯字符串频道参数不触发恢复。订阅带 `recover` 时，服务端回包的 `SubscribeAck.recoverResults` 会回显每频道已确认游标，SDK 写入本地 offset 表，供下次重连继续恢复；空批（offset 0）不会抹掉已知位置。
 
 ### 事件回调
 
@@ -168,8 +178,12 @@ static async dial(url: string, options?: ClientOption[]): Promise<MessageLoopCli
 | `onError` | `(handler: (error: Error) => void) => void` | 错误回调；连接错误会触发自动重连 |
 | `onConnected` | `(handler: (sessionId: string) => void) => void` | 连接（或恢复）成功 |
 | `onClosed` | `(handler: () => void) => void` | 连接关闭 |
+| `onSurvey` | `(requestId: string, request: Message) => Message \| Promise<Message>` | 应答服务端发来的调查；无 handler 时默认把请求载荷原样 echo 回去 |
+| `onSurveyRequest` | `(requestId: string, channel: string, request: Message) => Message \| Promise<Message>` | 同 `onSurvey`，额外携带请求频道；设置后优先于 `onSurvey` |
+| `onPresence` | `(event: PresenceEvent) => void` | Presence 事件（join/leave）；未知 action 仍投递 |
+| `onPresenceSnapshot` | `(snap: PresenceSnapshot) => void` | Presence 快照：`Connected.presence`、`SubscribeAck.presence` 与 `presence()` 查询结果各触发一次 |
 
-以上四个是单处理器（重复设置会覆盖）。需要多处理器时使用：
+以上八个是单处理器（重复设置会覆盖）。需要多处理器时使用：
 
 - `addMessageHandler(handler): () => void` —— 追加消息处理器，返回移除该处理器的函数（`removeMessageHandler(handler)` 亦可）
 - `addStateChangeHandler(handler: (event: ConnectionStateChangeEvent) => void): () => void` —— 监听连接状态迁移，事件含 `previousState` 与 `newState` 两个字段
@@ -264,9 +278,24 @@ interface ReceivedMessage {
 
 - `messageToPayload(msg: Message): Payload` / `payloadToMessage(payload: Payload, id: string, type?: string): Message` —— 与协议层的 `sharedpb.Payload`（json/binary/text 三态）互转，细节见 [../protocol.md](../protocol.md)。
 - `generateMessageId(): string` —— 生成 `{unix纳秒}-{计数器}` 格式的 ID。
-- `createConnectMessage`、`createSubscribeMessage`、`createUnsubscribeMessage`、`createPublishMessage`、`createRPCRequestMessage`、`createPingMessage`、`createSubRefreshMessage` —— 信封构造器，返回 `InboundMessage`；`MessageLoopClient` 内部即使用这些构造器，高级场景可直接复用。
+- `createConnectMessage`、`createSubscribeMessage`、`createUnsubscribeMessage`、`createPublishMessage`、`createRPCRequestMessage`、`createPingMessage`、`createPongMessage`、`createPresenceQueryMessage`、`createSurveyRequestMessage`、`createSubRefreshMessage` —— 信封构造器，返回 `InboundMessage`；`MessageLoopClient` 内部即使用这些构造器，高级场景可直接复用。
 - `parseOutboundMessage(msg): { type, data, id }` —— 解析服务端 `OutboundMessage`，`type` 为信封类型判别。
 - `extractRpcReply(reply)` —— 从 `RpcReply` 中提取 `requestId`、`payload` 与可选 `error { code, message }`。
+
+### Presence 与 Survey 类型（`src/client/types.ts`）
+
+SDK 不直接把 proto 的 `PresenceEvent` / `SurveyResult` 暴露为公共 API，而是包一层公共类型：
+
+```typescript
+interface PresenceInfo { sessionId: string; userId: string; clientId: string; connectedAt: bigint; }
+interface PresenceEvent { channel: string; action: string; info: PresenceInfo; }   // action: "join" | "leave"
+interface PresenceSnapshot { channel: string; clients: PresenceInfo[]; truncated: boolean; occupancy: number; }
+interface SurveyAnswer { sessionId: string; userId: string; payload?: Message; error?: Error; }
+```
+
+- `SurveyAnswer.userId` 读自答案的 `metadata.entries["user_id"]`（proto 的 `SurveyAnswer` 没有 user_id 字段），缺失为 `""`。
+- 调查结果整体失败时 `survey()` reject，error 携带服务端 `code`；若 `SurveyResult` 自身带 error，答案挂在被 reject 的 error 的 `answers` 属性上。
+- **不要在收包回调里同步 `await`** `rpc()` / `survey()` / `presence()`：这些调用的等待发生在调用方 Promise 上，接收循环负责填充结果，在回调里同步等待会互相卡死。
 
 ## 7. 传输与编码
 
@@ -299,8 +328,9 @@ interface Transport {
 ### 心跳与会话恢复（`src/client/client.ts`）
 
 - **心跳**：连接建立后按 `pingInterval` 发送 `Ping`，等待 `Pong`；超过 `pingTimeout` 未收到即触发错误并关闭连接（进而走重连）。
+- **服务端 Ping**：收到服务端发来的 Outbound `Ping` 时，SDK 立即回一条携带**相同 `id`** 的 Inbound `Pong`，并当作存活证据（清掉客户端自己的 `pingTimeoutTimer`），避免「服务端在探活、客户端却因自己的 pingTimeout 掐掉连接」。开启服务端 `server.heartbeat.ping_interval` 必须使用本版本（1.1.0+）SDK。
 - **重连**：断连后按指数退避（`reconnectInitialDelay * 2^attempts`，封顶 `reconnectMaxDelay`）自动重连，`reconnectMaxAttempts` 为 `0` 时无限重试。
-- **会话恢复**：重连时的 `Connect` 会携带原 `sessionId`、当前 `epoch` 与各频道最后收到的 `offset`（`recover: true`）。服务端 `Connected` 回复 `resumed` 为 `false` 时，SDK 会对 `subscribedChannels` 全部重新订阅。offset/epoch 的语义与恢复边界见[《架构指南》](01-architecture.md) 第 3.4 节。
+- **会话恢复**：重连时的 `Connect` 会携带原 `sessionId`、当前 `epoch` 与各频道最后收到的 `offset`（`recover: true`）。服务端 `Connected` 回复 `resumed` 为 `false` 时，SDK 会对 `subscribedChannels` 全部重新订阅，且每条重新订阅带 `recover: true` + 已记录的 `offset` / `epoch`（`resubscribeAllChannels`）。`Connected.recoverResults` 与 `SubscribeAck.recoverResults` 会回写已确认游标。offset/epoch 的语义与恢复边界见[《架构指南》](01-architecture.md) 第 3.4 节。
 
 ## 8. 浏览器使用
 
@@ -315,6 +345,7 @@ SDK 层的错误形态均为原生 `Error`，来源与附加信息如下（`src/
 
 - **服务端错误信封**：`Error` 并附加 `code` 与 `type` 属性（取自协议错误字段），经 `onError` 回调分发。
 - **RPC 错误**：服务端 `RpcReply.error` 时 reject，错误对象带 `code`（字符串）；RPC 超时 reject `RPC timeout after ${timeout}ms`。
+- **Presence / Survey 错误**：`presence()` / `survey()` 被服务端拒绝时 reject，错误对象带服务端 `code`；断连或 `close()` 时挂起的查询/调查以 `Connection closed` reject。未连接时调用两者直接 reject `Not connected`。
 - **连接问题**：未连接时调用发送类方法抛 `Not connected`；`dial` 失败直接抛出（超时为 `Connection timeout`，WebSocket 层为 `WebSocket connection failed` 等）。
 - **心跳超时**：`Pong timeout`，随后关闭连接。
 
@@ -332,7 +363,7 @@ npm run lint      # ESLint 检查 src/
 ```
 
 - 构建由三个 `tsc` 调用完成：`build:esm`、`build:cjs`、`build:types`。
-- 测试用 Jest（preset `ts-jest`，roots 为 `test/`），目前覆盖客户端选项构造（`test/client.test.ts`）与编解码（`test/codec.test.ts`）两组用例。
+- 测试用 Jest（preset `ts-jest`，roots 为 `test/`），覆盖客户端选项构造（`test/client.test.ts`）、编解码（`test/codec.test.ts`）、协议行为（`test/protocol.test.ts` / `test/regression.test.ts`）与 PR-09 新增能力（`test/pr09.test.ts`）。
 - `src/proto/` 下的代码由 buf 生成，不要手工编辑；开发流程与 Protobuf 工作流见[《开发指南》](06-development.md) 的「TypeScript SDK 开发」与「Protobuf 工作流」两节。
 
 ## 11. 发布
