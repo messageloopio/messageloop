@@ -35,6 +35,7 @@ type Metrics struct {
 	RecoveryPublications            *prometheus.HistogramVec
 	RecoveryTruncatedTotal          *prometheus.CounterVec
 	HeartbeatIdleDisconnects        prometheus.Counter
+	AdminUserFanout                 *prometheus.HistogramVec
 }
 
 // NewMetrics creates and registers all Prometheus metrics.
@@ -145,6 +146,14 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name:      "heartbeat_idle_disconnects_total",
 			Help:      "Total number of connections disconnected with 3511 by the heartbeat (idle timeout or unresponded server ping).",
 		}),
+		AdminUserFanout: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: "messageloop",
+			Name:      "admin_user_fanout",
+			Help:      "Number of sessions fanned out per user-targeted admin operation (publish/disconnect/subscribe/unsubscribe).",
+			// Fan-out scale is session counts, so use a count-shaped bucket
+			// ladder instead of DefBuckets (a duration scale).
+			Buckets: []float64{1, 2, 5, 10, 25, 50, 100, 250, 500, 1000},
+		}, []string{"op"}),
 	}
 	reg.MustRegister(
 		m.ConnectionsTotal,
@@ -167,6 +176,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.RecoveryPublications,
 		m.RecoveryTruncatedTotal,
 		m.HeartbeatIdleDisconnects,
+		m.AdminUserFanout,
 	)
 	return m
 }

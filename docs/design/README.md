@@ -12,5 +12,6 @@
 | [PR-04a 实现规格](tasks/pr-04a-presence.md) | Accepted | Presence 本节点一等事件（不 emit）；[第三方 prompt](tasks/pr-04a-prompt.md) |
 | [PR-04b 实现规格](tasks/pr-04b-presence-emit.md) | Accepted | Presence `cluster_emit` 门闩；[第三方 prompt](tasks/pr-04b-prompt.md) |
 | [PR-05 实现规格](tasks/pr-05-heartbeat.md) | Accepted | 服务端 ping + 秒级 idle；[第三方 prompt](tasks/pr-05-prompt.md) |
+| [PR-06 实现规格](tasks/pr-06-admin-user.md) | Accepted | Admin 按 user 投递/断开/订阅；[第三方 prompt](tasks/pr-06-prompt.md) |
 
 历史设计（已归档实现记录）见 [docs/archive](../archive/) 与 [docs/superpowers/specs](../superpowers/specs/)。

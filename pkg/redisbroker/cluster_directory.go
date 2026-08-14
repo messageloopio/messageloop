@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/lynx-go/x/log"
 	"github.com/messageloopio/messageloop"
 	"github.com/messageloopio/messageloop/config"
 	"github.com/redis/go-redis/v9"
@@ -48,6 +49,19 @@ func (d *redisSessionDirectory) sessionSnapshotKey(sessionID string) string {
 	return d.opts.ClusterSessionSnapshotPrefix + sessionID
 }
 
+// userMemberKey is the per-session member key of the user→sessions index. It
+// carries the same TTL as the session lease so the member expires together
+// with the lease; the set index (userSessionsKey) is trimmed by
+// RemoveUserSession and rebuilt by the periodic repair.
+func (d *redisSessionDirectory) userMemberKey(userID, sessionID string) string {
+	return fmt.Sprintf("%suser:member:%s:%s", d.opts.ClusterPrefix, userID, sessionID)
+}
+
+// userSessionsKey is the set of session IDs currently indexed for userID.
+func (d *redisSessionDirectory) userSessionsKey(userID string) string {
+	return fmt.Sprintf("%suser:sessions:%s", d.opts.ClusterPrefix, userID)
+}
+
 func (d *redisSessionDirectory) PutNodeLease(ctx context.Context, lease *messageloop.ClusterNodeLease, ttl time.Duration) error {
 	if lease == nil || lease.NodeID == "" || lease.IncarnationID == "" {
 		return nil
@@ -74,7 +88,17 @@ func (d *redisSessionDirectory) PutSessionLease(ctx context.Context, lease *mess
 	if lease.LeaseVersion == 0 {
 		lease.LeaseVersion = 1
 	}
-	return d.setJSON(ctx, d.sessionLeaseKey(lease.SessionID), lease, ttl)
+	// Read the previous lease so the user index can migrate a membership
+	// when the user changes (e.g. resume followed by re-authentication):
+	// the index is maintained by comparing old vs new leases.
+	oldLease, err := d.GetSessionLease(ctx, lease.SessionID)
+	if err != nil {
+		return err
+	}
+	if err := d.setJSON(ctx, d.sessionLeaseKey(lease.SessionID), lease, ttl); err != nil {
+		return err
+	}
+	return d.syncUserIndex(ctx, oldLease, lease, ttl)
 }
 
 func (d *redisSessionDirectory) CompareAndSwapSessionLease(ctx context.Context, expected, desired *messageloop.ClusterSessionLease, ttl time.Duration) (bool, error) {
@@ -114,7 +138,7 @@ func (d *redisSessionDirectory) CompareAndSwapSessionLease(ctx context.Context, 
 		return err
 	}, key)
 	if err == nil {
-		return true, nil
+		return true, d.syncUserIndex(ctx, expected, desired, ttl)
 	}
 	if err.Error() == compareMismatch || errors.Is(err, redis.TxFailedErr) {
 		return false, nil
@@ -138,7 +162,16 @@ func (d *redisSessionDirectory) DeleteSessionLease(ctx context.Context, sessionI
 	if sessionID == "" {
 		return nil
 	}
-	return d.client.Del(ctx, d.sessionLeaseKey(sessionID)).Err()
+	// Read the user before deleting the lease so the user index membership
+	// can be removed together with the lease.
+	lease, err := d.GetSessionLease(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if err := d.client.Del(ctx, d.sessionLeaseKey(sessionID)).Err(); err != nil {
+		return err
+	}
+	return d.syncUserIndex(ctx, lease, nil, 0)
 }
 
 func (d *redisSessionDirectory) PutSessionSnapshot(ctx context.Context, snapshot *messageloop.ClusterSessionSnapshot, ttl time.Duration) error {
@@ -187,6 +220,105 @@ func (d *redisSessionDirectory) getJSON(ctx context.Context, key string, target 
 		return false, err
 	}
 	return true, nil
+}
+
+// AddUserSession records a session's membership in a user's index: a
+// per-session member key with the session lease TTL plus a set member. The
+// set itself has no TTL; stale members expire with their member keys and are
+// filtered at expansion time.
+func (d *redisSessionDirectory) AddUserSession(ctx context.Context, userID, sessionID string, ttl time.Duration) error {
+	if userID == "" || sessionID == "" {
+		return nil
+	}
+	if ttl <= 0 {
+		ttl = time.Second
+	}
+	pipe := d.client.TxPipeline()
+	pipe.Set(ctx, d.userMemberKey(userID, sessionID), "1", ttl)
+	pipe.SAdd(ctx, d.userSessionsKey(userID), sessionID)
+	_, err := pipe.Exec(ctx)
+	return err
+}
+
+func (d *redisSessionDirectory) RemoveUserSession(ctx context.Context, userID, sessionID string) error {
+	if userID == "" || sessionID == "" {
+		return nil
+	}
+	pipe := d.client.TxPipeline()
+	pipe.Del(ctx, d.userMemberKey(userID, sessionID))
+	pipe.SRem(ctx, d.userSessionsKey(userID), sessionID)
+	_, err := pipe.Exec(ctx)
+	return err
+}
+
+func (d *redisSessionDirectory) ListUserSessions(ctx context.Context, userID string) ([]string, error) {
+	if userID == "" {
+		return nil, nil
+	}
+	return d.client.SMembers(ctx, d.userSessionsKey(userID)).Result()
+}
+
+// ListSessionLeases enumerates every stored session lease (SCAN
+// ml:cluster:session:lease:*). It feeds the periodic user-index repair; a
+// lease that vanished between the scan and the read is skipped.
+func (d *redisSessionDirectory) ListSessionLeases(ctx context.Context) ([]*messageloop.ClusterSessionLease, error) {
+	keys, err := scanKeys(ctx, d.client, d.opts.ClusterSessionLeasePrefix+"*")
+	if err != nil {
+		return nil, err
+	}
+	if len(keys) == 0 {
+		return nil, nil
+	}
+
+	pipe := d.client.Pipeline()
+	cmds := make(map[string]*redis.StringCmd, len(keys))
+	for _, key := range keys {
+		cmds[key] = pipe.Get(ctx, key)
+	}
+	_, err = pipe.Exec(ctx)
+	if err != nil && !errors.Is(err, redis.Nil) {
+		return nil, err
+	}
+
+	leases := make([]*messageloop.ClusterSessionLease, 0, len(keys))
+	for _, key := range keys {
+		cmd, ok := cmds[key]
+		if !ok {
+			continue
+		}
+		raw, cmdErr := cmd.Result()
+		if cmdErr != nil {
+			continue
+		}
+		lease := &messageloop.ClusterSessionLease{}
+		if unmarshalErr := json.Unmarshal([]byte(raw), lease); unmarshalErr != nil {
+			continue
+		}
+		leases = append(leases, lease)
+	}
+	return leases, nil
+}
+
+// syncUserIndex maintains the user→sessions index for one lease write. The
+// lease itself has already been written or deleted; index maintenance is
+// best-effort — a failure only warns, because the index is a hint (never
+// authoritative) and the periodic repair converges stale entries.
+func (d *redisSessionDirectory) syncUserIndex(ctx context.Context, oldLease, newLease *messageloop.ClusterSessionLease, ttl time.Duration) error {
+	if err := messageloop.SyncUserIndex(ctx, d, oldLease, newLease, ttl); err != nil {
+		log.WarnContext(ctx, "failed to sync user session index", err, "session_id", leaseSessionID(oldLease, newLease))
+		return nil
+	}
+	return nil
+}
+
+func leaseSessionID(oldLease, newLease *messageloop.ClusterSessionLease) string {
+	if newLease != nil {
+		return newLease.SessionID
+	}
+	if oldLease != nil {
+		return oldLease.SessionID
+	}
+	return ""
 }
 
 func clusterSessionLeaseEqual(left, right *messageloop.ClusterSessionLease) bool {

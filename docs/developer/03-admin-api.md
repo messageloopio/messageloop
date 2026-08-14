@@ -97,7 +97,7 @@ grpcurl \
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `id` | `string` | 出版物标识；会话投递时作为消息的 `id` 透传给客户端 |
-| `destination` | `Destination` | 投递目标：`sessions`（会话 ID 列表）或 `channels`（频道列表），可以同时指定 |
+| `destination` | `Destination` | 投递目标：`sessions`（会话 ID 列表）、`channels`（频道列表）或 `users`（用户 ID 列表），可以同时指定 |
 | `options` | `Options` | 投递选项，目前仅声明 `add_history` |
 | `payload` | `shared.v1.Payload` | 消息载荷，支持 `text`、`binary`、`json` 三种形式 |
 | `metadata` | `shared.v1.Metadata` | 已声明但当前处理器未使用，会被忽略 |
@@ -105,7 +105,7 @@ grpcurl \
 `Publication.Options.add_history`：控制频道发布是否写入历史。
 - `true`：写入 broker 历史，后续可通过 `GetHistory` 补拉。
 - `false` 或未设置：以 transient 方式发布，不写历史。
-- 会话目标（`destination.sessions`）不受该选项影响，始终直接投递到会话。
+- 会话目标（`destination.sessions`）与用户目标（`destination.users`）不受该选项影响，始终直接投递到会话。
 
 响应消息 `PublishResponse`：空消息，不返回任何字段。单条出版物的投递结果（例如 broker 分配的 offset）不会暴露给调用方。
 
@@ -114,10 +114,12 @@ grpcurl \
 - 载荷转换：`binary` 直接使用原始字节；`text` 按 UTF-8 字节发送；`json` 会被序列化为 JSON 字节后按文本发送。载荷为 nil 时发送空载荷。
 - 频道投递：默认以 transient 方式发布，不写历史；仅当 `options.add_history` 为 `true` 时通过 broker 的 `Publish` 路径发布并写入历史，与客户端发布走同一管道（见[《架构指南》](01-architecture.md)）。
 - 会话投递：向目标会话直接发送一条 `publication` 信封，消息的 `channel` 字段为空字符串（会话定向消息没有频道），`id` 为 `Publication.id`。目标会话不存在时**跳过**该投递，不报错、不计入失败（仅记录 debug 日志）。
+- 用户投递：`destination.users` 里的每个用户先展开为该用户的**全部 session**（单节点来自本地 hub 的 user 索引；集群下并上 Redis user 索引），展开结果与 `destination.sessions` **取并集（去重）**后走会话投递；`channels` 可同时指定或留空。**只有 users 的 destination 是合法的**，与 sessions 一样按会话逐个 best-effort 投递。展开时**始终校验** session lease 的 `UserID`（本地客户端则校验 `Client.UserID()`）：索引里的陈旧/投毒条目会被跳过；索引 miss 不做全集群 SCAN，靠周期 repair 收敛。
 - 部分失败语义：由于 `PublishResponse` 没有按条目返回的字段，失败只能通过整体结果表达。每条失败投递（目标会话发送失败、目标频道发布失败、载荷序列化失败、缺少 destination）都会记录错误日志；仅当**所有**投递尝试全部失败时，RPC 返回状态码 `Internal`（错误信息形如 `all N delivery attempt(s) failed`）；只要有一条成功，RPC 就返回空响应。
-- destination 为 nil 或 `sessions`、`channels` 均为空时，该条出版物视为失败。
+- destination 为 nil 或 `sessions`、`channels`、`users` 均为空时，该条出版物视为失败。
+- `destination.users`（以及其它按 user 字段）中的**空字符串**是客户端错误：RPC 返回 `InvalidArgument`，且**不做任何扫描**（匿名连接不可按 user 寻址）。
 
-返回的错误码：`Internal`。
+返回的错误码：`Internal`、`InvalidArgument`。
 
 集群感知：见 [集群感知行为](#集群感知行为)。
 
@@ -132,6 +134,7 @@ grpcurl \
 | `sessions` | `repeated string` | 要断开的会话 ID 列表 |
 | `code` | `uint32` | 断开码（disconnect code），原样传给客户端 |
 | `reason` | `string` | 人类可读的断开原因，原样传给客户端 |
+| `users` | `repeated string` | 要断开的用户 ID 列表；每个用户展开为其全部 session，与 `sessions` 取并集（去重）后逐个断开 |
 
 响应消息 `DisconnectResponse`：
 
@@ -141,7 +144,8 @@ grpcurl \
 
 语义：
 
-- 对列表中的每个会话逐一执行断开。每个会话独立得到一个布尔结果：会话存在且断开成功为 `true`；会话不存在或断开过程出错为 `false`。RPC 本身不会因为个别会话失败而返回错误。
+- 对展开后的每个会话逐一执行断开（`users` 展开 + `sessions` 并集、去重）。每个会话独立得到一个布尔结果：会话存在且断开成功为 `true`；会话不存在或断开过程出错为 `false`。RPC 本身不会因为个别会话失败而返回错误。
+- 按 user 展开与 Publish 相同：展开时始终校验 session lease 的 `UserID`（或本地 `Client.UserID()`），索引陈旧条目被跳过；`users` 中的空字符串返回 `InvalidArgument` 且不扫描。
 - 服务端会以指定的 `code` 与 `reason` 构造 `Disconnect` 并关闭客户端连接，客户端在协议层收到对应的断开通知（见[《客户端协议参考》](../protocol.md) 中的 Disconnect Codes 一节）。`code` 由调用方决定，服务端不做合法性校验；源码中内置的常量定义于 `disconnect.go`，例如：
 
 | 常量 | code | reason |
@@ -169,6 +173,7 @@ grpcurl \
 | --- | --- | --- |
 | `session_id` | `string` | 目标会话 ID |
 | `channels` | `repeated string` | 要订阅的频道列表 |
+| `user_id` | `string` | 目标用户 ID；展开为该用户的全部 session，与 `session_id` 取并集；`session_id` 与 `user_id` **都为空时**返回 `InvalidArgument` |
 
 响应消息 `SubscribeResponse`：
 
@@ -179,8 +184,9 @@ grpcurl \
 语义：
 
 - 订阅以单个会话为目标（会话级管理操作，不是广播订阅），实际调用的是客户端协议中「连接时附带订阅」之外的完整订阅路径（`AddSubscription`），包括 broker 订阅注册、在线状态（presence）登记与集群状态同步，因此与客户端主动订阅行为等价。
-- 每个频道独立得到一个布尔结果：会话不存在或订阅过程出错时为 `false`，成功为 `true`。RPC 本身不因个别频道失败而返回错误。
+- 按 `user_id` 展开后，对每个频道在每个会话上执行订阅；**任一 session 成功则该频道结果为 `true`**，全部失败才为 `false`。会话不存在或订阅过程出错时对应频道为 `false`。RPC 本身不因个别频道失败而返回错误。
 - 订阅已存在的频道是幂等的，重复订阅返回 `true` 且不产生副作用。
+- `user_id` 的展开与 Publish/Disconnect 相同：校验 lease 的 `UserID`，`session_id` 与 `user_id` 都为空时 `InvalidArgument` 且不扫描。
 
 集群感知：见 [集群感知行为](#集群感知行为)。
 
@@ -194,6 +200,7 @@ grpcurl \
 | --- | --- | --- |
 | `session_id` | `string` | 目标会话 ID |
 | `channels` | `repeated string` | 要取消订阅的频道列表 |
+| `user_id` | `string` | 目标用户 ID；与 Subscribe 对称：展开为用户全部 session，与 `session_id` 取并集；都为空时 `InvalidArgument` |
 
 响应消息 `UnsubscribeResponse`：
 
@@ -201,7 +208,7 @@ grpcurl \
 | --- | --- | --- |
 | `results` | `map<string, bool>` | 以频道名为键、是否取消订阅成功为值 |
 
-语义：与 `Subscribe` 对称。对每个频道独立执行取消订阅，包括从 hub 移除订阅、broker 反注册、在线状态清除与集群状态同步。会话不存在、频道未被该会话订阅或操作出错时对应结果为 `false`。
+语义：与 `Subscribe` 对称。对每个频道独立执行取消订阅（多 session 时任一 session 成功则该频道为 `true`），包括从 hub 移除订阅、broker 反注册、在线状态清除与集群状态同步。会话不存在、频道未被该会话订阅或操作出错时对应结果为 `false`。
 
 集群感知：见 [集群感知行为](#集群感知行为)。
 
@@ -366,6 +373,7 @@ message Error {
 | gRPC 状态码 | 触发条件 |
 | --- | --- |
 | `Unauthenticated` | 鉴权拦截器判定失败：缺少 `authorization` 元数据、格式不是 `Bearer <token>`、或令牌不匹配 |
+| `InvalidArgument` | 按 user 字段中出现空字符串（`destination.users`、`Disconnect.users` 的空条目，或 `Subscribe`/`Unsubscribe` 的 `session_id` 与 `user_id` 同时为空）——**不做任何扫描** |
 | `Internal` | `Publish` 请求中的所有投递尝试全部失败 |
 | `Unknown` | 其余错误：来自 Node 内部方法的错误（例如 `Survey` 调查注册表已满、presence/history 存储错误）原样透传，gRPC 框架将其映射为 `Unknown` |
 
@@ -410,6 +418,25 @@ grpcurl \
       "id": "direct-msg-1",
       "destination": {"sessions": ["abc-123"]},
       "payload": {"json": {"type": "notice", "content": "server restarting"}}
+    }]
+  }' \
+  127.0.0.1:9091 \
+  messageloop.server.v1.APIService/Publish
+```
+
+按用户发布（只填 `users`，投递给该用户的全部 session）：
+
+```bash
+grpcurl \
+  -import-path ./protocol \
+  -proto server/v1/api.proto \
+  -H "authorization: Bearer <token>" \
+  -plaintext \
+  -d '{
+    "publications": [{
+      "id": "user-notice-1",
+      "destination": {"users": ["alice"]},
+      "payload": {"text": "multi-device notice"}
     }]
   }' \
   127.0.0.1:9091 \
@@ -544,6 +571,7 @@ grpcurl \
 | --- | --- |
 | `Publish`（会话投递） | 通过会话租约（session lease）解析会话所在节点；会话由远端节点持有时，投递请求经 Redis 命令总线（command bus）路由到该节点执行 |
 | `Disconnect`、`Subscribe`、`Unsubscribe` | 与 `Publish` 会话投递相同：先解析会话租约，远端会话的操作经命令总线下发到持有该会话的节点执行；会话不存在时对应条目返回 `false` |
+| 按 user 展开（`Publish.users`、`Disconnect.users`、`Subscribe/Unsubscribe.user_id`） | 本地 hub 的 user 索引（`Hub.SessionsByUser`）并上 Redis user→sessions 索引（`ml:cluster:user:sessions:<user_id>` 集合 + `ml:cluster:user:member:<user_id>:<session_id>` 成员键，TTL 与 session lease 相同）；展开时对每个 session 校验 lease 的 `UserID`，不匹配或缺失则跳过；索引 miss 不做全集群 SCAN，靠周期 repair 收敛 |
 | `Survey` | 除本地调查外，还会通过命令总线向集群内所有其他节点广播调查请求（排除自身，`exclude_self`），聚合各节点的应答后统一排序返回；每个 `SurveyResult` 会附带 `node_id` 与 `incarnation_id` 元数据，标识应答来源节点；集群中某个节点执行调查失败时，该节点会以一条带 `error` 的 `SurveyResult` 表示（`code` 为 `SURVEY_FAILED`） |
 | `GetChannels` | 不再查询本地 hub，而是读取集群共享的频道投影（query store），返回全集群的活跃频道与订阅者数量 |
 | `GetPresence` | 在线状态存储在集群模式下替换为 Redis 支撑的存储，查询返回全集群的在线客户端 |

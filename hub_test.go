@@ -328,7 +328,6 @@ func TestHub_Add(t *testing.T) {
 	client := newTestClient(t, "session-1", "user-1")
 
 	_ = h.add(client)
-
 	h.mu.RLock()
 	if len(h.sessions) != 1 {
 		h.mu.RUnlock()
@@ -998,4 +997,36 @@ func TestHubAddSubRejectsMalformedExactChannel(t *testing.T) {
 	assert.NoError(t, err)
 	_, err = h.addSub("a.**.b", sub)
 	assert.ErrorIs(t, err, topics.ErrBadTopic, "addSub(%q)", "a.**.b")
+}
+
+// TestHub_SessionsByUser verifies the user→sessions lookup: two sessions of
+// the same user are both returned, other users never leak in, and an empty
+// user ID returns empty even when anonymous connections are registered.
+func TestHub_SessionsByUser(t *testing.T) {
+	h := newHub(0, 0)
+	clientA := newTestClient(t, "session-a-1", "user-a")
+	clientA2 := newTestClient(t, "session-a-2", "user-a")
+	clientB := newTestClient(t, "session-b", "user-b")
+	anon := newTestClient(t, "session-anon", "")
+	for _, c := range []*Client{clientA, clientA2, clientB, anon} {
+		require.NoError(t, h.add(c))
+	}
+
+	sessions := h.SessionsByUser("user-a")
+	require.Len(t, sessions, 2)
+	got := []string{sessions[0].SessionID(), sessions[1].SessionID()}
+	assert.Equal(t, []string{"session-a-1", "session-a-2"}, got, "sessions must be sorted and must not mix other users")
+
+	sessionsB := h.SessionsByUser("user-b")
+	require.Len(t, sessionsB, 1)
+	assert.Equal(t, "session-b", sessionsB[0].SessionID())
+
+	assert.Empty(t, h.SessionsByUser("user-unknown"))
+	// Empty user ID must stay empty even though the shard holds anonymous
+	// connections under the empty key.
+	assert.Empty(t, h.SessionsByUser(""))
+
+	// Removed sessions disappear from the lookup.
+	require.True(t, h.RemoveSessionIfMatches("session-a-1", clientA))
+	assert.Len(t, h.SessionsByUser("user-a"), 1)
 }

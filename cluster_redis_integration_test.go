@@ -13,9 +13,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/messageloopio/messageloop"
 	"github.com/messageloopio/messageloop/config"
+	"github.com/messageloopio/messageloop/pkg/grpcstream"
 	"github.com/messageloopio/messageloop/pkg/redisbroker"
 	"github.com/messageloopio/messageloop/proxy"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
+	serverpb "github.com/messageloopio/messageloop/shared/genproto/server/v1"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
@@ -656,4 +658,128 @@ func TestPresence_ClusterEmitRedisExactlyOne(t *testing.T) {
 		"the joiner must not receive its own join")
 	require.Zero(t, integrationPublicationCount(transportA),
 		"presence frames must never become publications")
+}
+
+// TestAdmin_DisconnectUsersAcrossNodes verifies PR-06 cross-node: user U has
+// one session on nodeA and one on nodeB; an admin Disconnect with
+// users=[U] resolves both through the Redis user index and disconnects both.
+func TestAdmin_DisconnectUsersAcrossNodes(t *testing.T) {
+	redisCfg := requireClusterRedis(t, clusterRedisIntegrationDB)
+	ctx := context.Background()
+
+	nodeA := newClusterRedisTestNode(t, ctx, redisCfg, "node-a")
+	nodeB := newClusterRedisTestNode(t, ctx, redisCfg, "node-b")
+
+	const userID = "cross-node-user"
+
+	transportA := &integrationCapturingTransport{}
+	clientA, _, err := messageloop.NewClient(ctx, nodeA, transportA, messageloop.JSONMarshaler{})
+	require.NoError(t, err)
+	clientA.ForceTestIDs("sess-user-a", userID, "client-a")
+	require.NoError(t, nodeA.AddClient(clientA))
+
+	transportB := &integrationCapturingTransport{}
+	clientB, _, err := messageloop.NewClient(ctx, nodeB, transportB, messageloop.JSONMarshaler{})
+	require.NoError(t, err)
+	clientB.ForceTestIDs("sess-user-b", userID, "client-b")
+	require.NoError(t, nodeB.AddClient(clientB))
+
+	// Both sessions must be visible in the Redis user index (written by the
+	// AddClient lease sync).
+	directory := redisbroker.NewSessionDirectory(redisCfg)
+	defer func() { _ = directory.Shutdown(ctx) }()
+	require.Eventually(t, func() bool {
+		ids, err := directory.ListUserSessions(ctx, userID)
+		if err != nil {
+			return false
+		}
+		return len(ids) == 2
+	}, 5*time.Second, 50*time.Millisecond)
+
+	// Admin Disconnect with users=[U] from nodeA: the remote session is
+	// resolved via the index + lease, then routed through the command bus.
+	handler := grpcstream.NewAPIServiceHandler(nodeA)
+	resp, err := handler.Disconnect(ctx, &serverpb.DisconnectRequest{
+		Users:  []string{userID},
+		Code:   3009,
+		Reason: "cross-node user disconnect",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Len(t, resp.GetResults(), 2, "results must be keyed per session")
+	require.True(t, resp.GetResults()[clientA.SessionID()], "nodeA session must be disconnected")
+	require.True(t, resp.GetResults()[clientB.SessionID()], "nodeB session must be disconnected")
+	require.Eventually(t, func() bool {
+		return transportA.isClosed() && transportB.isClosed()
+	}, 5*time.Second, 50*time.Millisecond)
+
+	// The user index is cleaned up by the lease delete on close.
+	require.Eventually(t, func() bool {
+		ids, err := directory.ListUserSessions(ctx, userID)
+		if err != nil {
+			return false
+		}
+		return len(ids) == 0
+	}, 5*time.Second, 50*time.Millisecond)
+}
+
+// TestClusterRedis_ResumeUserChangeMigratesIndex verifies PR-06 §9.7: after
+// a remote resume where the re-authenticated user differs from the lease
+// owner, the Redis user index migrates the membership (SREM old user, SADD
+// new user) so expansion by the old user no longer hits the session.
+func TestClusterRedis_ResumeUserChangeMigratesIndex(t *testing.T) {
+	redisCfg := requireClusterRedis(t, clusterRedisIntegrationDB)
+	ctx := context.Background()
+
+	nodeA := newClusterRedisTestNode(t, ctx, redisCfg, "node-a")
+	nodeB := newClusterRedisTestNode(t, ctx, redisCfg, "node-b")
+	authOld := &integrationAuthProxy{userID: "user-old"}
+	authNew := &integrationAuthProxy{userID: "user-new"}
+	require.NoError(t, nodeA.AddProxy(authOld, "", messageloop.SystemMethodAuthenticate))
+	require.NoError(t, nodeB.AddProxy(authNew, "", messageloop.SystemMethodAuthenticate))
+
+	oldTransport := &integrationCapturingTransport{}
+	oldClient, _, err := messageloop.NewClient(ctx, nodeA, oldTransport, messageloop.JSONMarshaler{})
+	require.NoError(t, err)
+	connectMsg := &clientpb.InboundMessage{
+		Id: "connect-old",
+		Envelope: &clientpb.InboundMessage_Connect{
+			Connect: &clientpb.Connect{ClientId: "client-old", Token: "token"},
+		},
+	}
+	require.NoError(t, oldClient.HandleMessage(ctx, connectMsg))
+	oldSessionID := oldClient.SessionID()
+	require.NotEmpty(t, oldSessionID)
+	require.Equal(t, "user-old", oldClient.UserID())
+
+	directory := redisbroker.NewSessionDirectory(redisCfg)
+	defer func() { _ = directory.Shutdown(ctx) }()
+	require.Eventually(t, func() bool {
+		ids, err := directory.ListUserSessions(ctx, "user-old")
+		return err == nil && len(ids) == 1
+	}, 5*time.Second, 50*time.Millisecond)
+
+	// Resume on nodeB with a different authenticated user: authUser wins over
+	// the inherited lease user, and the next lease write must migrate the
+	// index membership.
+	newTransport := &integrationCapturingTransport{}
+	newClient, _, err := messageloop.NewClient(ctx, nodeB, newTransport, messageloop.JSONMarshaler{})
+	require.NoError(t, err)
+	resumeMsg := &clientpb.InboundMessage{
+		Id: "connect-new",
+		Envelope: &clientpb.InboundMessage_Connect{
+			Connect: &clientpb.Connect{ClientId: "client-new", Token: "token", SessionId: oldSessionID},
+		},
+	}
+	require.NoError(t, newClient.HandleMessage(ctx, resumeMsg))
+	require.Equal(t, "user-new", newClient.UserID())
+
+	require.Eventually(t, func() bool {
+		ids, err := directory.ListUserSessions(ctx, "user-old")
+		if err != nil || len(ids) != 0 {
+			return false
+		}
+		ids, err = directory.ListUserSessions(ctx, "user-new")
+		return err == nil && len(ids) == 1
+	}, 5*time.Second, 50*time.Millisecond)
 }

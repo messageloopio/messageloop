@@ -683,6 +683,35 @@ func (h *Hub) LookupSession(sessionID string) *Client {
 	return h.sessions[sessionID]
 }
 
+// SessionsByUser returns a copy of all local client sessions registered under
+// userID, sorted by session ID. An empty userID always returns an empty slice
+// even when the per-user registry contains anonymous connections under the
+// empty key: anonymous sessions are never addressable by the user-based admin
+// API.
+func (h *Hub) SessionsByUser(userID string) []*Client {
+	if userID == "" {
+		return nil
+	}
+	shard := h.connShards[index(userID, numHubShards)]
+	shard.mu.RLock()
+	defer shard.mu.RUnlock()
+
+	sessionIDs, ok := shard.users[userID]
+	if !ok {
+		return nil
+	}
+	result := make([]*Client, 0, len(sessionIDs))
+	for sessionID := range sessionIDs {
+		if client, ok := shard.clients[sessionID]; ok {
+			result = append(result, client)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].SessionID() < result[j].SessionID()
+	})
+	return result
+}
+
 // DrainAll sends a disconnect to all connected clients and waits for them to close.
 func (h *Hub) DrainAll(disconnect Disconnect) {
 	h.mu.RLock()

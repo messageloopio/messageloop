@@ -2,6 +2,7 @@ package grpcstream
 
 import (
 	"context"
+	"sort"
 	"time"
 
 	"github.com/lynx-go/x/log"
@@ -25,6 +26,17 @@ func NewAPIServiceHandler(node *messageloop.Node) serverpb.APIServiceServer {
 func (h *apiServiceHandler) Publish(ctx context.Context, req *serverpb.PublishRequest) (*serverpb.PublishResponse, error) {
 	log.InfoContext(ctx, "server side API Publish", "request_id", req.RequestId)
 
+	// Empty user IDs inside destination.users are a client error: reject the
+	// whole request before any scanning happens (anonymous connections are
+	// never addressable by the user-based API).
+	for _, pub := range req.Publications {
+		for _, userID := range pub.GetDestination().GetUsers() {
+			if userID == "" {
+				return nil, status.Errorf(codes.InvalidArgument, "destination.users must not contain an empty user_id (publication %q)", pub.GetId())
+			}
+		}
+	}
+
 	// PublishResponse has no per-publication result fields, so failures are
 	// reported with partial-success semantics: every failure is logged, and
 	// when all publications fail the RPC returns an error.
@@ -40,17 +52,19 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverpb.PublishRe
 			continue
 		}
 
-		// Get destination
+		// Get destination: sessions, channels, and users may be combined;
+		// a destination with only users is valid.
 		dest := pub.GetDestination()
-		if dest == nil || (len(dest.Sessions) == 0 && len(dest.Channels) == 0) {
+		if dest == nil || (len(dest.Sessions) == 0 && len(dest.Channels) == 0 && len(dest.Users) == 0) {
 			log.WarnContext(ctx, "publication has no destination", "publication_id", pub.Id)
 			attempted++
 			failed++
 			continue
 		}
 
-		// Session-based publication
-		for _, sessionID := range dest.Sessions {
+		// Session-based publication: explicit sessions unioned (deduplicated)
+		// with every user's expanded sessions.
+		for _, sessionID := range h.unionSessions(ctx, dest.Sessions, dest.Users, "publish") {
 			attempted++
 			// Create OutboundMessage with Payload
 			msg := &clientpb.Message{
@@ -156,11 +170,17 @@ func (h *apiServiceHandler) Survey(ctx context.Context, req *serverpb.SurveyRequ
 }
 
 func (h *apiServiceHandler) Disconnect(ctx context.Context, req *serverpb.DisconnectRequest) (*serverpb.DisconnectResponse, error) {
-	log.InfoContext(ctx, "server side API Disconnect", "sessions", req.Sessions, "code", req.Code, "reason", req.Reason)
+	log.InfoContext(ctx, "server side API Disconnect", "sessions", req.Sessions, "users", req.Users, "code", req.Code, "reason", req.Reason)
+
+	for _, userID := range req.Users {
+		if userID == "" {
+			return nil, status.Error(codes.InvalidArgument, "users must not contain an empty user_id")
+		}
+	}
 
 	results := make(map[string]bool)
 
-	for _, sessionID := range req.Sessions {
+	for _, sessionID := range h.unionSessions(ctx, req.Sessions, req.Users, "disconnect") {
 		// Close the client with disconnect reason
 		disconnect := messageloop.Disconnect{
 			Code:   req.Code,
@@ -180,39 +200,93 @@ func (h *apiServiceHandler) Disconnect(ctx context.Context, req *serverpb.Discon
 }
 
 func (h *apiServiceHandler) Subscribe(ctx context.Context, req *serverpb.SubscribeRequest) (*serverpb.SubscribeResponse, error) {
-	log.InfoContext(ctx, "server side API Subscribe", "session_id", req.SessionId, "channels", req.Channels)
+	log.InfoContext(ctx, "server side API Subscribe", "session_id", req.SessionId, "user_id", req.UserId, "channels", req.Channels)
 
+	if req.SessionId == "" && req.UserId == "" {
+		return nil, status.Error(codes.InvalidArgument, "session_id and user_id must not both be empty")
+	}
+
+	sessions := h.unionSessions(ctx, []string{req.SessionId}, []string{req.UserId}, "subscribe")
 	results := make(map[string]bool)
 
 	for _, ch := range req.Channels {
-		ok, err := h.node.SubscribeSession(ctx, req.SessionId, ch)
-		if err != nil {
-			results[ch] = false
-			log.ErrorContext(ctx, "failed to subscribe to channel", err)
-		} else {
-			results[ch] = ok
+		// With multiple sessions (user fan-out), any successful session wins
+		// the channel's result: false only when every session failed.
+		ok := false
+		for _, sessionID := range sessions {
+			subscribed, err := h.node.SubscribeSession(ctx, sessionID, ch)
+			if err != nil {
+				log.ErrorContext(ctx, "failed to subscribe to channel", err, "channel", ch, "session_id", sessionID)
+				continue
+			}
+			if subscribed {
+				ok = true
+				break
+			}
 		}
+		results[ch] = ok
 	}
 
 	return &serverpb.SubscribeResponse{Results: results}, nil
 }
 
 func (h *apiServiceHandler) Unsubscribe(ctx context.Context, req *serverpb.UnsubscribeRequest) (*serverpb.UnsubscribeResponse, error) {
-	log.InfoContext(ctx, "server side API Unsubscribe", "session_id", req.SessionId, "channels", req.Channels)
+	log.InfoContext(ctx, "server side API Unsubscribe", "session_id", req.SessionId, "user_id", req.UserId, "channels", req.Channels)
 
+	if req.SessionId == "" && req.UserId == "" {
+		return nil, status.Error(codes.InvalidArgument, "session_id and user_id must not both be empty")
+	}
+
+	sessions := h.unionSessions(ctx, []string{req.SessionId}, []string{req.UserId}, "unsubscribe")
 	results := make(map[string]bool)
 
 	for _, ch := range req.Channels {
-		ok, err := h.node.UnsubscribeSession(ctx, req.SessionId, ch)
-		if err != nil {
-			results[ch] = false
-			log.ErrorContext(ctx, "failed to unsubscribe from channel", err)
-		} else {
-			results[ch] = ok
+		// With multiple sessions (user fan-out), any successful session wins
+		// the channel's result: false only when every session failed.
+		ok := false
+		for _, sessionID := range sessions {
+			unsubscribed, err := h.node.UnsubscribeSession(ctx, sessionID, ch)
+			if err != nil {
+				log.ErrorContext(ctx, "failed to unsubscribe from channel", err, "channel", ch, "session_id", sessionID)
+				continue
+			}
+			if unsubscribed {
+				ok = true
+				break
+			}
 		}
+		results[ch] = ok
 	}
 
 	return &serverpb.UnsubscribeResponse{Results: results}, nil
+}
+
+// unionSessions expands the users list into session IDs (via the node's
+// user index plus the local hub) and unions them with the explicit session
+// list, deduplicated and sorted for deterministic execution order. Empty
+// user IDs must have been rejected by the caller. The per-user fan-out
+// metric is observed with the given op label.
+func (h *apiServiceHandler) unionSessions(ctx context.Context, explicit []string, users []string, op string) []string {
+	seen := make(map[string]struct{}, len(explicit)+len(users))
+	for _, sessionID := range explicit {
+		if sessionID == "" {
+			continue
+		}
+		seen[sessionID] = struct{}{}
+	}
+	for _, userID := range users {
+		expanded := h.node.ExpandUserSessions(ctx, userID)
+		h.node.ObserveAdminUserFanout(op, len(expanded))
+		for _, sessionID := range expanded {
+			seen[sessionID] = struct{}{}
+		}
+	}
+	result := make([]string, 0, len(seen))
+	for sessionID := range seen {
+		result = append(result, sessionID)
+	}
+	sort.Strings(result)
+	return result
 }
 
 func (h *apiServiceHandler) GetPresence(ctx context.Context, req *serverpb.GetPresenceRequest) (*serverpb.GetPresenceResponse, error) {

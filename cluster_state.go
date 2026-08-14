@@ -129,6 +129,18 @@ func (noopSessionDirectory) DeleteSessionSnapshot(context.Context, string) error
 	return nil
 }
 
+func (noopSessionDirectory) AddUserSession(context.Context, string, string, time.Duration) error {
+	return nil
+}
+
+func (noopSessionDirectory) RemoveUserSession(context.Context, string, string) error {
+	return nil
+}
+
+func (noopSessionDirectory) ListUserSessions(context.Context, string) ([]string, error) {
+	return nil, nil
+}
+
 func (noopClusterCommandBus) SetHandler(ClusterCommandHandler) {}
 
 func (noopClusterCommandBus) SendCommand(context.Context, *ClusterCommand) (*ClusterCommandResult, error) {

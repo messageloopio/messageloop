@@ -102,6 +102,44 @@ func TestMetrics_ChannelPolicyTransientForcedRegistered(t *testing.T) {
 	require.True(t, found, "messageloop_channel_policy_transient_forced_total must be registered")
 }
 
+// TestMetrics_AdminUserFanoutRegistered verifies PR-06: the admin_user_fanout
+// histogram vec is registered with the op label and records fan-out sizes for
+// each user-targeted operation.
+func TestMetrics_AdminUserFanoutRegistered(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	metrics := NewMetrics(reg)
+
+	metrics.AdminUserFanout.WithLabelValues("publish").Observe(3)
+	metrics.AdminUserFanout.WithLabelValues("disconnect").Observe(1)
+	metrics.AdminUserFanout.WithLabelValues("subscribe").Observe(0)
+	metrics.AdminUserFanout.WithLabelValues("unsubscribe").Observe(2)
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	observed := make(map[string]uint64)
+	found := false
+	for _, family := range families {
+		if family.GetName() != "messageloop_admin_user_fanout" {
+			continue
+		}
+		found = true
+		for _, metric := range family.GetMetric() {
+			var op string
+			for _, label := range metric.GetLabel() {
+				if label.GetName() == "op" {
+					op = label.GetValue()
+				}
+			}
+			observed[op] = metric.GetHistogram().GetSampleCount()
+		}
+	}
+	require.True(t, found, "messageloop_admin_user_fanout must be registered")
+	require.Equal(t, uint64(1), observed["publish"])
+	require.Equal(t, uint64(1), observed["disconnect"])
+	require.Equal(t, uint64(1), observed["subscribe"])
+	require.Equal(t, uint64(1), observed["unsubscribe"])
+}
+
 // TestMetrics_HeartbeatIdleDisconnectsRegistered verifies PR-05: the
 // heartbeat_idle_disconnects_total counter is registered and incremented
 // through the metrics object.

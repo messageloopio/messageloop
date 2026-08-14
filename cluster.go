@@ -60,6 +60,9 @@ type ClusterLifecycle interface {
 }
 
 // SessionDirectory stores cluster-visible ownership and resumable session state.
+// The user→sessions index (AddUserSession/RemoveUserSession/ListUserSessions)
+// is a hint for user-targeted admin operations: it is never authoritative,
+// expansions always re-check the session lease.
 type SessionDirectory interface {
 	ClusterLifecycle
 	PutNodeLease(ctx context.Context, lease *ClusterNodeLease, ttl time.Duration) error
@@ -71,6 +74,14 @@ type SessionDirectory interface {
 	PutSessionSnapshot(ctx context.Context, snapshot *ClusterSessionSnapshot, ttl time.Duration) error
 	GetSessionSnapshot(ctx context.Context, sessionID string) (*ClusterSessionSnapshot, error)
 	DeleteSessionSnapshot(ctx context.Context, sessionID string) error
+	// AddUserSession records that sessionID currently belongs to userID, with
+	// the same TTL as the session lease. Empty user IDs never enter the index.
+	AddUserSession(ctx context.Context, userID, sessionID string, ttl time.Duration) error
+	// RemoveUserSession drops a session's membership from a user's index.
+	RemoveUserSession(ctx context.Context, userID, sessionID string) error
+	// ListUserSessions returns the indexed session IDs of userID. The result
+	// is a hint: callers must verify each session's lease before acting.
+	ListUserSessions(ctx context.Context, userID string) ([]string, error)
 }
 
 // ClusterCommandBus delivers cluster commands and command results between node incarnations.
@@ -108,6 +119,20 @@ type ClusterNodeLeaseManager interface {
 // ClusterProjectionRepairer periodically repairs shared query projections.
 type ClusterProjectionRepairer interface {
 	ClusterLifecycle
+}
+
+// ClusterUserIndexRepairer periodically rebuilds the user→sessions index from
+// authoritative session leases. It runs standalone and is deliberately not
+// part of the channel projection repair loop.
+type ClusterUserIndexRepairer interface {
+	ClusterLifecycle
+}
+
+// ClusterSessionLeaseLister enumerates every session lease stored in the
+// directory; only a lease-capable backend (e.g. Redis with SCAN) implements
+// it. The periodic user-index repair uses it to rebuild memberships.
+type ClusterSessionLeaseLister interface {
+	ListSessionLeases(ctx context.Context) ([]*ClusterSessionLease, error)
 }
 
 // ClusterCommandType identifies a cluster control-plane command.
@@ -181,6 +206,11 @@ type ClusterDependencies struct {
 	QueryStore         ClusterQueryStore
 	NodeLeaseManager   ClusterNodeLeaseManager
 	ProjectionRepairer ClusterProjectionRepairer
+	// UserIndexRepairer periodically rebuilds the user→sessions index from
+	// session leases. When nil, NewCluster derives one from the session
+	// directory if it can enumerate leases (ClusterSessionLeaseLister);
+	// otherwise a no-op repairer is used.
+	UserIndexRepairer ClusterUserIndexRepairer
 }
 
 // Cluster owns lifecycle coordination for cluster control-plane adapters.
@@ -218,6 +248,9 @@ func NewCluster(options ClusterOptions, deps ClusterDependencies) (*Cluster, err
 	}
 	if deps.ProjectionRepairer == nil {
 		deps.ProjectionRepairer = &noopClusterProjectionRepairer{}
+	}
+	if deps.UserIndexRepairer == nil {
+		deps.UserIndexRepairer = NewClusterUserIndexRepairer(deps.SessionDirectory, ClusterUserIndexRepairerConfig{})
 	}
 
 	return &Cluster{
@@ -321,6 +354,7 @@ func (r *Cluster) components() []ClusterLifecycle {
 		r.deps.QueryStore,
 		r.deps.NodeLeaseManager,
 		r.deps.ProjectionRepairer,
+		r.deps.UserIndexRepairer,
 	}
 }
 
@@ -338,6 +372,8 @@ func clusterComponentName(component ClusterLifecycle) string {
 		return "node_lease_manager"
 	case ClusterProjectionRepairer:
 		return "projection_repairer"
+	case ClusterUserIndexRepairer:
+		return "user_index_repairer"
 	default:
 		return fmt.Sprintf("%T", component)
 	}
@@ -353,3 +389,4 @@ type noopClusterCommandBus struct{ noopClusterComponent }
 type noopClusterQueryStore struct{ noopClusterComponent }
 type noopClusterNodeLeaseManager struct{ noopClusterComponent }
 type noopClusterProjectionRepairer struct{ noopClusterComponent }
+type noopClusterUserIndexRepairer struct{ noopClusterComponent }

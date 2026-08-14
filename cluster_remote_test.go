@@ -15,6 +15,8 @@ type fakeSessionDirectory struct {
 	nodeLease *ClusterNodeLease
 	// nodeLeases overrides nodeLease lookups keyed by "nodeID:incarnationID".
 	nodeLeases map[string]*ClusterNodeLease
+	// leases overrides GetSessionLease lookups keyed by session ID.
+	leases map[string]*ClusterSessionLease
 
 	// CAS bookkeeping (see CompareAndSwapSessionLease).
 	casCalls     int
@@ -24,6 +26,18 @@ type fakeSessionDirectory struct {
 
 	// putLeaseErr makes PutSessionLease fail (simulating a cluster sync error).
 	putLeaseErr error
+
+	// user index state: userSessions backs ListUserSessions and is mutated
+	// by Add/RemoveUserSession; the call slices record every call for
+	// assertions.
+	userSessions map[string][]string
+	addedUsers   []userSessionEntry
+	removedUsers []userSessionEntry
+}
+
+type userSessionEntry struct {
+	userID    string
+	sessionID string
 }
 
 func (f *fakeSessionDirectory) Start(context.Context) error    { return nil }
@@ -72,7 +86,10 @@ func fakeLeaseEqual(left, right *ClusterSessionLease) bool {
 		left.LeaseVersion == right.LeaseVersion
 }
 
-func (f *fakeSessionDirectory) GetSessionLease(context.Context, string) (*ClusterSessionLease, error) {
+func (f *fakeSessionDirectory) GetSessionLease(_ context.Context, sessionID string) (*ClusterSessionLease, error) {
+	if f.leases != nil {
+		return f.leases[sessionID], nil
+	}
 	return f.lease, nil
 }
 func (f *fakeSessionDirectory) DeleteSessionLease(context.Context, string) error { return nil }
@@ -83,6 +100,45 @@ func (f *fakeSessionDirectory) GetSessionSnapshot(context.Context, string) (*Clu
 	return f.snapshot, nil
 }
 func (f *fakeSessionDirectory) DeleteSessionSnapshot(context.Context, string) error { return nil }
+
+// AddUserSession records the membership and backs ListUserSessions.
+func (f *fakeSessionDirectory) AddUserSession(_ context.Context, userID, sessionID string, _ time.Duration) error {
+	f.addedUsers = append(f.addedUsers, userSessionEntry{userID: userID, sessionID: sessionID})
+	if userID == "" || sessionID == "" {
+		return nil
+	}
+	if f.userSessions == nil {
+		f.userSessions = make(map[string][]string)
+	}
+	f.userSessions[userID] = append(f.userSessions[userID], sessionID)
+	return nil
+}
+
+// RemoveUserSession drops the membership and backs ListUserSessions.
+func (f *fakeSessionDirectory) RemoveUserSession(_ context.Context, userID, sessionID string) error {
+	f.removedUsers = append(f.removedUsers, userSessionEntry{userID: userID, sessionID: sessionID})
+	if f.userSessions == nil {
+		return nil
+	}
+	sessions := f.userSessions[userID]
+	for i, sid := range sessions {
+		if sid == sessionID {
+			f.userSessions[userID] = append(sessions[:i], sessions[i+1:]...)
+			break
+		}
+	}
+	if len(f.userSessions[userID]) == 0 {
+		delete(f.userSessions, userID)
+	}
+	return nil
+}
+
+func (f *fakeSessionDirectory) ListUserSessions(_ context.Context, userID string) ([]string, error) {
+	if f.userSessions == nil {
+		return nil, nil
+	}
+	return append([]string(nil), f.userSessions[userID]...), nil
+}
 
 type fakeClusterCommandBus struct {
 	result           *ClusterCommandResult

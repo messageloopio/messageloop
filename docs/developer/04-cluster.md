@@ -237,6 +237,31 @@ cluster:
 
 集群部署下的推论：由于 epoch 是集群共享的，客户端在节点 A 建立订阅时拿到的 epoch 在节点 B 依然有效——跨节点恢复时**epoch 校验可以通过**，续读位置由客户端携带的逐频道 offset 决定（`client.go:642`），不再需要从历史开头全量恢复。全量恢复仅发生在客户端未携带 epoch（旧 SDK）或携带陈旧 epoch（epoch 键被清理/重建）时。会话快照中预留的 `ChannelOffsets` 与 `BrokerEpoch` 字段仍未被填充（`cluster_state.go:274-309`），即快照本身不承载续读位置，续读完全依赖客户端自带 offset；跨节点按 offset 续读因此已可工作，但快照侧的能力仍属未完成功能。
 
+### 4.5 按 user 展开的用户索引（user index）
+
+管理 API 支持按 `user_id` 对用户的**全部 session** 做 Publish / Disconnect / Subscribe / Unsubscribe（PR-06，见 [《管理 API 参考》](03-admin-api.md)）。展开 = 本地 `Hub.SessionsByUser` ∪ 集群 user 索引，随后对每个 session 校验 lease 的 `UserID`（本地客户端则用 `Client.UserID()`，即 KD-13：**索引不是权威**），最后复用现有 session 级命令（`PublishToSession` / `DisconnectSession` / `SubscribeSession` / `UnsubscribeSession`），不新增集群命令类型。
+
+**本地索引**（`hub.go` 的 `SessionsByUser`）：遍历 `connShard.users` 中该 user 所在分片（user 已按 `index(userID)` 分片）。空 user_id 的匿名连接不进入按 user API（`SessionsByUser("")` 恒为空；Admin 侧空 user_id 直接 `InvalidArgument`，不做扫描）。
+
+**集群索引**（`SessionDirectory` 新增 `AddUserSession` / `RemoveUserSession` / `ListUserSessions`，Redis 实现见 `pkg/redisbroker/cluster_directory.go`）：
+
+| 键 | 类型 | TTL | 说明 |
+| --- | --- | --- | --- |
+| `ml:cluster:user:member:<userID>:<sessionID>` | string（值 `"1"`） | 与 session lease 相同（`sessionLeaseTTL()`） | 成员键：续期时随 lease 一起刷新 |
+| `ml:cluster:user:sessions:<userID>` | set | 无（成员过期靠 repair 修剪） | 用户→session 集合；展开时 `SMEMBERS` 后逐个 `GET` lease 校验 |
+
+**维护**：所有 lease 写入路径共用单一 helper `SyncUserIndex`（根包 `cluster_user_index.go`），由 Redis directory 在 `PutSessionLease` / `CompareAndSwapSessionLease`（成功时）/ `DeleteSessionLease` 之后调用（Delete 先 `GET` lease 以得知 user 再 `SREM`）：
+
+- Delete（`newLease == nil`）：`RemoveUserSession(旧 user, session)`；
+- Put/CAS 成功：user 相同 → `AddUserSession`（刷新 TTL）；user 变了 → 先 `RemoveUserSession` 旧 user 再 `AddUserSession` 新 user（resume 后 re-auth 换 user 的场景，`PutSessionLease` 先读旧 lease 用于比对）；
+- 空 `UserID`：只 Remove，匿名 session 不进索引。
+
+索引写失败是 best-effort（记录警告，不影响 lease 本身）：索引是提示，陈旧条目靠 repair 与展开时的 lease 校验收敛。
+
+**修复**：独立周期任务 `clusterUserIndexRepairer`（根包 `cluster_user_index_repair.go`，默认 30 秒，`NewCluster` 自动装配——directory 实现 `ClusterSessionLeaseLister` 才生效，否则 no-op）。每轮 `SCAN ml:cluster:session:lease:*`（复用 `scanKeys`，`pkg/redisbroker/cluster_query_store.go`），读 lease JSON，对非空 `UserID` 以 lease 剩余 TTL `AddUserSession`。**不**并入频道投影修复循环，集群未启用时不运行。
+
+**禁止**：索引 miss 时做全集群 SCAN（热路径）。陈旧索引靠 repair 收敛；展开时 `GetSessionLease` 校验兜底（投毒/过期条目被跳过）。跨节点验证：`TestAdmin_DisconnectUsersAcrossNodes`、`TestClusterRedis_ResumeUserChangeMigratesIndex`（`cluster_redis_integration_test.go`）。
+
 ## 5. 集群级 Survey
 
 单节点 Survey（`Node.Survey`）只向**本节点**的频道订阅者发送请求并收集应答（`localSurvey`，`node.go:607-647`）。

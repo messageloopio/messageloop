@@ -126,6 +126,30 @@ func (b *probeBroker) History(ch string, sinceOffset uint64, limit int) ([]*mess
 
 func policyBoolPtr(v bool) *bool { return &v }
 
+// newUserTestClient registers a client in the node hub under the given user
+// ID (bypassing proxy auth via ForceTestIDs) and returns it.
+func newUserTestClient(t *testing.T, node *messageloop.Node, transport messageloop.Transport, sessionID, userID string) *messageloop.Client {
+	t.Helper()
+	client, _, err := messageloop.NewClient(context.Background(), node, transport, messageloop.JSONMarshaler{})
+	require.NoError(t, err)
+	client.ForceTestIDs(sessionID, userID, "client-"+sessionID)
+	require.NoError(t, node.AddClient(client))
+	return client
+}
+
+// transportContainsText reports whether the capture transport ever wrote a
+// frame containing the given text.
+func transportContainsText(transport *captureTransport, text string) bool {
+	transport.mu.Lock()
+	defer transport.mu.Unlock()
+	for _, raw := range transport.messages {
+		if bytes.Contains(raw, []byte(text)) {
+			return true
+		}
+	}
+	return false
+}
+
 // TestAPIServiceHandler_AddHistoryDeniedByPolicy verifies that an admin
 // publish with add_history=true to a policy-disabled-history channel is
 // counted as failed and never reaches a history-writing broker, while other
@@ -826,4 +850,163 @@ func TestAdmin_GetPresence_LegacyKeyFallsBackToClientID(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "legacy-session", info.GetSessionId(), "session_id falls back to the legacy client_id key")
 	require.Empty(t, info.GetConnectClientId())
+}
+
+// --- PR-06: Admin publish/disconnect/subscribe by user_id ---
+
+// TestAdmin_PublishDestinationUsers verifies that a users-only destination
+// (no sessions, no channels) fans the publication out to every local session
+// of the user and to no one else.
+func TestAdmin_PublishDestinationUsers(t *testing.T) {
+	ctx := context.Background()
+	node := messageloop.NewNode(nil)
+	handler := NewAPIServiceHandler(node)
+
+	transportA := &captureTransport{}
+	transportB := &captureTransport{}
+	otherTransport := &captureTransport{}
+	clientA := newUserTestClient(t, node, transportA, "sess-user-a-1", "U")
+	clientB := newUserTestClient(t, node, transportB, "sess-user-a-2", "U")
+	newUserTestClient(t, node, otherTransport, "sess-other-user", "other-user")
+
+	resp, err := handler.Publish(ctx, &serverpb.PublishRequest{
+		RequestId: uuid.NewString(),
+		Publications: []*serverpb.Publication{
+			{
+				Id:          "user-fanout-pub",
+				Destination: &serverpb.Publication_Destination{Users: []string{"U"}},
+				Payload:     &sharedpb.Payload{Data: &sharedpb.Payload_Text{Text: "hello user fanout"}},
+			},
+		},
+	})
+	require.NoError(t, err, "a users-only destination is a valid destination")
+	require.NotNil(t, resp)
+
+	require.True(t, transportContainsText(transportA, "hello user fanout"),
+		"session %s must receive the user publication", clientA.SessionID())
+	require.True(t, transportContainsText(transportB, "hello user fanout"),
+		"session %s must receive the user publication", clientB.SessionID())
+	require.False(t, transportContainsText(otherTransport, "hello user fanout"),
+		"other users must not receive the publication")
+}
+
+// TestAdmin_PublishUsersNoCluster verifies the single-node path explicitly:
+// with cluster disabled the expansion uses only the local Hub.SessionsByUser,
+// no session directory or Redis is involved.
+func TestAdmin_PublishUsersNoCluster(t *testing.T) {
+	ctx := context.Background()
+	node := messageloop.NewNode(nil) // cluster.enabled=false
+	handler := NewAPIServiceHandler(node)
+
+	transport := &captureTransport{}
+	client := newUserTestClient(t, node, transport, "sess-nocluster", "U")
+
+	resp, err := handler.Publish(ctx, &serverpb.PublishRequest{
+		RequestId: uuid.NewString(),
+		Publications: []*serverpb.Publication{
+			{
+				Id:          "nocluster-pub",
+				Destination: &serverpb.Publication_Destination{Users: []string{"U"}},
+				Payload:     &sharedpb.Payload{Data: &sharedpb.Payload_Text{Text: "local only"}},
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.True(t, transportContainsText(transport, "local only"),
+		"local SessionsByUser must be enough without a cluster (session %s)", client.SessionID())
+}
+
+// TestAdmin_DisconnectUsers verifies that Disconnect by user fans out to
+// every session of the user and reports per-session results.
+func TestAdmin_DisconnectUsers(t *testing.T) {
+	ctx := context.Background()
+	node := messageloop.NewNode(nil)
+	handler := NewAPIServiceHandler(node)
+
+	transportA := &mockTransport{}
+	transportB := &mockTransport{}
+	clientA := newUserTestClient(t, node, transportA, "sess-disc-a", "U")
+	clientB := newUserTestClient(t, node, transportB, "sess-disc-b", "U")
+	newUserTestClient(t, node, &mockTransport{}, "sess-disc-other", "other-user")
+
+	resp, err := handler.Disconnect(ctx, &serverpb.DisconnectRequest{
+		Users:  []string{"U"},
+		Code:   3500,
+		Reason: "admin user disconnect",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Len(t, resp.Results, 2, "results must be keyed per session")
+	require.True(t, resp.Results[clientA.SessionID()], "session A must be disconnected")
+	require.True(t, resp.Results[clientB.SessionID()], "session B must be disconnected")
+	require.True(t, transportA.closed)
+	require.True(t, transportB.closed)
+}
+
+// TestAdmin_EmptyUserInvalidArgument verifies that empty user IDs in any
+// user-targeted field are rejected with InvalidArgument before any scanning,
+// and that a registered session survives the rejected requests untouched.
+func TestAdmin_EmptyUserInvalidArgument(t *testing.T) {
+	ctx := context.Background()
+	node := messageloop.NewNode(nil)
+	handler := NewAPIServiceHandler(node)
+
+	transport := &mockTransport{}
+	client := newUserTestClient(t, node, transport, "sess-no-scan", "U")
+
+	_, err := handler.Publish(ctx, &serverpb.PublishRequest{
+		RequestId: uuid.NewString(),
+		Publications: []*serverpb.Publication{
+			{
+				Id:          "bad-user-pub",
+				Destination: &serverpb.Publication_Destination{Users: []string{""}},
+				Payload:     &sharedpb.Payload{Data: &sharedpb.Payload_Text{Text: "x"}},
+			},
+		},
+	})
+	require.Equal(t, codes.InvalidArgument, status.Code(err), "empty users entry must be InvalidArgument")
+
+	_, err = handler.Disconnect(ctx, &serverpb.DisconnectRequest{Users: []string{""}})
+	require.Equal(t, codes.InvalidArgument, status.Code(err), "empty users entry must be InvalidArgument")
+
+	_, err = handler.Subscribe(ctx, &serverpb.SubscribeRequest{Channels: []string{"ch"}})
+	require.Equal(t, codes.InvalidArgument, status.Code(err), "empty session_id and user_id must be InvalidArgument")
+
+	_, err = handler.Unsubscribe(ctx, &serverpb.UnsubscribeRequest{Channels: []string{"ch"}})
+	require.Equal(t, codes.InvalidArgument, status.Code(err), "empty session_id and user_id must be InvalidArgument")
+
+	// No scanning side effects: the registered session is still connected.
+	require.Same(t, client, node.Hub().LookupSession("sess-no-scan"))
+	require.False(t, transport.closed)
+}
+
+// TestAdmin_SubscribeByUser verifies Subscribe/Unsubscribe by user_id: the
+// user's local sessions enter the hub subscription, other users are
+// untouched, and the results are keyed by channel.
+func TestAdmin_SubscribeByUser(t *testing.T) {
+	ctx := context.Background()
+	node := messageloop.NewNode(nil)
+	handler := NewAPIServiceHandler(node)
+
+	newUserTestClient(t, node, &mockTransport{}, "sess-sub-user", "U")
+	newUserTestClient(t, node, &mockTransport{}, "sess-sub-other", "other-user")
+
+	resp, err := handler.Subscribe(ctx, &serverpb.SubscribeRequest{
+		UserId:   "U",
+		Channels: []string{"user.sub.channel"},
+	})
+	require.NoError(t, err)
+	require.True(t, resp.Results["user.sub.channel"], "the channel must be subscribed for the user")
+	require.Equal(t, 1, node.Hub().NumSubscribers("user.sub.channel"),
+		"only the user's session may be subscribed, not other users")
+
+	// Unsubscribe by user works symmetrically.
+	unsubResp, err := handler.Unsubscribe(ctx, &serverpb.UnsubscribeRequest{
+		UserId:   "U",
+		Channels: []string{"user.sub.channel"},
+	})
+	require.NoError(t, err)
+	require.True(t, unsubResp.Results["user.sub.channel"])
+	require.Zero(t, node.Hub().NumSubscribers("user.sub.channel"))
 }
