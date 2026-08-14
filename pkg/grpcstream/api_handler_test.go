@@ -760,3 +760,70 @@ func TestAPIServiceHandler_Publish_ACLDenied(t *testing.T) {
 	})
 	require.Error(t, err, "admin publish to an ACL-denied channel must fail")
 }
+
+// TestAdmin_GetPresenceFillsNewFields verifies PR-04a: the admin GetPresence
+// response carries session_id (falling back to the legacy client_id key) and
+// connect_client_id alongside the compatibility client_id == session.
+func TestAdmin_GetPresenceFillsNewFields(t *testing.T) {
+	ctx := context.Background()
+	node := messageloop.NewNode(nil)
+	require.NoError(t, node.Run(ctx))
+
+	transport := &mockTransport{}
+	client, _, err := messageloop.NewClient(ctx, node, transport, messageloop.JSONMarshaler{})
+	require.NoError(t, err)
+
+	connect := &clientpb.InboundMessage{
+		Id: "admin-connect",
+		Envelope: &clientpb.InboundMessage_Connect{
+			Connect: &clientpb.Connect{ClientId: "device-42"},
+		},
+	}
+	require.NoError(t, client.HandleMessage(ctx, connect))
+
+	sub := &clientpb.InboundMessage{
+		Id: "admin-sub",
+		Envelope: &clientpb.InboundMessage_Subscribe{
+			Subscribe: &clientpb.Subscribe{
+				Subscriptions: []*clientpb.Subscription{{Channel: "admin.presence.ch"}},
+			},
+		},
+	}
+	require.NoError(t, client.HandleMessage(ctx, sub))
+
+	handler := NewAPIServiceHandler(node)
+	resp, err := handler.GetPresence(ctx, &serverpb.GetPresenceRequest{Channel: "admin.presence.ch"})
+	require.NoError(t, err)
+
+	info, ok := resp.GetClients()[client.SessionID()]
+	require.True(t, ok, "the subscribed session must be present")
+	require.Equal(t, client.SessionID(), info.GetClientId(), "client_id stays the session ID for compatibility")
+	require.Equal(t, client.SessionID(), info.GetSessionId(), "session_id is the formal session ID")
+	require.Equal(t, "device-42", info.GetConnectClientId(), "connect_client_id is the Connect.client_id")
+}
+
+// TestAdmin_GetPresence_LegacyKeyFallsBackToClientID verifies that a store
+// record written without the new fields (legacy Redis JSON) still reports a
+// session_id derived from client_id and an empty connect_client_id.
+func TestAdmin_GetPresence_LegacyKeyFallsBackToClientID(t *testing.T) {
+	ctx := context.Background()
+	node := messageloop.NewNode(nil)
+	require.NoError(t, node.Run(ctx))
+
+	store := messageloop.NewMemoryPresenceStore()
+	node.SetPresenceStore(store)
+	// Simulate a legacy record: only client_id/user_id/connected_at set.
+	require.NoError(t, store.Add(ctx, "legacy.ch", &messageloop.PresenceInfo{
+		ClientID:    "legacy-session",
+		UserID:      "legacy-user",
+		ConnectedAt: 1,
+	}))
+
+	handler := NewAPIServiceHandler(node)
+	resp, err := handler.GetPresence(ctx, &serverpb.GetPresenceRequest{Channel: "legacy.ch"})
+	require.NoError(t, err)
+	info, ok := resp.GetClients()["legacy-session"]
+	require.True(t, ok)
+	require.Equal(t, "legacy-session", info.GetSessionId(), "session_id falls back to the legacy client_id key")
+	require.Empty(t, info.GetConnectClientId())
+}

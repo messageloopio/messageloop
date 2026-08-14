@@ -226,13 +226,26 @@ func (h *apiServiceHandler) GetPresence(ctx context.Context, req *serverpb.GetPr
 	clients := make(map[string]*serverpb.PresenceInfo, len(presenceMap))
 	for id, info := range presenceMap {
 		clients[id] = &serverpb.PresenceInfo{
-			ClientId:    info.ClientID,
-			UserId:      info.UserID,
-			ConnectedAt: info.ConnectedAt,
+			ClientId:        info.ClientID,
+			UserId:          info.UserID,
+			ConnectedAt:     info.ConnectedAt,
+			// SessionId falls back to the legacy client_id key so old
+			// Redis records without the new field still report it.
+			SessionId:       firstNonEmpty(info.SessionID, info.ClientID),
+			ConnectClientId: info.ConnectClientID,
 		}
 	}
 
 	return &serverpb.GetPresenceResponse{Clients: clients}, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func (h *apiServiceHandler) GetHistory(ctx context.Context, req *serverpb.GetHistoryRequest) (*serverpb.GetHistoryResponse, error) {

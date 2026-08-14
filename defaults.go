@@ -22,4 +22,10 @@ const (
 
 	// DefaultShutdownTimeout is the maximum time to wait for graceful shutdown.
 	DefaultShutdownTimeout = 10 * time.Second
+
+	// MaxPresenceSnapshotClients caps the number of PresenceInfo entries in
+	// a presence snapshot (Connected.presence / SubscribeAck.presence /
+	// PresenceQuery). A channel policy with presence_snapshot_limit > 0 may
+	// override this cap up or down.
+	MaxPresenceSnapshotClients = 256
 )

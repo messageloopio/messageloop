@@ -6,10 +6,18 @@ import (
 )
 
 // PresenceInfo holds the state of a client's presence in a channel.
+//
+// ClientID is the session ID in v1.0: SetPresenceForSession stores
+// c.SessionID() under ClientID, and PresenceStore method signatures keep
+// using it as the record key. SessionID is the formal name of the same
+// value; ConnectClientID is the client-supplied Connect.client_id. Both new
+// fields are JSON-omittable so legacy Redis keys without them still decode.
 type PresenceInfo struct {
-	ClientID    string `json:"client_id"`
-	UserID      string `json:"user_id"`
-	ConnectedAt int64  `json:"connected_at"`
+	ClientID        string `json:"client_id"`
+	UserID          string `json:"user_id"`
+	ConnectedAt     int64  `json:"connected_at"`
+	SessionID       string `json:"session_id,omitempty"`
+	ConnectClientID string `json:"connect_client_id,omitempty"`
 }
 
 // PresenceStore tracks which clients are currently present in which channels.

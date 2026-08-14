@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
+	"github.com/messageloopio/messageloop/pkg/topics"
 	"github.com/messageloopio/messageloop/proxy"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
@@ -169,11 +170,11 @@ func (c *Client) close(disconnect Disconnect) error {
 			go func() {
 				defer wg.Done()
 				for ch := range work {
-					if stored, ok := c.node.hub.LookupSubscriber(ch, c); ok && stored.Ephemeral {
-						continue
+					ephemeral := false
+					if stored, ok := c.node.hub.LookupSubscriber(ch, c); ok {
+						ephemeral = stored.Ephemeral
 					}
-					_ = c.node.presence.Remove(presCtx, ch, sessionID)
-					c.node.PublishPresenceLeave(ch, sessionID, userID)
+					c.node.presenceLeave(presCtx, ch, sessionID, userID, ephemeral)
 				}
 			}()
 		}
@@ -368,6 +369,8 @@ func (c *Client) handleMessage(ctx context.Context, in *clientpb.InboundMessage)
 		return c.handleSurvey(ctx, in, msg.SurveyRequest)
 	case *clientpb.InboundMessage_SurveyReply:
 		return c.handleSurveyReply(ctx, in, msg.SurveyReply)
+	case *clientpb.InboundMessage_PresenceQuery:
+		return c.handlePresenceQuery(ctx, in, msg.PresenceQuery)
 	default:
 		// Unknown or empty envelope: reject instead of silently dropping.
 		return DisconnectBadRequest
@@ -568,10 +571,7 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 						log.WarnContext(ctx, "failed to remove subscription during resume rollback",
 							"channel", ch, "session", connect.SessionId, "error", rmErr)
 					}
-					if !ephemeral {
-						_ = c.node.presence.Remove(ctx, ch, connect.SessionId)
-						go c.node.PublishPresenceLeave(ch, connect.SessionId, oldUser)
-					}
+					c.node.presenceLeave(ctx, ch, connect.SessionId, oldUser, ephemeral)
 				}
 				if c.node.hub.RemoveSessionIfMatches(connect.SessionId, oldSession) {
 					if delErr := c.node.deleteClusterSessionState(context.Background(), connect.SessionId); delErr != nil {
@@ -721,17 +721,13 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 		}
 		if !alreadySubscribed {
 			addedChannels = append(addedChannels, sub.Channel)
-			// Ephemeral subscriptions are never tracked for presence and do
-			// not publish join events (docs/protocol.md: ephemeral = "not
-			// tracked for presence").
-			if !sub.Ephemeral {
+			// Presence writers are gated by shouldTrackPresence: wildcard
+			// patterns, ephemeral subscriptions and presence=false channels
+			// never enter the store and never emit join events, so the
+			// addedPresence rollback list only holds tracked channels.
+			if c.node.shouldTrackPresence(sub.Channel, sub.Ephemeral) {
 				addedPresence = append(addedPresence, sub.Channel)
-				_ = c.node.presence.Add(ctx, sub.Channel, &PresenceInfo{
-					ClientID:    c.session,
-					UserID:      c.user,
-					ConnectedAt: c.connectedAt.UnixMilli(),
-				})
-				go c.node.PublishPresenceJoin(sub.Channel, c.session, c.user)
+				c.node.presenceJoin(ctx, sub.Channel, c)
 			}
 		}
 	}
@@ -784,9 +780,31 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 				Recovered:      recoveredAny,
 				Truncated:      truncatedAny,
 				RecoverResults: results,
+				// One snapshot per currently subscribed tracked channel,
+				// including channels restored from a resumed session.
+				Presence: c.presenceSnapshots(ctx),
 			},
 		}
 	}))
+}
+
+// presenceSnapshots builds the presence snapshots for every channel this
+// session is currently subscribed to that is tracked for presence (exact,
+// non-ephemeral, presence=true). Snapshot-only entries are omitted entirely
+// rather than emitted as empty snapshots.
+func (c *Client) presenceSnapshots(ctx context.Context) []*clientpb.PresenceSnapshot {
+	var snapshots []*clientpb.PresenceSnapshot
+	for _, sub := range c.subscriptionList() {
+		ephemeral := false
+		if stored, ok := c.node.hub.LookupSubscriber(sub.Channel, c); ok {
+			ephemeral = stored.Ephemeral
+		}
+		if !c.node.shouldTrackPresence(sub.Channel, ephemeral) {
+			continue
+		}
+		snapshots = append(snapshots, c.node.presenceSnapshot(ctx, sub.Channel))
+	}
+	return snapshots
 }
 
 // disconnectOnConnectError converts a non-terminal connect failure into a
@@ -1181,17 +1199,12 @@ func (c *Client) handleSubscribe(ctx context.Context, in *clientpb.InboundMessag
 		}
 		subs = append(subs, ch)
 
-		// Track presence for non-ephemeral subscriptions: ephemeral
-		// subscriptions are never tracked for presence and publish no join
-		// event (docs/protocol.md: ephemeral = "not tracked for presence").
-		if !alreadySubscribed && !ch.Ephemeral {
+		// Track presence for tracked subscriptions only (shouldTrackPresence
+		// excludes ephemeral, wildcard and presence=false channels): they
+		// never publish a join event. A re-subscribe does not join again.
+		if !alreadySubscribed && c.node.shouldTrackPresence(ch.Channel, ch.Ephemeral) {
 			addedPresence = append(addedPresence, ch.Channel)
-			_ = c.node.presence.Add(ctx, ch.Channel, &PresenceInfo{
-				ClientID:    c.session,
-				UserID:      c.user,
-				ConnectedAt: c.connectedAt.UnixMilli(),
-			})
-			go c.node.PublishPresenceJoin(ch.Channel, c.session, c.user)
+			c.node.presenceJoin(ctx, ch.Channel, c)
 		}
 
 		// Notify proxy about subscription
@@ -1219,9 +1232,29 @@ func (c *Client) handleSubscribe(ctx context.Context, in *clientpb.InboundMessag
 				Publications:   pubs,
 				RecoverResults: results,
 				Epoch:          currentEpoch,
+				// Catch-up snapshot for every channel in this request that
+				// is tracked for presence, including re-subscribes.
+				Presence: c.snapshotForChannels(ctx, subs),
 			},
 		}
 	}))
+}
+
+// snapshotForChannels builds presence snapshots for the requested channels,
+// skipping wildcard, ephemeral and presence=false subscriptions.
+func (c *Client) snapshotForChannels(ctx context.Context, subs []*clientpb.Subscription) []*clientpb.PresenceSnapshot {
+	var snapshots []*clientpb.PresenceSnapshot
+	for _, sub := range subs {
+		ephemeral := false
+		if stored, ok := c.node.hub.LookupSubscriber(sub.Channel, c); ok {
+			ephemeral = stored.Ephemeral
+		}
+		if !c.node.shouldTrackPresence(sub.Channel, ephemeral) {
+			continue
+		}
+		snapshots = append(snapshots, c.node.presenceSnapshot(ctx, sub.Channel))
+	}
+	return snapshots
 }
 
 func (c *Client) write(ctx context.Context, msg proto.Message) error {
@@ -1266,13 +1299,11 @@ func (c *Client) handleUnsubscribe(ctx context.Context, in *clientpb.InboundMess
 		// Remove subscription
 		_ = c.node.RemoveSubscription(sub.Channel, c)
 
-		// Remove presence and untrack channel.
-		if alreadySubscribed && !ephemeral {
-			_ = c.node.presence.Remove(ctx, sub.Channel, c.session)
-		}
-
-		// Publish presence leave event asynchronously
-		if alreadySubscribed && !ephemeral {
+		// Remove presence and publish leave only when this subscription was
+		// actually tracked (shouldTrackPresence excludes ephemeral, wildcard
+		// and presence=false channels). The unsubscribe request carries no
+		// ephemeral flag, so the stored subscription decides.
+		if alreadySubscribed && c.node.shouldTrackPresence(sub.Channel, ephemeral) {
 			sem <- struct{}{}
 			wg.Add(1)
 			go func(channel string) {
@@ -1280,7 +1311,7 @@ func (c *Client) handleUnsubscribe(ctx context.Context, in *clientpb.InboundMess
 					<-sem
 					wg.Done()
 				}()
-				c.node.PublishPresenceLeave(channel, c.session, c.user)
+				c.node.presenceLeave(ctx, channel, c.session, c.user, ephemeral)
 			}(sub.Channel)
 		}
 
@@ -1359,8 +1390,7 @@ func (c *Client) handleSubRefresh(ctx context.Context, in *clientpb.InboundMessa
 				ephemeral = stored.Ephemeral
 			}
 			_ = c.node.RemoveSubscription(ch, c)
-			if !ephemeral {
-				_ = c.node.presence.Remove(ctx, ch, c.session)
+			if c.node.shouldTrackPresence(ch, ephemeral) {
 				sem <- struct{}{}
 				wg.Add(1)
 				go func(channel string) {
@@ -1368,7 +1398,7 @@ func (c *Client) handleSubRefresh(ctx context.Context, in *clientpb.InboundMessa
 						<-sem
 						wg.Done()
 					}()
-					c.node.PublishPresenceLeave(channel, c.session, c.user)
+					c.node.presenceLeave(ctx, channel, c.session, c.user, ephemeral)
 				}(ch)
 			}
 		}
@@ -1515,6 +1545,78 @@ func (c *Client) subscriptionList() []*clientpb.Subscription {
 	})
 }
 
+// sessionCoversChannel reports whether the session is subscribed to ch
+// exactly or through a matching wildcard pattern. PresenceQuery requires
+// coverage before serving a snapshot: a broad ACL must not let a session
+// peek into channels it never subscribed to.
+func (c *Client) sessionCoversChannel(ch string) bool {
+	if c.hasSubscription(ch) {
+		return true
+	}
+	for _, pattern := range c.subscriptionList() {
+		if isWildcard(pattern.Channel) && topics.Match(pattern.Channel, ch) {
+			return true
+		}
+	}
+	return false
+}
+
+// handlePresenceQuery serves one PresenceQuery with the current presence
+// snapshot. Rejections surface as top-level error envelopes without
+// disconnecting: the subscription state is untouched.
+func (c *Client) handlePresenceQuery(ctx context.Context, in *clientpb.InboundMessage, query *clientpb.PresenceQuery) error {
+	ch := query.GetChannel()
+	if ch == "" || isWildcard(ch) {
+		return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+			out.Envelope = &clientpb.OutboundMessage_Error{
+				Error: &sharedpb.Error{
+					Code:    "BAD_REQUEST",
+					Type:    "request_error",
+					Message: "presence query channel must be an exact channel",
+				},
+			}
+		}))
+	}
+	if !c.sessionCoversChannel(ch) {
+		return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+			out.Envelope = &clientpb.OutboundMessage_Error{
+				Error: &sharedpb.Error{
+					Code:    "PERMISSION_DENIED",
+					Type:    "acl_error",
+					Message: "presence query denied: channel not covered by session",
+				},
+			}
+		}))
+	}
+	if !c.node.ChannelPolicy(ch).Presence {
+		return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+			out.Envelope = &clientpb.OutboundMessage_Error{
+				Error: &sharedpb.Error{
+					Code:    "POLICY_DENIED",
+					Type:    "policy_error",
+					Message: "presence query denied by channel policy",
+				},
+			}
+		}))
+	}
+	if c.node.acl != nil && !c.node.acl.CanSubscribe(ch, c.user) {
+		return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+			out.Envelope = &clientpb.OutboundMessage_Error{
+				Error: &sharedpb.Error{
+					Code:    "PERMISSION_DENIED",
+					Type:    "acl_error",
+					Message: "presence query denied by ACL rule",
+				},
+			}
+		}))
+	}
+	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+		out.Envelope = &clientpb.OutboundMessage_Presence{
+			Presence: c.node.presenceSnapshot(ctx, ch),
+		}
+	}))
+}
+
 // refreshPresence re-adds presence entries for all subscribed channels to reset TTL.
 func (c *Client) refreshPresence() {
 	c.mu.RLock()
@@ -1531,14 +1633,20 @@ func (c *Client) refreshPresence() {
 		return
 	}
 	info := &PresenceInfo{
-		ClientID:    session,
-		UserID:      user,
-		ConnectedAt: connAt,
+		ClientID:        session,
+		SessionID:       session,
+		ConnectClientID: c.ClientID(),
+		UserID:          user,
+		ConnectedAt:     connAt,
 	}
 	for _, ch := range channels {
-		// Ephemeral subscriptions never register presence, so their TTL must
-		// not be refreshed here either.
-		if stored, ok := c.node.hub.LookupSubscriber(ch, c); ok && stored.Ephemeral {
+		// Ephemeral, wildcard and presence=false subscriptions never
+		// register presence, so their TTL must not be refreshed here either.
+		ephemeral := false
+		if stored, ok := c.node.hub.LookupSubscriber(ch, c); ok {
+			ephemeral = stored.Ephemeral
+		}
+		if !c.node.shouldTrackPresence(ch, ephemeral) {
 			continue
 		}
 		_ = c.node.presence.Add(c.ctx, ch, info)

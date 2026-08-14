@@ -437,6 +437,31 @@ func TestNode_RestoreSessionSubscriptions_SkipsPresenceForEphemeral(t *testing.T
 		"permanent subscription must register presence on restore")
 }
 
+// TestNode_RestoreSessionSubscriptions_SkipsPresenceForWildcard verifies
+// PR-04a: restoring a wildcard pattern (non-ephemeral) must NOT register
+// presence for the pattern itself — wildcard patterns are never store keys.
+func TestNode_RestoreSessionSubscriptions_SkipsPresenceForWildcard(t *testing.T) {
+	node := NewNode(nil)
+	client, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
+	require.NoError(t, err)
+	client.ForceTestIDs("sess-restore-wc", "user-restore", "client-restore")
+
+	subscriptions := []ClusterSubscriptionSnapshot{
+		{Channel: "chat.**", Ephemeral: false},
+		{Channel: "normal.ch"},
+	}
+	require.NoError(t, node.restoreSessionSubscriptions(context.Background(), client, subscriptions))
+
+	present, err := node.presence.Get(context.Background(), "chat.**")
+	require.NoError(t, err)
+	require.Empty(t, present, "wildcard pattern must not register presence on restore")
+
+	present, err = node.presence.Get(context.Background(), "normal.ch")
+	require.NoError(t, err)
+	require.Contains(t, present, "sess-restore-wc",
+		"tracked exact channels still register presence on restore")
+}
+
 // failSecondSubscribeBroker fails the second broker Subscribe so a restore
 // aborts after the first channel was already restored.
 type failSecondSubscribeBroker struct {

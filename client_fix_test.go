@@ -1094,8 +1094,10 @@ func TestClient_Recovery_PreservesPayloadType(t *testing.T) {
 // --- Fix task 1 (P0-7): ephemeral subscriptions must not register presence
 // or publish join/leave events ---
 
-// presenceEventObserver subscribes to a channel's presence sub-channel and
-// counts the join/leave events it receives.
+// presenceEventObserver subscribes to a channel exactly and counts the
+// first-class presence events (presence_event envelopes) it receives. The
+// observer itself is a tracked member of the channel, which must be taken
+// into account by store-content assertions in tests that use it.
 type presenceEventObserver struct {
 	transport *capturingTransport
 	client    *Client
@@ -1116,7 +1118,7 @@ func newPresenceEventObserver(t *testing.T, node *Node, channel string) *presenc
 		Id: "obs-sub",
 		Envelope: &clientpb.InboundMessage_Subscribe{
 			Subscribe: &clientpb.Subscribe{
-				Subscriptions: []*clientpb.Subscription{{Channel: presenceChannel(channel)}},
+				Subscriptions: []*clientpb.Subscription{{Channel: channel}},
 			},
 		},
 	}
@@ -1135,14 +1137,8 @@ func (o *presenceEventObserver) eventCount() int {
 		if err != nil {
 			continue
 		}
-		pub := out.GetPublication()
-		if pub == nil {
-			continue
-		}
-		for _, msg := range pub.GetMessages() {
-			if msg.GetPayload().GetText() != "" {
-				count++
-			}
+		if out.GetPresenceEvent() != nil {
+			count++
 		}
 	}
 	return count
@@ -1175,11 +1171,14 @@ func TestClient_EphemeralSubscription_NoPresenceOrEvents(t *testing.T) {
 	require.NoError(t, client.HandleMessage(ctx, connectMsg))
 
 	// The subscription exists (messages are delivered)...
-	assert.Equal(t, 1, node.Hub().NumSubscribers(ch))
-	// ...but no presence record and no join event.
+	assert.Equal(t, 2, node.Hub().NumSubscribers(ch))
+	// ...but no presence record for the ephemeral session and no join event.
+	// The observer is a tracked member of ch, so the store holds exactly its
+	// entry and nothing for the ephemeral session.
 	presence, err := node.Presence(ctx, ch)
 	require.NoError(t, err)
-	assert.Empty(t, presence, "ephemeral subscription must not register presence")
+	require.Len(t, presence, 1, "ephemeral subscription must not register presence (only the observer may be present)")
+	require.Contains(t, presence, observer.client.SessionID())
 	time.Sleep(50 * time.Millisecond) // presence events are published async
 	assert.Zero(t, observer.eventCount(), "ephemeral connect subscription must not publish a join event")
 
@@ -1218,7 +1217,7 @@ func TestClient_EphemeralSubscription_NoPresenceOrEvents(t *testing.T) {
 	require.NoError(t, client.Close(Disconnect{}))
 	time.Sleep(50 * time.Millisecond)
 	assert.Zero(t, observer.eventCount(), "close of ephemeral subscriptions must not publish leave events")
-	assert.Zero(t, node.Hub().NumSubscribers(ch))
+	assert.Zero(t, node.Hub().NumSubscribers(ch+"-2"), "the ephemeral subscription must be removed on close")
 }
 
 // Control test: a non-ephemeral subscription registers presence and publishes
@@ -1249,7 +1248,8 @@ func TestClient_NonEphemeralSubscription_PresenceAndEvents(t *testing.T) {
 
 	presence, err := node.Presence(ctx, ch)
 	require.NoError(t, err)
-	require.Len(t, presence, 1, "non-ephemeral subscription must register presence")
+	require.Len(t, presence, 2, "observer and the non-ephemeral subscription must both register presence")
+	require.Contains(t, presence, client.SessionID())
 	require.Eventually(t, func() bool { return observer.eventCount() == 1 }, time.Second, 10*time.Millisecond,
 		"non-ephemeral subscription must publish one join event")
 

@@ -140,10 +140,12 @@ func (n *Node) restoreSessionSubscriptions(ctx context.Context, client *Client, 
 			n.rollbackRestoredSubscriptions(client, restored)
 			return err
 		}
-		// Ephemeral subscriptions never register presence (docs/protocol.md):
-		// a cross-node resume must not turn them into visible online members
-		// or publish join/leave events.
-		if !sub.Ephemeral {
+		// shouldTrackPresence gates the restore exactly like every other
+		// presence writer: wildcard patterns, ephemeral subscriptions and
+		// presence=false channels never enter the store. Restore never emits
+		// join events — members already in the channel must not see a
+		// duplicate join for a resumed session.
+		if n.shouldTrackPresence(sub.Channel, sub.Ephemeral) {
 			if err := n.SetPresenceForSession(ctx, sub.Channel, client); err != nil {
 				n.rollbackRestoredSubscriptions(client, append(restored, sub.Channel))
 				return err

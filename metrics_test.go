@@ -50,6 +50,33 @@ func TestMetricsTransportLabel(t *testing.T) {
 	require.Equal(t, "ws", MetricsTransportLabel("unknown"))
 }
 
+// TestMetrics_PresenceFailuresRegistered verifies PR-04a: the
+// presence_failures_total counter vector is registered with the op label and
+// counts each failure operation.
+func TestMetrics_PresenceFailuresRegistered(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	metrics := NewMetrics(reg)
+
+	metrics.PresenceFailures.WithLabelValues("store").Inc()
+	metrics.PresenceFailures.WithLabelValues("deliver").Inc()
+	metrics.PresenceFailures.WithLabelValues("rewrite").Inc()
+	metrics.PresenceFailures.WithLabelValues("companion").Inc()
+
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.PresenceFailures.WithLabelValues("store")))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.PresenceFailures.WithLabelValues("deliver")))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.PresenceFailures.WithLabelValues("rewrite")))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.PresenceFailures.WithLabelValues("companion")))
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	names := make(map[string]bool, len(families))
+	for _, family := range families {
+		names[family.GetName()] = true
+	}
+	require.True(t, names["messageloop_presence_failures_total"],
+		"messageloop_presence_failures_total must be registered")
+}
+
 // TestMetrics_ChannelPolicyTransientForcedRegistered verifies PR-02: the
 // channel-policy transient-forced counter is registered under its full name
 // and increments through the metrics object.

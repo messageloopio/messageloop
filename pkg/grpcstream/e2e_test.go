@@ -172,10 +172,16 @@ func TestGRPC_ClientStream_MultipleSubscribers(t *testing.T) {
 	_, err = pub.Recv() // publish_ack
 	require.NoError(t, err)
 
-	// All subscribers should receive the publication
+	// All subscribers should receive the publication. Fellow subscribers'
+	// presence events may arrive first (PR-04a first-class presence), so
+	// skip every non-publication envelope.
 	for i := 0; i < numSubs; i++ {
-		out, err := streams[i].Recv()
-		require.NoError(t, err)
+		var out *clientpb.OutboundMessage
+		for out == nil || out.GetPublication() == nil {
+			got, err := streams[i].Recv()
+			require.NoError(t, err)
+			out = got
+		}
 		require.NotNil(t, out.GetPublication(), "subscriber %d did not receive publication", i)
 	}
 }

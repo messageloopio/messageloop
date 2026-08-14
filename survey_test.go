@@ -525,8 +525,10 @@ func TestNode_Survey_ConcurrentClients(t *testing.T) {
 				return
 			}
 
-			// Clear transport messages from connect
-			transports[i].messages = nil
+			// Clear transport messages from connect. Concurrent subscribe
+			// fan-out may write presence events to this transport, so the
+			// reset must take the transport lock (PR-04a).
+			transports[i].resetMessages()
 
 			// Subscribe to channel (use unique channel for this test)
 			subMsg := &clientpb.InboundMessage{
@@ -546,7 +548,7 @@ func TestNode_Survey_ConcurrentClients(t *testing.T) {
 			}
 
 			// Clear transport messages from subscribe
-			transports[i].messages = nil
+			transports[i].resetMessages()
 		}(i)
 	}
 	wg.Wait()

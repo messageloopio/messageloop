@@ -75,6 +75,16 @@ func (c *capturingTransport) getMessageCount() int {
 	return len(c.messages)
 }
 
+// resetMessages clears the captured messages under the transport lock.
+// Concurrent fan-out (e.g. presence events between simultaneous
+// subscribers) may write to the transport while a test resets it, so the
+// reset must take the same lock as Write.
+func (c *capturingTransport) resetMessages() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.messages = nil
+}
+
 func (c *capturingTransport) getLastMessage() []byte {
 	c.mu.Lock()
 	defer c.mu.Unlock()

@@ -119,6 +119,14 @@ func validateSubscriber(sub Subscriber) error {
 	return nil
 }
 
+// Match reports whether the subscription pattern matches the concrete topic.
+// It is the exported form of matchCriteria — the single pattern-matching
+// implementation shared by every caller (e.g. sessionCoversChannel); there is
+// no second glob dialect.
+func Match(pattern, topic string) bool {
+	return matchCriteria(pattern, topic)
+}
+
 // matchCriteria reports whether the subscription pattern (pattern) matches
 // the concrete topic (topic). pattern may contain single-segment "*"
 // wildcards and a trailing "**" multi-segment wildcard; topic must be

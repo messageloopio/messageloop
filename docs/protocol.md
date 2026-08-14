@@ -404,7 +404,19 @@ When the server closes a connection, it sends a disconnect with a numeric code. 
 
 ## Presence
 
-Presence is tracked per subscribed channel (subscriptions with `ephemeral: true` are excluded). Presence join/leave events are published transiently on the internal `<channel>/__presence` channel (never written to history). Note: the `__presence` sub-channel currently has **no consumer** — presence state is served via the admin `GetPresence` API (backed by the presence store), not via pub/sub delivery. Clients that want realtime presence notifications must subscribe to the presence channel explicitly.
+Presence is tracked per subscribed channel. A subscription is tracked only when all three hold: `ephemeral: false`, the channel is exact (wildcard patterns like `chat.**` are never tracked), and the channel policy enables `presence`. Tracked members appear in the presence store and their join/leave becomes a first-class `presence_event`:
+
+- Subscribing to `C` delivers `C`'s join/leave events as `presence_event` envelopes — there is no need to also subscribe to a `C/__presence` companion channel.
+- The joining client does **not** receive its own join; the leaving client does **not** receive its own leave.
+- Events always carry the exact channel in `event.channel`; a wildcard subscriber receives the events of every exact channel its pattern covers.
+- Snapshots ride on `connected.presence` / `subscribe_ack.presence` (and are available on demand via `PresenceQuery`). A snapshot carries `occupancy` (all members), the capped `clients` list and `truncated`; the cap is `presence_snapshot_limit` (default 256).
+- `PresenceQuery` requires the session to cover the channel (exact subscription or matching wildcard pattern) plus the channel policy plus the built-in ACL; failures return `PERMISSION_DENIED` / `POLICY_DENIED` top-level errors and never disconnect.
+- Wildcard patterns, ephemeral subscriptions and `presence=false` channels produce no store entry, no snapshot entry and no events.
+- Presence failures never disconnect the client and never revoke a subscription.
+- By default no companion channel is written. With `legacy_presence_channel: true` (exact channels only), join/leave is additionally published transiently on `<channel>/__presence` in the legacy JSON format.
+- Phase 1 delivers presence events locally only (no cross-node emit).
+
+Presence state is also served via the admin `GetPresence` API (backed by the presence store).
 
 ## Server-Side Admin API
 

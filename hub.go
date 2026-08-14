@@ -54,6 +54,10 @@ type Hub struct {
 	matcher  topics.Matcher
 	wcSubsMu sync.Mutex
 	wcSubs   map[string]*topics.Subscription // key: "sessionID:channel"
+
+	// node back-reference lets broadcastPublication delegate presence frame
+	// rewrites to the node's deliverPresenceEvent. Set by NewNode.
+	node *Node
 }
 
 // newHub initializes Hub.
@@ -327,6 +331,28 @@ func (h *Hub) NumSubscribers(ch string) int {
 }
 
 func (h *Hub) broadcastPublication(ch string, pub *Publication) error {
+	// Presence frames (ml.type=presence) never become chat publications:
+	// they are rewritten into first-class presence events and dropped here.
+	// Phase 1 emit never produces such frames (emitPresence is local-only),
+	// so this branch is exercised by injected tests.
+	if pub != nil && pub.Metadata[PresenceMetaTypeKey] == PresenceMetaTypeValue {
+		evt := parsePresencePublication(pub)
+		if evt == nil {
+			log.WarnContext(context.Background(), "dropping unparseable presence publication", "channel", ch)
+			if h.node != nil && h.node.metrics != nil {
+				h.node.metrics.PresenceFailures.WithLabelValues("rewrite").Inc()
+			}
+			return nil
+		}
+		if evt.Channel == "" {
+			evt.Channel = ch
+		}
+		if h.node != nil {
+			h.node.deliverPresenceEvent(evt.Channel, evt, "")
+		}
+		return nil
+	}
+
 	// Merge exact and wildcard subscribers by session ID: a client subscribed
 	// to the channel exactly and via a wildcard pattern must receive the
 	// publication only once, with a single message ID.
@@ -555,6 +581,52 @@ func (h *Hub) GetMatchingSubscribers(ch string) []*Client {
 	}
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].SessionID() < result[j].SessionID()
+	})
+	return result
+}
+
+// presenceRecipient couples a subscriber client with its subscription's
+// ephemeral flag. GetMatchingSubscribers loses the flag, so the presence
+// delivery path collects recipients here instead.
+type presenceRecipient struct {
+	client    *Client
+	ephemeral bool
+}
+
+// presenceRecipients returns the clients covered by ch — subscribed exactly
+// (read from the channel's subShard) or via a matching wildcard pattern
+// (matcher lookup) — deduplicated by session ID, together with each
+// subscription's ephemeral flag.
+func (h *Hub) presenceRecipients(ch string) []presenceRecipient {
+	recipients := make(map[string]presenceRecipient)
+
+	shard := h.subShards[index(ch, numHubShards)]
+	shard.mu.RLock()
+	if subs, ok := shard.subs[ch]; ok {
+		for _, sub := range subs {
+			recipients[sub.Client.SessionID()] = presenceRecipient{client: sub.Client, ephemeral: sub.Ephemeral}
+		}
+	}
+	shard.mu.RUnlock()
+
+	for _, candidate := range h.matcher.Lookup(ch) {
+		sub, ok := candidate.(Subscriber)
+		if !ok || sub.Client == nil {
+			continue
+		}
+		sid := sub.Client.SessionID()
+		if _, exists := recipients[sid]; exists {
+			continue
+		}
+		recipients[sid] = presenceRecipient{client: sub.Client, ephemeral: sub.Ephemeral}
+	}
+
+	result := make([]presenceRecipient, 0, len(recipients))
+	for _, r := range recipients {
+		result = append(result, r)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].client.SessionID() < result[j].client.SessionID()
 	})
 	return result
 }

@@ -29,6 +29,7 @@ type Metrics struct {
 	ClusterProjectionRepairs        prometheus.Counter
 	ClusterProjectionRepairFailures prometheus.Counter
 	PresencePublishFailures         prometheus.Counter
+	PresenceFailures                *prometheus.CounterVec
 	ChannelPolicyTransientForced    prometheus.Counter
 	RecoveryTotal                   *prometheus.CounterVec
 	RecoveryPublications            *prometheus.HistogramVec
@@ -110,6 +111,11 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name:      "presence_publish_failures_total",
 			Help:      "Total number of failed presence join/leave event publications.",
 		}),
+		PresenceFailures: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "messageloop",
+			Name:      "presence_failures_total",
+			Help:      "Total number of presence failures by operation (deliver/store/rewrite/companion).",
+		}, []string{"op"}),
 		ChannelPolicyTransientForced: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: "messageloop",
 			Name:      "channel_policy_transient_forced_total",
@@ -149,6 +155,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.ClusterProjectionRepairs,
 		m.ClusterProjectionRepairFailures,
 		m.PresencePublishFailures,
+		m.PresenceFailures,
 		m.ChannelPolicyTransientForced,
 		m.RecoveryTotal,
 		m.RecoveryPublications,

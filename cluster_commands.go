@@ -250,8 +250,9 @@ func (n *Node) handleClusterSubscribeCommand(ctx context.Context, cmd *ClusterCo
 		return result
 	}
 	if !alreadySubscribed {
-		_ = n.SetPresenceForSession(ctx, cmd.Channel, client)
-		go n.PublishPresenceJoin(cmd.Channel, client.SessionID(), client.UserID())
+		// presenceJoin gates on shouldTrackPresence: wildcard channels and
+		// presence=false policies never enter the store here either.
+		n.presenceJoin(ctx, cmd.Channel, client)
 	}
 	return result
 }
@@ -270,8 +271,7 @@ func (n *Node) handleClusterUnsubscribeCommand(ctx context.Context, cmd *Cluster
 		return result
 	}
 	if alreadySubscribed {
-		_ = n.ClearPresenceForSession(ctx, cmd.Channel, client)
-		go n.PublishPresenceLeave(cmd.Channel, client.SessionID(), client.UserID())
+		n.presenceLeave(ctx, cmd.Channel, client.SessionID(), client.UserID(), false)
 	}
 	return result
 }

@@ -203,15 +203,15 @@ server:
 | `channels.policies[].history` | bool | `true` | 是否写历史。`false` 与 `transient_only: true` 效果相同：发布改走瞬时（见下） |
 | `channels.policies[].history_size` | int | 0 = broker 全局 | 该前缀频道的历史容量：memory broker 每频道 ring 容量 / Redis 每条 `XADD` 的 `MAXLEN`。**只在该频道 ring 首次创建时生效**：已存在的内存 ring 不会因改大/改小立即重建，直到频道被回收；**改小 `history_size` 对已有频道不立即生效** |
 | `channels.policies[].history_ttl` | string | 空 = broker 全局 | 历史保留时长（Redis：每次发布后 `EXPIRE` 刷新）。**memory broker 无 TTL，配置了打 Warn 并忽略** |
-| `channels.policies[].presence` | bool | `true` | presence 开关。**本版本只进入策略对象，尚未在订阅路径读取**（PR-04 生效） |
+| `channels.policies[].presence` | bool | `true` | presence 开关。PR-04a 起由 `shouldTrackPresence` 读取：`false` 的频道不存 presence、不发 join/leave、无快照，`PresenceQuery` 返回 `POLICY_DENIED` |
 | `channels.policies[].recover` | bool | `true` | 恢复开关。PR-03 起由 `recoverSubscription` 读取：`false` 时恢复被跳过（客户端要了 recover 则返回 `RECOVER_SKIPPED`） |
 | `channels.policies[].survey` | bool | `false` | 客户端 survey 开关（KD-6 默认关）。**本版本只进入策略对象，尚未在 survey 路径读取**（PR-05/PR-07 生效） |
 | `channels.policies[].transient_only` | bool | `false` | 强制瞬时：发布只实时投递、绝不写历史。**隐含 History=false、Recover=false**（即使漏写）。对客户端：不带 `transient` 标志的发布也改走 `PublishTransient`、ack offset=0、不报错；对 Admin：`add_history=true` 被**拒绝**（计失败、不发布），`add_history=false` 仍可瞬时发布 |
 | `channels.policies[].recover_limit` | int | 0 = `MaxRecoveredPublications` | 恢复条数上限。PR-03 起由 `recoverSubscription` 读取：命中该上限（或请求级配额耗尽）时恢复结果标记 `truncated=true` |
 | `channels.policies[].max_survey_subscribers` | int | 256 | survey 订阅者上限。**本版本只进入策略对象** |
 | `channels.policies[].max_survey_timeout` | string | `5s` | survey 超时上限。**本版本只进入策略对象** |
-| `channels.policies[].legacy_presence_channel` | bool | `false` | 是否写伴生 `__presence` 频道。**本版本只进入策略对象** |
-| `channels.policies[].presence_snapshot_limit` | int | 256 | presence 快照条数上限。**本版本只进入策略对象** |
+| `channels.policies[].legacy_presence_channel` | bool | `false` | PR-04a 起生效：为 `true` 时 join/leave 额外以旧 JSON 瞬时发布到精确频道的 `ch/__presence` 伴生频道（通配订阅从不写伴生）。默认不写伴生 |
+| `channels.policies[].presence_snapshot_limit` | int | 256 | PR-04a 起生效：`Connected.presence` / `SubscribeAck.presence` / `PresenceQuery` 快照的 clients 条数上限；`occupancy` 仍是全量计数，超出置 `truncated=true`。`0` = 全局默认 `MaxPresenceSnapshotClients`（256） |
 
 以上 `default` 与每条 `policies[].pattern` 均由 `Validate()` 校验：pattern 非空且合法（末尾 `**`）、`history_size >= 0`、两个 duration 可解析（`config/config.go` 的 `validateChannelPolicySpec`）。
 

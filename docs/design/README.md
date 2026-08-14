@@ -9,5 +9,6 @@
 | [PR-01 实现规格](tasks/pr-01-protocol.md) | Accepted | 冻结 v1.0 proto 字段号；[第三方 prompt](tasks/pr-01-prompt.md) |
 | [PR-02 实现规格](tasks/pr-02-channel-policy.md) | Accepted | 频道前缀策略引擎；[第三方 prompt](tasks/pr-02-prompt.md) |
 | [PR-03 实现规格](tasks/pr-03-recover.md) | Accepted | Subscribe/Connect 共用恢复；[第三方 prompt](tasks/pr-03-prompt.md) |
+| [PR-04a 实现规格](tasks/pr-04a-presence.md) | Accepted | Presence 本节点一等事件（不 emit）；[第三方 prompt](tasks/pr-04a-prompt.md) |
 
 历史设计（已归档实现记录）见 [docs/archive](../archive/) 与 [docs/superpowers/specs](../superpowers/specs/)。

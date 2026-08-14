@@ -71,6 +71,7 @@ func NewNode(cfg *config.Server) *Node {
 		presence:    NewMemoryPresenceStore(),
 		requireAuth: cfg != nil && cfg.RequireAuth,
 	}
+	node.hub.node = node
 
 	if cfg != nil && cfg.RPCTimeout != "" {
 		rpcTimeout, err := time.ParseDuration(cfg.RPCTimeout)
@@ -224,14 +225,18 @@ func (n *Node) Presence(ctx context.Context, ch string) (map[string]*PresenceInf
 }
 
 // SetPresenceForSession records presence for one subscribed session.
+// ClientID is the session ID in v1.0; SessionID carries the same value
+// formally, and ConnectClientID is the Connect.client_id.
 func (n *Node) SetPresenceForSession(ctx context.Context, ch string, c *Client) error {
 	if c == nil {
 		return nil
 	}
 	return n.presence.Add(ctx, ch, &PresenceInfo{
-		ClientID:    c.SessionID(),
-		UserID:      c.UserID(),
-		ConnectedAt: c.connectedAt.UnixMilli(),
+		ClientID:        c.SessionID(),
+		SessionID:       c.SessionID(),
+		ConnectClientID: c.ClientID(),
+		UserID:          c.UserID(),
+		ConnectedAt:     c.connectedAt.UnixMilli(),
 	})
 }
 
@@ -893,6 +898,8 @@ func presenceChannel(ch string) string {
 // PublishPresenceJoin publishes a presence join event to the channel's presence sub-channel.
 // Presence events are transient: they are delivered in real time but never
 // written to broker history, so they do not leak into the recovery stream.
+// PR-04a: kept for the legacy companion path (legacy_presence_channel=true)
+// and for direct callers; the first-class path emits through emitPresence.
 func (n *Node) PublishPresenceJoin(channel, clientID, userID string) {
 	evt := newPresenceEvent("join", channel, clientID, userID)
 	data, err := marshalPresenceEvent(evt)
@@ -905,6 +912,7 @@ func (n *Node) PublishPresenceJoin(channel, clientID, userID string) {
 			err, "channel", channel, "client_id", clientID)
 		if n.metrics != nil {
 			n.metrics.PresencePublishFailures.Inc()
+			n.metrics.PresenceFailures.WithLabelValues("companion").Inc()
 		}
 	}
 }
@@ -924,6 +932,204 @@ func (n *Node) PublishPresenceLeave(channel, clientID, userID string) {
 			err, "channel", channel, "client_id", clientID)
 		if n.metrics != nil {
 			n.metrics.PresencePublishFailures.Inc()
+			n.metrics.PresenceFailures.WithLabelValues("companion").Inc()
 		}
 	}
+}
+
+// shouldTrackPresence is the single gate shared by every presence writer
+// (subscribe, connect, unsubscribe, close, refresh, restore, cluster
+// commands): ephemeral subscriptions, wildcard patterns and channels whose
+// policy disables presence never touch the store, never join/leave and never
+// take a snapshot.
+func (n *Node) shouldTrackPresence(ch string, ephemeral bool) bool {
+	return !ephemeral && !isWildcard(ch) && n.ChannelPolicy(ch).Presence
+}
+
+// presenceJoin records a session's presence in ch and emits the join event,
+// excluding the joining session itself (no self-join). The store write is
+// best-effort: a failure warns and counts op=store but never rolls back the
+// subscription. Legacy companion publication runs only when the channel
+// policy opts in and shouldTrackPresence already excluded wildcards.
+func (n *Node) presenceJoin(ctx context.Context, ch string, c *Client) {
+	if c == nil {
+		return
+	}
+	ephemeral := false
+	if stored, ok := n.hub.LookupSubscriber(ch, c); ok {
+		ephemeral = stored.Ephemeral
+	}
+	if !n.shouldTrackPresence(ch, ephemeral) {
+		return
+	}
+	if err := n.SetPresenceForSession(ctx, ch, c); err != nil {
+		log.WarnContext(ctx, "failed to set presence for session", err, "channel", ch, "session", c.SessionID())
+		if n.metrics != nil {
+			n.metrics.PresenceFailures.WithLabelValues("store").Inc()
+		}
+	}
+	n.emitPresence(ch, &clientpb.PresenceEvent{
+		Channel: ch,
+		Action:  PresenceActionJoin,
+		Info: &clientpb.PresenceInfo{
+			SessionId:   c.SessionID(),
+			UserId:      c.UserID(),
+			ClientId:    c.ClientID(),
+			ConnectedAt: c.connectedAt.UnixMilli(),
+		},
+	}, c.SessionID())
+	if n.ChannelPolicy(ch).LegacyPresenceChannel {
+		go n.PublishPresenceJoin(ch, c.SessionID(), c.UserID())
+	}
+}
+
+// presenceLeave removes a session's presence from ch and emits the leave
+// event, excluding the leaving session itself. Only called for subscriptions
+// that were tracked (shouldTrackPresence), so wildcard and ephemeral
+// subscriptions never leak a leave.
+func (n *Node) presenceLeave(ctx context.Context, ch, sessionID, userID string, ephemeral bool) {
+	if !n.shouldTrackPresence(ch, ephemeral) {
+		return
+	}
+	if err := n.presence.Remove(ctx, ch, sessionID); err != nil {
+		log.WarnContext(ctx, "failed to remove presence", err, "channel", ch, "session", sessionID)
+		if n.metrics != nil {
+			n.metrics.PresenceFailures.WithLabelValues("store").Inc()
+		}
+	}
+	info := &clientpb.PresenceInfo{
+		SessionId: sessionID,
+		UserId:    userID,
+	}
+	if sess := n.hub.LookupSession(sessionID); sess != nil {
+		info.ClientId = sess.ClientID()
+		info.ConnectedAt = sess.connectedAt.UnixMilli()
+	}
+	n.emitPresence(ch, &clientpb.PresenceEvent{
+		Channel: ch,
+		Action:  PresenceActionLeave,
+		Info:    info,
+	}, sessionID)
+	if n.ChannelPolicy(ch).LegacyPresenceChannel {
+		go n.PublishPresenceLeave(ch, sessionID, userID)
+	}
+}
+
+// emitPresence is the Phase 1 presence emission path: first-class events are
+// delivered locally only. Cross-node emit is PR-04b and is intentionally not
+// reserved here — this function must never publish a transient ml.type=presence
+// frame.
+func (n *Node) emitPresence(ch string, evt *clientpb.PresenceEvent, excludeSession string) {
+	n.deliverPresenceEvent(ch, evt, excludeSession)
+}
+
+// deliverPresenceEvent fans a presence event out to every session covered by
+// ch: exact subscribers read from the channel's subShard (preserving the
+// ephemeral flag) plus wildcard subscribers from the matcher. Recipients are
+// deduplicated by session ID; ephemeral subscriptions and the excluded
+// session never receive the event. Delivery counts no MessagesDelivered.
+func (n *Node) deliverPresenceEvent(ch string, evt *clientpb.PresenceEvent, excludeSession string) {
+	if evt == nil {
+		return
+	}
+	recipients := n.hub.presenceRecipients(ch)
+	if len(recipients) == 0 {
+		return
+	}
+
+	out := MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
+		out.Envelope = &clientpb.OutboundMessage_PresenceEvent{PresenceEvent: evt}
+	})
+	ctx := context.Background()
+	send := func(r presenceRecipient) {
+		if err := r.client.Send(ctx, out); err != nil {
+			log.WarnContext(ctx, "failed to send presence event", err, "channel", ch, "session", r.client.SessionID())
+			if n.metrics != nil {
+				n.metrics.PresenceFailures.WithLabelValues("deliver").Inc()
+				n.metrics.DeliveryFailures.Inc()
+			}
+		}
+	}
+
+	// Same fan-out rhythm as broadcastPublication (serial under a small
+	// threshold, bounded goroutines above), but a dedicated loop: presence
+	// events are never assembled into publications.
+	const presenceParallelThreshold = 8
+	if len(recipients) <= presenceParallelThreshold {
+		for _, r := range recipients {
+			if r.ephemeral || r.client.SessionID() == excludeSession {
+				continue
+			}
+			send(r)
+		}
+		return
+	}
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, broadcastParallelLimit)
+	for _, r := range recipients {
+		if r.ephemeral || r.client.SessionID() == excludeSession {
+			continue
+		}
+		sem <- struct{}{}
+		wg.Add(1)
+		go func(r presenceRecipient) {
+			defer func() {
+				<-sem
+				wg.Done()
+			}()
+			send(r)
+		}(r)
+	}
+	wg.Wait()
+}
+
+// presenceSnapshot builds the current snapshot for ch under the channel
+// policy cap (MaxPresenceSnapshotClients unless presence_snapshot_limit
+// overrides it). occupancy counts every client, truncated reports that the
+// clients list was capped. A store failure yields an empty snapshot plus a
+// Warn and op=store — callers keep the subscription alive regardless.
+func (n *Node) presenceSnapshot(ctx context.Context, ch string) *clientpb.PresenceSnapshot {
+	limit := MaxPresenceSnapshotClients
+	if pol := n.ChannelPolicy(ch); pol.PresenceSnapshotLimit > 0 {
+		limit = pol.PresenceSnapshotLimit
+	}
+	clients, err := n.presence.Get(ctx, ch)
+	if err != nil {
+		log.WarnContext(ctx, "failed to read presence snapshot", err, "channel", ch)
+		if n.metrics != nil {
+			n.metrics.PresenceFailures.WithLabelValues("store").Inc()
+		}
+		return &clientpb.PresenceSnapshot{Channel: ch}
+	}
+	infos := make([]*clientpb.PresenceInfo, 0, len(clients))
+	for _, info := range clients {
+		infos = append(infos, &clientpb.PresenceInfo{
+			SessionId:   firstNonEmpty(info.SessionID, info.ClientID),
+			UserId:      info.UserID,
+			ClientId:    info.ConnectClientID,
+			ConnectedAt: info.ConnectedAt,
+		})
+	}
+	sort.Slice(infos, func(i, j int) bool {
+		return infos[i].SessionId < infos[j].SessionId
+	})
+	snapshot := &clientpb.PresenceSnapshot{Channel: ch, Occupancy: int32(len(infos))}
+	if len(infos) > limit {
+		snapshot.Clients = infos[:limit]
+		snapshot.Truncated = true
+	} else {
+		snapshot.Clients = infos
+	}
+	return snapshot
+}
+
+// firstNonEmpty returns the first non-empty value, used to fall back from
+// the formal session_id to the legacy client_id key in old Redis records.
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
