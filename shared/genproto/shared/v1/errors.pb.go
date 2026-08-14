@@ -25,11 +25,15 @@ const (
 )
 
 type Error struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Code          string                 `protobuf:"bytes,1,opt,name=code,proto3" json:"code,omitempty"`
-	Type          string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
-	Message       string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
-	Metadata      *structpb.Struct       `protobuf:"bytes,4,opt,name=metadata,proto3" json:"metadata,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Well-known string codes (not an enum): AUTH_REQUIRED, AUTH_ERROR,
+	// ACL_DENIED, ACL_ERROR, RATE_LIMITED, RPC_TIMEOUT, PROXY_ERROR,
+	// BAD_REQUEST, PERMISSION_DENIED, POLICY_DENIED,
+	// RECOVER_FAILED, RECOVER_SKIPPED.
+	Code          string           `protobuf:"bytes,1,opt,name=code,proto3" json:"code,omitempty"`
+	Type          string           `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
+	Message       string           `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
+	Metadata      *structpb.Struct `protobuf:"bytes,4,opt,name=metadata,proto3" json:"metadata,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

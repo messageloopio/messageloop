@@ -34,6 +34,10 @@
         },
         "transient": {
           "type": "boolean"
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "description": "v1.x: server ignores this in v1.0. Number frozen."
         }
       }
     },
@@ -61,6 +65,25 @@
         }
       }
     },
+    "messageloopclientv1PresenceInfo": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "clientId": {
+          "type": "string",
+          "title": "Connect.client_id（设备/端），不是 session"
+        },
+        "connectedAt": {
+          "type": "string",
+          "format": "int64"
+        }
+      }
+    },
     "messageloopclientv1Publication": {
       "type": "object",
       "properties": {
@@ -76,7 +99,7 @@
     "messageloopclientv1SurveyRequest": {
       "type": "object",
       "properties": {
-        "request_id": {
+        "requestId": {
           "type": "string"
         },
         "payload": {
@@ -84,8 +107,37 @@
         },
         "metadata": {
           "$ref": "#/definitions/v1Metadata"
+        },
+        "channel": {
+          "type": "string"
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "format": "int32"
         }
       }
+    },
+    "messageloopclientv1SurveyResult": {
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "type": "string"
+        },
+        "channel": {
+          "type": "string"
+        },
+        "answers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1SurveyAnswer"
+          }
+        },
+        "error": {
+          "$ref": "#/definitions/v1Error"
+        }
+      },
+      "title": "客户端 Survey 汇总。与 server.v1.SurveyResult 同名不同包。"
     },
     "protobufAny": {
       "type": "object",
@@ -126,10 +178,10 @@
     "v1Connect": {
       "type": "object",
       "properties": {
-        "client_id": {
+        "clientId": {
           "type": "string"
         },
-        "client_type": {
+        "clientType": {
           "type": "string"
         },
         "token": {
@@ -145,7 +197,7 @@
             "$ref": "#/definitions/v1Subscription"
           }
         },
-        "session_id": {
+        "sessionId": {
           "type": "string",
           "title": "上次会话 ID，为空表示新连接"
         }
@@ -154,7 +206,7 @@
     "v1Connected": {
       "type": "object",
       "properties": {
-        "session_id": {
+        "sessionId": {
           "type": "string"
         },
         "subscriptions": {
@@ -178,6 +230,28 @@
         "epoch": {
           "type": "string",
           "title": "broker 实例标识，用于防止重启后 offset 混淆"
+        },
+        "recovered": {
+          "type": "boolean",
+          "title": "至少一个频道 recovered=true"
+        },
+        "truncated": {
+          "type": "boolean",
+          "title": "至少一个频道 truncated"
+        },
+        "recoverResults": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1RecoverResult"
+          }
+        },
+        "presence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1PresenceSnapshot"
+          }
         }
       }
     },
@@ -185,7 +259,8 @@
       "type": "object",
       "properties": {
         "code": {
-          "type": "string"
+          "type": "string",
+          "description": "Well-known string codes (not an enum): AUTH_REQUIRED, AUTH_ERROR,\r\nACL_DENIED, ACL_ERROR, RATE_LIMITED, RPC_TIMEOUT, PROXY_ERROR,\r\nBAD_REQUEST, PERMISSION_DENIED, POLICY_DENIED,\r\nRECOVER_FAILED, RECOVER_SKIPPED."
         },
         "type": {
           "type": "string"
@@ -247,32 +322,44 @@
         "connected": {
           "$ref": "#/definitions/v1Connected"
         },
-        "subscribe_ack": {
+        "subscribeAck": {
           "$ref": "#/definitions/v1SubscribeAck"
         },
-        "unsubscribe_ack": {
+        "unsubscribeAck": {
           "$ref": "#/definitions/v1UnsubscribeAck"
         },
-        "publish_ack": {
+        "publishAck": {
           "$ref": "#/definitions/v1PublishAck"
         },
         "publication": {
           "$ref": "#/definitions/messageloopclientv1Publication"
         },
-        "rpc_reply": {
+        "rpcReply": {
           "$ref": "#/definitions/v1RpcReply"
         },
-        "sub_refresh_ack": {
+        "subRefreshAck": {
           "$ref": "#/definitions/v1SubRefreshAck"
         },
-        "survey_request": {
+        "surveyRequest": {
           "$ref": "#/definitions/messageloopclientv1SurveyRequest"
         },
-        "survey_reply": {
+        "surveyReply": {
           "$ref": "#/definitions/v1SurveyReply"
         },
         "pong": {
           "$ref": "#/definitions/v1Pong"
+        },
+        "presence": {
+          "$ref": "#/definitions/v1PresenceSnapshot"
+        },
+        "presenceEvent": {
+          "$ref": "#/definitions/v1PresenceEvent"
+        },
+        "ping": {
+          "$ref": "#/definitions/v1Ping"
+        },
+        "surveyResult": {
+          "$ref": "#/definitions/messageloopclientv1SurveyResult"
         }
       },
       "title": "服务端 -\u003e 客户端"
@@ -306,6 +393,53 @@
     "v1Pong": {
       "type": "object"
     },
+    "v1PresenceEvent": {
+      "type": "object",
+      "properties": {
+        "channel": {
+          "type": "string",
+          "title": "始终是精确频道"
+        },
+        "action": {
+          "type": "string",
+          "title": "\"join\" | \"leave\""
+        },
+        "info": {
+          "$ref": "#/definitions/messageloopclientv1PresenceInfo"
+        }
+      }
+    },
+    "v1PresenceQuery": {
+      "type": "object",
+      "properties": {
+        "channel": {
+          "type": "string",
+          "title": "精确频道"
+        }
+      }
+    },
+    "v1PresenceSnapshot": {
+      "type": "object",
+      "properties": {
+        "channel": {
+          "type": "string"
+        },
+        "clients": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/messageloopclientv1PresenceInfo"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "occupancy": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    },
     "v1PublishAck": {
       "type": "object",
       "properties": {
@@ -320,10 +454,38 @@
         }
       }
     },
+    "v1RecoverResult": {
+      "type": "object",
+      "properties": {
+        "channel": {
+          "type": "string"
+        },
+        "recovered": {
+          "type": "boolean",
+          "title": "History 调用成功（含 0 条）"
+        },
+        "truncated": {
+          "type": "boolean",
+          "title": "命中 cap"
+        },
+        "offset": {
+          "type": "string",
+          "format": "uint64",
+          "title": "有消息=最后一条；空批=回显 cursor"
+        },
+        "epoch": {
+          "type": "string"
+        },
+        "error": {
+          "$ref": "#/definitions/v1Error",
+          "title": "RECOVER_FAILED / RECOVER_SKIPPED"
+        }
+      }
+    },
     "v1RpcReply": {
       "type": "object",
       "properties": {
-        "request_id": {
+        "requestId": {
           "type": "string"
         },
         "payload": {
@@ -377,6 +539,30 @@
             "type": "object",
             "$ref": "#/definitions/v1Subscription"
           }
+        },
+        "publications": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/messageloopclientv1Publication"
+          }
+        },
+        "recoverResults": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1RecoverResult"
+          }
+        },
+        "epoch": {
+          "type": "string"
+        },
+        "presence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1PresenceSnapshot"
+          }
         }
       }
     },
@@ -407,10 +593,27 @@
         }
       }
     },
+    "v1SurveyAnswer": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/definitions/v1Payload"
+        },
+        "metadata": {
+          "$ref": "#/definitions/v1Metadata"
+        },
+        "error": {
+          "$ref": "#/definitions/v1Error"
+        }
+      }
+    },
     "v1SurveyReply": {
       "type": "object",
       "properties": {
-        "request_id": {
+        "requestId": {
           "type": "string"
         },
         "payload": {

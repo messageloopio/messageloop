@@ -68,7 +68,8 @@
       "type": "object",
       "properties": {
         "code": {
-          "type": "string"
+          "type": "string",
+          "description": "Well-known string codes (not an enum): AUTH_REQUIRED, AUTH_ERROR,\r\nACL_DENIED, ACL_ERROR, RATE_LIMITED, RPC_TIMEOUT, PROXY_ERROR,\r\nBAD_REQUEST, PERMISSION_DENIED, POLICY_DENIED,\r\nRECOVER_FAILED, RECOVER_SKIPPED."
         },
         "type": {
           "type": "string"

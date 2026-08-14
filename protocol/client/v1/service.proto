@@ -28,7 +28,10 @@ message InboundMessage {
     SurveyRequest survey_request = 9;
     SurveyReply survey_reply = 10;
     Ping ping = 11;
+    PresenceQuery presence_query = 12;
+    Pong pong = 14;
   }
+  reserved 13; // PresenceStatsQuery v1.x
 }
 
 // 服务端 -> 客户端
@@ -47,7 +50,12 @@ message OutboundMessage {
     SurveyRequest survey_request = 11;
     SurveyReply survey_reply = 12;
     Pong pong = 13;
+    PresenceSnapshot presence = 14;
+    PresenceEvent presence_event = 15;
+    Ping ping = 17;
+    SurveyResult survey_result = 18;
   }
+  reserved 16; // PresenceStats v1.x
 }
 
 // --- 消息类型定义 ---
@@ -67,6 +75,21 @@ message Connected {
   repeated Publication publications = 3;
   bool resumed = 4; // 是否成功恢复会话
   string epoch = 5; // broker 实例标识，用于防止重启后 offset 混淆
+  bool recovered = 6;                       // 至少一个频道 recovered=true
+  bool truncated = 7;                       // 至少一个频道 truncated
+  repeated RecoverResult recover_results = 8;
+  repeated PresenceSnapshot presence = 9;
+}
+
+// --- 恢复相关 ---
+
+message RecoverResult {
+  string channel = 1;
+  bool recovered = 2;     // History 调用成功（含 0 条）
+  bool truncated = 3;     // 命中 cap
+  uint64 offset = 4;      // 有消息=最后一条；空批=回显 cursor
+  string epoch = 5;
+  messageloop.shared.v1.Error error = 6; // RECOVER_FAILED / RECOVER_SKIPPED
 }
 
 message Subscription {
@@ -84,6 +107,10 @@ message Subscribe {
 
 message SubscribeAck {
   repeated Subscription subscriptions = 1;
+  repeated Publication publications = 2;
+  repeated RecoverResult recover_results = 3;
+  string epoch = 4;
+  repeated PresenceSnapshot presence = 5;
 }
 
 message Unsubscribe {
@@ -102,6 +129,8 @@ message Publish {
   messageloop.shared.v1.Metadata metadata = 3;
   string token = 4;
   bool transient = 5;
+  // v1.x: server ignores this in v1.0. Number frozen.
+  string idempotency_key = 6;
 }
 
 message PublishAck {
@@ -149,6 +178,8 @@ message SurveyRequest {
   string request_id = 1;
   messageloop.shared.v1.Payload payload = 2;
   messageloop.shared.v1.Metadata metadata = 3;
+  string channel = 4;
+  int32 timeout_ms = 5;
 }
 
 message SurveyReply {
@@ -156,6 +187,48 @@ message SurveyReply {
   messageloop.shared.v1.Payload payload = 2;
   messageloop.shared.v1.Metadata metadata = 3;
   messageloop.shared.v1.Error error = 4;
+}
+
+// 客户端 Survey 汇总。与 server.v1.SurveyResult 同名不同包。
+message SurveyResult {
+  string request_id = 1;
+  string channel = 2;
+  repeated SurveyAnswer answers = 3;
+  messageloop.shared.v1.Error error = 4;
+}
+
+message SurveyAnswer {
+  string session_id = 1;
+  messageloop.shared.v1.Payload payload = 2;
+  messageloop.shared.v1.Metadata metadata = 3;
+  messageloop.shared.v1.Error error = 4;
+}
+
+// --- Presence 相关 ---
+
+message PresenceQuery {
+  string channel = 1; // 精确频道
+}
+
+message PresenceInfo {
+  string session_id = 1;
+  string user_id = 2;
+  string client_id = 3;   // Connect.client_id（设备/端），不是 session
+  int64 connected_at = 4;
+}
+
+message PresenceSnapshot {
+  string channel = 1;
+  repeated PresenceInfo clients = 2;
+  bool truncated = 3;
+  int32 occupancy = 4;
+}
+
+message PresenceEvent {
+  string channel = 1;     // 始终是精确频道
+  string action = 2;      // "join" | "leave"
+  PresenceInfo info = 3;
+  reserved 4;             // occupancy v1.x
 }
 
 // --- 心跳 ---

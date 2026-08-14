@@ -29,6 +29,7 @@ message Publication {
   message Destination {
     repeated string sessions = 1;
     repeated string channels = 2;
+    repeated string users = 3;
   }
 
   string id = 1;
@@ -73,6 +74,7 @@ message DisconnectRequest {
   repeated string sessions = 1;
   uint32 code = 2;
   string reason = 3;
+  repeated string users = 4;
 }
 
 message DisconnectResponse {
@@ -84,6 +86,7 @@ message DisconnectResponse {
 message SubscribeRequest {
   string session_id = 1;
   repeated string channels = 2;
+  string user_id = 3;
 }
 
 message SubscribeResponse {
@@ -93,6 +96,7 @@ message SubscribeResponse {
 message UnsubscribeRequest {
   string session_id = 1;
   repeated string channels = 2;
+  string user_id = 3;
 }
 
 message UnsubscribeResponse {
@@ -110,9 +114,11 @@ message GetPresenceResponse {
 }
 
 message PresenceInfo {
-  string client_id = 1;
+  string client_id = 1;          // 兼容：仍为 session ID
   string user_id = 2;
   int64 connected_at = 3;
+  string session_id = 4;         // 与 client_id 相同的正式名
+  string connect_client_id = 5;  // Connect.client_id
 }
 
 // --- GetHistory ---

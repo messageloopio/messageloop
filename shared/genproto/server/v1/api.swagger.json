@@ -31,6 +31,12 @@
           "items": {
             "type": "string"
           }
+        },
+        "users": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       }
     },
@@ -39,6 +45,30 @@
       "properties": {
         "addHistory": {
           "type": "boolean"
+        }
+      }
+    },
+    "messageloopserverv1PresenceInfo": {
+      "type": "object",
+      "properties": {
+        "clientId": {
+          "type": "string",
+          "title": "兼容：仍为 session ID"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "connectedAt": {
+          "type": "string",
+          "format": "int64"
+        },
+        "sessionId": {
+          "type": "string",
+          "title": "与 client_id 相同的正式名"
+        },
+        "connectClientId": {
+          "type": "string",
+          "title": "Connect.client_id"
         }
       }
     },
@@ -59,6 +89,23 @@
         },
         "metadata": {
           "$ref": "#/definitions/v1Metadata"
+        }
+      }
+    },
+    "messageloopserverv1SurveyResult": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/definitions/v1Payload"
+        },
+        "metadata": {
+          "$ref": "#/definitions/v1Metadata"
+        },
+        "error": {
+          "$ref": "#/definitions/v1Error"
         }
       }
     },
@@ -125,7 +172,8 @@
       "type": "object",
       "properties": {
         "code": {
-          "type": "string"
+          "type": "string",
+          "description": "Well-known string codes (not an enum): AUTH_REQUIRED, AUTH_ERROR,\r\nACL_DENIED, ACL_ERROR, RATE_LIMITED, RPC_TIMEOUT, PROXY_ERROR,\r\nBAD_REQUEST, PERMISSION_DENIED, POLICY_DENIED,\r\nRECOVER_FAILED, RECOVER_SKIPPED."
         },
         "type": {
           "type": "string"
@@ -168,7 +216,7 @@
         "clients": {
           "type": "object",
           "additionalProperties": {
-            "$ref": "#/definitions/v1PresenceInfo"
+            "$ref": "#/definitions/messageloopserverv1PresenceInfo"
           }
         }
       }
@@ -236,21 +284,6 @@
       },
       "title": "统一的数据载荷类型"
     },
-    "v1PresenceInfo": {
-      "type": "object",
-      "properties": {
-        "clientId": {
-          "type": "string"
-        },
-        "userId": {
-          "type": "string"
-        },
-        "connectedAt": {
-          "type": "string",
-          "format": "int64"
-        }
-      }
-    },
     "v1PublishResponse": {
       "type": "object"
     },
@@ -275,25 +308,8 @@
           "type": "array",
           "items": {
             "type": "object",
-            "$ref": "#/definitions/v1SurveyResult"
+            "$ref": "#/definitions/messageloopserverv1SurveyResult"
           }
-        }
-      }
-    },
-    "v1SurveyResult": {
-      "type": "object",
-      "properties": {
-        "sessionId": {
-          "type": "string"
-        },
-        "payload": {
-          "$ref": "#/definitions/v1Payload"
-        },
-        "metadata": {
-          "$ref": "#/definitions/v1Metadata"
-        },
-        "error": {
-          "$ref": "#/definitions/v1Error"
         }
       }
     },

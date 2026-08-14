@@ -20,6 +20,11 @@ export const file_shared_v1_errors: GenFile = /*@__PURE__*/
  */
 export type Error = Message<"messageloop.shared.v1.Error"> & {
   /**
+   * Well-known string codes (not an enum): AUTH_REQUIRED, AUTH_ERROR,
+   * ACL_DENIED, ACL_ERROR, RATE_LIMITED, RPC_TIMEOUT, PROXY_ERROR,
+   * BAD_REQUEST, PERMISSION_DENIED, POLICY_DENIED,
+   * RECOVER_FAILED, RECOVER_SKIPPED.
+   *
    * @generated from field: string code = 1;
    */
   code: string;

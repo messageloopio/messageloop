@@ -8,6 +8,10 @@ import "google/protobuf/struct.proto";
 option go_package = "github.com/messageloopio/messageloop/shared/genproto/shared/v1;sharedpb";
 
 message Error {
+  // Well-known string codes (not an enum): AUTH_REQUIRED, AUTH_ERROR,
+  // ACL_DENIED, ACL_ERROR, RATE_LIMITED, RPC_TIMEOUT, PROXY_ERROR,
+  // BAD_REQUEST, PERMISSION_DENIED, POLICY_DENIED,
+  // RECOVER_FAILED, RECOVER_SKIPPED.
   string code = 1;
   string type = 2;
   string message = 3;

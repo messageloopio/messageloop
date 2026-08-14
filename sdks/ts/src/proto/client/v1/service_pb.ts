@@ -14,7 +14,7 @@ import type { Message as Message$1 } from "@bufbuild/protobuf";
  * Describes the file client/v1/service.proto.
  */
 export const file_client_v1_service: GenFile = /*@__PURE__*/
-  fileDesc("ChdjbGllbnQvdjEvc2VydmljZS5wcm90bxIVbWVzc2FnZWxvb3AuY2xpZW50LnYxIuMECg5JbmJvdW5kTWVzc2FnZRIKCgJpZBgBIAEoCRIMCgR0aW1lGAIgASgEEjEKB2Nvbm5lY3QYAyABKAsyHi5tZXNzYWdlbG9vcC5jbGllbnQudjEuQ29ubmVjdEgAEjUKCXN1YnNjcmliZRgEIAEoCzIgLm1lc3NhZ2Vsb29wLmNsaWVudC52MS5TdWJzY3JpYmVIABI5Cgt1bnN1YnNjcmliZRgFIAEoCzIiLm1lc3NhZ2Vsb29wLmNsaWVudC52MS5VbnN1YnNjcmliZUgAEjEKB3B1Ymxpc2gYBiABKAsyHi5tZXNzYWdlbG9vcC5jbGllbnQudjEuUHVibGlzaEgAEkUKC3JwY19yZXF1ZXN0GAcgASgLMiEubWVzc2FnZWxvb3AuY2xpZW50LnYxLlJwY1JlcXVlc3RIAFILcnBjX3JlcXVlc3QSRQoLc3ViX3JlZnJlc2gYCCABKAsyIS5tZXNzYWdlbG9vcC5jbGllbnQudjEuU3ViUmVmcmVzaEgAUgtzdWJfcmVmcmVzaBJOCg5zdXJ2ZXlfcmVxdWVzdBgJIAEoCzIkLm1lc3NhZ2Vsb29wLmNsaWVudC52MS5TdXJ2ZXlSZXF1ZXN0SABSDnN1cnZleV9yZXF1ZXN0EkgKDHN1cnZleV9yZXBseRgKIAEoCzIiLm1lc3NhZ2Vsb29wLmNsaWVudC52MS5TdXJ2ZXlSZXBseUgAUgxzdXJ2ZXlfcmVwbHkSKwoEcGluZxgLIAEoCzIbLm1lc3NhZ2Vsb29wLmNsaWVudC52MS5QaW5nSABCCgoIZW52ZWxvcGUimQYKD091dGJvdW5kTWVzc2FnZRIKCgJpZBgBIAEoCRIMCgR0aW1lGAIgASgEEi0KBWVycm9yGAMgASgLMhwubWVzc2FnZWxvb3Auc2hhcmVkLnYxLkVycm9ySAASNQoJY29ubmVjdGVkGAQgASgLMiAubWVzc2FnZWxvb3AuY2xpZW50LnYxLkNvbm5lY3RlZEgAEksKDXN1YnNjcmliZV9hY2sYBSABKAsyIy5tZXNzYWdlbG9vcC5jbGllbnQudjEuU3Vic2NyaWJlQWNrSABSDXN1YnNjcmliZV9hY2sSUQoPdW5zdWJzY3JpYmVfYWNrGAYgASgLMiUubWVzc2FnZWxvb3AuY2xpZW50LnYxLlVuc3Vic2NyaWJlQWNrSABSD3Vuc3Vic2NyaWJlX2FjaxJFCgtwdWJsaXNoX2FjaxgHIAEoCzIhLm1lc3NhZ2Vsb29wLmNsaWVudC52MS5QdWJsaXNoQWNrSABSC3B1Ymxpc2hfYWNrEjkKC3B1YmxpY2F0aW9uGAggASgLMiIubWVzc2FnZWxvb3AuY2xpZW50LnYxLlB1YmxpY2F0aW9uSAASPwoJcnBjX3JlcGx5GAkgASgLMh8ubWVzc2FnZWxvb3AuY2xpZW50LnYxLlJwY1JlcGx5SABSCXJwY19yZXBseRJQCg9zdWJfcmVmcmVzaF9hY2sYCiABKAsyJC5tZXNzYWdlbG9vcC5jbGllbnQudjEuU3ViUmVmcmVzaEFja0gAUg9zdWJfcmVmcmVzaF9hY2sSTgoOc3VydmV5X3JlcXVlc3QYCyABKAsyJC5tZXNzYWdlbG9vcC5jbGllbnQudjEuU3VydmV5UmVxdWVzdEgAUg5zdXJ2ZXlfcmVxdWVzdBJICgxzdXJ2ZXlfcmVwbHkYDCABKAsyIi5tZXNzYWdlbG9vcC5jbGllbnQudjEuU3VydmV5UmVwbHlIAFIMc3VydmV5X3JlcGx5EisKBHBvbmcYDSABKAsyGy5tZXNzYWdlbG9vcC5jbGllbnQudjEuUG9uZ0gAQgoKCGVudmVsb3BlIsUBCgdDb25uZWN0EhwKCWNsaWVudF9pZBgBIAEoCVIJY2xpZW50X2lkEiAKC2NsaWVudF90eXBlGAIgASgJUgtjbGllbnRfdHlwZRINCgV0b2tlbhgDIAEoCRIPCgd2ZXJzaW9uGAQgASgJEjoKDXN1YnNjcmlwdGlvbnMYBSADKAsyIy5tZXNzYWdlbG9vcC5jbGllbnQudjEuU3Vic2NyaXB0aW9uEh4KCnNlc3Npb25faWQYBiABKAlSCnNlc3Npb25faWQiwQEKCUNvbm5lY3RlZBIeCgpzZXNzaW9uX2lkGAEgASgJUgpzZXNzaW9uX2lkEjoKDXN1YnNjcmlwdGlvbnMYAiADKAsyIy5tZXNzYWdlbG9vcC5jbGllbnQudjEuU3Vic2NyaXB0aW9uEjgKDHB1YmxpY2F0aW9ucxgDIAMoCzIiLm1lc3NhZ2Vsb29wLmNsaWVudC52MS5QdWJsaWNhdGlvbhIPCgdyZXN1bWVkGAQgASgIEg0KBWVwb2NoGAUgASgJInEKDFN1YnNjcmlwdGlvbhIPCgdjaGFubmVsGAEgASgJEhEKCWVwaGVtZXJhbBgCIAEoCBINCgV0b2tlbhgDIAEoCRIOCgZvZmZzZXQYBCABKAQSDwoHcmVjb3ZlchgFIAEoCBINCgVlcG9jaBgGIAEoCSJHCglTdWJzY3JpYmUSOgoNc3Vic2NyaXB0aW9ucxgBIAMoCzIjLm1lc3NhZ2Vsb29wLmNsaWVudC52MS5TdWJzY3JpcHRpb24iSgoMU3Vic2NyaWJlQWNrEjoKDXN1YnNjcmlwdGlvbnMYASADKAsyIy5tZXNzYWdlbG9vcC5jbGllbnQudjEuU3Vic2NyaXB0aW9uIkkKC1Vuc3Vic2NyaWJlEjoKDXN1YnNjcmlwdGlvbnMYASADKAsyIy5tZXNzYWdlbG9vcC5jbGllbnQudjEuU3Vic2NyaXB0aW9uIkwKDlVuc3Vic2NyaWJlQWNrEjoKDXN1YnNjcmlwdGlvbnMYASADKAsyIy5tZXNzYWdlbG9vcC5jbGllbnQudjEuU3Vic2NyaXB0aW9uIqABCgdQdWJsaXNoEg8KB2NoYW5uZWwYASABKAkSLwoHcGF5bG9hZBgCIAEoCzIeLm1lc3NhZ2Vsb29wLnNoYXJlZC52MS5QYXlsb2FkEjEKCG1ldGFkYXRhGAMgASgLMh8ubWVzc2FnZWxvb3Auc2hhcmVkLnYxLk1ldGFkYXRhEg0KBXRva2VuGAQgASgJEhEKCXRyYW5zaWVudBgFIAEoCCIoCgpQdWJsaXNoQWNrEgoKAmlkGAEgASgJEg4KBm9mZnNldBgCIAEoBCKaAQoHTWVzc2FnZRIKCgJpZBgBIAEoCRIPCgdjaGFubmVsGAIgASgJEg4KBm9mZnNldBgDIAEoBBIvCgdwYXlsb2FkGAQgASgLMh4ubWVzc2FnZWxvb3Auc2hhcmVkLnYxLlBheWxvYWQSMQoIbWV0YWRhdGEYBSABKAsyHy5tZXNzYWdlbG9vcC5zaGFyZWQudjEuTWV0YWRhdGEiPwoLUHVibGljYXRpb24SMAoIbWVzc2FnZXMYASADKAsyHi5tZXNzYWdlbG9vcC5jbGllbnQudjEuTWVzc2FnZSKRAQoKUnBjUmVxdWVzdBIPCgdjaGFubmVsGAEgASgJEg4KBm1ldGhvZBgCIAEoCRIvCgdwYXlsb2FkGAMgASgLMh4ubWVzc2FnZWxvb3Auc2hhcmVkLnYxLlBheWxvYWQSMQoIbWV0YWRhdGEYBCABKAsyHy5tZXNzYWdlbG9vcC5zaGFyZWQudjEuTWV0YWRhdGEiuwEKCFJwY1JlcGx5Eh4KCnJlcXVlc3RfaWQYASABKAlSCnJlcXVlc3RfaWQSLwoHcGF5bG9hZBgCIAEoCzIeLm1lc3NhZ2Vsb29wLnNoYXJlZC52MS5QYXlsb2FkEjEKCG1ldGFkYXRhGAMgASgLMh8ubWVzc2FnZWxvb3Auc2hhcmVkLnYxLk1ldGFkYXRhEisKBWVycm9yGAQgASgLMhwubWVzc2FnZWxvb3Auc2hhcmVkLnYxLkVycm9yIh4KClN1YlJlZnJlc2gSEAoIY2hhbm5lbHMYASADKAkiDwoNU3ViUmVmcmVzaEFjayKTAQoNU3VydmV5UmVxdWVzdBIeCgpyZXF1ZXN0X2lkGAEgASgJUgpyZXF1ZXN0X2lkEi8KB3BheWxvYWQYAiABKAsyHi5tZXNzYWdlbG9vcC5zaGFyZWQudjEuUGF5bG9hZBIxCghtZXRhZGF0YRgDIAEoCzIfLm1lc3NhZ2Vsb29wLnNoYXJlZC52MS5NZXRhZGF0YSK+AQoLU3VydmV5UmVwbHkSHgoKcmVxdWVzdF9pZBgBIAEoCVIKcmVxdWVzdF9pZBIvCgdwYXlsb2FkGAIgASgLMh4ubWVzc2FnZWxvb3Auc2hhcmVkLnYxLlBheWxvYWQSMQoIbWV0YWRhdGEYAyABKAsyHy5tZXNzYWdlbG9vcC5zaGFyZWQudjEuTWV0YWRhdGESKwoFZXJyb3IYBCABKAsyHC5tZXNzYWdlbG9vcC5zaGFyZWQudjEuRXJyb3IiBgoEUGluZyIGCgRQb25nMnYKEk1lc3NhZ2VMb29wU2VydmljZRJgCgtNZXNzYWdlTG9vcBIlLm1lc3NhZ2Vsb29wLmNsaWVudC52MS5JbmJvdW5kTWVzc2FnZRomLm1lc3NhZ2Vsb29wLmNsaWVudC52MS5PdXRib3VuZE1lc3NhZ2UoATABQkJaQGdpdGh1Yi5jb20vbWVzc2FnZWxvb3Bpby9tZXNzYWdlbG9vcC9nZW5wcm90by9jbGllbnQvdjE7Y2xpZW50cGJiBnByb3RvMw", [file_shared_v1_errors, file_shared_v1_types]);
+  fileDesc("ChdjbGllbnQvdjEvc2VydmljZS5wcm90bxIVbWVzc2FnZWxvb3AuY2xpZW50LnYxIp4FCg5JbmJvdW5kTWVzc2FnZRIKCgJpZBgBIAEoCRIMCgR0aW1lGAIgASgEEjEKB2Nvbm5lY3QYAyABKAsyHi5tZXNzYWdlbG9vcC5jbGllbnQudjEuQ29ubmVjdEgAEjUKCXN1YnNjcmliZRgEIAEoCzIgLm1lc3NhZ2Vsb29wLmNsaWVudC52MS5TdWJzY3JpYmVIABI5Cgt1bnN1YnNjcmliZRgFIAEoCzIiLm1lc3NhZ2Vsb29wLmNsaWVudC52MS5VbnN1YnNjcmliZUgAEjEKB3B1Ymxpc2gYBiABKAsyHi5tZXNzYWdlbG9vcC5jbGllbnQudjEuUHVibGlzaEgAEjgKC3JwY19yZXF1ZXN0GAcgASgLMiEubWVzc2FnZWxvb3AuY2xpZW50LnYxLlJwY1JlcXVlc3RIABI4CgtzdWJfcmVmcmVzaBgIIAEoCzIhLm1lc3NhZ2Vsb29wLmNsaWVudC52MS5TdWJSZWZyZXNoSAASPgoOc3VydmV5X3JlcXVlc3QYCSABKAsyJC5tZXNzYWdlbG9vcC5jbGllbnQudjEuU3VydmV5UmVxdWVzdEgAEjoKDHN1cnZleV9yZXBseRgKIAEoCzIiLm1lc3NhZ2Vsb29wLmNsaWVudC52MS5TdXJ2ZXlSZXBseUgAEisKBHBpbmcYCyABKAsyGy5tZXNzYWdlbG9vcC5jbGllbnQudjEuUGluZ0gAEj4KDnByZXNlbmNlX3F1ZXJ5GAwgASgLMiQubWVzc2FnZWxvb3AuY2xpZW50LnYxLlByZXNlbmNlUXVlcnlIABIrCgRwb25nGA4gASgLMhsubWVzc2FnZWxvb3AuY2xpZW50LnYxLlBvbmdIAEIKCghlbnZlbG9wZUoECA0QDiKgBwoPT3V0Ym91bmRNZXNzYWdlEgoKAmlkGAEgASgJEgwKBHRpbWUYAiABKAQSLQoFZXJyb3IYAyABKAsyHC5tZXNzYWdlbG9vcC5zaGFyZWQudjEuRXJyb3JIABI1Cgljb25uZWN0ZWQYBCABKAsyIC5tZXNzYWdlbG9vcC5jbGllbnQudjEuQ29ubmVjdGVkSAASPAoNc3Vic2NyaWJlX2FjaxgFIAEoCzIjLm1lc3NhZ2Vsb29wLmNsaWVudC52MS5TdWJzY3JpYmVBY2tIABJACg91bnN1YnNjcmliZV9hY2sYBiABKAsyJS5tZXNzYWdlbG9vcC5jbGllbnQudjEuVW5zdWJzY3JpYmVBY2tIABI4CgtwdWJsaXNoX2FjaxgHIAEoCzIhLm1lc3NhZ2Vsb29wLmNsaWVudC52MS5QdWJsaXNoQWNrSAASOQoLcHVibGljYXRpb24YCCABKAsyIi5tZXNzYWdlbG9vcC5jbGllbnQudjEuUHVibGljYXRpb25IABI0CglycGNfcmVwbHkYCSABKAsyHy5tZXNzYWdlbG9vcC5jbGllbnQudjEuUnBjUmVwbHlIABI/Cg9zdWJfcmVmcmVzaF9hY2sYCiABKAsyJC5tZXNzYWdlbG9vcC5jbGllbnQudjEuU3ViUmVmcmVzaEFja0gAEj4KDnN1cnZleV9yZXF1ZXN0GAsgASgLMiQubWVzc2FnZWxvb3AuY2xpZW50LnYxLlN1cnZleVJlcXVlc3RIABI6CgxzdXJ2ZXlfcmVwbHkYDCABKAsyIi5tZXNzYWdlbG9vcC5jbGllbnQudjEuU3VydmV5UmVwbHlIABIrCgRwb25nGA0gASgLMhsubWVzc2FnZWxvb3AuY2xpZW50LnYxLlBvbmdIABI7CghwcmVzZW5jZRgOIAEoCzInLm1lc3NhZ2Vsb29wLmNsaWVudC52MS5QcmVzZW5jZVNuYXBzaG90SAASPgoOcHJlc2VuY2VfZXZlbnQYDyABKAsyJC5tZXNzYWdlbG9vcC5jbGllbnQudjEuUHJlc2VuY2VFdmVudEgAEisKBHBpbmcYESABKAsyGy5tZXNzYWdlbG9vcC5jbGllbnQudjEuUGluZ0gAEjwKDXN1cnZleV9yZXN1bHQYEiABKAsyIy5tZXNzYWdlbG9vcC5jbGllbnQudjEuU3VydmV5UmVzdWx0SABCCgoIZW52ZWxvcGVKBAgQEBEioQEKB0Nvbm5lY3QSEQoJY2xpZW50X2lkGAEgASgJEhMKC2NsaWVudF90eXBlGAIgASgJEg0KBXRva2VuGAMgASgJEg8KB3ZlcnNpb24YBCABKAkSOgoNc3Vic2NyaXB0aW9ucxgFIAMoCzIjLm1lc3NhZ2Vsb29wLmNsaWVudC52MS5TdWJzY3JpcHRpb24SEgoKc2Vzc2lvbl9pZBgGIAEoCSLVAgoJQ29ubmVjdGVkEhIKCnNlc3Npb25faWQYASABKAkSOgoNc3Vic2NyaXB0aW9ucxgCIAMoCzIjLm1lc3NhZ2Vsb29wLmNsaWVudC52MS5TdWJzY3JpcHRpb24SOAoMcHVibGljYXRpb25zGAMgAygLMiIubWVzc2FnZWxvb3AuY2xpZW50LnYxLlB1YmxpY2F0aW9uEg8KB3Jlc3VtZWQYBCABKAgSDQoFZXBvY2gYBSABKAkSEQoJcmVjb3ZlcmVkGAYgASgIEhEKCXRydW5jYXRlZBgHIAEoCBI9Cg9yZWNvdmVyX3Jlc3VsdHMYCCADKAsyJC5tZXNzYWdlbG9vcC5jbGllbnQudjEuUmVjb3ZlclJlc3VsdBI5CghwcmVzZW5jZRgJIAMoCzInLm1lc3NhZ2Vsb29wLmNsaWVudC52MS5QcmVzZW5jZVNuYXBzaG90IpIBCg1SZWNvdmVyUmVzdWx0Eg8KB2NoYW5uZWwYASABKAkSEQoJcmVjb3ZlcmVkGAIgASgIEhEKCXRydW5jYXRlZBgDIAEoCBIOCgZvZmZzZXQYBCABKAQSDQoFZXBvY2gYBSABKAkSKwoFZXJyb3IYBiABKAsyHC5tZXNzYWdlbG9vcC5zaGFyZWQudjEuRXJyb3IicQoMU3Vic2NyaXB0aW9uEg8KB2NoYW5uZWwYASABKAkSEQoJZXBoZW1lcmFsGAIgASgIEg0KBXRva2VuGAMgASgJEg4KBm9mZnNldBgEIAEoBBIPCgdyZWNvdmVyGAUgASgIEg0KBWVwb2NoGAYgASgJIkcKCVN1YnNjcmliZRI6Cg1zdWJzY3JpcHRpb25zGAEgAygLMiMubWVzc2FnZWxvb3AuY2xpZW50LnYxLlN1YnNjcmlwdGlvbiKNAgoMU3Vic2NyaWJlQWNrEjoKDXN1YnNjcmlwdGlvbnMYASADKAsyIy5tZXNzYWdlbG9vcC5jbGllbnQudjEuU3Vic2NyaXB0aW9uEjgKDHB1YmxpY2F0aW9ucxgCIAMoCzIiLm1lc3NhZ2Vsb29wLmNsaWVudC52MS5QdWJsaWNhdGlvbhI9Cg9yZWNvdmVyX3Jlc3VsdHMYAyADKAsyJC5tZXNzYWdlbG9vcC5jbGllbnQudjEuUmVjb3ZlclJlc3VsdBINCgVlcG9jaBgEIAEoCRI5CghwcmVzZW5jZRgFIAMoCzInLm1lc3NhZ2Vsb29wLmNsaWVudC52MS5QcmVzZW5jZVNuYXBzaG90IkkKC1Vuc3Vic2NyaWJlEjoKDXN1YnNjcmlwdGlvbnMYASADKAsyIy5tZXNzYWdlbG9vcC5jbGllbnQudjEuU3Vic2NyaXB0aW9uIkwKDlVuc3Vic2NyaWJlQWNrEjoKDXN1YnNjcmlwdGlvbnMYASADKAsyIy5tZXNzYWdlbG9vcC5jbGllbnQudjEuU3Vic2NyaXB0aW9uIrkBCgdQdWJsaXNoEg8KB2NoYW5uZWwYASABKAkSLwoHcGF5bG9hZBgCIAEoCzIeLm1lc3NhZ2Vsb29wLnNoYXJlZC52MS5QYXlsb2FkEjEKCG1ldGFkYXRhGAMgASgLMh8ubWVzc2FnZWxvb3Auc2hhcmVkLnYxLk1ldGFkYXRhEg0KBXRva2VuGAQgASgJEhEKCXRyYW5zaWVudBgFIAEoCBIXCg9pZGVtcG90ZW5jeV9rZXkYBiABKAkiKAoKUHVibGlzaEFjaxIKCgJpZBgBIAEoCRIOCgZvZmZzZXQYAiABKAQimgEKB01lc3NhZ2USCgoCaWQYASABKAkSDwoHY2hhbm5lbBgCIAEoCRIOCgZvZmZzZXQYAyABKAQSLwoHcGF5bG9hZBgEIAEoCzIeLm1lc3NhZ2Vsb29wLnNoYXJlZC52MS5QYXlsb2FkEjEKCG1ldGFkYXRhGAUgASgLMh8ubWVzc2FnZWxvb3Auc2hhcmVkLnYxLk1ldGFkYXRhIj8KC1B1YmxpY2F0aW9uEjAKCG1lc3NhZ2VzGAEgAygLMh4ubWVzc2FnZWxvb3AuY2xpZW50LnYxLk1lc3NhZ2UikQEKClJwY1JlcXVlc3QSDwoHY2hhbm5lbBgBIAEoCRIOCgZtZXRob2QYAiABKAkSLwoHcGF5bG9hZBgDIAEoCzIeLm1lc3NhZ2Vsb29wLnNoYXJlZC52MS5QYXlsb2FkEjEKCG1ldGFkYXRhGAQgASgLMh8ubWVzc2FnZWxvb3Auc2hhcmVkLnYxLk1ldGFkYXRhIq8BCghScGNSZXBseRISCgpyZXF1ZXN0X2lkGAEgASgJEi8KB3BheWxvYWQYAiABKAsyHi5tZXNzYWdlbG9vcC5zaGFyZWQudjEuUGF5bG9hZBIxCghtZXRhZGF0YRgDIAEoCzIfLm1lc3NhZ2Vsb29wLnNoYXJlZC52MS5NZXRhZGF0YRIrCgVlcnJvchgEIAEoCzIcLm1lc3NhZ2Vsb29wLnNoYXJlZC52MS5FcnJvciIeCgpTdWJSZWZyZXNoEhAKCGNoYW5uZWxzGAEgAygJIg8KDVN1YlJlZnJlc2hBY2sirAEKDVN1cnZleVJlcXVlc3QSEgoKcmVxdWVzdF9pZBgBIAEoCRIvCgdwYXlsb2FkGAIgASgLMh4ubWVzc2FnZWxvb3Auc2hhcmVkLnYxLlBheWxvYWQSMQoIbWV0YWRhdGEYAyABKAsyHy5tZXNzYWdlbG9vcC5zaGFyZWQudjEuTWV0YWRhdGESDwoHY2hhbm5lbBgEIAEoCRISCgp0aW1lb3V0X21zGAUgASgFIrIBCgtTdXJ2ZXlSZXBseRISCgpyZXF1ZXN0X2lkGAEgASgJEi8KB3BheWxvYWQYAiABKAsyHi5tZXNzYWdlbG9vcC5zaGFyZWQudjEuUGF5bG9hZBIxCghtZXRhZGF0YRgDIAEoCzIfLm1lc3NhZ2Vsb29wLnNoYXJlZC52MS5NZXRhZGF0YRIrCgVlcnJvchgEIAEoCzIcLm1lc3NhZ2Vsb29wLnNoYXJlZC52MS5FcnJvciKWAQoMU3VydmV5UmVzdWx0EhIKCnJlcXVlc3RfaWQYASABKAkSDwoHY2hhbm5lbBgCIAEoCRI0CgdhbnN3ZXJzGAMgAygLMiMubWVzc2FnZWxvb3AuY2xpZW50LnYxLlN1cnZleUFuc3dlchIrCgVlcnJvchgEIAEoCzIcLm1lc3NhZ2Vsb29wLnNoYXJlZC52MS5FcnJvciKzAQoMU3VydmV5QW5zd2VyEhIKCnNlc3Npb25faWQYASABKAkSLwoHcGF5bG9hZBgCIAEoCzIeLm1lc3NhZ2Vsb29wLnNoYXJlZC52MS5QYXlsb2FkEjEKCG1ldGFkYXRhGAMgASgLMh8ubWVzc2FnZWxvb3Auc2hhcmVkLnYxLk1ldGFkYXRhEisKBWVycm9yGAQgASgLMhwubWVzc2FnZWxvb3Auc2hhcmVkLnYxLkVycm9yIiAKDVByZXNlbmNlUXVlcnkSDwoHY2hhbm5lbBgBIAEoCSJcCgxQcmVzZW5jZUluZm8SEgoKc2Vzc2lvbl9pZBgBIAEoCRIPCgd1c2VyX2lkGAIgASgJEhEKCWNsaWVudF9pZBgDIAEoCRIUCgxjb25uZWN0ZWRfYXQYBCABKAMifwoQUHJlc2VuY2VTbmFwc2hvdBIPCgdjaGFubmVsGAEgASgJEjQKB2NsaWVudHMYAiADKAsyIy5tZXNzYWdlbG9vcC5jbGllbnQudjEuUHJlc2VuY2VJbmZvEhEKCXRydW5jYXRlZBgDIAEoCBIRCglvY2N1cGFuY3kYBCABKAUiaQoNUHJlc2VuY2VFdmVudBIPCgdjaGFubmVsGAEgASgJEg4KBmFjdGlvbhgCIAEoCRIxCgRpbmZvGAMgASgLMiMubWVzc2FnZWxvb3AuY2xpZW50LnYxLlByZXNlbmNlSW5mb0oECAQQBSIGCgRQaW5nIgYKBFBvbmcydgoSTWVzc2FnZUxvb3BTZXJ2aWNlEmAKC01lc3NhZ2VMb29wEiUubWVzc2FnZWxvb3AuY2xpZW50LnYxLkluYm91bmRNZXNzYWdlGiYubWVzc2FnZWxvb3AuY2xpZW50LnYxLk91dGJvdW5kTWVzc2FnZSgBMAFCSVpHZ2l0aHViLmNvbS9tZXNzYWdlbG9vcGlvL21lc3NhZ2Vsb29wL3NoYXJlZC9nZW5wcm90by9jbGllbnQvdjE7Y2xpZW50cGJiBnByb3RvMw", [file_shared_v1_errors, file_shared_v1_types]);
 
 /**
  * 客户端 -> 服务端
@@ -61,25 +61,25 @@ export type InboundMessage = Message$1<"messageloop.client.v1.InboundMessage"> &
     case: "publish";
   } | {
     /**
-     * @generated from field: messageloop.client.v1.RpcRequest rpc_request = 7 [json_name = "rpc_request"];
+     * @generated from field: messageloop.client.v1.RpcRequest rpc_request = 7;
      */
     value: RpcRequest;
     case: "rpcRequest";
   } | {
     /**
-     * @generated from field: messageloop.client.v1.SubRefresh sub_refresh = 8 [json_name = "sub_refresh"];
+     * @generated from field: messageloop.client.v1.SubRefresh sub_refresh = 8;
      */
     value: SubRefresh;
     case: "subRefresh";
   } | {
     /**
-     * @generated from field: messageloop.client.v1.SurveyRequest survey_request = 9 [json_name = "survey_request"];
+     * @generated from field: messageloop.client.v1.SurveyRequest survey_request = 9;
      */
     value: SurveyRequest;
     case: "surveyRequest";
   } | {
     /**
-     * @generated from field: messageloop.client.v1.SurveyReply survey_reply = 10 [json_name = "survey_reply"];
+     * @generated from field: messageloop.client.v1.SurveyReply survey_reply = 10;
      */
     value: SurveyReply;
     case: "surveyReply";
@@ -89,6 +89,18 @@ export type InboundMessage = Message$1<"messageloop.client.v1.InboundMessage"> &
      */
     value: Ping;
     case: "ping";
+  } | {
+    /**
+     * @generated from field: messageloop.client.v1.PresenceQuery presence_query = 12;
+     */
+    value: PresenceQuery;
+    case: "presenceQuery";
+  } | {
+    /**
+     * @generated from field: messageloop.client.v1.Pong pong = 14;
+     */
+    value: Pong;
+    case: "pong";
   } | { case: undefined; value?: undefined };
 };
 
@@ -132,19 +144,19 @@ export type OutboundMessage = Message$1<"messageloop.client.v1.OutboundMessage">
     case: "connected";
   } | {
     /**
-     * @generated from field: messageloop.client.v1.SubscribeAck subscribe_ack = 5 [json_name = "subscribe_ack"];
+     * @generated from field: messageloop.client.v1.SubscribeAck subscribe_ack = 5;
      */
     value: SubscribeAck;
     case: "subscribeAck";
   } | {
     /**
-     * @generated from field: messageloop.client.v1.UnsubscribeAck unsubscribe_ack = 6 [json_name = "unsubscribe_ack"];
+     * @generated from field: messageloop.client.v1.UnsubscribeAck unsubscribe_ack = 6;
      */
     value: UnsubscribeAck;
     case: "unsubscribeAck";
   } | {
     /**
-     * @generated from field: messageloop.client.v1.PublishAck publish_ack = 7 [json_name = "publish_ack"];
+     * @generated from field: messageloop.client.v1.PublishAck publish_ack = 7;
      */
     value: PublishAck;
     case: "publishAck";
@@ -156,25 +168,25 @@ export type OutboundMessage = Message$1<"messageloop.client.v1.OutboundMessage">
     case: "publication";
   } | {
     /**
-     * @generated from field: messageloop.client.v1.RpcReply rpc_reply = 9 [json_name = "rpc_reply"];
+     * @generated from field: messageloop.client.v1.RpcReply rpc_reply = 9;
      */
     value: RpcReply;
     case: "rpcReply";
   } | {
     /**
-     * @generated from field: messageloop.client.v1.SubRefreshAck sub_refresh_ack = 10 [json_name = "sub_refresh_ack"];
+     * @generated from field: messageloop.client.v1.SubRefreshAck sub_refresh_ack = 10;
      */
     value: SubRefreshAck;
     case: "subRefreshAck";
   } | {
     /**
-     * @generated from field: messageloop.client.v1.SurveyRequest survey_request = 11 [json_name = "survey_request"];
+     * @generated from field: messageloop.client.v1.SurveyRequest survey_request = 11;
      */
     value: SurveyRequest;
     case: "surveyRequest";
   } | {
     /**
-     * @generated from field: messageloop.client.v1.SurveyReply survey_reply = 12 [json_name = "survey_reply"];
+     * @generated from field: messageloop.client.v1.SurveyReply survey_reply = 12;
      */
     value: SurveyReply;
     case: "surveyReply";
@@ -184,6 +196,30 @@ export type OutboundMessage = Message$1<"messageloop.client.v1.OutboundMessage">
      */
     value: Pong;
     case: "pong";
+  } | {
+    /**
+     * @generated from field: messageloop.client.v1.PresenceSnapshot presence = 14;
+     */
+    value: PresenceSnapshot;
+    case: "presence";
+  } | {
+    /**
+     * @generated from field: messageloop.client.v1.PresenceEvent presence_event = 15;
+     */
+    value: PresenceEvent;
+    case: "presenceEvent";
+  } | {
+    /**
+     * @generated from field: messageloop.client.v1.Ping ping = 17;
+     */
+    value: Ping;
+    case: "ping";
+  } | {
+    /**
+     * @generated from field: messageloop.client.v1.SurveyResult survey_result = 18;
+     */
+    value: SurveyResult;
+    case: "surveyResult";
   } | { case: undefined; value?: undefined };
 };
 
@@ -199,12 +235,12 @@ export const OutboundMessageSchema: GenMessage<OutboundMessage> = /*@__PURE__*/
  */
 export type Connect = Message$1<"messageloop.client.v1.Connect"> & {
   /**
-   * @generated from field: string client_id = 1 [json_name = "client_id"];
+   * @generated from field: string client_id = 1;
    */
   clientId: string;
 
   /**
-   * @generated from field: string client_type = 2 [json_name = "client_type"];
+   * @generated from field: string client_type = 2;
    */
   clientType: string;
 
@@ -226,7 +262,7 @@ export type Connect = Message$1<"messageloop.client.v1.Connect"> & {
   /**
    * 上次会话 ID，为空表示新连接
    *
-   * @generated from field: string session_id = 6 [json_name = "session_id"];
+   * @generated from field: string session_id = 6;
    */
   sessionId: string;
 };
@@ -243,7 +279,7 @@ export const ConnectSchema: GenMessage<Connect> = /*@__PURE__*/
  */
 export type Connected = Message$1<"messageloop.client.v1.Connected"> & {
   /**
-   * @generated from field: string session_id = 1 [json_name = "session_id"];
+   * @generated from field: string session_id = 1;
    */
   sessionId: string;
 
@@ -270,6 +306,30 @@ export type Connected = Message$1<"messageloop.client.v1.Connected"> & {
    * @generated from field: string epoch = 5;
    */
   epoch: string;
+
+  /**
+   * 至少一个频道 recovered=true
+   *
+   * @generated from field: bool recovered = 6;
+   */
+  recovered: boolean;
+
+  /**
+   * 至少一个频道 truncated
+   *
+   * @generated from field: bool truncated = 7;
+   */
+  truncated: boolean;
+
+  /**
+   * @generated from field: repeated messageloop.client.v1.RecoverResult recover_results = 8;
+   */
+  recoverResults: RecoverResult[];
+
+  /**
+   * @generated from field: repeated messageloop.client.v1.PresenceSnapshot presence = 9;
+   */
+  presence: PresenceSnapshot[];
 };
 
 /**
@@ -278,6 +338,56 @@ export type Connected = Message$1<"messageloop.client.v1.Connected"> & {
  */
 export const ConnectedSchema: GenMessage<Connected> = /*@__PURE__*/
   messageDesc(file_client_v1_service, 3);
+
+/**
+ * @generated from message messageloop.client.v1.RecoverResult
+ */
+export type RecoverResult = Message$1<"messageloop.client.v1.RecoverResult"> & {
+  /**
+   * @generated from field: string channel = 1;
+   */
+  channel: string;
+
+  /**
+   * History 调用成功（含 0 条）
+   *
+   * @generated from field: bool recovered = 2;
+   */
+  recovered: boolean;
+
+  /**
+   * 命中 cap
+   *
+   * @generated from field: bool truncated = 3;
+   */
+  truncated: boolean;
+
+  /**
+   * 有消息=最后一条；空批=回显 cursor
+   *
+   * @generated from field: uint64 offset = 4;
+   */
+  offset: bigint;
+
+  /**
+   * @generated from field: string epoch = 5;
+   */
+  epoch: string;
+
+  /**
+   * RECOVER_FAILED / RECOVER_SKIPPED
+   *
+   * @generated from field: messageloop.shared.v1.Error error = 6;
+   */
+  error?: Error;
+};
+
+/**
+ * Describes the message messageloop.client.v1.RecoverResult.
+ * Use `create(RecoverResultSchema)` to create a new message.
+ */
+export const RecoverResultSchema: GenMessage<RecoverResult> = /*@__PURE__*/
+  messageDesc(file_client_v1_service, 4);
 
 /**
  * @generated from message messageloop.client.v1.Subscription
@@ -325,7 +435,7 @@ export type Subscription = Message$1<"messageloop.client.v1.Subscription"> & {
  * Use `create(SubscriptionSchema)` to create a new message.
  */
 export const SubscriptionSchema: GenMessage<Subscription> = /*@__PURE__*/
-  messageDesc(file_client_v1_service, 4);
+  messageDesc(file_client_v1_service, 5);
 
 /**
  * @generated from message messageloop.client.v1.Subscribe
@@ -342,7 +452,7 @@ export type Subscribe = Message$1<"messageloop.client.v1.Subscribe"> & {
  * Use `create(SubscribeSchema)` to create a new message.
  */
 export const SubscribeSchema: GenMessage<Subscribe> = /*@__PURE__*/
-  messageDesc(file_client_v1_service, 5);
+  messageDesc(file_client_v1_service, 6);
 
 /**
  * @generated from message messageloop.client.v1.SubscribeAck
@@ -352,6 +462,26 @@ export type SubscribeAck = Message$1<"messageloop.client.v1.SubscribeAck"> & {
    * @generated from field: repeated messageloop.client.v1.Subscription subscriptions = 1;
    */
   subscriptions: Subscription[];
+
+  /**
+   * @generated from field: repeated messageloop.client.v1.Publication publications = 2;
+   */
+  publications: Publication[];
+
+  /**
+   * @generated from field: repeated messageloop.client.v1.RecoverResult recover_results = 3;
+   */
+  recoverResults: RecoverResult[];
+
+  /**
+   * @generated from field: string epoch = 4;
+   */
+  epoch: string;
+
+  /**
+   * @generated from field: repeated messageloop.client.v1.PresenceSnapshot presence = 5;
+   */
+  presence: PresenceSnapshot[];
 };
 
 /**
@@ -359,7 +489,7 @@ export type SubscribeAck = Message$1<"messageloop.client.v1.SubscribeAck"> & {
  * Use `create(SubscribeAckSchema)` to create a new message.
  */
 export const SubscribeAckSchema: GenMessage<SubscribeAck> = /*@__PURE__*/
-  messageDesc(file_client_v1_service, 6);
+  messageDesc(file_client_v1_service, 7);
 
 /**
  * @generated from message messageloop.client.v1.Unsubscribe
@@ -376,7 +506,7 @@ export type Unsubscribe = Message$1<"messageloop.client.v1.Unsubscribe"> & {
  * Use `create(UnsubscribeSchema)` to create a new message.
  */
 export const UnsubscribeSchema: GenMessage<Unsubscribe> = /*@__PURE__*/
-  messageDesc(file_client_v1_service, 7);
+  messageDesc(file_client_v1_service, 8);
 
 /**
  * @generated from message messageloop.client.v1.UnsubscribeAck
@@ -393,7 +523,7 @@ export type UnsubscribeAck = Message$1<"messageloop.client.v1.UnsubscribeAck"> &
  * Use `create(UnsubscribeAckSchema)` to create a new message.
  */
 export const UnsubscribeAckSchema: GenMessage<UnsubscribeAck> = /*@__PURE__*/
-  messageDesc(file_client_v1_service, 8);
+  messageDesc(file_client_v1_service, 9);
 
 /**
  * @generated from message messageloop.client.v1.Publish
@@ -423,6 +553,13 @@ export type Publish = Message$1<"messageloop.client.v1.Publish"> & {
    * @generated from field: bool transient = 5;
    */
   transient: boolean;
+
+  /**
+   * v1.x: server ignores this in v1.0. Number frozen.
+   *
+   * @generated from field: string idempotency_key = 6;
+   */
+  idempotencyKey: string;
 };
 
 /**
@@ -430,7 +567,7 @@ export type Publish = Message$1<"messageloop.client.v1.Publish"> & {
  * Use `create(PublishSchema)` to create a new message.
  */
 export const PublishSchema: GenMessage<Publish> = /*@__PURE__*/
-  messageDesc(file_client_v1_service, 9);
+  messageDesc(file_client_v1_service, 10);
 
 /**
  * @generated from message messageloop.client.v1.PublishAck
@@ -456,7 +593,7 @@ export type PublishAck = Message$1<"messageloop.client.v1.PublishAck"> & {
  * Use `create(PublishAckSchema)` to create a new message.
  */
 export const PublishAckSchema: GenMessage<PublishAck> = /*@__PURE__*/
-  messageDesc(file_client_v1_service, 10);
+  messageDesc(file_client_v1_service, 11);
 
 /**
  * @generated from message messageloop.client.v1.Message
@@ -493,7 +630,7 @@ export type Message = Message$1<"messageloop.client.v1.Message"> & {
  * Use `create(MessageSchema)` to create a new message.
  */
 export const MessageSchema: GenMessage<Message> = /*@__PURE__*/
-  messageDesc(file_client_v1_service, 11);
+  messageDesc(file_client_v1_service, 12);
 
 /**
  * @generated from message messageloop.client.v1.Publication
@@ -510,7 +647,7 @@ export type Publication = Message$1<"messageloop.client.v1.Publication"> & {
  * Use `create(PublicationSchema)` to create a new message.
  */
 export const PublicationSchema: GenMessage<Publication> = /*@__PURE__*/
-  messageDesc(file_client_v1_service, 12);
+  messageDesc(file_client_v1_service, 13);
 
 /**
  * @generated from message messageloop.client.v1.RpcRequest
@@ -542,14 +679,14 @@ export type RpcRequest = Message$1<"messageloop.client.v1.RpcRequest"> & {
  * Use `create(RpcRequestSchema)` to create a new message.
  */
 export const RpcRequestSchema: GenMessage<RpcRequest> = /*@__PURE__*/
-  messageDesc(file_client_v1_service, 13);
+  messageDesc(file_client_v1_service, 14);
 
 /**
  * @generated from message messageloop.client.v1.RpcReply
  */
 export type RpcReply = Message$1<"messageloop.client.v1.RpcReply"> & {
   /**
-   * @generated from field: string request_id = 1 [json_name = "request_id"];
+   * @generated from field: string request_id = 1;
    */
   requestId: string;
 
@@ -574,7 +711,7 @@ export type RpcReply = Message$1<"messageloop.client.v1.RpcReply"> & {
  * Use `create(RpcReplySchema)` to create a new message.
  */
 export const RpcReplySchema: GenMessage<RpcReply> = /*@__PURE__*/
-  messageDesc(file_client_v1_service, 14);
+  messageDesc(file_client_v1_service, 15);
 
 /**
  * @generated from message messageloop.client.v1.SubRefresh
@@ -591,7 +728,7 @@ export type SubRefresh = Message$1<"messageloop.client.v1.SubRefresh"> & {
  * Use `create(SubRefreshSchema)` to create a new message.
  */
 export const SubRefreshSchema: GenMessage<SubRefresh> = /*@__PURE__*/
-  messageDesc(file_client_v1_service, 15);
+  messageDesc(file_client_v1_service, 16);
 
 /**
  * @generated from message messageloop.client.v1.SubRefreshAck
@@ -604,14 +741,14 @@ export type SubRefreshAck = Message$1<"messageloop.client.v1.SubRefreshAck"> & {
  * Use `create(SubRefreshAckSchema)` to create a new message.
  */
 export const SubRefreshAckSchema: GenMessage<SubRefreshAck> = /*@__PURE__*/
-  messageDesc(file_client_v1_service, 16);
+  messageDesc(file_client_v1_service, 17);
 
 /**
  * @generated from message messageloop.client.v1.SurveyRequest
  */
 export type SurveyRequest = Message$1<"messageloop.client.v1.SurveyRequest"> & {
   /**
-   * @generated from field: string request_id = 1 [json_name = "request_id"];
+   * @generated from field: string request_id = 1;
    */
   requestId: string;
 
@@ -624,6 +761,16 @@ export type SurveyRequest = Message$1<"messageloop.client.v1.SurveyRequest"> & {
    * @generated from field: messageloop.shared.v1.Metadata metadata = 3;
    */
   metadata?: Metadata;
+
+  /**
+   * @generated from field: string channel = 4;
+   */
+  channel: string;
+
+  /**
+   * @generated from field: int32 timeout_ms = 5;
+   */
+  timeoutMs: number;
 };
 
 /**
@@ -631,14 +778,14 @@ export type SurveyRequest = Message$1<"messageloop.client.v1.SurveyRequest"> & {
  * Use `create(SurveyRequestSchema)` to create a new message.
  */
 export const SurveyRequestSchema: GenMessage<SurveyRequest> = /*@__PURE__*/
-  messageDesc(file_client_v1_service, 17);
+  messageDesc(file_client_v1_service, 18);
 
 /**
  * @generated from message messageloop.client.v1.SurveyReply
  */
 export type SurveyReply = Message$1<"messageloop.client.v1.SurveyReply"> & {
   /**
-   * @generated from field: string request_id = 1 [json_name = "request_id"];
+   * @generated from field: string request_id = 1;
    */
   requestId: string;
 
@@ -663,7 +810,189 @@ export type SurveyReply = Message$1<"messageloop.client.v1.SurveyReply"> & {
  * Use `create(SurveyReplySchema)` to create a new message.
  */
 export const SurveyReplySchema: GenMessage<SurveyReply> = /*@__PURE__*/
-  messageDesc(file_client_v1_service, 18);
+  messageDesc(file_client_v1_service, 19);
+
+/**
+ * 客户端 Survey 汇总。与 server.v1.SurveyResult 同名不同包。
+ *
+ * @generated from message messageloop.client.v1.SurveyResult
+ */
+export type SurveyResult = Message$1<"messageloop.client.v1.SurveyResult"> & {
+  /**
+   * @generated from field: string request_id = 1;
+   */
+  requestId: string;
+
+  /**
+   * @generated from field: string channel = 2;
+   */
+  channel: string;
+
+  /**
+   * @generated from field: repeated messageloop.client.v1.SurveyAnswer answers = 3;
+   */
+  answers: SurveyAnswer[];
+
+  /**
+   * @generated from field: messageloop.shared.v1.Error error = 4;
+   */
+  error?: Error;
+};
+
+/**
+ * Describes the message messageloop.client.v1.SurveyResult.
+ * Use `create(SurveyResultSchema)` to create a new message.
+ */
+export const SurveyResultSchema: GenMessage<SurveyResult> = /*@__PURE__*/
+  messageDesc(file_client_v1_service, 20);
+
+/**
+ * @generated from message messageloop.client.v1.SurveyAnswer
+ */
+export type SurveyAnswer = Message$1<"messageloop.client.v1.SurveyAnswer"> & {
+  /**
+   * @generated from field: string session_id = 1;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: messageloop.shared.v1.Payload payload = 2;
+   */
+  payload?: Payload;
+
+  /**
+   * @generated from field: messageloop.shared.v1.Metadata metadata = 3;
+   */
+  metadata?: Metadata;
+
+  /**
+   * @generated from field: messageloop.shared.v1.Error error = 4;
+   */
+  error?: Error;
+};
+
+/**
+ * Describes the message messageloop.client.v1.SurveyAnswer.
+ * Use `create(SurveyAnswerSchema)` to create a new message.
+ */
+export const SurveyAnswerSchema: GenMessage<SurveyAnswer> = /*@__PURE__*/
+  messageDesc(file_client_v1_service, 21);
+
+/**
+ * @generated from message messageloop.client.v1.PresenceQuery
+ */
+export type PresenceQuery = Message$1<"messageloop.client.v1.PresenceQuery"> & {
+  /**
+   * 精确频道
+   *
+   * @generated from field: string channel = 1;
+   */
+  channel: string;
+};
+
+/**
+ * Describes the message messageloop.client.v1.PresenceQuery.
+ * Use `create(PresenceQuerySchema)` to create a new message.
+ */
+export const PresenceQuerySchema: GenMessage<PresenceQuery> = /*@__PURE__*/
+  messageDesc(file_client_v1_service, 22);
+
+/**
+ * @generated from message messageloop.client.v1.PresenceInfo
+ */
+export type PresenceInfo = Message$1<"messageloop.client.v1.PresenceInfo"> & {
+  /**
+   * @generated from field: string session_id = 1;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: string user_id = 2;
+   */
+  userId: string;
+
+  /**
+   * Connect.client_id（设备/端），不是 session
+   *
+   * @generated from field: string client_id = 3;
+   */
+  clientId: string;
+
+  /**
+   * @generated from field: int64 connected_at = 4;
+   */
+  connectedAt: bigint;
+};
+
+/**
+ * Describes the message messageloop.client.v1.PresenceInfo.
+ * Use `create(PresenceInfoSchema)` to create a new message.
+ */
+export const PresenceInfoSchema: GenMessage<PresenceInfo> = /*@__PURE__*/
+  messageDesc(file_client_v1_service, 23);
+
+/**
+ * @generated from message messageloop.client.v1.PresenceSnapshot
+ */
+export type PresenceSnapshot = Message$1<"messageloop.client.v1.PresenceSnapshot"> & {
+  /**
+   * @generated from field: string channel = 1;
+   */
+  channel: string;
+
+  /**
+   * @generated from field: repeated messageloop.client.v1.PresenceInfo clients = 2;
+   */
+  clients: PresenceInfo[];
+
+  /**
+   * @generated from field: bool truncated = 3;
+   */
+  truncated: boolean;
+
+  /**
+   * @generated from field: int32 occupancy = 4;
+   */
+  occupancy: number;
+};
+
+/**
+ * Describes the message messageloop.client.v1.PresenceSnapshot.
+ * Use `create(PresenceSnapshotSchema)` to create a new message.
+ */
+export const PresenceSnapshotSchema: GenMessage<PresenceSnapshot> = /*@__PURE__*/
+  messageDesc(file_client_v1_service, 24);
+
+/**
+ * @generated from message messageloop.client.v1.PresenceEvent
+ */
+export type PresenceEvent = Message$1<"messageloop.client.v1.PresenceEvent"> & {
+  /**
+   * 始终是精确频道
+   *
+   * @generated from field: string channel = 1;
+   */
+  channel: string;
+
+  /**
+   * "join" | "leave"
+   *
+   * @generated from field: string action = 2;
+   */
+  action: string;
+
+  /**
+   * @generated from field: messageloop.client.v1.PresenceInfo info = 3;
+   */
+  info?: PresenceInfo;
+};
+
+/**
+ * Describes the message messageloop.client.v1.PresenceEvent.
+ * Use `create(PresenceEventSchema)` to create a new message.
+ */
+export const PresenceEventSchema: GenMessage<PresenceEvent> = /*@__PURE__*/
+  messageDesc(file_client_v1_service, 25);
 
 /**
  * @generated from message messageloop.client.v1.Ping
@@ -676,7 +1005,7 @@ export type Ping = Message$1<"messageloop.client.v1.Ping"> & {
  * Use `create(PingSchema)` to create a new message.
  */
 export const PingSchema: GenMessage<Ping> = /*@__PURE__*/
-  messageDesc(file_client_v1_service, 19);
+  messageDesc(file_client_v1_service, 26);
 
 /**
  * @generated from message messageloop.client.v1.Pong
@@ -689,7 +1018,7 @@ export type Pong = Message$1<"messageloop.client.v1.Pong"> & {
  * Use `create(PongSchema)` to create a new message.
  */
 export const PongSchema: GenMessage<Pong> = /*@__PURE__*/
-  messageDesc(file_client_v1_service, 20);
+  messageDesc(file_client_v1_service, 27);
 
 /**
  * @generated from service messageloop.client.v1.MessageLoopService

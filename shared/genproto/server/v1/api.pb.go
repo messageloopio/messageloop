@@ -389,6 +389,7 @@ type DisconnectRequest struct {
 	Sessions      []string               `protobuf:"bytes,1,rep,name=sessions,proto3" json:"sessions,omitempty"`
 	Code          uint32                 `protobuf:"varint,2,opt,name=code,proto3" json:"code,omitempty"`
 	Reason        string                 `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
+	Users         []string               `protobuf:"bytes,4,rep,name=users,proto3" json:"users,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -444,6 +445,13 @@ func (x *DisconnectRequest) GetReason() string {
 	return ""
 }
 
+func (x *DisconnectRequest) GetUsers() []string {
+	if x != nil {
+		return x.Users
+	}
+	return nil
+}
+
 type DisconnectResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Results       map[string]bool        `protobuf:"bytes,1,rep,name=results,proto3" json:"results,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
@@ -492,6 +500,7 @@ type SubscribeRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	Channels      []string               `protobuf:"bytes,2,rep,name=channels,proto3" json:"channels,omitempty"`
+	UserId        string                 `protobuf:"bytes,3,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -538,6 +547,13 @@ func (x *SubscribeRequest) GetChannels() []string {
 		return x.Channels
 	}
 	return nil
+}
+
+func (x *SubscribeRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
 }
 
 type SubscribeResponse struct {
@@ -588,6 +604,7 @@ type UnsubscribeRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	Channels      []string               `protobuf:"bytes,2,rep,name=channels,proto3" json:"channels,omitempty"`
+	UserId        string                 `protobuf:"bytes,3,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -634,6 +651,13 @@ func (x *UnsubscribeRequest) GetChannels() []string {
 		return x.Channels
 	}
 	return nil
+}
+
+func (x *UnsubscribeRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
 }
 
 type UnsubscribeResponse struct {
@@ -769,12 +793,14 @@ func (x *GetPresenceResponse) GetClients() map[string]*PresenceInfo {
 }
 
 type PresenceInfo struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ClientId      string                 `protobuf:"bytes,1,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	ConnectedAt   int64                  `protobuf:"varint,3,opt,name=connected_at,json=connectedAt,proto3" json:"connected_at,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	ClientId        string                 `protobuf:"bytes,1,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"` // 兼容：仍为 session ID
+	UserId          string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	ConnectedAt     int64                  `protobuf:"varint,3,opt,name=connected_at,json=connectedAt,proto3" json:"connected_at,omitempty"`
+	SessionId       string                 `protobuf:"bytes,4,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`                     // 与 client_id 相同的正式名
+	ConnectClientId string                 `protobuf:"bytes,5,opt,name=connect_client_id,json=connectClientId,proto3" json:"connect_client_id,omitempty"` // Connect.client_id
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *PresenceInfo) Reset() {
@@ -826,6 +852,20 @@ func (x *PresenceInfo) GetConnectedAt() int64 {
 		return x.ConnectedAt
 	}
 	return 0
+}
+
+func (x *PresenceInfo) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *PresenceInfo) GetConnectClientId() string {
+	if x != nil {
+		return x.ConnectClientId
+	}
+	return ""
 }
 
 type GetHistoryRequest struct {
@@ -1196,6 +1236,7 @@ type Publication_Destination struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Sessions      []string               `protobuf:"bytes,1,rep,name=sessions,proto3" json:"sessions,omitempty"`
 	Channels      []string               `protobuf:"bytes,2,rep,name=channels,proto3" json:"channels,omitempty"`
+	Users         []string               `protobuf:"bytes,3,rep,name=users,proto3" json:"users,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1244,11 +1285,18 @@ func (x *Publication_Destination) GetChannels() []string {
 	return nil
 }
 
+func (x *Publication_Destination) GetUsers() []string {
+	if x != nil {
+		return x.Users
+	}
+	return nil
+}
+
 var File_server_v1_api_proto protoreflect.FileDescriptor
 
 const file_server_v1_api_proto_rawDesc = "" +
 	"\n" +
-	"\x13server/v1/api.proto\x12\x15messageloop.server.v1\x1a\x16shared/v1/errors.proto\x1a\x15shared/v1/types.proto\"\x9f\x03\n" +
+	"\x13server/v1/api.proto\x12\x15messageloop.server.v1\x1a\x16shared/v1/errors.proto\x1a\x15shared/v1/types.proto\"\xb5\x03\n" +
 	"\vPublication\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12P\n" +
 	"\vdestination\x18\x02 \x01(\v2..messageloop.server.v1.Publication.DestinationR\vdestination\x12D\n" +
@@ -1257,10 +1305,11 @@ const file_server_v1_api_proto_rawDesc = "" +
 	"\bmetadata\x18\x05 \x01(\v2\x1f.messageloop.shared.v1.MetadataR\bmetadata\x1a*\n" +
 	"\aOptions\x12\x1f\n" +
 	"\vadd_history\x18\x01 \x01(\bR\n" +
-	"addHistory\x1aE\n" +
+	"addHistory\x1a[\n" +
 	"\vDestination\x12\x1a\n" +
 	"\bsessions\x18\x01 \x03(\tR\bsessions\x12\x1a\n" +
-	"\bchannels\x18\x02 \x03(\tR\bchannels\"w\n" +
+	"\bchannels\x18\x02 \x03(\tR\bchannels\x12\x14\n" +
+	"\x05users\x18\x03 \x03(\tR\x05users\"w\n" +
 	"\x0ePublishRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12F\n" +
@@ -1283,29 +1332,32 @@ const file_server_v1_api_proto_rawDesc = "" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x128\n" +
 	"\apayload\x18\x02 \x01(\v2\x1e.messageloop.shared.v1.PayloadR\apayload\x12;\n" +
 	"\bmetadata\x18\x03 \x01(\v2\x1f.messageloop.shared.v1.MetadataR\bmetadata\x122\n" +
-	"\x05error\x18\x04 \x01(\v2\x1c.messageloop.shared.v1.ErrorR\x05error\"[\n" +
+	"\x05error\x18\x04 \x01(\v2\x1c.messageloop.shared.v1.ErrorR\x05error\"q\n" +
 	"\x11DisconnectRequest\x12\x1a\n" +
 	"\bsessions\x18\x01 \x03(\tR\bsessions\x12\x12\n" +
 	"\x04code\x18\x02 \x01(\rR\x04code\x12\x16\n" +
-	"\x06reason\x18\x03 \x01(\tR\x06reason\"\xa2\x01\n" +
+	"\x06reason\x18\x03 \x01(\tR\x06reason\x12\x14\n" +
+	"\x05users\x18\x04 \x03(\tR\x05users\"\xa2\x01\n" +
 	"\x12DisconnectResponse\x12P\n" +
 	"\aresults\x18\x01 \x03(\v26.messageloop.server.v1.DisconnectResponse.ResultsEntryR\aresults\x1a:\n" +
 	"\fResultsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\bR\x05value:\x028\x01\"M\n" +
+	"\x05value\x18\x02 \x01(\bR\x05value:\x028\x01\"f\n" +
 	"\x10SubscribeRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1a\n" +
-	"\bchannels\x18\x02 \x03(\tR\bchannels\"\xa0\x01\n" +
+	"\bchannels\x18\x02 \x03(\tR\bchannels\x12\x17\n" +
+	"\auser_id\x18\x03 \x01(\tR\x06userId\"\xa0\x01\n" +
 	"\x11SubscribeResponse\x12O\n" +
 	"\aresults\x18\x01 \x03(\v25.messageloop.server.v1.SubscribeResponse.ResultsEntryR\aresults\x1a:\n" +
 	"\fResultsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\bR\x05value:\x028\x01\"O\n" +
+	"\x05value\x18\x02 \x01(\bR\x05value:\x028\x01\"h\n" +
 	"\x12UnsubscribeRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1a\n" +
-	"\bchannels\x18\x02 \x03(\tR\bchannels\"\xa4\x01\n" +
+	"\bchannels\x18\x02 \x03(\tR\bchannels\x12\x17\n" +
+	"\auser_id\x18\x03 \x01(\tR\x06userId\"\xa4\x01\n" +
 	"\x13UnsubscribeResponse\x12Q\n" +
 	"\aresults\x18\x01 \x03(\v27.messageloop.server.v1.UnsubscribeResponse.ResultsEntryR\aresults\x1a:\n" +
 	"\fResultsEntry\x12\x10\n" +
@@ -1317,11 +1369,14 @@ const file_server_v1_api_proto_rawDesc = "" +
 	"\aclients\x18\x01 \x03(\v27.messageloop.server.v1.GetPresenceResponse.ClientsEntryR\aclients\x1a_\n" +
 	"\fClientsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x129\n" +
-	"\x05value\x18\x02 \x01(\v2#.messageloop.server.v1.PresenceInfoR\x05value:\x028\x01\"g\n" +
+	"\x05value\x18\x02 \x01(\v2#.messageloop.server.v1.PresenceInfoR\x05value:\x028\x01\"\xb2\x01\n" +
 	"\fPresenceInfo\x12\x1b\n" +
 	"\tclient_id\x18\x01 \x01(\tR\bclientId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12!\n" +
-	"\fconnected_at\x18\x03 \x01(\x03R\vconnectedAt\"f\n" +
+	"\fconnected_at\x18\x03 \x01(\x03R\vconnectedAt\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x04 \x01(\tR\tsessionId\x12*\n" +
+	"\x11connect_client_id\x18\x05 \x01(\tR\x0fconnectClientId\"f\n" +
 	"\x11GetHistoryRequest\x12\x18\n" +
 	"\achannel\x18\x01 \x01(\tR\achannel\x12!\n" +
 	"\fsince_offset\x18\x02 \x01(\x04R\vsinceOffset\x12\x14\n" +
@@ -1355,7 +1410,7 @@ const file_server_v1_api_proto_rawDesc = "" +
 	"\vGetPresence\x12).messageloop.server.v1.GetPresenceRequest\x1a*.messageloop.server.v1.GetPresenceResponse\x12a\n" +
 	"\n" +
 	"GetHistory\x12(.messageloop.server.v1.GetHistoryRequest\x1a).messageloop.server.v1.GetHistoryResponse\x12d\n" +
-	"\vGetChannels\x12).messageloop.server.v1.GetChannelsRequest\x1a*.messageloop.server.v1.GetChannelsResponseBBZ@github.com/messageloopio/messageloop/genproto/server/v1;serverpbb\x06proto3"
+	"\vGetChannels\x12).messageloop.server.v1.GetChannelsRequest\x1a*.messageloop.server.v1.GetChannelsResponseBIZGgithub.com/messageloopio/messageloop/shared/genproto/server/v1;serverpbb\x06proto3"
 
 var (
 	file_server_v1_api_proto_rawDescOnce sync.Once
