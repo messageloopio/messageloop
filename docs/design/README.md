@@ -4,8 +4,10 @@
 
 | 文档 | 状态 | 说明 |
 | --- | --- | --- |
-| [内核架构重设](kernel-architecture.md) | Draft | 2026-08-16 按评审修订：状态机 / SessionDoc / LiveBus / gap / deny / A1 先行；**不替代** v1.0 |
+| [内核架构重设](kernel-architecture.md) | Draft | 独立大版本靶心（**不向后兼容**）；状态机 / SessionDoc / LiveBus / gap / deny / fencing |
 | [内核架构重设 · 独立评审](kernel-architecture-review.md) | Review | 2026-08-16 两路独立评审；修订已吸收 critical / major，见文首对照 |
+| [PR-KA-A0 实现规格](tasks/pr-ka-a0-protocol.md) | Ready | 冻结 client/server/shared **v2** proto；[prompt](tasks/pr-ka-a0-prompt.md) |
+| [PR-KA-A1 实现规格](tasks/pr-ka-a1-fencing.md) | Ready | 续约 same-fence CAS、删盲写 Put、resume 回滚；[prompt](tasks/pr-ka-a1-prompt.md) |
 | [v1.0 功能缺口设计](v1.0-platform-gaps.md) | Approved | Subscribe 恢复、Presence、按 user、心跳、客户端 Survey、通配 presence、频道策略；含 Key Decisions、排期、PR Plan |
 | [产品 ROADMAP](../../ROADMAP.md) | Approved | v0.2 → v1.0 → v1.x 能力地图与排期摘要 |
 | [PR-01 实现规格](tasks/pr-01-protocol.md) | Accepted | 冻结 v1.0 proto 字段号；[第三方 prompt](tasks/pr-01-prompt.md) |

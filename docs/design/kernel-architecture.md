@@ -4,12 +4,12 @@
 | --- | --- |
 | 文档标题 | MessageLoop 内核架构重设 |
 | 日期 | 2026-08-16 |
-| 状态 | Draft（2026-08-16 按独立评审修订；语义已钉死，尚未批准实施） |
+| 状态 | Draft（独立大版本；**不向后兼容** v0.2 / v1.0 协议、配置、SDK、集群混部） |
 | 仓库路径 | `docs/design/kernel-architecture.md` |
 | 独立评审 | [`kernel-architecture-review.md`](kernel-architecture-review.md) |
-| 与 v1.0 关系 | **不替代** [`v1.0-platform-gaps.md`](v1.0-platform-gaps.md)。v1.0 是现行代码上的产品闭环；本文是 v1.x / 下一代内核靶心。 |
+| 与现行树关系 | 从现行代码 **fork 出独立版本** 开发与发布。现行 v1.0 规格与发版门禁仍只约束旧树。本版本 **不必** 混部、双合同、旧字段、旧 YAML、旧 SDK。 |
 | 产品定位 | 双向实时 Messaging Platform（IM / Chat Room / Gaming / IoT）。一条连接上完成 pub/sub、恢复、在场、RPC、Survey。 |
-| 已落地行为 | 以源码与 [开发者文档](../developer/README.md) 为准。本文是靶心合同，不是现行实现合同。 |
+| 已落地行为 | 旧树以源码与 [开发者文档](../developer/README.md) 为准。本文件是 **新版本的合同**。 |
 
 ---
 
@@ -23,7 +23,7 @@ MessageLoop 的产品判断成立：传输无关、通配订阅、恢复、sessi
 
 集群对外不可见：客户端只认 `session_id` + `Position`，能连任意节点、在任意节点 resume。单节点与集群是同一个内核，只换适配器。
 
-2026-08-16 修订吸收了独立评审的 critical / major：钉死 Detached 与 Directory 的关系；跨节点改为水化而非「零拷贝」；Occupancy 唯一走 LiveBus；LiveBus 的 pattern 编译规则；History gap 的可检测子集；deny 语言包含；fencing 提前到现行类型上；混部与 proto cap；Open Questions 与 KD 对齐。
+2026-08-16 修订吸收独立评审的 critical / major。同日补充 **KD-K31**：本方案作为独立版本开发发布，**不考虑向后兼容**。因此删掉 recover.v1/v2 双合同、旧 YAML 兼容期、舰队混部门闩、A1 齐步、RC 前冻结 Session 等约束。旧树的诊断仍作「从哪叉出来」的对照，不是运行时义务。
 
 ---
 
@@ -37,7 +37,7 @@ MessageLoop 的产品判断成立：传输无关、通配订阅、恢复、sessi
 4. Occupancy 退出业务 Publication；控制事件带 OccupancyGen；跨节点 **只** 走 LiveBus。
 5. 授权合成一个求值器：一种通配方言、一条默认叙事、Admin 是 Capability。
 6. 集群收成 Membership + Directory（单激活 + fencing）+ NodeRPC；派生索引不当权威；热路径不嵌投影。
-7. 客户端回包足够当权威。SDK 只缓存，不编造。旧 SDK 在 cap 协商前继续走 v1.0 Ack 合同。
+7. 客户端回包足够当权威。只发本版本协议；没有旧 SDK 合同。
 8. 十二条宪法成为后续改动的门禁。
 
 ### Non-Goals
@@ -48,16 +48,15 @@ MessageLoop 的产品判断成立：传输无关、通配订阅、恢复、sessi
 - 第一天接第三条日志后端（PG / NATS）。
 - 完整 ORSWOT Presence。只留 Occupancy 接口缝，第一实现是租约 + OccupancyGen。
 - 在 Go 里再造 actor 运行时。
-- 用本文替换 v1.0 发版门禁。
+- 在本版本里继续支持 v0.2/v1.0 客户端、旧 YAML、旧 Redis 键布局、无签名命令、`cluster_emit` 双路径、Ack 内嵌 1000 条恢复。
 - 内置 JWT/JWKS、Admin HTTP、SSE、一次铺齐新语言 SDK。
 - **Redis Cluster / Redis 7 sharded PUB/SUB 作为 LiveBus 第一适配器的目标。** 第一适配器是 standalone Redis。Cluster 上的通配缩放另开里程碑。
-- v1.0 RC 之前改 Session 对象或换命令总线。RC 前内核只准：文档、proto **加字段 / reserved**、以及「现行类型上删盲写 Put」（A1，见增量路径）。
 
 ---
 
 ## Diagnosis
 
-结构裂缝仍在，行为裂缝有一部分已在 v1.0 树上补上。两栏分开，避免实现者重复做 PR-03。
+下列是旧树上的裂缝：新版本应直接做成右边的形状，不必保留旧行为作兼容。行为栏是「好语义要带走」，不是「旧客户端还要能连」。
 
 ### 结构裂缝（仍在，内核要改）
 
@@ -84,7 +83,7 @@ MessageLoop 的产品判断成立：传输无关、通配订阅、恢复、sessi
 | --- | --- | --- |
 | Connect / Subscribe 共用 `recoverSubscription` | `recover.go` | 同一 Replayer；再加 gap 与流式消费 |
 | Resume 信 `ChannelOffsets`，缺则 skip | `cluster_state.go` + `recordDeliveredOffsets` | 服务端 Position 权威；`docs/developer/04-cluster.md` §4.4「未填充」已落后源码 |
-| 一等 `presence_event` + `cluster_emit` 两阶段 | `node.go` `emitPresence` | 换成 LiveBus，混部仍要两阶段 |
+| 一等 `presence_event` + `cluster_emit` 两阶段 | `node.go` `emitPresence` | 只留 LiveBus，删除 `cluster_emit` 与 `ml.type` 改写 |
 | `sessionCoversChannel` | `client.go` | 升为 Coverage |
 | 客户端 Survey 异步 + 门闩 | `handleSurvey` | 人数估计来源钉死为 Coverage |
 | 服务端 ping + `pingDeadline` | `heartbeat.go` | 续约改为 same-fence Bind，禁止再 Put |
@@ -189,7 +188,7 @@ pkg/topics
 shared/
 ```
 
-允许一段时间根包 re-export 旧名字（KD-K26）。
+包按 `internal/*` 重划（KD-K26）。不强制 re-export 旧根包符号。
 
 ---
 
@@ -285,41 +284,27 @@ Fence 之后旧对象上的 Publish / Subscribe / Survey / 集群命令一律硬
 
 ```
 Connect  { token, session_id?, caps[], subscriptions[] }
-Connected { session_id, stream_epoch, accepted_caps, resume, recover_results? }
+Connected { session_id, stream_epoch, accepted_caps, resume }
 ```
 
 匿名忽略 `session_id`。Resume 仅当鉴权成功。
 
-`Connect.subscriptions` 失败策略保留 KD-9：**单频道授权失败 = 该频道软失败，其余仍订**；恢复失败不撤订阅。整批回滚只发生在 Bind / Hydrate 失败（硬失败）。
+`Connect.subscriptions`：**单频道授权失败 = 该频道软失败，其余仍订**；恢复失败不撤订阅。整批回滚只发生在 Bind / Hydrate 失败（硬失败）。
 
-### 能力协商（闭集）
+`caps[]` 只协商本版本内的可选能力（例如是否收 Occupancy、是否允许被 Survey），**不是**协议世代开关。不认识本版本信封的客户端不得连接。
 
-| cap | 含义 | 服务端未协商时 |
-| --- | --- | --- |
-| `recover.v1` | Ack 内嵌 publications + `RecoverResult`（现行 v1.0） | 默认；旧 SDK |
-| `recover.v2` | 流式 `Publication{replay}` + `RecoverComplete{position,truncated,gap}` | 不发流；走 v1 |
-| `recover.gap` | 理解 `gap` / `gap_reason` | 字段可加，旧客户端忽略 |
-| `occupancy.gen` | 理解 PresenceEvent.gen | 仍投递事件，旧客户端忽略 gen |
-| `server_ping` | 理解 Outbound Ping | `ping_interval` 必须保持 0，否则会误杀 |
-
-未列出的 cap 忽略。服务端 `accepted_caps` 是交集。
-
-### 恢复
+### 恢复（只有流，没有 Ack 内嵌批次）
 
 ```
-SubscribeAck      { ok, recover: pending | skipped | failed }   // v2
-Publication       { replay=true, position }                    // v2
-RecoverComplete   { position, truncated, gap, gap_reason }     // v2
-
-// v1 并存
-RecoverResult     { recovered, truncated, offset, epoch, error }
-Connected/SubscribeAck.publications
+SubscribeAck      { ok, recover: pending | skipped | failed }
+Publication       { replay=true, position }
+RecoverComplete   { position, truncated, gap, gap_reason }
 ```
 
-- 权威是服务端为该 Session 记下的 Position。客户端 offset 只是提示。
+- 权威是服务端为该 Session 记下的 Position。客户端带的 offset 只是提示。
 - Resume / 重订 / 动态订阅同一 Replayer。
 - 「从头」= 显式 `fresh=true` 或 StreamEpoch 重置。**不是** `offset==0`。
-- Position wire（新 message，字段号在 A0 冻结）：
+- Position：
 
 ```
 message Position {
@@ -328,8 +313,9 @@ message Position {
 }
 ```
 
-- `gap` 语义见 Stream 节。v1 客户端：空批必须继续带 `recovered`/`truncated`（v1.0 合同），**禁止**靠把 `publications` 留空假装追上同时又宣称回包即权威。
+- 禁止再把恢复消息塞进 `Connected` / `SubscribeAck`。没有 `RecoverResult` 旧形状。
 - 恢复失败不撤订阅。
+- proto / 配置 / Redis 键前缀 / 错误码均可按本文件重划，不必保留 v1.0 字段号。
 
 ### 失败两层
 
@@ -338,13 +324,13 @@ message Position {
 | 软失败 | 信封 `Error`，连接还在 | 授权、限流、恢复失败、策略拒绝、Survey 门 |
 | 硬失败 | `Disconnect` | 鉴权门、限额、空闲、慢消费者、fencing 失败、Bind/Hydrate 失败 |
 
-一份码表。权限软失败统一 `PERMISSION_DENIED`（type=`acl_error` 或 `policy_error`）。废弃并行的 `ACL_DENIED` 作为新合同（旧码可映射一个版本）。集群内部状态不泄漏：对客户端是 `DisconnectStale` 或再 resume。
+一份码表。权限软失败只有 `PERMISSION_DENIED`（type=`acl_error` 或 `policy_error`）。不保留 `ACL_DENIED`。集群内部状态不泄漏：对客户端是 `DisconnectStale` 或再 resume。
 
 文档无触发点的 Disconnect 码不写进新合同。
 
 ### 回包即权威
 
-对 **accepted_caps 内** 的客户端：频道列表含 ephemeral、Position、recover 结果、resumed 必须可从回包重建。SDK 只缓存。
+频道列表含 ephemeral、Position、`RecoverComplete`、resumed 必须可从回包重建。SDK 只缓存，不编造。
 
 ---
 
@@ -439,11 +425,11 @@ Occupancy
 - 自己不收 self-join/leave；快照可含自己。
 - 过期合成 leave：取新 OccupancyGen，事件带该 gen。
 - 事件 **不进 Stream、不是 Publication 信封**。
-- 遗留 `ch/__presence` 仅策略打开。
+- 不实现 `ch/__presence` 伴生频道，不实现 `cluster_emit`，不实现 `ml.type` 改写。
 
-**跨节点唯一投递面：LiveBus。** `Occupancy.Join/Leave` 之后 `LiveBus.Publish(exactCh, PresenceEnv)`。禁止 `PublishTransient` + `ml.type`，禁止并行 NodeRPC 广播，禁止「或」。节点 B 只有 `im.**` 的 Interest 时，靠 LiveBus 的 pattern 编译收到 `im.room.1`。
+**跨节点唯一投递面：LiveBus。** `Occupancy.Join/Leave` 之后 `LiveBus.Publish(exactCh, PresenceEnv)`。禁止 `PublishTransient`，禁止并行 NodeRPC 广播。节点 B 只有 `im.**` 的 Interest 时，靠 LiveBus 的 pattern 编译收到 `im.room.1`。
 
-混部：与 `cluster_emit` 相同纪律。默认关新通道；节点 lease 上报 `occupancy_schema=livebus`；Membership 最小版本未齐之前，新节点仍走本机 `deliverPresenceEvent`（单节点 / 旧舰队）；齐了再开 LiveBus emit。禁止双写业务频道。
+本版本舰队必须跑同一套内核。没有「旧节点当聊天收 presence」的窗口。
 
 ---
 
@@ -468,7 +454,7 @@ action    = SubscribePattern | Publish | Recover | Presence | Survey | 下列 Ca
 | 放大类 | 拒绝，用规则打开 | 客户端 Survey、按 user 扇出 |
 | 控制类 | 拒绝，除非已鉴权 Session | resume、takeover |
 
-频道前缀策略是规则的 **Effects**，不是平行 first-match 引擎。YAML 兼容期：旧 `acl.rules` + `channel_policies` 只读编译进同一张表（pattern → allow/deny/effects）。新配置只写一张表。
+频道前缀策略是规则的 **Effects**，不是平行 first-match 引擎。配置只有一张表（pattern → allow/deny/effects）。不读旧 `acl.rules` + `channel_policies` 双文件。
 
 ### 授权主语
 
@@ -568,20 +554,15 @@ OnLeave(inc) → 批量作废该 incarnation 名下 session 的 fencing（视为
 
 ### NodeRPC
 
-**正确性先行、换总线随后（KD-K6 分两步）：**
+命令总线第一实现就可以是 Redis Stream + 每 incarnation 一个 consumer group（不必先在旧 pubsub 上过渡）。HMAC 从第一天就是硬门：
 
-1. **现行 pubsub 上**：fencing + HMAC + 超时 ≥ handler。不换通道也能修双活。
-2. **再**迁 Redis Stream + 每 incarnation 一个 consumer group。
-
-HMAC（一步到位写进合同，两步都遵守）：
-
-- 密钥在 **节点配置**（环境 / 文件），**不进 Redis**。新节点随部署注入。
-- 共享集群密钥。被盗 = 能伪造命令；仍要求 Redis 网络隔离。HMAC 把「能写 Redis ⇒ 能注入」收成「能写 Redis **且** 持有密钥」。
+- 密钥在 **节点配置**（环境 / 文件），**不进 Redis**。
+- 共享集群密钥。被盗 = 能伪造命令；仍要求 Redis 网络隔离。
 - 签：`Type, SessionID, TargetIncarnationID, Fencing, Payload-hash, CommandID, IssuedAt`。
 - `IssuedAt` 允许 ±30s 时钟偏斜。
 - `command_id` 去重 TTL ≥ `max(handler_timeout, survey_timeout)`（默认 ≥ 15s）。
-- 新二进制拒绝未签名。Membership `command_schema=hmac` 未齐时，旧节点仍收未签名；齐后拒绝。
-- Directory Bind 的 Redis 账号与业务数据面分离（Redis ACL）。HMAC 不保护 Directory 写入；专用账号才是。
+- **拒绝未签名命令。** 没有「旧节点收未签名」窗口。
+- Directory Bind 的 Redis 账号与业务数据面分离（Redis ACL）。
 
 Survey / 长调用：意图与应答分开；发送方等待 ≥ handler 超时。人数预检来源 = 各节点 **Coverage** 计数之和（`count_only`），允许偏高，必须声明。不是 Occupancy，不是投影。
 
@@ -589,18 +570,9 @@ Survey / 长调用：意图与应答分开；发送方等待 ≥ handler 超时�
 
 投影与 user→sessions **退出热路径**。user 索引 = 成员键 + TTL，repair **能修剪**。展开按 user：本机 ∪ 索引，每条再查 Directory 且 User 匹配。**一个** SCAN 修复器重建全部派生。
 
-### 混部
+### 舰队
 
-节点 lease 上报：`command_schema`、`occupancy_schema`、`kernel_caps`。
-
-| 开关 | 默认 | 打开条件 |
-| --- | --- | --- |
-| 删盲写 Put（A1） | 新二进制即删 | 旧二进制仍 Put → **在全舰队升级 A1 之前，新节点 Bind 可能被旧 ping 抢回**。因此 A1 是 **旗舰齐步** 或「先关旧节点 ping 续约」。文档标为 **breaking 运维步骤** |
-| Occupancy LiveBus emit | 关 | 全部 incarnation `occupancy_schema=livebus` |
-| NodeRPC Stream | 关 | 全部 `command_schema=stream`；在此之前 HMAC+pubsub |
-| recover.v2 | 按客户端 cap | 旧 SDK 永远 v1 |
-
-跨 schema 的 Survey / Evict：发到旧 incarnation 用旧通道；新节点不向未声明 Stream 的目标发 Stream。
+本版本节点之间、节点与客户端之间 **同一协议世代**。不支持与 v0.2/v1.0 二进制或旧 SDK 组网。Redis 键前缀建议换代（例如 `ml2:`），避免和旧树共用一个 DB 时互相覆盖。Membership 发现到无法识别的 incarnation schema 则拒绝与之 Bind / RPC。
 
 ### 观测
 
@@ -640,7 +612,7 @@ Session 与 Stream 同区域。**跨区域 Directory Bind 直接禁止。** 只�
 8. 适配器可替换。memory ≡ Redis 在 **已写明的断言** 上（含 gap 可检测子集，不含 Redis Cluster 通配缩放）。
 9. 失败两层。一份码表。
 10. 单节点 ≅ 集群。热路径不出现 `if cluster { redis }`。控制面 SCAN 循环可以有。
-11. 回给客户端的就是权威——在 **accepted_caps** 内。旧 cap 走 v1.0 合同。
+11. 回给客户端的就是权威。没有第二套旧合同。
 12. 文档与代码同 PR。未实现字段不得写成已实现。
 
 ### 对称表
@@ -662,23 +634,25 @@ Session 与 Stream 同区域。**跨区域 Directory Bind 直接禁止。** 只�
 
 ## Incremental Path
 
-v1.0 RC 前：只做文档、proto 加字段、以及 **A1（旗舰齐步）**。Session 拆对象与换总线放到 RC 之后 / v1.x。
+独立版本、独立发布。步骤仍拆开以便验收，但 **可以打破协议、配置、包路径和 Redis 键**。没有与旧树混部的完成标准。
 
-每步可独立合并、可回滚（`kernel.<step>` flag，默认关，A1 除外——A1 是删错误 API）。回归测试须对旧代码会红。
+每步可独立合并。回归测本版本合同；不必为旧客户端保绿（本版本 SDK 与测试一起改）。
 
-| 步 | 内容 | 完成标准 | 混部 |
-| --- | --- | --- | --- |
-| **A0** | proto：`Position`、`RecoverComplete`、`gap_reason`、PresenceEvent.gen、Connect.caps；字段号冻结 | 生成代码；旧客户端忽略新字段 | 只加字段 |
-| **A1** | **现行类型上**删除刷新 Put；续约 same-fence Bind/CAS；CAS 失败且对方仍活则回滚；写路径认 fence | 测试：B CAS 后 A ping 不得抢回；`PutSessionLease` 退出刷新路径 | **齐步升级**或先关旧续约。见上 |
-| **A2** | History 可检测 gap；停 XDel-on-PUBLISH-fail；Publish 成功合同；memory 看 Interest | 四条验收测试绿 | 无协议破 |
-| **A3** | Interest 自己计数；去掉通配 last 谎言；LiveBus 编译规则（精确 + 前缀 `*`/`**`，拒绝其余） | memory 与 Redis 同一套 interested 断言；不可路由 pattern 有测试 | 旧节点仍 PSubscribe `*`；新节点可先双订 |
-| **A4** | Authorizer 一种通配 + 语言包含；Capability 闭集；YAML 兼容编译 | 表驱动 deny 用例全绿 | 旧 YAML 只读编译 |
-| **B1** | 本机 Session/Attachment + 写队列 + 状态机 | 本机接管不扫分片换指针；错误映射表有测试 | 对象仍可从 `*Client` 迁 |
-| **B2** | Occupancy 事件走 LiveBus；OccupancyGen | `Hub.node` / `cluster_emit` 可关 | lease `occupancy_schema` 齐后开 emit |
-| **B3** | `recover.v2` 流式消费（写队列已在） | 新 SDK 一条路径；旧 cap 仍 v1 | cap 协商 |
-| **B4** | NodeRPC → Stream；repair 合一；迁 `internal/cluster` | `command_schema=stream` 齐后切；HMAC 已在 A1/总线第一步 | 双通道直到齐 |
+| 步 | 内容 | 完成标准 |
+| --- | --- | --- |
+| **A0** | 按本文件重划 proto：`Position`、流式恢复、PresenceEvent.gen、错误码。字段号一次冻结。规格：[pr-ka-a0-protocol.md](tasks/pr-ka-a0-protocol.md) | 生成代码；无旧 oneof 包袱 |
+| **A1** | 删除热路径 `PutSessionLease`；续约 same-fence Bind；活节点 takeover 失败回滚。规格：[pr-ka-a1-fencing.md](tasks/pr-ka-a1-fencing.md) | B CAS 后 A ping 不得抢回 |
+| **A2** | History 可检测 gap；停 XDel-on-fail；Publish 成功合同；memory 看 Interest | 四条验收测试绿 |
+| **A3** | Interest 自己计数；LiveBus 编译；禁止 `PSubscribe *` | 不可路由 pattern 有测试 |
+| **A4** | Authorizer 一张表 + 语言包含；Capability 闭集；新 YAML | 表驱动 deny 用例全绿 |
+| **B1** | Session/Attachment + 写队列 + 状态机 | 本机接管不扫分片换指针 |
+| **B2** | Occupancy 只走 LiveBus + OccupancyGen | 无 `Hub.node`、无 `cluster_emit` |
+| **B3** | 流式恢复（写队列已在） | SDK 一条消费路径 |
+| **B4** | NodeRPC Stream + HMAC；repair 合一；`internal/*` 包 | 无盲写、无未签名命令 |
 
-确定性模拟（KD-K20）是 B4 之后的独立里程碑，不是 B4 附赠。
+确定性模拟（KD-K20）在 B4 之后单独做。
+
+A0–A4 可在仍叫 `*Client` 的代码上先改合同；B1 再改对象名。不必等「旧 RC」。
 
 ---
 
@@ -691,7 +665,7 @@ v1.0 RC 前：只做文档、proto 加字段、以及 **A1（旗舰齐步）**�
 | KD-K3 | 唯一硬不变量：Session 单激活 | 其余派生 |
 | KD-K4 | 刷新 = same-fence Bind；删除盲写 Put | 现行 Put 否定 CAS |
 | KD-K5 | 先 Bind 再 Evict；被抢只准 Fence | 对话失败不得破坏新 owner |
-| KD-K6 | NodeRPC 至少一次 + 幂等。先在现行总线补 fencing/HMAC，再迁 Stream | 正确性不绑在换通道上 |
+| KD-K6 | NodeRPC 至少一次 + 幂等 + HMAC，第一实现即可走 Stream | 独立版本，不必过渡旧 pubsub |
 | KD-K7 | Stream 无家；Occupancy 不 Bind 频道 | pub/sub 要无家 |
 | KD-K8 | Occupancy = 租约 + OccupancyGen；不上 ORSWOT | 对局/IM 要进出序 |
 | KD-K9 | 控制事件禁止进 Publication/Stream | 消灭 cluster_emit |
@@ -703,21 +677,22 @@ v1.0 RC 前：只做文档、proto 加字段、以及 **A1（旗舰齐步）**�
 | KD-K13b | LiveBus 第一适配器 = standalone Redis；Cluster/sharded 非目标 | SSUBSCRIBE 无 pattern |
 | KD-K14 | memory ≡ Redis 在已列验收测试上 | 浅缝变深缝 |
 | KD-K15 | Admin = 同核 + Capability 闭集 | 消灭平行协议 |
-| KD-K16 | 回包即权威限于 accepted_caps；v1 保持 v1.0 Recover 合同 | 旧字段留空会假装追上 |
+| KD-K16 | 回包即权威；恢复只走流 | 独立版本，无旧 Ack 批次 |
 | KD-K17 | 失败两层、一份码表 | 消灭三套码 |
-| KD-K18 | 默认 idle 300s、服务端 ping 默认关 | 不误杀旧 SDK |
-| KD-K19 | 不替代 v1.0；RC 前不拆 Session 对象、不换总线 | 一人 14 周排期 |
+| KD-K18 | 默认 idle 300s、服务端 ping 默认关 | 产品默认（IM）；开 ping 是配置，不是兼容负担 |
+| KD-K19 | 本方案独立版本发布，与 v1.0 树分开发版 | KD-K31 |
 | KD-K20 | 确定性模拟独立里程碑 | 锁 fencing |
 | KD-K21 | 发布不要求 Coverage；Admin 同规则 | 现行行为；IoT/系统通知 |
-| KD-K22 | 恢复「从头」仅 fresh 或 epoch 重置；字段与 v2 同一 proto 小版本加入，流式消费等 B3 | 收口原 Q3 |
-| KD-K23 | `history=false` 时 Publish 改 Live，不硬拒客户端 | 对齐 handlePublish |
+| KD-K22 | 恢复「从头」仅 fresh 或 epoch 重置；消费等写队列（B3） | 收口原 Q3 |
+| KD-K23 | `history=false` 时 Publish 改 Live，不硬拒客户端 | 产品语义 |
 | KD-K24 | Survey 人数 = Coverage 估计，允许偏高 | 一问一集合 |
 | KD-K25 | 跨区域 Directory Bind 禁止 | 不堵死多区域时先划界 |
-| KD-K26 | 允许根包 re-export 过渡 | 避免一次改完 import |
+| KD-K26 | 包路径按 `internal/*` 重划；不强制长期 re-export 旧根包符号 | 独立版本可破 import |
 | KD-K27 | `node_epoch` 只准 Redis/内存单调 INCR | 禁止随机 UUID 当世代 |
-| KD-K28 | A1 是齐步运维步骤 | 旧 Put 会破坏新 Bind |
-| KD-K29 | HMAC 密钥在节点配置，不进 Redis | 能写 Redis 不再自动等于能签命令 |
-| KD-K30 | 死节点（Alive 无该 incarnation）允许直接 Bind | 保留现行旁路 |
+| KD-K28 | （废止）A1 齐步 — 独立版本无旧二进制混部 | 见 KD-K31 |
+| KD-K29 | HMAC 密钥在节点配置，不进 Redis；拒绝未签名 | 能写 Redis 不再自动等于能签命令 |
+| KD-K30 | 死节点（Alive 无该 incarnation）允许直接 Bind | 旁路仍要 |
+| KD-K31 | **独立版本，不向后兼容** | 协议 / 配置 / SDK / Redis 键 / 集群混部均可打破。不与 v0.2/v1.0 组网。建议键前缀换代（`ml2:`） |
 
 ---
 
@@ -727,11 +702,11 @@ v1.0 RC 前：只做文档、proto 加字段、以及 **A1（旗舰齐步）**�
 
 | # | 问题 | 选项 |
 | --- | --- | --- |
-| Q6 | A1 齐步方式 | (a) 维护窗口全升；(b) 先配旧节点停 ping 续约再滚新二进制 |
-| Q7 | 不可路由 pattern（`*.room`）对客户端 | (a) `BAD_REQUEST` / `pattern_not_routable`（倾向）；(b) 降级为该节点全量收 + 本地过滤（破坏 KD-K13 缩放承诺，须打黄金指标） |
-| Q8 | 稠密 seq 旁路（真中洞检测）放哪个里程碑 | 默认 v1.x+，不挡 A2 |
+| Q7 | 不可路由 pattern（`*.room`） | (a) 直接拒绝（倾向，KD-K13）；(b) 该节点全量收 + 本地过滤并打黄金指标 |
+| Q8 | 稠密 seq（真中洞检测）放哪一步 | 默认 A2 之后独立刀，不挡 A2 |
+| Q9 | 独立版本的仓库形态 | (a) 新分支 / 新 tag 线在本仓库；(b) 新模块路径继续同一 repo |
 
-已关闭：原 Q1→KD-K21；Q2→Non-Goals/KD-K8；Q3→KD-K22；Q4→KD-K6；Q5→KD-K26。
+已关闭：Q1→KD-K21；Q2→Non-Goals/KD-K8；Q3→KD-K22；Q4→KD-K6；Q5→KD-K26；**Q6 齐步→KD-K31 废止**。
 
 ---
 
@@ -762,11 +737,11 @@ v1.0 RC 前：只做文档、proto 加字段、以及 **A1（旗舰齐步）**�
 ## Related Documents
 
 - [独立评审](kernel-architecture-review.md)
-- [v1.0 功能缺口](v1.0-platform-gaps.md)
-- [ROADMAP](../../ROADMAP.md)
-- [现行架构](../developer/01-architecture.md) — 现状
-- [集群指南](../developer/04-cluster.md) — 现状；§4.4 ChannelOffsets「未填充」落后源码
-- [客户端协议](../protocol.md) — 现行 v1.0 合同
+- [v1.0 功能缺口](v1.0-platform-gaps.md) — **旧树**规格，本版本不执行
+- [ROADMAP](../../ROADMAP.md) — 旧树排期
+- [现行架构](../developer/01-architecture.md) — 旧树现状
+- [集群指南](../developer/04-cluster.md) — 旧树现状
+- [客户端协议](../protocol.md) — 旧树 v1.0 合同；本版本协议以本文 + 后续 A0 规格为准
 
 ---
 
@@ -775,4 +750,6 @@ v1.0 RC 前：只做文档、proto 加字段、以及 **A1（旗舰齐步）**�
 | 日期 | 说明 |
 | --- | --- |
 | 2026-08-15 | 初稿 |
-| 2026-08-16 | 按独立评审修订：状态机、SessionDoc、LiveBus 编译、gap 子集、deny 包含、A1 先行、混部、cap、KD-K21–K30；关闭原 Q1–Q5 |
+| 2026-08-16 | 按独立评审修订 |
+| 2026-08-16 | **KD-K31**：独立版本、不向后兼容。去掉双合同 / 混部 / 齐步 / 旧 YAML / recover.v1 |
+| 2026-08-16 | A0 / A1 第三方规格与 prompt：`docs/design/tasks/pr-ka-a0-*`、`pr-ka-a1-*` |
