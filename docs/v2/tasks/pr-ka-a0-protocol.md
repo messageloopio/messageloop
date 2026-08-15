@@ -24,7 +24,7 @@
 - `protocol/server/v2/api.proto`（新）
 - `shared/genproto/shared/v2/**`、`shared/genproto/client/v2/**`、`shared/genproto/server/v2/**`（`task generate-protocol` 产物）
 - `sdks/ts/src/proto/**` 下由同一条 generate 写出的 **v2** 文件
-- `docs/design/tasks/pr-ka-a0-protocol.md`（完成备注）
+- `docs/v2/tasks/pr-ka-a0-protocol.md`（完成备注）
 
 禁止：改 `protocol/**/v1/**`、`client.go`、`hub.go`、`node.go`、`sdks/go/**`（除生成物）、`sdks/ts/src/client/**`、配置、测试业务。禁止新增除 `MessageLoop` / `APIService` 已有形状之外的 RPC。禁止 git commit / tag / push。
 

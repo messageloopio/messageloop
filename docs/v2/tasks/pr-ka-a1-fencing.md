@@ -30,7 +30,7 @@
 - `pkg/redisbroker/cluster_directory.go`：仅当 CAS(nil) 或 refresh 需要修实现 bug；**禁止**把 `PutSessionLease` 改回热路径
 - 测试：`cluster_state_test.go`、`cluster_resume_test.go`、`cluster_remote_test.go`、`client_fix_test.go`、必要时 `cluster_test.go` / `cluster_offsets_test.go`
 - `docs/developer/04-cluster.md`：lease 续约改为 CAS，点明盲写已删
-- `docs/design/tasks/pr-ka-a1-fencing.md`（完成备注）
+- `docs/v2/tasks/pr-ka-a1-fencing.md`（完成备注）
 
 禁止：改 proto、SDK、`hub.go` 扇出、`broker.go`、git 写操作。
 

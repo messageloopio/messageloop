@@ -5,7 +5,7 @@
 | 文档标题 | MessageLoop 内核架构重设 |
 | 日期 | 2026-08-16 |
 | 状态 | Draft（独立大版本；**不向后兼容** v0.2 / v1.0 协议、配置、SDK、集群混部） |
-| 仓库路径 | `docs/design/kernel-architecture.md` |
+| 仓库路径 | `docs/v2/kernel-architecture.md` |
 | 独立评审 | [`kernel-architecture-review.md`](kernel-architecture-review.md) |
 | 与现行树关系 | 从现行代码 **fork 出独立版本** 开发与发布。现行 v1.0 规格与发版门禁仍只约束旧树。本版本 **不必** 混部、双合同、旧字段、旧 YAML、旧 SDK。 |
 | 产品定位 | 双向实时 Messaging Platform（IM / Chat Room / Gaming / IoT）。一条连接上完成 pub/sub、恢复、在场、RPC、Survey。 |
@@ -737,7 +737,7 @@ A0–A4 可在仍叫 `*Client` 的代码上先改合同；B1 再改对象名。�
 ## Related Documents
 
 - [独立评审](kernel-architecture-review.md)
-- [v1.0 功能缺口](v1.0-platform-gaps.md) — **旧树**规格，本版本不执行
+- [v1.0 功能缺口](../design/v1.0-platform-gaps.md) — **旧树**规格，本版本不执行
 - [ROADMAP](../../ROADMAP.md) — 旧树排期
 - [现行架构](../developer/01-architecture.md) — 旧树现状
 - [集群指南](../developer/04-cluster.md) — 旧树现状
@@ -752,4 +752,5 @@ A0–A4 可在仍叫 `*Client` 的代码上先改合同；B1 再改对象名。�
 | 2026-08-15 | 初稿 |
 | 2026-08-16 | 按独立评审修订 |
 | 2026-08-16 | **KD-K31**：独立版本、不向后兼容。去掉双合同 / 混部 / 齐步 / 旧 YAML / recover.v1 |
-| 2026-08-16 | A0 / A1 第三方规格与 prompt：`docs/design/tasks/pr-ka-a0-*`、`pr-ka-a1-*` |
+| 2026-08-16 | A0 / A1 第三方规格与 prompt：`docs/v2/tasks/pr-ka-a0-*`、`pr-ka-a1-*` |
+| 2026-08-16 | 文档迁至 `docs/v2/` |

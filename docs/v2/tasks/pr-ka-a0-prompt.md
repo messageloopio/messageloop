@@ -15,9 +15,9 @@ D:\Codes\qiulin\messageloop
 
 独立实现 **PR-KA-A0**。唯一规格书（必须先通读再改代码）：
 
-`docs/design/tasks/pr-ka-a0-protocol.md`
+`docs/v2/tasks/pr-ka-a0-protocol.md`
 
-背景（只读，不要自行改设计）：`docs/design/kernel-architecture.md` 的 Protocol 节与 KD-K31。规格书与设计冲突时 **以规格书为准**。
+背景（只读，不要自行改设计）：`docs/v2/kernel-architecture.md` 的 Protocol 节与 KD-K31。规格书与设计冲突时 **以规格书为准**。
 
 ## 目标（一句话）
 

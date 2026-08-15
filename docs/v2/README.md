@@ -1,0 +1,12 @@
+# MessageLoop 独立版本（v2）
+
+本目录是 **不向后兼容** 的独立大版本设计与实施规格。旧树的产品/协议合同仍在 [docs/design](../design/README.md)（v1.0）与 [docs/protocol.md](../protocol.md)。
+
+| 文档 | 状态 | 说明 |
+| --- | --- | --- |
+| [内核架构重设](kernel-architecture.md) | Draft | 靶心：Session/Attachment、四平面、fencing、宪法、KD-K31 |
+| [独立评审](kernel-architecture-review.md) | Review | 2026-08-16 两路评审；修订对照见文首 |
+| [PR-KA-A0 实现规格](tasks/pr-ka-a0-protocol.md) | Ready | 冻结 client/server/shared **v2** proto；[prompt](tasks/pr-ka-a0-prompt.md) |
+| [PR-KA-A1 实现规格](tasks/pr-ka-a1-fencing.md) | Ready | 续约 same-fence CAS、删盲写 Put、resume 回滚；[prompt](tasks/pr-ka-a1-prompt.md) |
+
+第三方实现：复制对应 `tasks/pr-ka-*-prompt.md` 围栏全文；规格与靶心冲突时以该步规格为准。

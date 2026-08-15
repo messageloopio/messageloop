@@ -15,9 +15,9 @@ D:\Codes\qiulin\messageloop
 
 独立实现 **PR-KA-A1**。唯一规格书（必须先通读再改代码）：
 
-`docs/design/tasks/pr-ka-a1-fencing.md`
+`docs/v2/tasks/pr-ka-a1-fencing.md`
 
-背景（只读）：`docs/design/kernel-architecture.md` 的 Cluster / Bind 节、KD-K4、KD-K5、KD-K30、KD-K31。规格书与设计冲突时 **以规格书为准**。
+背景（只读）：`docs/v2/kernel-architecture.md` 的 Cluster / Bind 节、KD-K4、KD-K5、KD-K30、KD-K31。规格书与设计冲突时 **以规格书为准**。
 
 先读这些现码再动手：
 
