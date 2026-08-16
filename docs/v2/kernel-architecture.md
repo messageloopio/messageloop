@@ -647,7 +647,7 @@ Session 与 Stream 同区域。**跨区域 Directory Bind 直接禁止。** 只�
 | **A4** | Authorizer 一张表 + 语言包含；Capability 闭集；新 YAML。规格：[pr-ka-a4-authorizer.md](tasks/pr-ka-a4-authorizer.md) | 表驱动 deny 用例全绿 |
 | **B1** | Session/Attachment + 写队列 + 状态机。规格：[pr-ka-b1-session.md](tasks/pr-ka-b1-session.md) | 本机接管不扫分片换指针 |
 | **B2** | Occupancy 只走 LiveBus + OccupancyGen。规格：[pr-ka-b2-occupancy.md](tasks/pr-ka-b2-occupancy.md) | 无 `Hub.node`、无 `cluster_emit` |
-| **B3** | 流式恢复（写队列已在） | SDK 一条消费路径 |
+| **B3** | 流式恢复（写队列已在）。规格：[pr-ka-b3-recover.md](tasks/pr-ka-b3-recover.md) | SDK 一条消费路径 |
 | **B4** | NodeRPC Stream + HMAC；repair 合一；`internal/*` 包 | 无盲写、无未签名命令 |
 
 确定性模拟（KD-K20）在 B4 之后单独做。
