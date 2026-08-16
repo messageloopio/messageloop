@@ -3,10 +3,12 @@ package redisbroker
 import (
 	"context"
 	"errors"
+	"sort"
 	"testing"
 	"time"
 
 	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/pkg/topics"
 	"github.com/stretchr/testify/require"
 )
@@ -16,11 +18,16 @@ import (
 // exercised by unit tests.
 func newTestRedisBroker() *redisBroker {
 	return &redisBroker{
-		subscribed:  make(map[string]int),
-		wcCounts:    make(map[string]int),
-		wcHandles:   make(map[string]*topics.Subscription),
-		matcher:     topics.NewCSTrieMatcher(),
-		lastOffsets: make(map[string]uint64),
+		opts:           NewOptions(config.RedisConfig{}),
+		subscribed:     make(map[string]int),
+		wcCounts:       make(map[string]int),
+		wcHandles:      make(map[string]*topics.Subscription),
+		matcher:        topics.NewCSTrieMatcher(),
+		lastOffsets:    make(map[string]uint64),
+		liveOps:        make(chan liveOp, liveOpsBufferSize),
+		liveDesired:    make(map[string]struct{}),
+		liveActive:     make(map[string]struct{}),
+		pendingLiveOps: make(map[string][]chan struct{}),
 	}
 }
 
@@ -365,4 +372,250 @@ func TestRedisBroker_WildcardReceivesPublication_Redis(t *testing.T) {
 		t.Fatalf("pattern must not receive after refcount reaches 0, got %s", ch)
 	case <-time.After(1500 * time.Millisecond):
 	}
+}
+
+// liveActiveNames returns a sorted snapshot of the names currently subscribed
+// on the broker's active pub/sub connection.
+func liveActiveNames(b *redisBroker) []string {
+	b.pubsubMu.Lock()
+	defer b.pubsubMu.Unlock()
+	names := make([]string, 0, len(b.liveActive))
+	for name := range b.liveActive {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// waitLiveActive waits until the broker's active connection subscribes
+// exactly want (sorted) and returns the last observed set.
+func waitLiveActive(t *testing.T, b *redisBroker, want []string) []string {
+	t.Helper()
+	var got []string
+	require.Eventually(t, func() bool {
+		got = liveActiveNames(b)
+		if len(got) != len(want) {
+			return false
+		}
+		for i := range got {
+			if got[i] != want[i] {
+				return false
+			}
+		}
+		return true
+	}, 5*time.Second, 25*time.Millisecond)
+	return got
+}
+
+// startLiveTestBrokers starts a consumer broker A plus a publisher broker B
+// sharing the test Redis; publications received by A's handler are pushed to
+// the returned channel.
+func startLiveTestBrokers(t *testing.T) (*redisBroker, *redisBroker, chan string) {
+	t.Helper()
+	redisCfg := requireCommandBusRedis(t)
+	brokerA := New(redisCfg).(*redisBroker)
+	brokerB := New(redisCfg).(*redisBroker)
+	t.Cleanup(func() { _ = brokerB.client.Close() })
+
+	received := make(chan string, 32)
+	ctx, cancel := context.WithCancel(context.Background())
+	started := make(chan error, 1)
+	go func() {
+		started <- brokerA.Start(ctx, func(ch string, _ *messageloop.Publication) error {
+			received <- ch
+			return nil
+		})
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-started:
+		case <-time.After(3 * time.Second):
+		}
+	})
+	require.NoError(t, brokerA.Subscribe("__probe__.ready"))
+	waitLiveActive(t, brokerA, []string{brokerA.opts.PubSubPrefix + "__probe__.ready"})
+	require.NoError(t, brokerA.Unsubscribe("__probe__.ready"))
+	waitLiveActive(t, brokerA, nil)
+	return brokerA, brokerB, received
+}
+
+// expectReceived asserts the next handler delivery is channel want (draining
+// any earlier deliveries first).
+func expectReceived(t *testing.T, received <-chan string, want string) {
+	t.Helper()
+	select {
+	case ch := <-received:
+		require.Equal(t, want, ch)
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out waiting for delivery on %q", want)
+	}
+}
+
+// expectNoDelivery asserts no handler delivery arrives within wait.
+func expectNoDelivery(t *testing.T, received <-chan string, wait time.Duration) {
+	t.Helper()
+	select {
+	case ch := <-received:
+		t.Fatalf("unexpected delivery on %q", ch)
+	case <-time.After(wait):
+	}
+}
+
+// TestRedisBroker_LiveSubscription_CompiledOnly pins A3 §8-3: the live
+// subscription set is exactly the compiled interest — after subscribing only
+// chat.1 the connection holds no glob pattern at all (no PSubscribe(prefix+*)
+// fallback), and publications on unrelated channels never reach the handler.
+func TestRedisBroker_LiveSubscription_CompiledOnly(t *testing.T) {
+	brokerA, brokerB, received := startLiveTestBrokers(t)
+
+	require.NoError(t, brokerA.Subscribe("chat.1"))
+	names := waitLiveActive(t, brokerA, []string{brokerA.opts.PubSubPrefix + "chat.1"})
+	for _, name := range names {
+		require.NotContains(t, name, "*", "no glob subscription may exist for an exact-only interest")
+	}
+
+	// chat.1 is delivered...
+	_, err := brokerB.Publish("chat.1", &messageloop.Publication{Payload: []byte("m1"), Kind: messageloop.PayloadKindBinary})
+	require.NoError(t, err)
+	expectReceived(t, received, "chat.1")
+
+	// ...while a publish on an unsubscribed channel never reaches the handler
+	// (previously it arrived via PSubscribe(prefix+"*") and was dropped only
+	// after receipt).
+	_, err = brokerB.Publish("stocks.1", &messageloop.Publication{Payload: []byte("m2"), Kind: messageloop.PayloadKindBinary})
+	require.NoError(t, err)
+	expectNoDelivery(t, received, 1500*time.Millisecond)
+}
+
+// TestRedisBroker_LiveSubscription_ImDoubleStar pins A3 §8-3: Subscribe("im.**")
+// compiles to the pattern im.* plus the exact channel im (zero-segment case),
+// so publications on "im" and "im.x" reach the handler while unrelated
+// channels never do.
+func TestRedisBroker_LiveSubscription_ImDoubleStar(t *testing.T) {
+	brokerA, brokerB, received := startLiveTestBrokers(t)
+
+	require.NoError(t, brokerA.Subscribe("im.**"))
+	waitLiveActive(t, brokerA, []string{
+		brokerA.opts.PubSubPrefix + "im",
+		brokerA.opts.PubSubPrefix + "im.*",
+	})
+
+	_, err := brokerB.Publish("im", &messageloop.Publication{Payload: []byte("z"), Kind: messageloop.PayloadKindBinary})
+	require.NoError(t, err)
+	expectReceived(t, received, "im")
+
+	_, err = brokerB.Publish("im.x", &messageloop.Publication{Payload: []byte("x"), Kind: messageloop.PayloadKindBinary})
+	require.NoError(t, err)
+	expectReceived(t, received, "im.x")
+
+	_, err = brokerB.Publish("im.a.b.c", &messageloop.Publication{Payload: []byte("d"), Kind: messageloop.PayloadKindBinary})
+	require.NoError(t, err)
+	expectReceived(t, received, "im.a.b.c")
+
+	_, err = brokerB.Publish("stocks", &messageloop.Publication{Payload: []byte("s"), Kind: messageloop.PayloadKindBinary})
+	require.NoError(t, err)
+	expectNoDelivery(t, received, 1500*time.Millisecond)
+}
+
+// TestRedisBroker_LiveSubscription_ImRoomStarLocalMatch pins hard constraint
+// 4: Subscribe("im.room.*") must deliver im.room.a but NOT im.room.a.b — the
+// Redis glob matches the deeper channel too, so the local segment-level Match
+// must discard it.
+func TestRedisBroker_LiveSubscription_ImRoomStarLocalMatch(t *testing.T) {
+	brokerA, brokerB, received := startLiveTestBrokers(t)
+
+	require.NoError(t, brokerA.Subscribe("im.room.*"))
+	waitLiveActive(t, brokerA, []string{brokerA.opts.PubSubPrefix + "im.room.*"})
+
+	_, err := brokerB.Publish("im.room.a", &messageloop.Publication{Payload: []byte("a"), Kind: messageloop.PayloadKindBinary})
+	require.NoError(t, err)
+	expectReceived(t, received, "im.room.a")
+
+	_, err = brokerB.Publish("im.room.a.b", &messageloop.Publication{Payload: []byte("b"), Kind: messageloop.PayloadKindBinary})
+	require.NoError(t, err)
+	expectNoDelivery(t, received, 1500*time.Millisecond)
+
+	_, err = brokerB.Publish("im.other.a", &messageloop.Publication{Payload: []byte("o"), Kind: messageloop.PayloadKindBinary})
+	require.NoError(t, err)
+	expectNoDelivery(t, received, 500*time.Millisecond)
+}
+
+// TestRedisBroker_LiveSubscription_ReconnectRebuildsInterest pins A3 §8-4:
+// after the active pub/sub connection is dropped, the reconnect rebuilds
+// exactly the compiled interest (still no glob for unrelated traffic) and
+// only interested channels are delivered.
+func TestRedisBroker_LiveSubscription_ReconnectRebuildsInterest(t *testing.T) {
+	brokerA, brokerB, received := startLiveTestBrokers(t)
+
+	require.NoError(t, brokerA.Subscribe("im.**"))
+	waitLiveActive(t, brokerA, []string{
+		brokerA.opts.PubSubPrefix + "im",
+		brokerA.opts.PubSubPrefix + "im.*",
+	})
+
+	// Drop the connection and wait for the teardown to complete.
+	brokerA.pubsubMu.Lock()
+	if brokerA.activePubSub != nil {
+		_ = brokerA.activePubSub.Close()
+	}
+	brokerA.pubsubMu.Unlock()
+	require.Eventually(t, func() bool {
+		brokerA.pubsubMu.Lock()
+		defer brokerA.pubsubMu.Unlock()
+		return brokerA.activePubSub == nil
+	}, 5*time.Second, 25*time.Millisecond)
+
+	// After the reconnect the same compiled interest must be rebuilt: the
+	// pattern plus the zero-segment exact channel, and no bare prefix+"*".
+	waitLiveActive(t, brokerA, []string{
+		brokerA.opts.PubSubPrefix + "im",
+		brokerA.opts.PubSubPrefix + "im.*",
+	})
+	for _, name := range liveActiveNames(brokerA) {
+		require.NotEqual(t, brokerA.opts.PubSubPrefix+"*", name,
+			"rebuilt live set must never contain the bare wildcard subscription")
+	}
+
+	_, err := brokerB.Publish("im.x", &messageloop.Publication{Payload: []byte("x"), Kind: messageloop.PayloadKindBinary})
+	require.NoError(t, err)
+	expectReceived(t, received, "im.x")
+
+	_, err = brokerB.Publish("stocks", &messageloop.Publication{Payload: []byte("s"), Kind: messageloop.PayloadKindBinary})
+	require.NoError(t, err)
+	expectNoDelivery(t, received, 1500*time.Millisecond)
+}
+
+// TestRedisBroker_LiveSubscription_DynamicRemove pins A3 §5.3: when the last
+// subscriber of a pattern leaves, the compiled Redis subscription is removed
+// from the live connection.
+func TestRedisBroker_LiveSubscription_DynamicRemove(t *testing.T) {
+	brokerA, brokerB, received := startLiveTestBrokers(t)
+
+	require.NoError(t, brokerA.Subscribe("im.**"))
+	waitLiveActive(t, brokerA, []string{
+		brokerA.opts.PubSubPrefix + "im",
+		brokerA.opts.PubSubPrefix + "im.*",
+	})
+
+	require.NoError(t, brokerA.Unsubscribe("im.**"))
+	waitLiveActive(t, brokerA, nil)
+
+	_, err := brokerB.Publish("im.x", &messageloop.Publication{Payload: []byte("x"), Kind: messageloop.PayloadKindBinary})
+	require.NoError(t, err)
+	expectNoDelivery(t, received, 1500*time.Millisecond)
+}
+
+// TestRedisBroker_Subscribe_RejectsUnroutable pins A3 §8-2 on the Redis side:
+// unroutable patterns and bare wildcards are refused up front and leave no
+// live subscription behind.
+func TestRedisBroker_Subscribe_RejectsUnroutable(t *testing.T) {
+	b := newTestRedisBroker()
+	for _, ch := range []string{"*.room", "**", "*", "im.*.tick"} {
+		err := b.Subscribe(ch)
+		require.ErrorIs(t, err, messageloop.ErrPatternNotRoutable, "channel %q", ch)
+	}
+	err := b.Subscribe("a..b")
+	require.ErrorIs(t, err, topics.ErrBadTopic)
+	require.Empty(t, liveActiveNames(b))
 }

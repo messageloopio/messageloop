@@ -764,3 +764,38 @@ func TestMemoryBroker_Publish_PreservesKindAndMetadata(t *testing.T) {
 	require.Greater(t, h.Time, int64(0))
 	require.Equal(t, offset, h.Offset)
 }
+
+// TestMemoryBroker_Subscribe_RejectsUnroutablePatterns pins A3 §8-2: patterns
+// the live bus cannot route ("*.room", bare "**"/"*") must fail with
+// ErrPatternNotRoutable and leave no state behind, while "im.**" subscribes
+// successfully and still delivers "im.room.1".
+func TestMemoryBroker_Subscribe_RejectsUnroutablePatterns(t *testing.T) {
+	b, cp, cancel := newTestBroker(t, MemoryBrokerOptions{})
+	defer cancel()
+
+	for _, ch := range []string{"*.room", "**", "*", "im.*.tick"} {
+		err := b.Subscribe(ch)
+		require.ErrorIs(t, err, ErrPatternNotRoutable, "channel %q", ch)
+	}
+
+	err := b.Subscribe("a..b")
+	require.ErrorIs(t, err, topics.ErrBadTopic)
+
+	// The rejected keys must leave no interest behind.
+	_, err = b.Publish("im.room.1", publishPub([]byte("m1"), false))
+	require.NoError(t, err)
+	require.Equal(t, 0, cp.count(), "rejected patterns must not create interest")
+
+	// "im.**" still compiles and routes (A2 semantics preserved).
+	require.NoError(t, b.Subscribe("im.**"))
+	_, err = b.Publish("im.room.1", publishPub([]byte("m2"), false))
+	require.NoError(t, err)
+	require.Equal(t, 1, cp.count(), "Subscribe(\"im.**\") must deliver im.room.1")
+	require.Equal(t, "im.room.1", cp.last().Channel)
+
+	// And the zero-segment case still matches: Publish("im") reaches the
+	// handler under the "im.**" interest.
+	_, err = b.Publish("im", publishPub([]byte("m3"), false))
+	require.NoError(t, err)
+	require.Equal(t, 2, cp.count(), "Subscribe(\"im.**\") must deliver \"im\" too")
+}

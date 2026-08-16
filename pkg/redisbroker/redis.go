@@ -72,6 +72,29 @@ type redisBroker struct {
 	// simulate a disconnect. Guarded by pubsubMu.
 	pubsubMu     sync.Mutex
 	activePubSub *redis.PubSub
+	// liveActive mirrors the names (full Redis channel/pattern names, pubsub
+	// prefix included) currently subscribed on the active connection; it is
+	// rebuilt from scratch on every connection. Guarded by pubsubMu.
+	liveActive map[string]struct{}
+
+	// liveOps is the serial queue of Redis live-subscription changes
+	// (add/remove exact channels and patterns) derived from CompileInterest.
+	// runPubSub applies them on the active pub/sub connection so Subscribe /
+	// Unsubscribe never touch Redis while holding subMu (A3 §5.3).
+	liveOps chan liveOp
+	// liveDesired tracks the desired live-sub set at the last enqueue: the
+	// diff between it and the recomputed set yields the ops to apply. Guarded
+	// by subMu.
+	liveDesired map[string]struct{}
+	// liveOpsDropped counts live-subscription changes dropped while the
+	// serial queue was full (the consumer was stuck on a dead connection);
+	// the reconnect rebuild recovers the desired set.
+	liveOpsDropped atomic.Uint64
+	// pendingLiveOps maps full Redis channel/pattern names to the
+	// confirmation channels of add ops whose subscribe/psubscribe ack has
+	// not arrived yet (a name can accumulate several waiters). Consumer-
+	// goroutine-only (runPubSub), no lock needed.
+	pendingLiveOps map[string][]chan struct{}
 }
 
 // New creates a new Redis-backed Broker.
@@ -79,14 +102,18 @@ type redisBroker struct {
 func New(cfg config.RedisConfig) messageloop.Broker {
 	opts := NewOptions(cfg)
 	return &redisBroker{
-		client:      newRedisClient(opts),
-		opts:        opts,
-		subscribed:  make(map[string]int),
-		wcCounts:    make(map[string]int),
-		wcHandles:   make(map[string]*topics.Subscription),
-		matcher:     topics.NewCSTrieMatcher(),
-		readyCh:     make(chan struct{}),
-		lastOffsets: make(map[string]uint64),
+		client:         newRedisClient(opts),
+		opts:           opts,
+		subscribed:     make(map[string]int),
+		wcCounts:       make(map[string]int),
+		wcHandles:      make(map[string]*topics.Subscription),
+		matcher:        topics.NewCSTrieMatcher(),
+		readyCh:        make(chan struct{}),
+		lastOffsets:    make(map[string]uint64),
+		liveOps:        make(chan liveOp, liveOpsBufferSize),
+		liveDesired:    make(map[string]struct{}),
+		liveActive:     make(map[string]struct{}),
+		pendingLiveOps: make(map[string][]chan struct{}),
 	}
 }
 
@@ -145,31 +172,51 @@ func isWildcardChannel(ch string) bool {
 // Subscribe registers interest in ch on this node. Wildcard patterns are
 // matched against incoming pub/sub channels via the topic matcher; both
 // exact channels and patterns are reference counted so the underlying
-// interest is kept until every subscriber has left.
+// interest is kept until every subscriber has left. Keys that
+// CompileInterest rejects (unroutable patterns like "*.room", bare "*"/"**",
+// malformed topics) are refused with ErrPatternNotRoutable / ErrBadTopic
+// before any state changes (A3). First subscriptions enqueue the compiled
+// Redis live-subscription change; the pub/sub consumer applies it without
+// holding subMu.
 func (b *redisBroker) Subscribe(ch string) error {
+	if _, err := messageloop.CompileInterest(ch); err != nil {
+		return err
+	}
+	var ops []liveOp
 	b.subMu.Lock()
-	defer b.subMu.Unlock()
+	first := false
 	if isWildcardChannel(ch) {
 		b.wcCounts[ch]++
 		if b.wcCounts[ch] == 1 {
 			sub, err := b.matcher.Subscribe(ch, ch)
 			if err != nil {
 				delete(b.wcCounts, ch)
+				b.subMu.Unlock()
 				return err
 			}
 			b.wcHandles[ch] = sub
+			first = true
 		}
-		return nil
+	} else {
+		b.subscribed[ch]++
+		first = b.subscribed[ch] == 1
 	}
-	b.subscribed[ch]++
+	if first {
+		ops = b.liveDiffLocked()
+	}
+	b.subMu.Unlock()
+	b.enqueueLiveOps(ops)
 	return nil
 }
 
 // Unsubscribe removes interest in ch on this node, keeping the interest
-// while the reference count is still above zero.
+// while the reference count is still above zero. Last unsubscriptions enqueue
+// the compiled Redis live-subscription removal (only when no other key shares
+// the same compiled channel/pattern, see liveDiffLocked).
 func (b *redisBroker) Unsubscribe(ch string) error {
+	var ops []liveOp
 	b.subMu.Lock()
-	defer b.subMu.Unlock()
+	last := false
 	if isWildcardChannel(ch) {
 		if b.wcCounts[ch] > 0 {
 			b.wcCounts[ch]--
@@ -179,33 +226,49 @@ func (b *redisBroker) Unsubscribe(ch string) error {
 					b.matcher.Unsubscribe(sub)
 					delete(b.wcHandles, ch)
 				}
+				last = true
 			}
 		}
-		return nil
-	}
-	if b.subscribed[ch] > 0 {
-		b.subscribed[ch]--
-		if b.subscribed[ch] == 0 {
-			delete(b.subscribed, ch)
-			// The delivery baseline is meaningless without subscribers:
-			// drop it so the map cannot grow without bound, and a fresh
-			// subscription starts from its own baseline instead of
-			// replaying history the previous subscriber already consumed.
-			delete(b.lastOffsets, ch)
+	} else {
+		if b.subscribed[ch] > 0 {
+			b.subscribed[ch]--
+			if b.subscribed[ch] == 0 {
+				delete(b.subscribed, ch)
+				// The delivery baseline is meaningless without subscribers:
+				// drop it so the map cannot grow without bound, and a fresh
+				// subscription starts from its own baseline instead of
+				// replaying history the previous subscriber already consumed.
+				delete(b.lastOffsets, ch)
+				last = true
+			}
 		}
 	}
+	if last {
+		ops = b.liveDiffLocked()
+	}
+	b.subMu.Unlock()
+	b.enqueueLiveOps(ops)
 	return nil
 }
 
 // interested reports whether this node wants messages for the given concrete
 // channel: exact subscriptions or any wildcard pattern that matches it.
+// Patterns are additionally verified with MatchAfterCompile so the Redis
+// glob over-match (Redis "*" crosses dots: "im.room.*" also covers
+// "im.room.a.b") is discarded before delivery (A3 §4).
 func (b *redisBroker) interested(channel string) bool {
 	b.subMu.RLock()
 	defer b.subMu.RUnlock()
 	if b.subscribed[channel] > 0 {
 		return true
 	}
-	return len(b.matcher.Lookup(channel)) > 0
+	for _, pattern := range b.matcher.Lookup(channel) {
+		key, ok := pattern.(string)
+		if ok && messageloop.MatchAfterCompile(key, channel) {
+			return true
+		}
+	}
+	return false
 }
 
 // Publish writes payload to the Redis Stream (for history) and broadcasts via

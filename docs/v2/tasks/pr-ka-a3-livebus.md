@@ -3,7 +3,7 @@
 | 字段 | 值 |
 | --- | --- |
 | 标题 | `broker: compile live interest; drop PSubscribe prefix*` |
-| 状态 | **Ready**（尚未实现） |
+| 状态 | **Accepted**（2026-08-16 主 agent 终验通过，尚未 commit） |
 | 依赖 | A2 已合（memory 已有 matcher Interest）。在 `v2` 分支上做 |
 | 设计来源 | [kernel-architecture.md](../kernel-architecture.md) LiveBus 编译、KD-K13、KD-K13b、KD-K31、Q7→拒绝 |
 | 验收人 | 主 agent |
@@ -171,3 +171,13 @@ Admin `SubscribeSession`：返回 error 即可（现有 gRPC 错误路径）。
 - 偏离（应无）
 
 ## 11. 实现备注（完成后填写）
+
+**已实现（2026-08-16，PR-KA-A3）**
+
+- 根包新增 `interest.go`：`CompileInterest` / `CompiledInterest` / `ErrPatternNotRoutable` / `MatchAfterCompile`，memory 与 Redis 共用一份。
+- `broker_memory.go`：`Subscribe` 入口先 `CompileInterest`，NotRoutable / BadTopic 直接返回；通过后沿用 A2 refcount+matcher 不变。
+- `pkg/redisbroker/pubsub.go`：删除 `PSubscribe(PubSubPrefix+"*")`。每条连接先 `Subscribe(prefix+"__live__")` 作控制订户（其 ack 关闭 `Ready()`），再按当前 `subscribed`/`wcCounts` 重建全部编译结果（精确 `Subscribe`、Pattern `PSubscribe`、AlsoExact `Subscribe`）。动态增删走串行队列 `liveOps`（chan，runPubSub 同 goroutine 消费），`Subscribe`/`Unsubscribe` 在首订/归零时重算 desired 集合并 diff 出 add/remove op；add op 带确认握手（消费 goroutine 收到 subscribe/psubscribe ack 才放行调用方，保证「订阅返回后发布必达」，用 `ChannelWithSubscriptions` 观察 ack）。重连重建不丢内存 `subscribed`/`wcCounts`。收包循环：去 prefix、忽略 `__live__`、`interested()`（含 `MatchAfterCompile` 段匹配过滤）后再 `deliverOnce`。
+- `pkg/redisbroker/redis.go`：`Subscribe` 先 `CompileInterest`；`interested()` 增加对命中的 pattern 逐一 `MatchAfterCompile` 过滤（`im.room.*` 不收 `im.room.a.b`）。
+- `client.go`：`handleSubscribe` 与 `handleConnect` 对 `ErrPatternNotRoutable` / `topics.ErrBadTopic` 发顶层 Error 信封（`PATTERN_NOT_ROUTABLE` / `BAD_REQUEST`，`request_error`），`continue` 不回滚其它频道、不断连；Connect 仍成功且该频道不进订阅列表。
+- 测试：§4 表驱动全行（`interest_test.go`）；memory NotRoutable 拒绝 + `im.**` 投递；Redis 编译订阅（只订 `chat.1` 时 `stocks.1` 不进 handler、无 glob 订阅）、`im.**`（`im`/`im.x` 进、`stocks` 不进）、`im.room.*`（`im.room.a` 进、`im.room.a.b` 不进）、重连重建、动态移除；客户端软失败两条（Subscribe / Connect）。全部用 Ready + Eventually / 握手确认，无固定长 Sleep。
+- 已知取舍：跨 Redis 的确认握手只覆盖「订阅返回后必达」；断线窗口内的 add op 在重连重建时恢复，实时丢窗与 A2 的 catch-up 局限相同（文档化）。

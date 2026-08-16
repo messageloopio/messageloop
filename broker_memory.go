@@ -86,8 +86,13 @@ func (b *memoryBroker) Ready() <-chan struct{} {
 // matched against concrete channels via the topic matcher (same semantics as
 // the Redis broker's interested()); exact channels and patterns are both
 // reference counted. The channel's history is retained while at least one
-// subscriber is registered.
+// subscriber is registered. Keys that CompileInterest rejects (unroutable
+// patterns like "*.room", bare "*"/"**", malformed topics) are refused with
+// ErrPatternNotRoutable / ErrBadTopic before any state changes (A3).
 func (b *memoryBroker) Subscribe(ch string) error {
+	if _, err := CompileInterest(ch); err != nil {
+		return err
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if isWildcard(ch) {

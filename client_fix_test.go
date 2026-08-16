@@ -1886,3 +1886,114 @@ func TestClient_SurveyReply_WithoutRequestID_Dropped(t *testing.T) {
 	require.Len(t, survey.Results(), 1)
 	assert.Equal(t, []byte("pong"), survey.Results()[0].Payload)
 }
+
+// --- PR-KA-A3: unroutable patterns soft-fail per channel ---
+
+// connectClient is a test helper: a fresh node + client with one Connect
+// frame handled, returning the client and its capturing transport.
+func connectClient(t *testing.T, node *Node) (*Client, *capturingTransport) {
+	t.Helper()
+	ctx := context.Background()
+	transport := &capturingTransport{}
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
+	require.NoError(t, err)
+	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
+		Id:       "connect-1",
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: "client-1"}},
+	}))
+	transport.resetMessages()
+	return client, transport
+}
+
+// TestClient_SubscribeUnroutablePattern_SoftFail pins A3 §8-5: subscribing an
+// unroutable pattern ("*.room") sends a top-level PATTERN_NOT_ROUTABLE
+// envelope, keeps the connection up, leaves no hub subscription, and does not
+// roll back the other channels in the same request.
+func TestClient_SubscribeUnroutablePattern_SoftFail(t *testing.T) {
+	node := NewNode(nil)
+	client, transport := connectClient(t, node)
+
+	require.NoError(t, client.HandleMessage(context.Background(), &clientpb.InboundMessage{
+		Id: "subscribe-1",
+		Envelope: &clientpb.InboundMessage_Subscribe{
+			Subscribe: &clientpb.Subscribe{Subscriptions: []*clientpb.Subscription{
+				{Channel: "*.room"},
+				{Channel: "good.ch"},
+			}},
+		},
+	}))
+
+	// Connection must stay up.
+	require.False(t, transport.isClosed())
+
+	msgs := transport.snapshotMessages()
+	require.Len(t, msgs, 2, "one error envelope for the unroutable channel, one SubscribeAck")
+
+	var out clientpb.OutboundMessage
+	require.NoError(t, (JSONMarshaler{}).Unmarshal(msgs[0], &out))
+	errEnv := out.GetError()
+	require.NotNil(t, errEnv, "first envelope must be the PATTERN_NOT_ROUTABLE error")
+	require.Equal(t, "PATTERN_NOT_ROUTABLE", errEnv.GetCode())
+	require.Equal(t, "request_error", errEnv.GetType())
+
+	require.NoError(t, (JSONMarshaler{}).Unmarshal(msgs[1], &out))
+	ack := out.GetSubscribeAck()
+	require.NotNil(t, ack, "second envelope must be the SubscribeAck")
+	require.Len(t, ack.GetSubscriptions(), 1, "only the routable channel is acknowledged")
+	require.Equal(t, "good.ch", ack.GetSubscriptions()[0].GetChannel())
+
+	// The unroutable pattern left no hub subscription behind.
+	require.False(t, client.hasSubscription("*.room"))
+	require.True(t, client.hasSubscription("good.ch"))
+	require.Empty(t, node.Hub().GetMatchingSubscribers("x.room"),
+		"the unroutable pattern must not be registered in the hub matcher")
+}
+
+// TestClient_ConnectWithUnroutableSubscription_SoftFail pins A3 §8-6: a
+// Connect carrying an unroutable channel still succeeds; the channel is
+// skipped (error envelope) and stays out of Connected.Subscriptions while the
+// routable channels are subscribed.
+func TestClient_ConnectWithUnroutableSubscription_SoftFail(t *testing.T) {
+	ctx := context.Background()
+	node := NewNode(nil)
+	transport := &capturingTransport{}
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
+	require.NoError(t, err)
+
+	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
+		Id: "connect-1",
+		Envelope: &clientpb.InboundMessage_Connect{
+			Connect: &clientpb.Connect{
+				ClientId: "client-1",
+				Subscriptions: []*clientpb.Subscription{
+					{Channel: "*.room"},
+					{Channel: "good.ch"},
+				},
+			},
+		},
+	}))
+
+	// The Connect itself must succeed and the connection must stay up.
+	require.False(t, transport.isClosed())
+
+	msgs := transport.snapshotMessages()
+	require.Len(t, msgs, 2, "one error envelope for the unroutable channel, one Connected")
+
+	var out clientpb.OutboundMessage
+	require.NoError(t, (JSONMarshaler{}).Unmarshal(msgs[0], &out))
+	errEnv := out.GetError()
+	require.NotNil(t, errEnv, "first envelope must be the PATTERN_NOT_ROUTABLE error")
+	require.Equal(t, "PATTERN_NOT_ROUTABLE", errEnv.GetCode())
+
+	require.NoError(t, (JSONMarshaler{}).Unmarshal(msgs[1], &out))
+	connected := out.GetConnected()
+	require.NotNil(t, connected, "second envelope must be Connected")
+	var channels []string
+	for _, sub := range connected.GetSubscriptions() {
+		channels = append(channels, sub.GetChannel())
+	}
+	require.Contains(t, channels, "good.ch")
+	require.NotContains(t, channels, "*.room")
+	require.False(t, client.hasSubscription("*.room"))
+	require.True(t, client.hasSubscription("good.ch"))
+}

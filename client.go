@@ -732,6 +732,17 @@ func (c *Client) handleConnect(ctx context.Context, in *clientpb.InboundMessage,
 		}
 
 		if err := c.node.AddSubscription(ctx, sub.Channel, NewSubscriber(c, sub.Ephemeral)); err != nil {
+			// Unroutable patterns and malformed topics fail the single
+			// channel softly: an error envelope, the channel is skipped (it
+			// stays out of Connected.Subscriptions), the channels already
+			// added in this Connect stay, and the Connect itself succeeds
+			// (A3 §7).
+			if errors.Is(err, ErrPatternNotRoutable) || errors.Is(err, topics.ErrBadTopic) {
+				log.WarnContext(ctx, "connect initial subscription skipped",
+					"channel", sub.Channel, "error", err)
+				c.sendSubscribeRequestError(ctx, in, sub.Channel, err)
+				continue
+			}
 			for _, channel := range addedChannels {
 				_ = c.node.RemoveSubscription(channel, c)
 			}
@@ -843,6 +854,25 @@ func (c *Client) disconnectOnConnectError(ctx context.Context, err error) error 
 	log.WarnContext(ctx, "connect failed, disconnecting client", "error", err)
 	_ = c.close(DisconnectInternal)
 	return err
+}
+
+// sendSubscribeRequestError sends a top-level request error envelope for a
+// channel that could not be subscribed (unroutable pattern / bad topic). The
+// connection stays up and every other channel is unaffected (A3 §7).
+func (c *Client) sendSubscribeRequestError(ctx context.Context, in *clientpb.InboundMessage, channel string, err error) {
+	code := "BAD_REQUEST"
+	if errors.Is(err, ErrPatternNotRoutable) {
+		code = "PATTERN_NOT_ROUTABLE"
+	}
+	_ = c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+		out.Envelope = &clientpb.OutboundMessage_Error{
+			Error: &sharedpb.Error{
+				Code:    code,
+				Type:    "request_error",
+				Message: fmt.Sprintf("cannot subscribe to channel %q: %v", channel, err),
+			},
+		}
+	}))
 }
 
 // checkSubscribeACL evaluates the subscribe ACL for one channel and returns the
@@ -1205,6 +1235,14 @@ func (c *Client) handleSubscribe(ctx context.Context, in *clientpb.InboundMessag
 		}
 
 		if err := c.node.AddSubscription(ctx, ch.Channel, Subscriber{Client: c, Ephemeral: ch.Ephemeral}); err != nil {
+			// Unroutable patterns and malformed topics fail the single
+			// channel softly: a top-level error envelope, no rollback of
+			// the channels already added in this request, no disconnect
+			// (A3 §7).
+			if errors.Is(err, ErrPatternNotRoutable) || errors.Is(err, topics.ErrBadTopic) {
+				c.sendSubscribeRequestError(ctx, in, ch.Channel, err)
+				continue
+			}
 			for _, channel := range addedChannels {
 				if err := c.node.RemoveSubscription(channel, c); err != nil {
 					log.WarnContext(ctx, "failed to rollback subscription", "channel", channel, "error", err)

@@ -28,6 +28,256 @@ const deliveryWorkers = 16
 // backpressure instead of buffering without bound.
 const deliveryQueueSize = 256
 
+// liveControlChannel is the stable control subscription on every pub/sub
+// connection: its subscribe ack confirms liveness so Ready() can close even
+// before any real interest exists, and it keeps the connection subscribed
+// when the node has no interests at all. Nothing publishes to it; inbound
+// messages on it are ignored. Client keys pass ValidateTopic, so the name is
+// never special-cased in topic validation (A3 §5.2).
+const liveControlChannel = "__live__"
+
+// liveOpsBufferSize bounds the serial live-subscription change queue. The
+// consumer (runPubSub) applies changes on the active connection; while the
+// connection is down, the queue fills and further changes are dropped and
+// counted — the reconnect rebuild in runPubSub re-derives the full desired
+// set, so drops never lose interest (A3 §5.3).
+const liveOpsBufferSize = 256
+
+// liveOpAckTimeout bounds how long a Subscribe caller waits for the live
+// subscription add to be confirmed on the active connection before giving up.
+// Confirmation means Redis processed the subscribe: publications after that
+// point are delivered in real time. On timeout the interest is still kept
+// locally (and rebuilt on the next connection), so delivery is eventually
+// consistent even when the ack is lost.
+const liveOpAckTimeout = 5 * time.Second
+
+// liveOp is one queued Redis live-subscription change: subscribe/unsubscribe
+// an exact channel or a compiled glob pattern (full name, pubsub prefix
+// included). done is closed by the consumer once the change is applied and
+// confirmed (adds) or applied (removes); nil means fire-and-forget.
+type liveOp struct {
+	add     bool
+	pattern bool // true → PSubscribe/PUnsubscribe, false → Subscribe/Unsubscribe
+	channel string
+	done    chan struct{}
+}
+
+// enqueueLiveOps queues live-subscription changes for the pub/sub consumer.
+// Adds are acknowledged before returning when a live connection exists: the
+// caller can then rely on real-time delivery for the new interest (e.g. a
+// presence join published right after Subscribe returns). The queue is
+// bounded; when it is full (the consumer is stuck on a dead connection),
+// changes are dropped and counted instead of blocking the Subscribe /
+// Unsubscribe caller — the reconnect rebuild recovers the desired set, so a
+// dropped op never loses interest permanently.
+func (b *redisBroker) enqueueLiveOps(ops []liveOp) {
+	for _, op := range ops {
+		b.pubsubMu.Lock()
+		live := b.activePubSub != nil
+		b.pubsubMu.Unlock()
+		if op.add && live {
+			op.done = make(chan struct{})
+		}
+		select {
+		case b.liveOps <- op:
+		default:
+			b.liveOpsDropped.Add(1)
+			log.WarnContext(context.Background(), "live subscription change dropped: queue full",
+				"channel", op.channel, "add", op.add)
+			continue
+		}
+		if op.done != nil {
+			select {
+			case <-op.done:
+			case <-time.After(liveOpAckTimeout):
+				log.WarnContext(context.Background(), "live subscription add not confirmed in time",
+					"channel", op.channel)
+			}
+		}
+	}
+}
+
+// completeLiveOp closes the op's confirmation channel, if any. Safe to call
+// from the consumer goroutine exactly once per op.
+func completeLiveOp(op liveOp) {
+	if op.done != nil {
+		close(op.done)
+	}
+}
+
+// applyLiveOp applies one queued change on the given pub/sub connection and
+// confirms it. Called only from the runPubSub goroutine. While disconnected
+// (nil pubsub) the change is skipped: the reconnect rebuild subscribes the
+// full desired set anyway. Adds already covered by the current connection
+// (e.g. subscribed during the rebuild) are confirmed without a redundant
+// write.
+func (b *redisBroker) applyLiveOp(ctx context.Context, pubsub *redis.PubSub, op liveOp) {
+	if pubsub == nil {
+		completeLiveOp(op)
+		return
+	}
+	if op.add && b.isLiveActive(op.channel) {
+		completeLiveOp(op)
+		return
+	}
+
+	opCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	var err error
+	switch {
+	case op.pattern && op.add:
+		err = pubsub.PSubscribe(opCtx, op.channel)
+	case op.pattern && !op.add:
+		err = pubsub.PUnsubscribe(opCtx, op.channel)
+	case !op.pattern && op.add:
+		err = pubsub.Subscribe(opCtx, op.channel)
+	default:
+		err = pubsub.Unsubscribe(opCtx, op.channel)
+	}
+	cancel()
+	if err != nil {
+		log.WarnContext(ctx, "live subscription change failed",
+			"channel", op.channel, "add", op.add, "error", err)
+		completeLiveOp(op)
+		return
+	}
+	if op.add {
+		// The Redis ack (subscribe/psubscribe) is the confirmation point: it
+		// is emitted right after Redis processed the command, so every
+		// publication after that is guaranteed to reach this connection.
+		b.setLiveActive(op.channel)
+		b.pendingLiveOps[op.channel] = append(b.pendingLiveOps[op.channel], op.done)
+		return
+	}
+	b.clearLiveActive(op.channel)
+	completeLiveOp(op)
+}
+
+// completePendingLiveOps confirms every add op still awaiting its Redis ack,
+// then forgets them. Called from the runPubSub goroutine when the connection
+// goes away: the reconnect rebuild re-subscribes the desired set.
+func (b *redisBroker) completePendingLiveOps() {
+	for name, dones := range b.pendingLiveOps {
+		for _, done := range dones {
+			if done != nil {
+				close(done)
+			}
+		}
+		delete(b.pendingLiveOps, name)
+	}
+}
+
+// isLiveActive reports whether name is currently subscribed on the active
+// connection. Guarded by pubsubMu.
+func (b *redisBroker) isLiveActive(name string) bool {
+	b.pubsubMu.Lock()
+	defer b.pubsubMu.Unlock()
+	_, ok := b.liveActive[name]
+	return ok
+}
+
+// setLiveActive records name as subscribed on the active connection. Guarded
+// by pubsubMu.
+func (b *redisBroker) setLiveActive(name string) {
+	b.pubsubMu.Lock()
+	b.liveActive[name] = struct{}{}
+	b.pubsubMu.Unlock()
+}
+
+// clearLiveActive forgets name on the active connection. Guarded by pubsubMu.
+func (b *redisBroker) clearLiveActive(name string) {
+	b.pubsubMu.Lock()
+	delete(b.liveActive, name)
+	b.pubsubMu.Unlock()
+}
+
+// liveDesiredLocked returns the full set of Redis channels/patterns (pubsub
+// prefix included) this node currently needs, derived from the compiled
+// interest of every subscribed key. Caller must hold subMu (read or write).
+func (b *redisBroker) liveDesiredLocked() map[string]struct{} {
+	desired := make(map[string]struct{})
+	add := func(name string) { desired[name] = struct{}{} }
+	for ch := range b.subscribed {
+		ci, err := messageloop.CompileInterest(ch)
+		if err != nil {
+			continue
+		}
+		if ci.Exact != "" {
+			add(b.opts.PubSubPrefix + ci.Exact)
+		}
+	}
+	for key := range b.wcCounts {
+		ci, err := messageloop.CompileInterest(key)
+		if err != nil {
+			continue
+		}
+		if ci.Pattern != "" {
+			add(b.opts.PubSubPrefix + ci.Pattern)
+		}
+		if ci.AlsoExact != "" {
+			add(b.opts.PubSubPrefix + ci.AlsoExact)
+		}
+	}
+	return desired
+}
+
+// liveDiffLocked computes the desired live-sub set, diffs it against the last
+// enqueued set, and returns the ops to apply (add for newly desired names,
+// remove for names that lost all interest — multiple keys sharing one
+// compiled name keep it desired until every key is gone). Caller must hold
+// subMu (write).
+func (b *redisBroker) liveDiffLocked() []liveOp {
+	desired := b.liveDesiredLocked()
+	var ops []liveOp
+	for name := range desired {
+		if _, ok := b.liveDesired[name]; !ok {
+			ops = append(ops, liveOp{
+				add:     true,
+				pattern: strings.Contains(name, "*"),
+				channel: name,
+			})
+		}
+	}
+	for name := range b.liveDesired {
+		if _, ok := desired[name]; !ok {
+			ops = append(ops, liveOp{
+				add:     false,
+				pattern: strings.Contains(name, "*"),
+				channel: name,
+			})
+		}
+	}
+	b.liveDesired = desired
+	return ops
+}
+
+// rebuildLiveSubs subscribes the current compiled interest on a fresh pub/sub
+// connection: exact channels via Subscribe, patterns via PSubscribe, the
+// trailing-** zero-segment channel via Subscribe (A3 §5.2). Only
+// CompileInterest results are used; there is no default PSubscribe(prefix+"*")
+// anymore. Each subscribed name is recorded as active so queued add ops for
+// it are confirmed without a redundant write.
+func (b *redisBroker) rebuildLiveSubs(ctx context.Context, pubsub *redis.PubSub) error {
+	b.subMu.RLock()
+	desired := b.liveDesiredLocked()
+	b.subMu.RUnlock()
+
+	for name := range desired {
+		opCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		var err error
+		if strings.Contains(name, "*") {
+			err = pubsub.PSubscribe(opCtx, name)
+		} else {
+			err = pubsub.Subscribe(opCtx, name)
+		}
+		cancel()
+		if err != nil {
+			return fmt.Errorf("redis broker: rebuild live subscription %q: %w", name, err)
+		}
+		b.setLiveActive(name)
+	}
+	return nil
+}
+
 // delivery is one queued handler invocation.
 type delivery struct {
 	channel string
@@ -100,29 +350,44 @@ func (b *redisBroker) runPubSubWithRetry(ctx context.Context) error {
 	}
 }
 
-// runPubSub subscribes to the wildcard Redis Pub/Sub pattern and dispatches
-// incoming publication messages to the handler. Blocks until ctx is done.
+// runPubSub runs the live consumer for one pub/sub connection: it subscribes
+// the control channel, rebuilds the compiled interest, and dispatches inbound
+// publications to the handler. Blocks until ctx is done or the connection
+// fails. There is no default PSubscribe(PubSubPrefix+"*"): Redis subscriptions
+// are exactly the CompileInterest results of the current interest (A3 §5.2).
 func (b *redisBroker) runPubSub(ctx context.Context) error {
-	pubsub := b.client.PSubscribe(ctx, b.opts.PubSubPrefix+"*")
+	pubsub := b.client.Subscribe(ctx, b.opts.PubSubPrefix+liveControlChannel)
 	b.setActivePubSub(pubsub)
 	defer func() {
+		b.completePendingLiveOps()
 		b.clearActivePubSub(pubsub)
 		_ = pubsub.Close()
 	}()
 
-	// Wait for the subscription confirmation: PSubscribe is asynchronous, and
-	// Ready() must only close once the subscription is actually live (which
-	// also guarantees the epoch is initialized, see Start).
+	// Wait for the subscription confirmation: the control channel's subscribe
+	// ack proves the connection is live (it is always the first subscription,
+	// so its ack arrives first), and Ready() must only close once the
+	// connection is actually live (which also guarantees the epoch is
+	// initialized, see Start).
 	if _, err := pubsub.Receive(ctx); err != nil {
 		return err
 	}
 	b.readyOnce.Do(func() { close(b.readyCh) })
 
+	// Subscribe the current compiled interest before consuming messages so a
+	// publication arriving right after connect is not missed in real time
+	// (exact channels are additionally covered by the stream catch-up below).
+	if err := b.rebuildLiveSubs(ctx, pubsub); err != nil {
+		return err
+	}
+
 	// Create the delivery channel before the catch-up: publications arriving
 	// while history is replayed are buffered and delivered live afterwards
 	// instead of overflowing go-redis's default 100-message buffer and being
-	// silently dropped.
-	ch := pubsub.ChannelSize(pubsubBufferSize)
+	// silently dropped. ChannelWithSubscriptions also surfaces the
+	// subscribe/psubscribe acks used to confirm dynamic live-subscription
+	// adds (see applyLiveOp).
+	ch := pubsub.ChannelWithSubscriptions(redis.WithChannelSize(pubsubBufferSize))
 
 	// Messages published while we were disconnected were not delivered in
 	// real time: replay them from the stream before resuming live delivery.
@@ -134,25 +399,53 @@ func (b *redisBroker) runPubSub(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return nil
-		case msg, ok := <-ch:
+		case op := <-b.liveOps:
+			// Serialized live-subscription changes: applied on this
+			// connection while it is alive; queued changes are recovered by
+			// the rebuild on the next connection.
+			b.applyLiveOp(ctx, pubsub, op)
+		case item, ok := <-ch:
 			if !ok {
 				return nil
 			}
-			if len(msg.Channel) <= len(b.opts.PubSubPrefix) {
-				continue
-			}
-			channelName := strings.TrimPrefix(msg.Channel, b.opts.PubSubPrefix)
+			switch m := item.(type) {
+			case *redis.Subscription:
+				// Confirms every dynamic add awaiting this channel's ack
+				// (kind subscribe/psubscribe); other kinds (unsubscribe
+				// acks, reconnect resubscribes) match no pending op and are
+				// ignored.
+				if dones, ok := b.pendingLiveOps[m.Channel]; ok {
+					for _, done := range dones {
+						if done != nil {
+							close(done)
+						}
+					}
+					delete(b.pendingLiveOps, m.Channel)
+				}
+			case *redis.Message:
+				if len(m.Channel) <= len(b.opts.PubSubPrefix) {
+					continue
+				}
+				channelName := strings.TrimPrefix(m.Channel, b.opts.PubSubPrefix)
+				if channelName == liveControlChannel {
+					continue
+				}
 
-			if !b.interested(channelName) {
-				continue
-			}
+				// Exact interest or a segment-level pattern match (the Redis
+				// glob over-match is discarded here, see interested).
+				if !b.interested(channelName) {
+					continue
+				}
 
-			redisMsg, err := deserializeMessage([]byte(msg.Payload))
-			if err != nil || redisMsg.Type != messageTypePublication {
-				continue
-			}
+				redisMsg, err := deserializeMessage([]byte(m.Payload))
+				if err != nil || redisMsg.Type != messageTypePublication {
+					continue
+				}
 
-			b.deliverOnce(channelName, messageToPublication(channelName, redisMsg, redisMsg.Offset))
+				b.deliverOnce(channelName, messageToPublication(channelName, redisMsg, redisMsg.Offset))
+			default:
+				// *redis.Pong (go-redis health pings) and anything else.
+			}
 		}
 	}
 }
@@ -321,10 +614,12 @@ func messageToPublication(channelName string, redisMsg *redisMessage, offset uin
 }
 
 // setActivePubSub records the live pub/sub subscription (used by tests to
-// simulate a disconnect).
+// simulate a disconnect) and resets the active-name mirror: every connection
+// starts from an empty subscription set, rebuilt in runPubSub.
 func (b *redisBroker) setActivePubSub(pubsub *redis.PubSub) {
 	b.pubsubMu.Lock()
 	b.activePubSub = pubsub
+	b.liveActive = make(map[string]struct{})
 	b.pubsubMu.Unlock()
 }
 
@@ -334,6 +629,7 @@ func (b *redisBroker) clearActivePubSub(pubsub *redis.PubSub) {
 	b.pubsubMu.Lock()
 	if b.activePubSub == pubsub {
 		b.activePubSub = nil
+		b.liveActive = make(map[string]struct{})
 	}
 	b.pubsubMu.Unlock()
 }

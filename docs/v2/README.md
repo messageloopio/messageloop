@@ -9,6 +9,6 @@
 | [PR-KA-A0 实现规格](tasks/pr-ka-a0-protocol.md) | Accepted | 冻结 client/server/shared **v2** proto；[prompt](tasks/pr-ka-a0-prompt.md) |
 | [PR-KA-A1 实现规格](tasks/pr-ka-a1-fencing.md) | Accepted | 续约 same-fence CAS、删盲写 Put、resume 回滚；[prompt](tasks/pr-ka-a1-prompt.md) |
 | [PR-KA-A2 实现规格](tasks/pr-ka-a2-history.md) | Accepted | History gap 页、Publish 成功合同、memory Interest；[prompt](tasks/pr-ka-a2-prompt.md) |
-| [PR-KA-A3 实现规格](tasks/pr-ka-a3-livebus.md) | Ready | Interest 编译、去掉 `PSubscribe *`；[prompt](tasks/pr-ka-a3-prompt.md) |
+| [PR-KA-A3 实现规格](tasks/pr-ka-a3-livebus.md) | Accepted | Interest 编译、去掉 `PSubscribe *`；[prompt](tasks/pr-ka-a3-prompt.md) |
 
 第三方实现：复制对应 `tasks/pr-ka-*-prompt.md` 围栏全文；规格与靶心冲突时以该步规格为准。
