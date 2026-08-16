@@ -274,8 +274,8 @@ func TestSubscribe_RecoverWildcardSkipped(t *testing.T) {
 func TestSubscribe_RecoverPolicySkipped(t *testing.T) {
 	ctx := context.Background()
 	node := NewNode(&config.Server{
-		Channels: config.ChannelConfig{
-			Policies: []config.ChannelPolicyRule{
+		Authorizer: config.AuthorizerConfig{
+			Rules: []config.AuthorizerRule{
 				{Pattern: "game.tick.**", ChannelPolicySpec: config.ChannelPolicySpec{TransientOnly: policyBoolPtr(true)}},
 			},
 		},

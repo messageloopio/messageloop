@@ -3,7 +3,7 @@
 | 字段 | 值 |
 | --- | --- |
 | 标题 | `auth: one Authorizer table, language inclusion, closed capabilities` |
-| 状态 | **Ready**（尚未实现） |
+| 状态 | **Accepted**（2026-08-16 主 agent 终验通过，尚未 commit） |
 | 依赖 | A3 已合（`CompileInterest` / `ErrPatternNotRoutable`）。在 `v2` 分支上做 |
 | 设计来源 | [kernel-architecture.md](../kernel-architecture.md) Authorizer、KD-K10、KD-K15、KD-K17、KD-K21、KD-K31 |
 | 验收人 | 主 agent |
@@ -358,3 +358,34 @@ Admin **无 Session Coverage**（KD 已裁定）。客户端 Presence / Survey �
 ## 12. 实现备注（完成后填写）
 
 （实现者填写）
+
+---
+
+**已实现（v2，2026-08-16）**
+
+改动文件：
+
+- 新增 `authorizer.go` / `authorizer_test.go`：`Action` / `Principal` / `Capability`（闭集 + `ClosedCapabilityNames` + `DefaultAdminCapabilities`）/ `Decision` / `Authorizer`；`compilePattern`（订阅 key 语言）、`patternsIntersect`（§5.2 表驱动，star∩dstar 三行）、`Decide`（§5.4 五 action）、`Effects`（§5.5 全表 overlay + TransientOnly 强制）、`ReplaceRules`、`PatternsToRevoke`。
+- 删除 `acl.go` / `acl_test.go`（`ACLEngine`、last-write-wins、中段 `**` 匹配全部移除）。
+- `channel_policy.go`：保留 `ChannelPolicy` / `DefaultChannelPolicy` / `compiledPolicySpec` / `overlay`；删除 `ChannelPolicyEngine` / `NewChannelPolicyEngine`。
+- `config/config.go`：`Server.Authorizer`（`AuthorizerConfig` + `AuthorizerRule`，内联 Effects）；`GRPCAdmin.Capabilities`（nil → 默认位、`[]` → 零位、未知名 → Validate 错误，`config.CapabilityNames` 闭集副本）；`ACL` / `Channels` 字段保留仅用于 `Validate` 显式拒绝（KD-K31，无兼容期）；`validateAuthorizerPattern` 拒绝 `a.**.b` / `*.room` / `im.*.tick` / 裸 `*` / `**`。
+- `node.go`：删除 `node.acl` / `node.channelPolicy`，`node.authorizer` 永非 nil；`ChannelPolicy(ch)` → `authorizer.Effects(ch)`；`AdminDecide` / `AdminCapabilities` / `CountMatchingSubscribers`；`ReplaceRules`（换表后按客户端逐 pattern 整条撤销）；admin caps 装配。
+- `cluster_commands.go`：`AdminCanSubscribe`（CompileInterest + subscribe.any 跳静态 allow 名单但 deny_all 仍生效 + Decide；`**`/`*` 一律失败）、`AdminCanPublish`（Decide）。
+- `client.go`：`checkSubscribeACL`（路由编译 → Decide → 代理，代理不越过静态 deny）；`handlePublish` 先 Decide 再代理；`handleSurvey` / `handlePresenceQuery` 走 Decide；`handleRPC` 无代理 → `NO_PROXY`（不再 echo）。
+- `pkg/grpcstream/api_handler.go`：`GetHistory`（history.read + Decide Recover）、`GetPresence`（presence.read + Decide Presence + 无 large_snapshot 时截断）、`GetChannels`（channels.list）、Publish/Disconnect/Subscribe/Unsubscribe（session.act / user.fanout）、Survey（无 bypass_gate 时走 Decide + 人数门）。
+- 测试改写：`channel_policy_test.go`（overlay 语义，不再断言 first-match）、`survey_test.go`（`Decide` 门 + `surveyOpenNode` 辅助）、`presence_test.go` / `recover_test.go` / `client_fix_test.go` / `cluster_v1_e2e_test.go` / `pkg/websocket/e2e_test.go` / `api_handler_test.go`（capability 用例）、`client_test.go`（NO_PROXY）、`config_test.go`（新表 + 旧键拒绝）。
+- 配置：`config-example.yaml` 迁到 `server.authorizer` + `grpc_admin.capabilities`；`config.yaml`（gitignored 本地文件）同步迁移。
+- 文档：`docs/developer/01-architecture.md` §3.7/§3.8 与相关行；`docs/developer/02-configuration.md` `server.acl` / `server.channels` 段 → `server.authorizer`。
+
+验收清单（§10）：
+
+1. 通过：`NewACLEngine` / `ACLEngine` / `NewChannelPolicyEngine` / `ChannelPolicyEngine` / `node.acl` / `matchChannelPattern` 全库无引用（`rg` 验证，仅 config 包内的旧键拒绝检查与注释保留）。
+2. 通过：`TestAuthorizer_LanguageInclusionTable`（§5.2 全 11 行）+ `TestAuthorizer_DenyNotPunchable`。
+3. 通过：运行时不再读 `server.acl` / `server.channels`；`TestValidate_RejectsServerACL` / `TestValidate_RejectsServerChannels`（含 YAML 解析路径）。
+4. 通过：`TestClientSession_Subscribe_ProxyAllowDoesNotBypassStaticDeny`（代理允许仍 `ACL_DENIED`）+ `TestClientSession_Subscribe_ProxyDenyAfterStaticAllow`。
+5. 通过：`TestClientSession_HandleMessage_RpcRequest_NoProxy` 断言 Error `NO_PROXY` / `request_error` 且无 `RpcReply`。
+6. 通过：`TestAdmin_GetHistoryRequiresCapability`（spy broker 零调用）/ `TestAdmin_GetHistoryExplicitEmptyCapabilities` / `TestAdmin_GetHistoryDefaultCapabilities`；默认位下既有 `TestAPIServiceHandler_PublishAddHistory` / `TestAdmin_GetPresenceFillsNewFields` 继续绿。
+7. 通过：`git diff` 未触碰 hub.go 扇出、broker 实现、pubsub.go 编译、recover.go 判定、A1 fencing / A2 gap 热路径（recover_test.go 仅改配置形态）。
+8. 通过：`go build ./...`、`go vet ./...`、`go test ./...`、`go test -race . ./config ./pkg/grpcstream` 全绿。
+
+偏离：无。

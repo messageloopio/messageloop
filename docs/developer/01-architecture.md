@@ -48,7 +48,7 @@ MessageLoop 的核心设计目标可以归纳为四点：
 | `Broker` | broker.go、broker_memory.go、pkg/redisbroker/ | 发布/订阅与历史存储；内存实现与 Redis 实现 |
 | `Presence` | presence.go、presence_event.go、pkg/redisbroker/presence_redis.go | 频道内在线成员追踪与 join/leave 事件分发 |
 | `Survey` | survey.go、node.go | 向频道订阅者广播请求并带超时收集响应 |
-| `ACL` | acl.go | 基于频道 glob 模式与用户白名单的访问控制 |
+| `Authorizer` | authorizer.go | 单一授权求值器：一个 Decide、一张 server.authorizer 表、一种通配语言；频道策略 Effects 与 Admin Capability 闭集 |
 | `Proxy` | proxy/ | RPC 转发与鉴权/ACL/生命周期钩子的后端集成 |
 | `Cluster` | cluster.go、cluster_*.go | 可选的 Redis 支撑分布式控制面（详见[《分布式集群指南》](04-cluster.md)） |
 | `Metrics` | metrics.go | Prometheus 指标收集（详见[《可观测性指南》](05-observability.md)） |
@@ -57,13 +57,13 @@ MessageLoop 的核心设计目标可以归纳为四点：
 
 ### 3.1 Node（node.go）
 
-`Node` 是运行时装配根：它持有 `hub`、`broker`、`presence`、`cluster`、`proxy`、`acl`、`metrics`、`surveys` 等全部子系统，并通过一组 setter 方法注入实现。
+`Node` 是运行时装配根：它持有 `hub`、`broker`、`presence`、`cluster`、`proxy`、`authorizer`、`metrics`、`surveys` 等全部子系统，并通过一组 setter 方法注入实现。
 
 关键方法与行为：
 
 | 方法 | 说明 |
 | --- | --- |
-| `NewNode(cfg *config.Server)` | 构造默认装配：`newHub(0, MaxConnectionsPerUser)`、`NewMemoryBroker`、`NewMemoryPresenceStore`，从配置构建内置 ACL 与心跳管理器 |
+| `NewNode(cfg *config.Server)` | 构造默认装配：`newHub(0, MaxConnectionsPerUser)`、`NewMemoryBroker`、`NewMemoryPresenceStore`，从配置构建 Authorizer（`server.authorizer` 一张表，永不 nil）与心跳管理器 |
 | `Run(ctx)` | 先启动集群（若启用），再以 `go n.broker.Start(ctx, handler)` 启动 broker，handler 即 `n.hub.broadcastPublication`；若 broker 实现 `Ready()` 则等待其就绪 |
 | `Shutdown()` | 以 `DisconnectForceNoReconnect` 排空全部连接，受 `DefaultShutdownTimeout`（10s）约束，然后关闭集群 |
 | `AddClient(c)` | 注册连接（超限返回 `DisconnectConnectionLimit`），集群模式下同步会话状态 |
@@ -130,7 +130,7 @@ MessageLoop 的核心设计目标可以归纳为四点：
 4. 恢复：本地会话存在则复制其状态（频道、用户、租约版本）、`closeQuiet` 旧连接（不触发 presence 清理）、`ReplaceSession` 接管；本地不存在则尝试跨节点恢复（`resumeRemoteSession`）。未鉴权连接不能驱逐仍被服务的会话。
 5. `AddClient` 注册 + `MarkMetricsCharged`，集群模式下同步会话状态。
 6. 通知代理 `OnConnected`。
-7. 处理 Connect 携带的订阅列表：先做订阅数上限检查（超限 `DisconnectChannelLimit`），逐频道 ACL 检查，`AddSubscription` + presence 登记 + 异步发布 join 事件。
+7. 处理 Connect 携带的订阅列表：先做订阅数上限检查（超限 `DisconnectChannelLimit`），逐频道 Authorizer/代理检查，`AddSubscription` + presence 登记 + 异步发布 join 事件。
 8. 消息恢复：`sub.Recover` 时以 `sub.Offset+1` 为起点调 `broker.History`；若 broker 有 epoch（`Epoch()`）且与客户端携带的 `sub.Epoch` 不一致（或客户端未携带），从 0（开头）恢复；恢复总量受 `MaxRecoveredPublications`（1000）封顶。全部结果随 `Connected` 信封返回（含 `Resumed` 与 `Epoch` 字段）。
 
 **入站消息路由（`handleMessage`）**：
@@ -138,13 +138,13 @@ MessageLoop 的核心设计目标可以归纳为四点：
 | 信封类型 | 处理函数 | 行为要点 |
 | --- | --- | --- |
 | `Connect` | `handleConnect` | 鉴权、恢复、初始订阅与恢复（见上） |
-| `Publish` | `handlePublish` | 未鉴权 → `DisconnectInvalidToken`；限速 → `RATE_LIMITED` 错误；代理 `PublishAcl` 或内置 ACL；Payload 的 Json/Binary/Text 变体统一转字节；成功回 `PublishAck`（含 broker 分配的 offset） |
-| `Subscribe` | `handleSubscribe` | 订阅数上限检查、逐频道 ACL、Saga 提交、presence 登记 + join 事件、代理 `OnSubscribed` 通知，回 `SubscribeAck` |
-| `RpcRequest` | `handleRPC` | 经 `node.ProxyRPC` 转发（详见 §3.7）；超时回 `RPC_TIMEOUT`；无匹配代理时回显请求（echo）；代理错误回 `PROXY_ERROR` |
+| `Publish` | `handlePublish` | 未鉴权 → `DisconnectInvalidToken`；限速 → `RATE_LIMITED` 错误；静态 `Decide(Publish)` 后问代理 `PublishAcl`（代理允许不越过静态 deny）；Payload 的 Json/Binary/Text 变体统一转字节；成功回 `PublishAck`（含 broker 分配的 offset） |
+| `Subscribe` | `handleSubscribe` | 订阅数上限检查、逐频道 Authorizer/代理、Saga 提交、presence 登记 + join 事件、代理 `OnSubscribed` 通知，回 `SubscribeAck` |
+| `RpcRequest` | `handleRPC` | 经 `node.ProxyRPC` 转发（详见 §3.7）；超时回 `RPC_TIMEOUT`；无匹配代理回 `NO_PROXY`（不再 echo）；代理错误回 `PROXY_ERROR` |
 | `Unsubscribe` | `handleUnsubscribe` | 移除订阅、presence 清理 + leave 事件、代理 `OnUnsubscribed` 通知 |
 | `Ping` | `handlePing` | 刷新活动时间，回 `Pong`；presence/集群状态刷新被节流（`pingClusterRefreshInterval` 10s，CAS 保证单次） |
 | `SubRefresh` | `handleSubRefresh` | 重新校验订阅 ACL，失败的频道被撤销并发布 leave |
-| `SurveyRequest` | `handleSurvey` | 同步校验后派 worker 调 `Node.Survey`，异步回 `SurveyResult`（不阻塞读循环；默认策略关 + `CanSurvey` deny） |
+| `SurveyRequest` | `handleSurvey` | 同步校验后派 worker 调 `Node.Survey`，异步回 `SurveyResult`（不阻塞读循环；默认策略关 + `Decide(Survey)` deny） |
 | `SurveyReply` | `handleSurveyReply` | 校验请求 ID 后写入对应 Survey（`node.AddSurveyResponse`） |
 
 **限制执行**：
@@ -209,21 +209,30 @@ join/leave 事件默认以**一等 `presence_event` 信封**分发，不走伴�
 
 **客户端发起的 Survey（`handleSurvey`，client.go，PR-07）**：客户端可对**精确频道**发起 Survey 并异步收集应答，与 Admin 流程独立：
 
-1. 同步校验，任一失败即回顶层 Error 信封（不断连、不撤订阅）：channel 为空或是通配 → `BAD_REQUEST`；`sessionCoversChannel` 未覆盖（精确订阅或通配命中，ACL 放行不能偷看未加入的频道）→ `PERMISSION_DENIED`；频道策略 `survey=false`（默认关，KD-6）→ `SURVEY_DISABLED`；ACL `CanSurvey` 默认 deny，规则未配 `allow_survey` → `PERMISSION_DENIED`；同会话已有一笔在途 Survey 或超过 1/s 限流 → `RATE_LIMITED`。
+1. 同步校验，任一失败即回顶层 Error 信封（不断连、不撤订阅）：channel 为空或是通配 → `BAD_REQUEST`；`sessionCoversChannel` 未覆盖（精确订阅或通配命中，授权放行不能偷看未加入的频道）→ `PERMISSION_DENIED`；Authorizer `Decide(Survey)` 拒绝——`Effects.Survey=false`（默认关，KD-6）→ `SURVEY_DISABLED`，未配 `allow_survey` 或 deny 命中 → `PERMISSION_DENIED`；同会话已有一笔在途 Survey 或超过 1/s 限流 → `RATE_LIMITED`。
 2. 通过校验后**不阻塞读循环**（KD-15）：标记 in-flight，worker goroutine 先做 `countMatchingSubscribers` 集群 `count_only` 预检（本地快路径 + 广播，超过 `max_survey_subscribers` → `SURVEY_TOO_MANY_SUBSCRIBERS`，**零**条 outbound `SurveyRequest`），再调 `Node.Survey`，汇总后异步回 `SurveyResult`（回显发起方 `request_id`）。
-3. **Admin `Node.Survey` 不受 `CanSurvey` 与 `max_survey_subscribers` 门限制约**（无订阅者上限）。
+3. **Admin `Node.Survey`**：持有 `survey.bypass_gate` 时不受 `Decide(Survey)` 与 `max_survey_subscribers` 门限制约（PR-KA-A4 §7）；无此位则与客户端走相同的门。
 
-### 3.7 ACL（acl.go）
+### 3.7 Authorizer（authorizer.go，PR-KA-A4）
 
-`ACLRule` 由四个维度组成：`ChannelPattern`（glob 模式，如 `chat.public.*`）、`AllowSubscribe`/`AllowPublish`/`AllowSurvey`（用户 ID 白名单，`"*"` 表示任意已认证用户）、`DenyAll`（整条规则封禁）。频道匹配用分段 glob `matchChannelPattern`（acl.go）：按 `.` 分段后逐段比对，`*` 只匹配**恰好一个非空段**（与订阅 matcher 一致，`chat.*` 不匹配 `chat.rooms.1`），`**` 匹配零或多段（ACL 还允许 `**` 出现在中间，如 `a.**.b`）——刻意取代 Go 标准库 `path.Match`（其 `*` 会跨 `.` 匹配，使 `chat.*` 与 `chat.**` 行为一致，与 CSTrie 单段通配不一致）。
+单一授权求值器：**一个 `Decide(principal, action, channel)`、一张 `server.authorizer` 表、一种通配语言**（KD-K10）。旧的 `ACLEngine`（last-write-wins、中段 `**`）与 `ChannelPolicyEngine`（first-match 平行表）已删除；频道策略是规则的 **Effects**，不再有第二张表。
 
-`CanSubscribe`/`CanPublish`/`CanSurvey` 采用"最严格者优先"（worst-match-first）语义：
+`AuthorizerRule` 由 `pattern`（订阅 key 语言：`*` 单段、`**` 仅末段、字面前缀不可为空，`a.**.b` / `*.room` / 裸 `**` 非法）、`DenyAll`、`AllowSubscribe`/`AllowPublish`/`AllowSurvey`（用户 ID 白名单，`"*"` 表示任意已认证用户；**省略 = 不约束该 action，空列表 = 拒绝**）与内联 Effects（history/presence/recover/survey/transient 等）组成。
 
-- 任一匹配规则设置 `DenyAll` → 直接拒绝（宽松规则无法绕过）；
-- 否则由最后一条带白名单的匹配规则决定（确定性的 last-write-wins）；
-- 没有规则匹配时，订阅与发布**默认放行**；**Survey 相反**——`CanSurvey` 默认拒绝：无匹配规则、或匹配规则只列 `allow_subscribe`/`allow_publish` 而没有 `allow_survey`，都不打开 Survey。Admin `Node.Survey` 不走 `CanSurvey`。
+`Decide` 语义（§5.4）：
 
-**与代理 ACL 的优先级**：订阅/发布先查代理——`FindProxy(channel, "subscribe")` / `FindProxy(channel, "publish")` 命中则调用 `SubscribeAcl`/`PublishAcl`，以代理结论为准；内置规则仅在无代理匹配时作为回退生效（见 `checkSubscribeACL` 与 `handlePublish`）。
+- **订阅（SubscribePattern）**：默认放行，但 `L(p) ∩ L(d) ≠ ∅`（deny 规则 d 生效于该 principal）→ 整条拒绝（deny 不可被更具体的 allow 打洞）。语言求交按 §5.2 表驱动实现（exact/star/dstar），**不枚举频道**。不可路由 pattern（`*.room`、裸 `**`）先于 ACL 给出 `not_routable`。
+- **发布（Publish）**：精确频道，默认放行；`deny_all` 或未命中的 allow 名单 → 拒绝。**不要求 Coverage**（KD-K21）。
+- **Survey**：默认拒绝；`Effects.Survey==true` **且** 有 `allow_survey` 命中 **且** 无 deny 命中才放行。
+- **恢复（Recover）/ 在场（Presence）**：精确频道；默认跟随 `Effects(ch)`；`deny_all` 命中或通配频道 → 拒绝。
+
+`Effects(ch)` = `DefaultChannelPolicy()` overlay `server.authorizer.default`，再按表顺序 overlay 每条匹配规则（后写覆盖先写）；`TransientOnly` 强制 `History=false` 且 `Recover=false`。
+
+**Admin Capability 闭集**（KD-K15）：`history.read` / `presence.read` / `channels.list` / `session.act` / `user.fanout` / `subscribe.any` / `presence.large_snapshot` / `survey.bypass_gate` / `pattern.global`（预留）。`server.grpc_admin.capabilities` 省略 = 除 `pattern.global` 外全位；显式 `[]` = 零位（锁死 Admin 数据面）；未知名 = Validate 错误。`GetHistory`/`GetPresence`/`GetChannels`/代订/按 user 扇出必须持位，不得旁路。
+
+**与代理 ACL 的关系**：订阅/发布先过静态 `Decide`，再问代理——代理命中时 `SubscribeAcl`/`PublishAcl` 作为**额外的门**；代理允许**不得**跳过静态 deny（见 `checkSubscribeACL` 与 `handlePublish`），代理拒绝只否决这一次请求（不进入 AllowLang，避免 TOCTOU）。
+
+**无代理 RPC**（§8.3）：`handleRPC` 遇 `proxy.ErrNoProxyFound` 回顶层 Error `code=NO_PROXY` `type=request_error`，**不再 echo** 请求体。
 
 ### 3.8 Proxy（proxy/proxy.go、router.go、http.go、grpc.go）
 
@@ -322,7 +331,7 @@ Hub 的 `wcSubs` 记录每个通配符订阅（键 `sessionID:channel`），广�
   │                     │   复制旧状态 → 旧会话 closeQuiet
   │                     │   → Hub.ReplaceSession(sessionId, 新Client)
   │                     │── AddClient + MarkMetricsCharged
-  │                     │── 逐频道 ACL → AddSubscription(saga)
+  │                     │── 逐频道 Authorizer/代理 → AddSubscription(saga)
   │                     │── broker.History(offset+1)（校验 Epoch）
   │◄── Connected ───────┤      （Resumed=true, Publications=恢复的消息）
   │                     │
@@ -362,7 +371,7 @@ Hub 的 `wcSubs` 记录每个通配符订阅（键 `sessionID:channel`），广�
   │                   │── ProxyRPC(rpcCtx) ────────────────────►│
   │                   │   （上下文含 rpcTimeout，代理层叠加）      │
   │                   │◄────────────── RPCResponse ─────────────┤
-  │◄── RpcReply ──────┤（超时→RPC_TIMEOUT；无代理→回显；          │
+  │◄── RpcReply ──────┤（超时→RPC_TIMEOUT；无代理→NO_PROXY；        │
   │                   │  代理错误→PROXY_ERROR）                  │
 ```
 
@@ -386,7 +395,7 @@ Admin 路径：
   │── SurveyRequest ─►│                              │
   │ (channel,payload) │── 同步校验：channel 精确 /    │
   │   timeout_ms      │   sessionCoversChannel /     │
-  │                   │   策略 survey / CanSurvey /   │
+  │                   │   策略 survey / Decide(Survey) │
   │                   │   限流（任一失败 → 顶层 Error）│
   │                   │── worker：count_only 集群预检  │
   │                   │── Node.Survey ── Outbound ───►│

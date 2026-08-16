@@ -3,12 +3,29 @@ package config
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/lynx-go/x/log"
 	"github.com/messageloopio/messageloop/pkg/topics"
 	"github.com/messageloopio/messageloop/proxy"
 )
+
+// CapabilityNames is the closed set of admin capability names accepted under
+// server.grpc_admin.capabilities. It mirrors the root package's
+// ClosedCapabilityNames (the root package cannot import config, so the two
+// lists are kept in sync manually).
+var CapabilityNames = map[string]struct{}{
+	"presence.large_snapshot": {},
+	"survey.bypass_gate":      {},
+	"history.read":            {},
+	"presence.read":           {},
+	"channels.list":           {},
+	"session.act":             {},
+	"user.fanout":             {},
+	"subscribe.any":           {},
+	"pattern.global":          {},
+}
 
 type Config struct {
 	Server    Server        `yaml:"server" json:"server" mapstructure:"server"`
@@ -26,15 +43,22 @@ type ClusterConfig struct {
 }
 
 type Server struct {
-	Http        HttpServer    `yaml:"http" json:"http" mapstructure:"http"`
-	GRPCAdmin   GRPCAdmin     `yaml:"grpc_admin" json:"grpc_admin" mapstructure:"grpc_admin"`
-	Heartbeat   Heartbeat     `yaml:"heartbeat" json:"heartbeat" mapstructure:"heartbeat"`
-	RPCTimeout  string        `yaml:"rpc_timeout" json:"rpc_timeout" mapstructure:"rpc_timeout"` // default: "30s"
-	Limits      Limits        `yaml:"limits" json:"limits" mapstructure:"limits"`
-	ACL         ACLConfig     `yaml:"acl" json:"acl" mapstructure:"acl"`
-	RequireAuth bool          `yaml:"require_auth" json:"require_auth" mapstructure:"require_auth"` // Reject connections with empty token
-	Channels    ChannelConfig `yaml:"channels" json:"channels" mapstructure:"channels"`
-	Presence    Presence      `yaml:"presence" json:"presence" mapstructure:"presence"`
+	Http        HttpServer `yaml:"http" json:"http" mapstructure:"http"`
+	GRPCAdmin   GRPCAdmin  `yaml:"grpc_admin" json:"grpc_admin" mapstructure:"grpc_admin"`
+	Heartbeat   Heartbeat  `yaml:"heartbeat" json:"heartbeat" mapstructure:"heartbeat"`
+	RPCTimeout  string     `yaml:"rpc_timeout" json:"rpc_timeout" mapstructure:"rpc_timeout"` // default: "30s"
+	Limits      Limits     `yaml:"limits" json:"limits" mapstructure:"limits"`
+	RequireAuth bool       `yaml:"require_auth" json:"require_auth" mapstructure:"require_auth"` // Reject connections with empty token
+	Presence    Presence   `yaml:"presence" json:"presence" mapstructure:"presence"`
+	// Authorizer is the single authorization table (PR-KA-A4 §6): pattern →
+	// allow lists / deny_all / Effects. It replaces the old server.acl and
+	// server.channels blocks.
+	Authorizer AuthorizerConfig `yaml:"authorizer" json:"authorizer" mapstructure:"authorizer"`
+	// ACL and Channels are removed in PR-KA-A4 (KD-K31: no compatibility
+	// period). The fields stay declared so YAML still parses and Validate can
+	// reject them explicitly — nothing else may read them.
+	ACL      ACLConfig     `yaml:"acl" json:"acl" mapstructure:"acl"`
+	Channels ChannelConfig `yaml:"channels" json:"channels" mapstructure:"channels"`
 }
 
 // Presence is the process-wide presence control-plane switch.
@@ -46,18 +70,40 @@ type Presence struct {
 	ClusterEmit bool `yaml:"cluster_emit" json:"cluster_emit" mapstructure:"cluster_emit"`
 }
 
-// ChannelConfig configures per-channel-prefix behavior switches
-// (history/presence/recover/survey/transient). When omitted entirely the
-// engine still exists and resolves to the pre-policy defaults (history on,
-// presence on, survey off).
+// ChannelConfig is the removed server.channels block (PR-KA-A4 / KD-K31: no
+// compatibility period). It exists only so Validate can reject YAML that
+// still spells it; nothing may read it.
 type ChannelConfig struct {
 	Default  ChannelPolicySpec   `yaml:"default" json:"default" mapstructure:"default"`
 	Policies []ChannelPolicyRule `yaml:"policies" json:"policies" mapstructure:"policies"`
 }
 
-// ChannelPolicyRule is one first-match policy rule: the first rule whose
-// pattern matches a channel wins. Note this is the opposite of the ACL
-// engine's last-write-wins evaluation.
+// AuthorizerConfig is the single authorization table (PR-KA-A4 §6): a default
+// Effects spec plus rules in table order. A zero AuthorizerConfig is valid:
+// no rules, default Effects = DefaultChannelPolicy() (subscribe/publish open,
+// survey off).
+type AuthorizerConfig struct {
+	Default ChannelPolicySpec `yaml:"default" json:"default" mapstructure:"default"`
+	Rules   []AuthorizerRule  `yaml:"rules" json:"rules" mapstructure:"rules"`
+}
+
+// AuthorizerRule is one row of the authorizer table. Pattern uses the
+// subscription key language (`*` single segment, `**` only as the final
+// segment; the literal prefix must not be empty). A nil allow list does not
+// constrain the action; an empty list denies it; "*" allows any
+// authenticated user. deny_all denies every action on the pattern.
+type AuthorizerRule struct {
+	Pattern           string   `yaml:"pattern" json:"pattern" mapstructure:"pattern"`
+	DenyAll           bool     `yaml:"deny_all" json:"deny_all" mapstructure:"deny_all"`
+	AllowSubscribe    []string `yaml:"allow_subscribe" json:"allow_subscribe" mapstructure:"allow_subscribe"`
+	AllowPublish      []string `yaml:"allow_publish" json:"allow_publish" mapstructure:"allow_publish"`
+	AllowSurvey       []string `yaml:"allow_survey" json:"allow_survey" mapstructure:"allow_survey"`
+	ChannelPolicySpec `yaml:",inline" mapstructure:",squash"`
+}
+
+// ChannelPolicyRule is one policy rule: every rule whose pattern matches a
+// channel contributes its Effects, in table order (later overrides earlier,
+// PR-KA-A4 §5.5 — not first-match).
 type ChannelPolicyRule struct {
 	Pattern           string `yaml:"pattern" json:"pattern" mapstructure:"pattern"`
 	ChannelPolicySpec `yaml:",inline" mapstructure:",squash"`
@@ -81,13 +127,15 @@ type ChannelPolicySpec struct {
 	PresenceSnapshotLimit *int   `yaml:"presence_snapshot_limit" json:"presence_snapshot_limit" mapstructure:"presence_snapshot_limit"`
 }
 
-// ACLConfig defines built-in channel access control rules.
-// These rules are evaluated only when no proxy ACL is configured for a channel.
+// ACLConfig is the removed server.acl block (PR-KA-A4 / KD-K31: no
+// compatibility period). It exists only so Validate can reject YAML that
+// still spells it; nothing may read it.
 type ACLConfig struct {
 	Rules []ACLRule `yaml:"rules" json:"rules" mapstructure:"rules"`
 }
 
-// ACLRule defines a single access control rule.
+// ACLRule is the removed server.acl rule shape (moved to AuthorizerRule
+// under server.authorizer).
 type ACLRule struct {
 	ChannelPattern string   `yaml:"channel_pattern" json:"channel_pattern" mapstructure:"channel_pattern"`
 	AllowSubscribe []string `yaml:"allow_subscribe" json:"allow_subscribe" mapstructure:"allow_subscribe"`
@@ -115,6 +163,11 @@ type GRPCAdmin struct {
 	// admin API is served without authentication and a WARN is logged at
 	// startup. Only for controlled environments.
 	AllowInsecure bool `yaml:"allow_insecure" json:"allow_insecure" mapstructure:"allow_insecure"`
+	// Capabilities is the admin capability set (PR-KA-A4 §7). Omitted (nil) →
+	// DefaultAdminCapabilities (every closed bit except pattern.global);
+	// explicitly empty ([]) → zero bits, locking the admin data plane.
+	// Unknown names are a Validate error.
+	Capabilities []string `yaml:"capabilities" json:"capabilities" mapstructure:"capabilities"`
 }
 
 type Heartbeat struct {
@@ -362,28 +415,88 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("cluster requires broker.type=redis")
 	}
 
-	// Validate channel policy config: the default spec and every policy
-	// rule. Policy patterns must be valid topics (trailing "**" only, no
-	// explicit empty segments); the matcher is the same segment-based glob
-	// as the ACL layer, but policy evaluation is first-match while ACL is
-	// last-write-wins.
-	if err := validateChannelPolicySpec("server.channels.default", c.Server.Channels.Default); err != nil {
+	// Validate the admin capability names: the set is closed, unknown names
+	// are rejected up front (PR-KA-A4 §7).
+	for i, name := range c.Server.GRPCAdmin.Capabilities {
+		if _, ok := CapabilityNames[name]; !ok {
+			return fmt.Errorf("server.grpc_admin.capabilities[%d]: unknown capability %q", i, name)
+		}
+	}
+
+	// The removed authorization blocks must not reappear (KD-K31: no
+	// compatibility period). The fields stay declared so YAML still parses
+	// and this explicit check can reject them.
+	if len(c.Server.ACL.Rules) > 0 {
+		return fmt.Errorf("server.acl is removed; move rules to server.authorizer.rules")
+	}
+	if len(c.Server.Channels.Policies) > 0 || channelPolicySpecSet(c.Server.Channels.Default) {
+		return fmt.Errorf("server.channels is removed; move policy to server.authorizer")
+	}
+
+	// Validate the authorizer table: the default Effects spec and every rule.
+	// Rule patterns must be part of the subscription key language (§5.1) and
+	// every inline Effects spec follows the channel policy constraints.
+	if err := validateChannelPolicySpec("server.authorizer.default", c.Server.Authorizer.Default); err != nil {
 		return err
 	}
-	for i, policy := range c.Server.Channels.Policies {
-		prefix := fmt.Sprintf("server.channels.policies[%d]", i)
-		if policy.Pattern == "" {
+	for i, rule := range c.Server.Authorizer.Rules {
+		prefix := fmt.Sprintf("server.authorizer.rules[%d]", i)
+		if rule.Pattern == "" {
 			return fmt.Errorf("%s.pattern is required", prefix)
 		}
-		if err := topics.ValidateTopic(policy.Pattern); err != nil {
-			return fmt.Errorf("%s.pattern %q: %w", prefix, policy.Pattern, err)
+		if err := validateAuthorizerPattern(rule.Pattern); err != nil {
+			return fmt.Errorf("%s.pattern %q: %w", prefix, rule.Pattern, err)
 		}
-		if err := validateChannelPolicySpec(prefix, policy.ChannelPolicySpec); err != nil {
+		if err := validateChannelPolicySpec(prefix, rule.ChannelPolicySpec); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+// validateAuthorizerPattern checks that a rule pattern is part of the
+// subscription key language: a valid topic whose wildcard (if any) is a final
+// single "*" or "**" preceded by a non-empty literal prefix. "a.**.b",
+// "*.room", "im.*.tick" and bare "*" / "**" are all rejected.
+func validateAuthorizerPattern(pattern string) error {
+	if err := topics.ValidateTopic(pattern); err != nil {
+		return err
+	}
+	if !strings.Contains(pattern, "*") {
+		return nil
+	}
+	segments := strings.Split(pattern, ".")
+	last := segments[len(segments)-1]
+	if last != "*" && last != "**" {
+		return fmt.Errorf("wildcard must be the final segment (last segment must be * or **)")
+	}
+	for _, seg := range segments[:len(segments)-1] {
+		if strings.Contains(seg, "*") {
+			return fmt.Errorf("only the final segment may be a wildcard")
+		}
+	}
+	if len(segments) == 1 {
+		return fmt.Errorf("empty literal prefix is not allowed")
+	}
+	return nil
+}
+
+// channelPolicySpecSet reports whether the spec carries any explicit value
+// (used to detect a non-empty server.channels.default).
+func channelPolicySpecSet(spec ChannelPolicySpec) bool {
+	return spec.History != nil ||
+		spec.HistorySize != nil ||
+		spec.HistoryTTL != "" ||
+		spec.Presence != nil ||
+		spec.Recover != nil ||
+		spec.Survey != nil ||
+		spec.TransientOnly != nil ||
+		spec.RecoverLimit != nil ||
+		spec.MaxSurveySubscribers != nil ||
+		spec.MaxSurveyTimeout != "" ||
+		spec.LegacyPresenceChannel != nil ||
+		spec.PresenceSnapshotLimit != nil
 }
 
 // validateChannelPolicySpec validates the scalar constraints shared by the

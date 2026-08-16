@@ -234,8 +234,8 @@ func TestPresence_QueryWildcardRejected(t *testing.T) {
 
 func TestPresence_PolicyPresenceFalse(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode(&config.Server{Channels: config.ChannelConfig{
-		Policies: []config.ChannelPolicyRule{{
+	node := NewNode(&config.Server{Authorizer: config.AuthorizerConfig{
+		Rules: []config.AuthorizerRule{{
 			Pattern:           "nopres.**",
 			ChannelPolicySpec: config.ChannelPolicySpec{Presence: policyBoolPtr(false)},
 		}},
@@ -279,9 +279,9 @@ func TestPresence_SnapshotTruncated(t *testing.T) {
 	for i := 0; i < 300; i++ {
 		session := fmt.Sprintf("preset-%03d", i)
 		require.NoError(t, node.presence.Add(ctx, ch, &PresenceInfo{
-			ClientID:  session,
-			SessionID: session,
-			UserID:    "user-preset",
+			ClientID:    session,
+			SessionID:   session,
+			UserID:      "user-preset",
 			ConnectedAt: int64(i),
 		}))
 	}
@@ -399,7 +399,7 @@ func TestPresence_NoCompanionByDefault(t *testing.T) {
 
 func TestPresence_LegacyCompanionExactOnly(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode(&config.Server{Channels: config.ChannelConfig{
+	node := NewNode(&config.Server{Authorizer: config.AuthorizerConfig{
 		Default: config.ChannelPolicySpec{LegacyPresenceChannel: policyBoolPtr(true)},
 	}})
 	broker := &countingBroker{}

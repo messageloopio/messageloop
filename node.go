@@ -32,10 +32,15 @@ type Node struct {
 	metrics          *Metrics
 	surveys          map[string]*Survey
 	surveyMu         sync.RWMutex
-	acl              *ACLEngine
-	channelPolicy    *ChannelPolicyEngine
-	requireAuth      bool
-	healthCheck      func(context.Context) error
+	// authorizer is the single authorization evaluator; it is never nil
+	// (PR-KA-A4). It replaced the ACL engine and the channel policy engine.
+	authorizer *Authorizer
+	// adminCaps carries the configured admin capability bits: nil
+	// server.grpc_admin.capabilities → DefaultAdminCapabilities; an explicit
+	// empty list → zero.
+	adminCaps   Capability
+	requireAuth bool
+	healthCheck func(context.Context) error
 	// presenceClusterEmitFlag mirrors server.presence.cluster_emit: when true
 	// first-class presence events are published through the broker instead of
 	// being delivered locally (PR-04b). False keeps the PR-04a local-only
@@ -127,36 +132,35 @@ func NewNode(cfg *config.Server) *Node {
 
 	node.broker = NewMemoryBroker(MemoryBrokerOptions{})
 
-	if cfg != nil && len(cfg.ACL.Rules) > 0 {
-		rules := make([]ACLRule, len(cfg.ACL.Rules))
-		for i, r := range cfg.ACL.Rules {
-			rules[i] = ACLRule{
-				ChannelPattern: r.ChannelPattern,
-				AllowSubscribe: r.AllowSubscribe,
-				AllowPublish:   r.AllowPublish,
-				AllowSurvey:    r.AllowSurvey,
-				DenyAll:        r.DenyAll,
+	// The single authorization table. An empty server.authorizer (or a nil
+	// cfg) compiles to the pre-policy defaults (history on, presence on,
+	// survey off, subscribe/publish open), so an unconfigured server behaves
+	// exactly as before. Invalid rule patterns are rejected by
+	// config.Validate; an Authorizer build failure must not take the server
+	// down, so fall back to the empty table.
+	var authzCfg config.AuthorizerConfig
+	if cfg != nil {
+		authzCfg = cfg.Authorizer
+	}
+	authorizer, err := NewAuthorizer(authzCfg)
+	if err != nil {
+		log.WarnContext(context.Background(), "authorizer build failed, falling back to defaults", "error", err)
+		authorizer, _ = NewAuthorizer(config.AuthorizerConfig{})
+	}
+	node.authorizer = authorizer
+
+	// Admin capability bits: omitted capabilities → every closed bit except
+	// pattern.global; an explicit empty list → zero bits (locked admin data
+	// plane). Unknown names are rejected by config.Validate and skipped here.
+	node.adminCaps = DefaultAdminCapabilities
+	if cfg != nil && cfg.GRPCAdmin.Capabilities != nil {
+		node.adminCaps = 0
+		for _, name := range cfg.GRPCAdmin.Capabilities {
+			if cap, ok := ClosedCapabilityNames[name]; ok {
+				node.adminCaps |= cap
 			}
 		}
-		node.acl = NewACLEngine(rules)
 	}
-
-	// Channel policy engine: an empty server.channels (or a nil cfg) compiles
-	// to the pre-policy defaults (history on, presence on, survey off), so an
-	// unconfigured server behaves exactly as before. Invalid durations are
-	// rejected by config.Validate; the engine falls back to defaults with a
-	// warning. An engine build failure (invalid pattern) must not take the
-	// server down, so fall back to the empty engine.
-	channels := config.ChannelConfig{}
-	if cfg != nil {
-		channels = cfg.Channels
-	}
-	engine, err := NewChannelPolicyEngine(channels)
-	if err != nil {
-		log.WarnContext(context.Background(), "channel policy engine build failed, falling back to defaults", "error", err)
-		engine, _ = NewChannelPolicyEngine(config.ChannelConfig{})
-	}
-	node.channelPolicy = engine
 
 	if cfg != nil {
 		node.presenceClusterEmitFlag = cfg.Presence.ClusterEmit
@@ -300,15 +304,64 @@ func (n *Node) SetMetrics(m *Metrics) {
 	n.metrics = m
 }
 
-// ChannelPolicy returns the effective channel policy for ch: the first
-// matching policy rule overlaid on the compiled default. An engine that was
-// never built (should not happen after NewNode) resolves to the pre-policy
-// defaults.
+// ChannelPolicy returns the effective channel policy for ch, resolved by the
+// Authorizer's Effects (server.authorizer table overlay, PR-KA-A4 §5.5).
 func (n *Node) ChannelPolicy(ch string) ChannelPolicy {
-	if n.channelPolicy == nil {
-		return DefaultChannelPolicy()
+	return n.authorizer.Effects(ch)
+}
+
+// userPrincipal builds the principal for an authenticated client user.
+func (n *Node) userPrincipal(userID string) Principal {
+	return Principal{Kind: PrincipalUser, UserID: userID}
+}
+
+// adminPrincipal builds the principal for the server-side admin API
+// (UserID "admin", matching allow lists like today's adminPrincipal).
+func (n *Node) adminPrincipal() Principal {
+	return Principal{Kind: PrincipalAdmin, UserID: adminPrincipal, Caps: n.adminCaps}
+}
+
+// AdminDecide evaluates one action for the admin principal (used by the
+// gRPC admin API: Recover / Presence / Survey gates).
+func (n *Node) AdminDecide(action Action, channel string) Decision {
+	return n.authorizer.Decide(n.adminPrincipal(), action, channel)
+}
+
+// AdminCapabilities returns the configured admin capability bits.
+func (n *Node) AdminCapabilities() Capability {
+	return n.adminCaps
+}
+
+// ReplaceRules swaps the authorizer rule table, then revokes every local
+// subscription whose pattern is no longer allowed (PR-KA-A4 §8.4). Revoked
+// patterns are removed whole — never split into exact channels.
+func (n *Node) ReplaceRules(cfg config.AuthorizerConfig) error {
+	if err := n.authorizer.ReplaceRules(cfg); err != nil {
+		return err
 	}
-	return n.channelPolicy.For(ch)
+	n.hub.mu.RLock()
+	sessions := make([]*Client, 0, len(n.hub.sessions))
+	for _, c := range n.hub.sessions {
+		sessions = append(sessions, c)
+	}
+	n.hub.mu.RUnlock()
+	for _, client := range sessions {
+		client.mu.RLock()
+		channels := make([]string, 0, len(client.subscribedChannels))
+		for ch := range client.subscribedChannels {
+			channels = append(channels, ch)
+		}
+		userID := client.user
+		client.mu.RUnlock()
+		p := Principal{Kind: PrincipalUser, UserID: userID}
+		for _, ch := range n.authorizer.PatternsToRevoke(p, channels) {
+			if err := n.RemoveSubscription(ch, client); err != nil {
+				log.WarnContext(context.Background(), "failed to revoke subscription after rule replacement",
+					"channel", ch, "session", client.SessionID(), "error", err)
+			}
+		}
+	}
+	return nil
 }
 
 // AddClient adds a client session to the node's hub.
@@ -933,6 +986,12 @@ func resultNodeID(result *ClusterCommandResult) string {
 		return ""
 	}
 	return result.NodeID
+}
+
+// CountMatchingSubscribers exposes the cluster-wide matching subscriber count
+// for the admin survey population gate (PR-KA-A4 §7 survey.bypass_gate).
+func (n *Node) CountMatchingSubscribers(ctx context.Context, ch string) (int, error) {
+	return n.countMatchingSubscribers(ctx, ch)
 }
 
 // buildClientSurveyResult assembles the client-facing SurveyResult from the

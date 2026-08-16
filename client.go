@@ -875,9 +875,41 @@ func (c *Client) sendSubscribeRequestError(ctx context.Context, in *clientpb.Inb
 	}))
 }
 
-// checkSubscribeACL evaluates the subscribe ACL for one channel and returns the
-// error envelope to send to the client, or nil when the subscription is allowed.
+// checkSubscribeACL evaluates one subscription through the Authorizer and the
+// proxy (PR-KA-A4 §8.1) and returns the error envelope to send to the client,
+// or nil when the subscription is allowed. Order: routability, static Decide,
+// then the proxy — a proxy approval must never bypass a static deny.
 func (c *Client) checkSubscribeACL(ctx context.Context, in *clientpb.InboundMessage, ch *clientpb.Subscription) *sharedpb.Error {
+	// 1. Routability before authorization: the subscription key must compile
+	// on the live bus (A3). The same code pair as A3: PATTERN_NOT_ROUTABLE /
+	// BAD_REQUEST, and the connection stays up.
+	if _, err := CompileInterest(ch.Channel); err != nil {
+		code := "BAD_REQUEST"
+		if errors.Is(err, ErrPatternNotRoutable) {
+			code = "PATTERN_NOT_ROUTABLE"
+		}
+		return &sharedpb.Error{
+			Code:    code,
+			Type:    "request_error",
+			Message: fmt.Sprintf("cannot subscribe to channel %q: %v", ch.Channel, err),
+		}
+	}
+
+	// 2. Static authorization: language inclusion against the authorizer
+	// rules. This runs before the proxy, so a proxy that allows can never
+	// punch a hole in a static deny.
+	if dec := c.node.authorizer.Decide(c.node.userPrincipal(c.user), ActionSubscribePattern, ch.Channel); !dec.Allow {
+		log.WarnContext(ctx, "ACL denied subscribe", "channel", ch.Channel, "user", c.user, "reason", dec.Reason)
+		return &sharedpb.Error{
+			Code:    "ACL_DENIED",
+			Type:    "acl_error",
+			Message: "subscribe denied by ACL rule",
+		}
+	}
+
+	// 3. Proxy: an additional gate asked only when a route matches. The
+	// proxy may reject this single request, but its approval does not
+	// replace step 2 (no TOCTOU into AllowLang).
 	p := c.node.FindProxy(ch.Channel, "subscribe")
 	if p != nil {
 		aclReq := &proxy.SubscribeAclProxyRequest{
@@ -898,18 +930,6 @@ func (c *Client) checkSubscribeACL(ctx context.Context, in *clientpb.InboundMess
 		if aclResp.Error != nil {
 			log.WarnContext(ctx, "proxy subscribe ACL returned error", "channel", ch.Channel, "error", aclResp.Error)
 			return aclResp.Error
-		}
-		return nil
-	}
-	if c.node.acl != nil {
-		// Built-in ACL check (fallback when no proxy is configured)
-		if !c.node.acl.CanSubscribe(ch.Channel, c.user) {
-			log.WarnContext(ctx, "ACL denied subscribe", "channel", ch.Channel, "user", c.user)
-			return &sharedpb.Error{
-				Code:    "ACL_DENIED",
-				Type:    "acl_error",
-				Message: "subscribe denied by ACL rule",
-			}
 		}
 	}
 	return nil
@@ -1024,14 +1044,15 @@ func (c *Client) handleRPC(ctx context.Context, in *clientpb.InboundMessage, rpc
 			}))
 		}
 
-		// No proxy configured - return echo behavior
+		// No proxy configured: soft failure NO_PROXY (PR-KA-A4 §8.3). The
+		// request is no longer echoed as an RpcReply.
 		if errors.Is(err, proxy.ErrNoProxyFound) {
 			return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
-				out.Envelope = &clientpb.OutboundMessage_RpcReply{
-					RpcReply: &clientpb.RpcReply{
-						RequestId: in.Id,
-						Payload:   rpcReq.Payload,
-						Metadata:  rpcReq.Metadata,
+				out.Envelope = &clientpb.OutboundMessage_Error{
+					Error: &sharedpb.Error{
+						Code:    "NO_PROXY",
+						Type:    "request_error",
+						Message: "no proxy configured for channel/method",
 					},
 				}
 			}))
@@ -1103,7 +1124,24 @@ func (c *Client) handlePublish(ctx context.Context, in *clientpb.InboundMessage,
 		return errors.New("missing channel in publish message")
 	}
 
-	// Proxy ACL check - check if there's a proxy configured for publish ACL
+	// Static authorization first (PR-KA-A4 §8.1): a proxy that allows must
+	// never override a static deny.
+	if dec := c.node.authorizer.Decide(c.node.userPrincipal(c.user), ActionPublish, channel); !dec.Allow {
+		log.WarnContext(ctx, "ACL denied publish", "channel", channel, "user", c.user, "reason", dec.Reason)
+		return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+			out.Envelope = &clientpb.OutboundMessage_Error{
+				Error: &sharedpb.Error{
+					Code:    "ACL_DENIED",
+					Type:    "acl_error",
+					Message: "publish denied by ACL rule",
+				},
+			}
+		}))
+	}
+
+	// Proxy ACL check: an additional gate, asked only when a route matches.
+	// The proxy may reject this single request; its approval cannot bypass
+	// the static Decide above.
 	p := c.node.FindProxy(channel, "publish")
 	if p != nil {
 		aclReq := &proxy.PublishAclProxyRequest{
@@ -1130,20 +1168,6 @@ func (c *Client) handlePublish(ctx context.Context, in *clientpb.InboundMessage,
 			return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 				out.Envelope = &clientpb.OutboundMessage_Error{
 					Error: aclResp.Error,
-				}
-			}))
-		}
-	} else if c.node.acl != nil {
-		// Built-in ACL check (fallback when no proxy is configured)
-		if !c.node.acl.CanPublish(channel, c.user) {
-			log.WarnContext(ctx, "ACL denied publish", "channel", channel, "user", c.user)
-			return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
-				out.Envelope = &clientpb.OutboundMessage_Error{
-					Error: &sharedpb.Error{
-						Code:    "ACL_DENIED",
-						Type:    "acl_error",
-						Message: "publish denied by ACL rule",
-					},
 				}
 			}))
 		}
@@ -1549,13 +1573,16 @@ func (c *Client) handleSurvey(ctx context.Context, in *clientpb.InboundMessage, 
 	if !c.sessionCoversChannel(ch) {
 		return c.sendSurveyError(ctx, in, "PERMISSION_DENIED", "acl_error", "survey denied: channel not covered by session")
 	}
-	pol := c.node.ChannelPolicy(ch)
-	if !pol.Survey {
-		return c.sendSurveyError(ctx, in, "SURVEY_DISABLED", "policy_error", "survey disabled by channel policy")
-	}
-	if c.node.acl != nil && !c.node.acl.CanSurvey(ch, c.user) {
+	// Authorizer decides survey: it already combines the Effects.Survey
+	// gate with the allow_survey rules and deny_all (PR-KA-A4 §8.1).
+	dec := c.node.authorizer.Decide(c.node.userPrincipal(c.user), ActionSurvey, ch)
+	if !dec.Allow {
+		if !dec.Effects.Survey {
+			return c.sendSurveyError(ctx, in, "SURVEY_DISABLED", "policy_error", "survey disabled by channel policy")
+		}
 		return c.sendSurveyError(ctx, in, "PERMISSION_DENIED", "acl_error", "survey denied by ACL rule")
 	}
+	pol := dec.Effects
 	if !c.surveyInFlight.CompareAndSwap(false, true) {
 		return c.sendSurveyError(ctx, in, "RATE_LIMITED", "rate_limit", "a survey is already in flight for this session")
 	}
@@ -1807,18 +1834,19 @@ func (c *Client) handlePresenceQuery(ctx context.Context, in *clientpb.InboundMe
 			}
 		}))
 	}
-	if !c.node.ChannelPolicy(ch).Presence {
-		return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
-			out.Envelope = &clientpb.OutboundMessage_Error{
-				Error: &sharedpb.Error{
-					Code:    "POLICY_DENIED",
-					Type:    "policy_error",
-					Message: "presence query denied by channel policy",
-				},
-			}
-		}))
-	}
-	if c.node.acl != nil && !c.node.acl.CanSubscribe(ch, c.user) {
+	dec := c.node.authorizer.Decide(c.node.userPrincipal(c.user), ActionPresence, ch)
+	if !dec.Allow {
+		if !dec.Effects.Presence {
+			return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+				out.Envelope = &clientpb.OutboundMessage_Error{
+					Error: &sharedpb.Error{
+						Code:    "POLICY_DENIED",
+						Type:    "policy_error",
+						Message: "presence query denied by channel policy",
+					},
+				}
+			}))
+		}
 		return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 			out.Envelope = &clientpb.OutboundMessage_Error{
 				Error: &sharedpb.Error{

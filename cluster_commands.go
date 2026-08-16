@@ -60,13 +60,13 @@ func (n *Node) DisconnectSession(ctx context.Context, sessionID string, disconne
 	return clusterCommandSucceeded(result), err
 }
 
-// adminPrincipal is the fixed ACL identity used for admin API operations
-// (server-side gRPC API). The built-in ACL rules are user-ID based; admin
-// operations are evaluated against this well-known principal.
+// adminPrincipal is the fixed authorization identity used for admin API
+// operations (server-side gRPC API): "admin" matches allow lists exactly like
+// a user ID (PR-KA-A4 §5.3).
 const adminPrincipal = "admin"
 
 // SubscribeSession subscribes a local or remote session to a channel.
-// The channel is checked against the built-in ACL with the admin principal
+// The channel is checked against the Authorizer with the admin principal
 // before any command is dispatched; cluster command handlers trust the
 // initiating node's check.
 func (n *Node) SubscribeSession(ctx context.Context, sessionID, channel string) (bool, error) {
@@ -95,21 +95,25 @@ func (n *Node) UnsubscribeSession(ctx context.Context, sessionID, channel string
 }
 
 // AdminCanSubscribe reports whether the admin API may subscribe a session to
-// channel under the built-in ACL rules (no rules means allowed).
+// channel (PR-KA-A4 §8.4): the key must compile (bare "*"/"**" always fail,
+// even with pattern.global), subscribe.any skips the static allow lists
+// (deny_all still binds), and otherwise the subscribe decision must allow
+// the admin principal.
 func (n *Node) AdminCanSubscribe(channel string) bool {
-	if n.acl == nil {
-		return true
+	if _, err := CompileInterest(channel); err != nil {
+		return false
 	}
-	return n.acl.CanSubscribe(channel, adminPrincipal)
+	p := n.adminPrincipal()
+	if p.Caps&CapSubscribeAny != 0 {
+		return n.authorizer.decideSubscribeSkipAllowLists(channel).Allow
+	}
+	return n.authorizer.Decide(p, ActionSubscribePattern, channel).Allow
 }
 
 // AdminCanPublish reports whether the admin API may publish to channel under
-// the built-in ACL rules (no rules means allowed).
+// the authorizer rules (PR-KA-A4 §8.4).
 func (n *Node) AdminCanPublish(channel string) bool {
-	if n.acl == nil {
-		return true
-	}
-	return n.acl.CanPublish(channel, adminPrincipal)
+	return n.authorizer.Decide(n.adminPrincipal(), ActionPublish, channel).Allow
 }
 
 func (n *Node) dispatchSessionCommand(ctx context.Context, sessionID string, cmd *ClusterCommand) (*ClusterCommandResult, error) {

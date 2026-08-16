@@ -97,11 +97,13 @@ func (m *mockTransport) RemoteAddr() string {
 	return "127.0.0.1:12345"
 }
 
-// probeBroker records every Publish call so tests can assert whether the
-// history-writing path was exercised.
+// probeBroker records every Publish / History call so tests can assert
+// whether the data plane was exercised.
 type probeBroker struct {
 	publishCalls   int
 	publishChannel string
+	historyCalls   int
+	historyChannel string
 }
 
 func (b *probeBroker) Start(ctx context.Context, handler messageloop.PublicationHandler) error {
@@ -121,7 +123,9 @@ func (b *probeBroker) Publish(ch string, pub *messageloop.Publication) (uint64, 
 func (b *probeBroker) PublishTransient(ch string, pub *messageloop.Publication) error { return nil }
 
 func (b *probeBroker) History(ch string, sinceOffset uint64, limit int) (*messageloop.HistoryPage, error) {
-	return nil, nil
+	b.historyCalls++
+	b.historyChannel = ch
+	return &messageloop.HistoryPage{}, nil
 }
 
 func policyBoolPtr(v bool) *bool { return &v }
@@ -157,8 +161,8 @@ func transportContainsText(transport *captureTransport, text string) bool {
 func TestAPIServiceHandler_AddHistoryDeniedByPolicy(t *testing.T) {
 	ctx := context.Background()
 	node := messageloop.NewNode(&config.Server{
-		Channels: config.ChannelConfig{
-			Policies: []config.ChannelPolicyRule{
+		Authorizer: config.AuthorizerConfig{
+			Rules: []config.AuthorizerRule{
 				{Pattern: "game.tick.**", ChannelPolicySpec: config.ChannelPolicySpec{TransientOnly: policyBoolPtr(true)}},
 				{Pattern: "no-history.**", ChannelPolicySpec: config.ChannelPolicySpec{History: policyBoolPtr(false)}},
 			},
@@ -193,8 +197,8 @@ func TestAPIServiceHandler_AddHistoryDeniedByPolicy(t *testing.T) {
 	// semantics), and the broker is still never called.
 	probe2 := &probeBroker{}
 	node2 := messageloop.NewNode(&config.Server{
-		Channels: config.ChannelConfig{
-			Policies: []config.ChannelPolicyRule{
+		Authorizer: config.AuthorizerConfig{
+			Rules: []config.AuthorizerRule{
 				{Pattern: "game.tick.**", ChannelPolicySpec: config.ChannelPolicySpec{TransientOnly: policyBoolPtr(true)}},
 			},
 		},
@@ -225,8 +229,8 @@ func TestAPIServiceHandler_AddHistoryDeniedByPolicy(t *testing.T) {
 func TestAPIServiceHandler_PublishToChannelsWithoutAddHistoryOnDisabledChannel(t *testing.T) {
 	ctx := context.Background()
 	node := messageloop.NewNode(&config.Server{
-		Channels: config.ChannelConfig{
-			Policies: []config.ChannelPolicyRule{
+		Authorizer: config.AuthorizerConfig{
+			Rules: []config.AuthorizerRule{
 				{Pattern: "game.tick.**", ChannelPolicySpec: config.ChannelPolicySpec{TransientOnly: policyBoolPtr(true)}},
 			},
 		},
@@ -733,13 +737,16 @@ func TestAPIServiceHandler_GetHistory_ReturnsContentTypeAndId(t *testing.T) {
 	require.Equal(t, `{"k":"v"}`, p.Payload.GetText())
 	require.NotZero(t, p.Time)
 }
-// Task 13a: admin subscribe/publish must respect the built-in ACL rules.
+
+// Task 13a: admin subscribe/publish must respect the authorizer rules.
 func TestAPIServiceHandler_Subscribe_ACLDenied(t *testing.T) {
 	ctx := context.Background()
 	node := messageloop.NewNode(&config.Server{
-		ACL: config.ACLConfig{Rules: []config.ACLRule{
-			{ChannelPattern: "private.*", AllowSubscribe: []string{"alice"}},
-		}},
+		Authorizer: config.AuthorizerConfig{
+			Rules: []config.AuthorizerRule{
+				{Pattern: "private.*", AllowSubscribe: []string{"alice"}},
+			},
+		},
 	})
 	handler := NewAPIServiceHandler(node)
 
@@ -764,9 +771,11 @@ func TestAPIServiceHandler_Subscribe_ACLDenied(t *testing.T) {
 func TestAPIServiceHandler_Publish_ACLDenied(t *testing.T) {
 	ctx := context.Background()
 	node := messageloop.NewNode(&config.Server{
-		ACL: config.ACLConfig{Rules: []config.ACLRule{
-			{ChannelPattern: "private.*", AllowPublish: []string{"bob"}},
-		}},
+		Authorizer: config.AuthorizerConfig{
+			Rules: []config.AuthorizerRule{
+				{Pattern: "private.*", AllowPublish: []string{"bob"}},
+			},
+		},
 	})
 	handler := NewAPIServiceHandler(node)
 
@@ -1009,4 +1018,146 @@ func TestAdmin_SubscribeByUser(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, unsubResp.Results["user.sub.channel"])
 	require.Zero(t, node.Hub().NumSubscribers("user.sub.channel"))
+}
+
+// --- PR-KA-A4 §9.9: capability gates ---
+
+// TestAdmin_GetHistoryRequiresCapability verifies that without history.read
+// GetHistory fails with PERMISSION_DENIED and the broker History is never
+// called (spy broker).
+func TestAdmin_GetHistoryRequiresCapability(t *testing.T) {
+	ctx := context.Background()
+	node := messageloop.NewNode(&config.Server{
+		GRPCAdmin: config.GRPCAdmin{Capabilities: []string{"channels.list"}},
+	})
+	probe := &probeBroker{}
+	node.SetBroker(probe)
+	handler := NewAPIServiceHandler(node)
+
+	_, err := handler.GetHistory(ctx, &serverpb.GetHistoryRequest{Channel: "cap.history.ch"})
+	require.Equal(t, codes.PermissionDenied, status.Code(err), "missing history.read must fail softly")
+	require.Zero(t, probe.historyCalls, "the broker must never be touched without history.read")
+}
+
+// TestAdmin_GetHistoryDefaultCapabilities verifies that omitted capabilities
+// keep GetHistory usable (the default bits include history.read).
+func TestAdmin_GetHistoryDefaultCapabilities(t *testing.T) {
+	ctx := context.Background()
+	node := messageloop.NewNode(nil)
+	probe := &probeBroker{}
+	node.SetBroker(probe)
+	handler := NewAPIServiceHandler(node)
+
+	resp, err := handler.GetHistory(ctx, &serverpb.GetHistoryRequest{Channel: "cap.history.ch"})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, 1, probe.historyCalls, "the default bits must include history.read")
+}
+
+// TestAdmin_GetHistoryExplicitEmptyCapabilities verifies that an explicit
+// empty capability list locks the admin data plane: GetHistory is denied and
+// the broker is never touched.
+func TestAdmin_GetHistoryExplicitEmptyCapabilities(t *testing.T) {
+	ctx := context.Background()
+	node := messageloop.NewNode(&config.Server{
+		GRPCAdmin: config.GRPCAdmin{Capabilities: []string{}},
+	})
+	probe := &probeBroker{}
+	node.SetBroker(probe)
+	handler := NewAPIServiceHandler(node)
+
+	_, err := handler.GetHistory(ctx, &serverpb.GetHistoryRequest{Channel: "cap.history.ch"})
+	require.Equal(t, codes.PermissionDenied, status.Code(err))
+	require.Zero(t, probe.historyCalls)
+
+	// GetPresence / GetChannels are locked too.
+	_, err = handler.GetPresence(ctx, &serverpb.GetPresenceRequest{Channel: "cap.presence.ch"})
+	require.Equal(t, codes.PermissionDenied, status.Code(err), "presence.read missing")
+	_, err = handler.GetChannels(ctx, &serverpb.GetChannelsRequest{})
+	require.Equal(t, codes.PermissionDenied, status.Code(err), "channels.list missing")
+}
+
+// TestAdmin_GetHistoryDecideDenied verifies GetHistory also requires
+// Decide(admin, ActionRecover, ch): a deny_all rule on the channel fails the
+// read before the broker is touched, even with history.read held.
+func TestAdmin_GetHistoryDecideDenied(t *testing.T) {
+	ctx := context.Background()
+	node := messageloop.NewNode(&config.Server{
+		Authorizer: config.AuthorizerConfig{
+			Rules: []config.AuthorizerRule{{Pattern: "secret.**", DenyAll: true}},
+		},
+	})
+	probe := &probeBroker{}
+	node.SetBroker(probe)
+	handler := NewAPIServiceHandler(node)
+
+	_, err := handler.GetHistory(ctx, &serverpb.GetHistoryRequest{Channel: "secret.room"})
+	require.Equal(t, codes.PermissionDenied, status.Code(err))
+	require.Zero(t, probe.historyCalls, "deny_all must fail GetHistory before the broker is read")
+
+	// A non-denied channel is served.
+	resp, err := handler.GetHistory(ctx, &serverpb.GetHistoryRequest{Channel: "open.room"})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, 1, probe.historyCalls)
+}
+
+// TestAdmin_GetPresenceDecideDenied verifies GetPresence requires
+// Decide(admin, ActionPresence, ch): presence=false channels and deny_all
+// channels fail softly.
+func TestAdmin_GetPresenceDecideDenied(t *testing.T) {
+	ctx := context.Background()
+	node := messageloop.NewNode(&config.Server{
+		Authorizer: config.AuthorizerConfig{
+			Rules: []config.AuthorizerRule{
+				{Pattern: "secret.**", DenyAll: true},
+				{Pattern: "nopres.**", ChannelPolicySpec: config.ChannelPolicySpec{Presence: policyBoolPtr(false)}},
+			},
+		},
+	})
+	handler := NewAPIServiceHandler(node)
+
+	_, err := handler.GetPresence(ctx, &serverpb.GetPresenceRequest{Channel: "secret.room"})
+	require.Equal(t, codes.PermissionDenied, status.Code(err), "deny_all must fail GetPresence")
+	_, err = handler.GetPresence(ctx, &serverpb.GetPresenceRequest{Channel: "nopres.room"})
+	require.Equal(t, codes.PermissionDenied, status.Code(err), "presence=false must fail GetPresence")
+}
+
+// TestAdmin_PublishSessionRequiresCapability verifies session/user
+// destinations are capability-gated (session.act / user.fanout).
+func TestAdmin_PublishSessionRequiresCapability(t *testing.T) {
+	ctx := context.Background()
+	node := messageloop.NewNode(&config.Server{
+		GRPCAdmin: config.GRPCAdmin{Capabilities: []string{"user.fanout"}},
+	})
+	handler := NewAPIServiceHandler(node)
+
+	_, err := handler.Publish(ctx, &serverpb.PublishRequest{
+		RequestId: uuid.NewString(),
+		Publications: []*serverpb.Publication{
+			{
+				Id: "no-session-act",
+				Destination: &serverpb.Publication_Destination{
+					Sessions: []string{"sess-x"},
+				},
+				Payload: &sharedpb.Payload{Data: &sharedpb.Payload_Text{Text: "x"}},
+			},
+		},
+	})
+	require.Equal(t, codes.PermissionDenied, status.Code(err), "session publish requires session.act")
+
+	// user.fanout without session.act is not enough for user destinations.
+	_, err = handler.Publish(ctx, &serverpb.PublishRequest{
+		RequestId: uuid.NewString(),
+		Publications: []*serverpb.Publication{
+			{
+				Id: "no-session-act-user",
+				Destination: &serverpb.Publication_Destination{
+					Users: []string{"U"},
+				},
+				Payload: &sharedpb.Payload{Data: &sharedpb.Payload_Text{Text: "x"}},
+			},
+		},
+	})
+	require.Equal(t, codes.PermissionDenied, status.Code(err), "user fanout still delivers per-session")
 }

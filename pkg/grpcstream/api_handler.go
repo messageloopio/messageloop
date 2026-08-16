@@ -26,6 +26,26 @@ func NewAPIServiceHandler(node *messageloop.Node) serverpb.APIServiceServer {
 func (h *apiServiceHandler) Publish(ctx context.Context, req *serverpb.PublishRequest) (*serverpb.PublishResponse, error) {
 	log.InfoContext(ctx, "server side API Publish", "request_id", req.RequestId)
 
+	// Capability gates (PR-KA-A4 §7): per-session delivery needs session.act;
+	// per-user expansion needs user.fanout on top. A missing bit fails the
+	// whole RPC with PERMISSION_DENIED before any delivery.
+	for _, pub := range req.Publications {
+		dest := pub.GetDestination()
+		if dest == nil {
+			continue
+		}
+		if len(dest.Sessions) > 0 {
+			if err := h.requireAdminCaps(messageloop.CapSessionAct, "publish to sessions"); err != nil {
+				return nil, err
+			}
+		}
+		if len(dest.Users) > 0 {
+			if err := h.requireAdminCaps(messageloop.CapUserFanout|messageloop.CapSessionAct, "publish to users"); err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	// Empty user IDs inside destination.users are a client error: reject the
 	// whole request before any scanning happens (anonymous connections are
 	// never addressable by the user-based API).
@@ -131,6 +151,23 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverpb.PublishRe
 func (h *apiServiceHandler) Survey(ctx context.Context, req *serverpb.SurveyRequest) (*serverpb.SurveyResponse, error) {
 	log.InfoContext(ctx, "server side API Survey", "channel", req.Channel, "request_id", req.RequestId)
 
+	// Without survey.bypass_gate the Admin survey runs through the same
+	// gates as a client survey: the Survey decision (Effects.Survey +
+	// allow_survey / deny_all) and the population cap (PR-KA-A4 §7). With
+	// the bit, today's gate-free behavior is preserved.
+	if h.node.AdminCapabilities()&messageloop.CapSurveyBypassGate == 0 {
+		if !h.node.AdminDecide(messageloop.ActionSurvey, req.Channel).Allow {
+			return nil, status.Error(codes.PermissionDenied, "survey denied by ACL rule")
+		}
+		total, err := h.node.CountMatchingSubscribers(ctx, req.Channel)
+		if err != nil {
+			return nil, err
+		}
+		if limit := h.node.ChannelPolicy(req.Channel).MaxSurveySubscribers; limit > 0 && total > limit {
+			return nil, status.Error(codes.ResourceExhausted, "survey refused: too many subscribers")
+		}
+	}
+
 	timeout := time.Duration(req.TimeoutMs) * time.Millisecond
 	payload, err := payloadBytes(req.Payload)
 	if err != nil {
@@ -172,6 +209,18 @@ func (h *apiServiceHandler) Survey(ctx context.Context, req *serverpb.SurveyRequ
 func (h *apiServiceHandler) Disconnect(ctx context.Context, req *serverpb.DisconnectRequest) (*serverpb.DisconnectResponse, error) {
 	log.InfoContext(ctx, "server side API Disconnect", "sessions", req.Sessions, "users", req.Users, "code", req.Code, "reason", req.Reason)
 
+	// Capability gates (PR-KA-A4 §7).
+	if len(req.Sessions) > 0 {
+		if err := h.requireAdminCaps(messageloop.CapSessionAct, "disconnect sessions"); err != nil {
+			return nil, err
+		}
+	}
+	if len(req.Users) > 0 {
+		if err := h.requireAdminCaps(messageloop.CapUserFanout|messageloop.CapSessionAct, "disconnect users"); err != nil {
+			return nil, err
+		}
+	}
+
 	for _, userID := range req.Users {
 		if userID == "" {
 			return nil, status.Error(codes.InvalidArgument, "users must not contain an empty user_id")
@@ -205,6 +254,18 @@ func (h *apiServiceHandler) Subscribe(ctx context.Context, req *serverpb.Subscri
 	if req.SessionId == "" && req.UserId == "" {
 		return nil, status.Error(codes.InvalidArgument, "session_id and user_id must not both be empty")
 	}
+	// Capability gates (PR-KA-A4 §7): proxied subscription is a session act;
+	// per-user expansion additionally needs user.fanout.
+	if req.SessionId != "" {
+		if err := h.requireAdminCaps(messageloop.CapSessionAct, "subscribe session"); err != nil {
+			return nil, err
+		}
+	}
+	if req.UserId != "" {
+		if err := h.requireAdminCaps(messageloop.CapUserFanout|messageloop.CapSessionAct, "subscribe user"); err != nil {
+			return nil, err
+		}
+	}
 
 	sessions := h.unionSessions(ctx, []string{req.SessionId}, []string{req.UserId}, "subscribe")
 	results := make(map[string]bool)
@@ -235,6 +296,17 @@ func (h *apiServiceHandler) Unsubscribe(ctx context.Context, req *serverpb.Unsub
 
 	if req.SessionId == "" && req.UserId == "" {
 		return nil, status.Error(codes.InvalidArgument, "session_id and user_id must not both be empty")
+	}
+	// Capability gates (PR-KA-A4 §7).
+	if req.SessionId != "" {
+		if err := h.requireAdminCaps(messageloop.CapSessionAct, "unsubscribe session"); err != nil {
+			return nil, err
+		}
+	}
+	if req.UserId != "" {
+		if err := h.requireAdminCaps(messageloop.CapUserFanout|messageloop.CapSessionAct, "unsubscribe user"); err != nil {
+			return nil, err
+		}
 	}
 
 	sessions := h.unionSessions(ctx, []string{req.SessionId}, []string{req.UserId}, "unsubscribe")
@@ -292,6 +364,15 @@ func (h *apiServiceHandler) unionSessions(ctx context.Context, explicit []string
 func (h *apiServiceHandler) GetPresence(ctx context.Context, req *serverpb.GetPresenceRequest) (*serverpb.GetPresenceResponse, error) {
 	log.InfoContext(ctx, "server side API GetPresence", "channel", req.Channel)
 
+	// Capability + Decide gates (PR-KA-A4 §7): presence.read is required and
+	// the channel must be allowed for the admin principal.
+	if err := h.requireAdminCaps(messageloop.CapPresenceRead, "GetPresence"); err != nil {
+		return nil, err
+	}
+	if !h.node.AdminDecide(messageloop.ActionPresence, req.Channel).Allow {
+		return nil, status.Error(codes.PermissionDenied, "presence denied by ACL rule")
+	}
+
 	presenceMap, err := h.node.Presence(ctx, req.Channel)
 	if err != nil {
 		return nil, err
@@ -300,13 +381,33 @@ func (h *apiServiceHandler) GetPresence(ctx context.Context, req *serverpb.GetPr
 	clients := make(map[string]*serverpb.PresenceInfo, len(presenceMap))
 	for id, info := range presenceMap {
 		clients[id] = &serverpb.PresenceInfo{
-			ClientId:        info.ClientID,
-			UserId:          info.UserID,
-			ConnectedAt:     info.ConnectedAt,
+			ClientId:    info.ClientID,
+			UserId:      info.UserID,
+			ConnectedAt: info.ConnectedAt,
 			// SessionId falls back to the legacy client_id key so old
 			// Redis records without the new field still report it.
 			SessionId:       firstNonEmpty(info.SessionID, info.ClientID),
 			ConnectClientId: info.ConnectClientID,
+		}
+	}
+
+	// Without presence.large_snapshot the admin snapshot is truncated to the
+	// channel policy cap like the client path; with the bit it stays full
+	// (PR-KA-A4 §7).
+	if h.node.AdminCapabilities()&messageloop.CapPresenceLargeSnapshot == 0 {
+		limit := messageloop.MaxPresenceSnapshotClients
+		if pol := h.node.ChannelPolicy(req.Channel); pol.PresenceSnapshotLimit > 0 {
+			limit = pol.PresenceSnapshotLimit
+		}
+		if len(clients) > limit {
+			keys := make([]string, 0, len(clients))
+			for id := range clients {
+				keys = append(keys, id)
+			}
+			sort.Strings(keys)
+			for _, id := range keys[limit:] {
+				delete(clients, id)
+			}
 		}
 	}
 
@@ -324,6 +425,17 @@ func firstNonEmpty(values ...string) string {
 
 func (h *apiServiceHandler) GetHistory(ctx context.Context, req *serverpb.GetHistoryRequest) (*serverpb.GetHistoryResponse, error) {
 	log.InfoContext(ctx, "server side API GetHistory", "channel", req.Channel, "since_offset", req.SinceOffset, "limit", req.Limit)
+
+	// Capability + Decide gates (PR-KA-A4 §7): history.read is required and
+	// the channel must allow Recover for the admin principal (Effects.Recover
+	// plus deny_all; transient channels are rejected). A missing bit must not
+	// touch the broker at all.
+	if err := h.requireAdminCaps(messageloop.CapHistoryRead, "GetHistory"); err != nil {
+		return nil, err
+	}
+	if !h.node.AdminDecide(messageloop.ActionRecover, req.Channel).Allow {
+		return nil, status.Error(codes.PermissionDenied, "history denied by ACL rule")
+	}
 
 	page, err := h.node.Broker().History(req.Channel, req.SinceOffset, int(req.Limit))
 	if err != nil {
@@ -353,6 +465,11 @@ func (h *apiServiceHandler) GetHistory(ctx context.Context, req *serverpb.GetHis
 func (h *apiServiceHandler) GetChannels(ctx context.Context, req *serverpb.GetChannelsRequest) (*serverpb.GetChannelsResponse, error) {
 	log.InfoContext(ctx, "server side API GetChannels")
 
+	// Capability gate (PR-KA-A4 §7): channels.list is required.
+	if err := h.requireAdminCaps(messageloop.CapChannelsList, "GetChannels"); err != nil {
+		return nil, err
+	}
+
 	activeChannels, err := h.node.Channels(ctx)
 	if err != nil {
 		return nil, err
@@ -374,4 +491,14 @@ func payloadBytes(payload *sharedpb.Payload) ([]byte, error) {
 		return nil, err
 	}
 	return pub.Payload, nil
+}
+
+// requireAdminCaps fails the RPC with PERMISSION_DENIED when the configured
+// admin capabilities miss any of the required bits (PR-KA-A4 §7). Missing
+// bits fail softly; nothing is read or written.
+func (h *apiServiceHandler) requireAdminCaps(bits messageloop.Capability, what string) error {
+	if h.node.AdminCapabilities()&bits != bits {
+		return status.Errorf(codes.PermissionDenied, "%s requires admin capability", what)
+	}
+	return nil
 }

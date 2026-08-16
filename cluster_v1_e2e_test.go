@@ -183,8 +183,10 @@ func TestClientSurvey_AggregatesAcrossRedisNodes(t *testing.T) {
 
 	serverCfg := &config.Server{
 		RequireAuth: true,
-		Channels:    config.ChannelConfig{Default: config.ChannelPolicySpec{Survey: testBoolPtr(true)}},
-		ACL:         config.ACLConfig{Rules: []config.ACLRule{{ChannelPattern: "csurvey.**", AllowSurvey: []string{"*"}}}},
+		Authorizer: config.AuthorizerConfig{
+			Default: config.ChannelPolicySpec{Survey: testBoolPtr(true)},
+			Rules:   []config.AuthorizerRule{{Pattern: "csurvey.**", AllowSurvey: []string{"*"}}},
+		},
 	}
 	nodeA := newClusterRedisTestNodeWithConfig(t, ctx, redisCfg, "node-a", serverCfg)
 	nodeB := newClusterRedisTestNodeWithConfig(t, ctx, redisCfg, "node-b", serverCfg)

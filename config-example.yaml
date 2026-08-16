@@ -8,6 +8,18 @@ server:
     # tls:
     #   cert_file: "./certs/admin.crt"
     #   key_file: "./certs/admin.key"
+    # capabilities:          # Admin capability bits (PR-KA-A4). Omitted =
+    #                        # every closed bit except pattern.global.
+    #   - history.read
+    #   - presence.read
+    #   - channels.list
+    #   - session.act
+    #   - user.fanout
+    #   - subscribe.any
+    #   - presence.large_snapshot
+    #   - survey.bypass_gate
+    # Explicitly empty [] locks the admin data plane (no history/presence/
+    # channels reads, no session/user operations). Unknown names fail Validate.
   heartbeat:
     idle_timeout: "300s"  # Close idle client connections after this duration.
                           # "" or parse failure = 300s; "0s" = never kick for idle.
@@ -26,50 +38,42 @@ server:
     max_subscriptions_per_client: 0   # 0 = unlimited
     max_publishes_per_second: 0       # 0 = unlimited
     max_message_size: 65536           # bytes, 0 = default
-  acl:
+  # The single authorization table (PR-KA-A4). Pattern language is the
+  # subscription key language: "*" = one segment, "**" = only the final
+  # segment; the literal prefix must not be empty. deny_all denies every
+  # action on the pattern; a nil allow list does not constrain the action;
+  # an empty list denies it; "*" allows any authenticated user.
+  # Effects overlay in table order: generic rules first, specific rules last.
+  # Unset = subscribe/publish open, survey off, history/presence on.
+  authorizer:
+    default:                    # Base Effects for every channel
+      history: true
+      presence: true
+      recover: true
+      survey: false             # client survey off by default (KD-6)
+      # history_size: 0         # 0 = broker global (memory 256 / redis stream_max_length)
+      # history_ttl: ""         # empty = broker global
+      # max_survey_subscribers: 256
+      # max_survey_timeout: "5s"
+      # presence_snapshot_limit: 256
+      # legacy_presence_channel: false
     rules:
-      - channel_pattern: "chat.public.*"
+      - pattern: "chat.public.*"
         allow_subscribe: ["*"]
         allow_publish: ["alice", "bob"]
-        # allow_survey: ["*"]   # PR-07: users allowed to initiate client surveys
-                                # on matching channels. Unset = survey denied
-                                # (CanSurvey defaults to deny), even when the
-                                # channel policy sets survey: true.
-      - channel_pattern: "chat.private.*"
+      - pattern: "chat.private.*"
         deny_all: true
+      # - pattern: "game.tick.**"   # game ticks: forced transient
+      #   transient_only: true
+      #   presence: false
+      # - pattern: "csurvey.**"     # open client survey on a prefix
+      #   allow_survey: ["*"]
+      #   survey: true
   # presence:
   #   cluster_emit: false   # Process-wide presence switch (not a channel policy).
   #                         # true = publish join/leave through the broker so other
   #                         # nodes deliver them. Change to true only after EVERY node
   #                         # is on PR-04a+; older nodes deliver these frames as chat.
-  # Channel prefix policies: first-match (more specific patterns first).
-  # Unset = the compiled default below (history/presence on, survey off).
-  # NOTE: policy matching is first-match, while ACL rules are last-write-wins.
-  # channels:
-  #   default:
-  #     history: true
-  #     history_size: 0            # 0 = broker global (memory 256 / redis stream_max_length)
-  #     history_ttl: ""            # empty = broker global; the memory broker ignores it with a warning
-  #     presence: true
-  #     recover: true
-  #     survey: false              # client survey off by default (KD-6)
-  #     max_survey_subscribers: 256
-  #     max_survey_timeout: "5s"
-  #     legacy_presence_channel: false
-  #     presence_snapshot_limit: 256
-  #   policies:
-  #     - pattern: "game.tick.**"  # game ticks: forced transient, never written to history
-  #       history: false
-  #       presence: false
-  #       recover: false
-  #       survey: false
-  #       transient_only: true
-  #     - pattern: "im.**"         # IM: large per-channel history (use the Redis broker)
-  #       history: true
-  #       history_size: 5000
-  #       presence: true
-  #       recover: true
-  #       survey: false
 
 transport:
   websocket:

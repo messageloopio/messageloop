@@ -151,9 +151,9 @@ func TestClientSession_HandleMessage_Publish_JSONPayload(t *testing.T) {
 func TestClientSession_HandleMessage_Connect_ACLDeniedSubscription(t *testing.T) {
 	ctx := context.Background()
 	node := NewNode(&config.Server{
-		ACL: config.ACLConfig{
-			Rules: []config.ACLRule{
-				{ChannelPattern: "private.*", DenyAll: true},
+		Authorizer: config.AuthorizerConfig{
+			Rules: []config.AuthorizerRule{
+				{Pattern: "private.*", DenyAll: true},
 			},
 		},
 	})
@@ -198,6 +198,129 @@ func TestClientSession_HandleMessage_Connect_ACLDeniedSubscription(t *testing.T)
 	assert.Len(t, connected.GetSubscriptions(), 1)
 	assert.Equal(t, "public.room", connected.GetSubscriptions()[0].Channel)
 }
+
+// --- PR-KA-A4 §9.7: proxy approval must not bypass static deny ---
+
+// TestClientSession_Subscribe_ProxyAllowDoesNotBypassStaticDeny verifies
+// that a proxy which approves a subscription cannot punch a hole in a static
+// deny_all rule: the client still receives ACL_DENIED, nothing is subscribed
+// and the connection stays up.
+func TestClientSession_Subscribe_ProxyAllowDoesNotBypassStaticDeny(t *testing.T) {
+	ctx := context.Background()
+	node := NewNode(&config.Server{
+		Authorizer: config.AuthorizerConfig{
+			Rules: []config.AuthorizerRule{
+				{Pattern: "secret.**", DenyAll: true},
+			},
+		},
+	})
+	// A proxy route that matches secret.* for "subscribe" and always allows.
+	require.NoError(t, node.AddProxy(&connectAuthProxyStub{}, "secret.*", "subscribe"))
+
+	transport := &capturingTransport{}
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
+	require.NoError(t, err)
+	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
+		Id:       "connect-1",
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{}},
+	}))
+	transport.messages = nil
+
+	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
+		Id: "sub-1",
+		Envelope: &clientpb.InboundMessage_Subscribe{
+			Subscribe: &clientpb.Subscribe{
+				Subscriptions: []*clientpb.Subscription{{Channel: "secret.1"}},
+			},
+		},
+	}))
+
+	require.Equal(t, 2, transport.getMessageCount(), "the ACL error followed by the (empty) SubscribeAck")
+	var out clientpb.OutboundMessage
+	require.NoError(t, (JSONMarshaler{}).Unmarshal(transport.getMessage(0), &out))
+	errObj := out.GetError()
+	require.NotNil(t, errObj, "the proxy approval must not bypass the static deny")
+	assert.Equal(t, "ACL_DENIED", errObj.Code)
+	assert.Equal(t, "acl_error", errObj.Type)
+	assert.Zero(t, node.Hub().NumSubscribers("secret.1"), "the denied channel must not be subscribed")
+	require.False(t, transport.isClosed(), "a denied subscribe must not disconnect")
+}
+
+// TestClientSession_Subscribe_ProxyDenyAfterStaticAllow verifies the proxy
+// still works as an additional gate: a static allow followed by a proxy deny
+// rejects the single request.
+func TestClientSession_Subscribe_ProxyDenyAfterStaticAllow(t *testing.T) {
+	ctx := context.Background()
+	node := NewNode(nil)
+	require.NoError(t, node.AddProxy(&denyingACLProxyStub{}, "rpc.*", "subscribe"))
+
+	transport := &capturingTransport{}
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
+	require.NoError(t, err)
+	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
+		Id:       "connect-1",
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{}},
+	}))
+	transport.messages = nil
+
+	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
+		Id: "sub-1",
+		Envelope: &clientpb.InboundMessage_Subscribe{
+			Subscribe: &clientpb.Subscribe{
+				Subscriptions: []*clientpb.Subscription{{Channel: "rpc.gate"}},
+			},
+		},
+	}))
+
+	require.Equal(t, 2, transport.getMessageCount(), "the proxy error followed by the (empty) SubscribeAck")
+	var out clientpb.OutboundMessage
+	require.NoError(t, (JSONMarshaler{}).Unmarshal(transport.getMessage(0), &out))
+	errObj := out.GetError()
+	require.NotNil(t, errObj)
+	assert.Equal(t, "RPC_GATE_DENIED", errObj.Code, "the proxy error must pass through")
+	assert.Zero(t, node.Hub().NumSubscribers("rpc.gate"))
+}
+
+// denyingACLProxyStub rejects every subscribe ACL with a fixed error.
+type denyingACLProxyStub struct{}
+
+func (m *denyingACLProxyStub) RPC(context.Context, *proxy.RPCProxyRequest) (*proxy.RPCProxyResponse, error) {
+	return nil, nil
+}
+
+func (m *denyingACLProxyStub) Authenticate(context.Context, *proxy.AuthenticateProxyRequest) (*proxy.AuthenticateProxyResponse, error) {
+	return &proxy.AuthenticateProxyResponse{}, nil
+}
+
+func (m *denyingACLProxyStub) SubscribeAcl(context.Context, *proxy.SubscribeAclProxyRequest) (*proxy.SubscribeAclProxyResponse, error) {
+	return &proxy.SubscribeAclProxyResponse{
+		Error: &sharedpb.Error{Code: "RPC_GATE_DENIED", Type: "acl_error", Message: "denied by gate"},
+	}, nil
+}
+
+func (m *denyingACLProxyStub) PublishAcl(context.Context, *proxy.PublishAclProxyRequest) (*proxy.PublishAclProxyResponse, error) {
+	return &proxy.PublishAclProxyResponse{}, nil
+}
+
+func (m *denyingACLProxyStub) OnConnected(context.Context, *proxy.OnConnectedProxyRequest) (*proxy.OnConnectedProxyResponse, error) {
+	return &proxy.OnConnectedProxyResponse{}, nil
+}
+
+func (m *denyingACLProxyStub) OnSubscribed(context.Context, *proxy.OnSubscribedProxyRequest) (*proxy.OnSubscribedProxyResponse, error) {
+	return &proxy.OnSubscribedProxyResponse{}, nil
+}
+
+func (m *denyingACLProxyStub) OnUnsubscribed(context.Context, *proxy.OnUnsubscribedProxyRequest) (*proxy.OnUnsubscribedProxyResponse, error) {
+	return &proxy.OnUnsubscribedProxyResponse{}, nil
+}
+
+func (m *denyingACLProxyStub) OnDisconnected(context.Context, *proxy.OnDisconnectedProxyRequest) (*proxy.OnDisconnectedProxyResponse, error) {
+	return &proxy.OnDisconnectedProxyResponse{}, nil
+}
+
+func (m *denyingACLProxyStub) Name() string { return "denying-acl-stub" }
+
+func (m *denyingACLProxyStub) Close() error { return nil }
 
 // --- P0-5: per-client subscription limit on connect ---
 
@@ -1093,6 +1216,7 @@ func TestClientSession_LocalResume_MetricsBalanced(t *testing.T) {
 	require.NoError(t, clientB.Close(Disconnect{}))
 	require.Equal(t, float64(0), testutil.ToFloat64(metrics.ConnectionsTotal.WithLabelValues("ws")))
 }
+
 // Task 12: connect-time recovery must preserve the original payload type: a
 // text message recovered from history arrives as Payload_Text, not Binary.
 func TestClient_Recovery_PreservesPayloadType(t *testing.T) {
@@ -1699,11 +1823,11 @@ type failStartBroker struct{}
 func (b *failStartBroker) Start(context.Context, PublicationHandler) error {
 	return errors.New("redis connection refused")
 }
-func (b *failStartBroker) Ready() <-chan struct{} { return make(chan struct{}) }
-func (b *failStartBroker) Subscribe(string) error { return nil }
-func (b *failStartBroker) Unsubscribe(string) error { return nil }
-func (b *failStartBroker) Publish(string, *Publication) (uint64, error) { return 0, nil }
-func (b *failStartBroker) PublishTransient(string, *Publication) error { return nil }
+func (b *failStartBroker) Ready() <-chan struct{}                            { return make(chan struct{}) }
+func (b *failStartBroker) Subscribe(string) error                            { return nil }
+func (b *failStartBroker) Unsubscribe(string) error                          { return nil }
+func (b *failStartBroker) Publish(string, *Publication) (uint64, error)      { return 0, nil }
+func (b *failStartBroker) PublishTransient(string, *Publication) error       { return nil }
 func (b *failStartBroker) History(string, uint64, int) (*HistoryPage, error) { return nil, nil }
 
 func TestNode_Run_BrokerStartFailureReturnsError(t *testing.T) {
@@ -1740,9 +1864,9 @@ func TestClient_SubscribeLimit_IgnoresDuplicatesAndACLDenied(t *testing.T) {
 	ctx := context.Background()
 	node := NewNode(&config.Server{
 		Limits: config.Limits{MaxSubscriptionsPerClient: 2},
-		ACL: config.ACLConfig{
-			Rules: []config.ACLRule{
-				{ChannelPattern: "private.*", DenyAll: true},
+		Authorizer: config.AuthorizerConfig{
+			Rules: []config.AuthorizerRule{
+				{Pattern: "private.*", DenyAll: true},
 			},
 		},
 	})

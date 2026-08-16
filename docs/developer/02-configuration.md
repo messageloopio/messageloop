@@ -43,7 +43,7 @@
    - `broker.redis.consumer_group` 非空 → 直接拒绝：`broker.redis.consumer_group is not implemented; remove it from the configuration`（该字段声明但从未被消费，见 [broker.redis 字段](#brokerredis-字段)）；
    - `broker.redis.stream_approximate` 非 true（含显式 false）→ 直接拒绝：`broker.redis.stream_approximate: false is not supported (only approximate trimming is implemented); remove the field or set it to true`（`config.go:222-231`）。
 6. **cluster 前置条件**：`cluster.enabled: true` 要求 `broker.type: redis`，否则报 `cluster requires broker.type=redis`。
-7. **频道策略**（`server.channels`，见 [server.channels 节](#serverchannels-节)）：`policies[].pattern` 非空且是合法 topic（`**` 只允许在末尾，`a.**.b` 非法，与订阅 matcher 对齐）；`history_size` 设置时 `>= 0`；`history_ttl` / `max_survey_timeout` 非空时必须是合法 Go duration。
+7. **授权表**（`server.authorizer`，见 [server.authorizer 节](#serverauthorizer-节)）：规则 `pattern` 非空且是订阅 key 语言（`*` 单段、`**` 仅末尾、字面前缀非空，`a.**.b` / `*.room` / 裸 `**` 非法）；`history_size` 设置时 `>= 0`；`history_ttl` / `max_survey_timeout` 非空时必须是合法 Go duration；`grpc_admin.capabilities` 必须在闭集内。**`server.acl` / `server.channels` 键出现即失败**（已删除，KD-K31）。
 
 `cluster.node_id` 是否必填不在 `Validate()` 中，而在 `ClusterOptions.normalize()`（`cluster.go:27-30`）检查：启用集群时 `node_id` 为空直接报错。
 
@@ -100,15 +100,7 @@ server:
     max_subscriptions_per_client: 0
     max_publishes_per_second: 0
     max_message_size: 65536
-  acl:
-    rules:
-      - channel_pattern: "chat.public.*"
-        allow_subscribe: ["*"]
-        allow_publish: ["alice", "bob"]
-      - channel_pattern: "chat.private.*"
-        deny_all: true
-  require_auth: false
-  channels:                 # 按频道前缀的策略，见下节；可省略
+  authorizer:               # 唯一授权表（PR-KA-A4），见下节；可省略
     default:
       history: true
       history_size: 0       # 0 = broker 全局（memory 256 / redis stream_max_length）
@@ -121,19 +113,13 @@ server:
       max_survey_timeout: "5s"
       legacy_presence_channel: false
       presence_snapshot_limit: 256
-    policies:
-      - pattern: "game.tick.**"   # 更具体的必须写在前面（first-match）
-        history: false
-        presence: false
-        recover: false
-        survey: false
-        transient_only: true
-      - pattern: "im.**"
-        history: true
-        history_size: 5000
-        presence: true
-        recover: true
-        survey: false
+    rules:
+      - pattern: "chat.public.*"
+        allow_subscribe: ["*"]
+        allow_publish: ["alice", "bob"]
+      - pattern: "chat.private.*"
+        deny_all: true
+  require_auth: false
 ```
 
 | 字段 | 类型 | 默认值 | 说明 |
@@ -151,95 +137,61 @@ server:
 | `server.limits.max_subscriptions_per_client` | int | 0（不限） | 单个客户端可订阅的频道数上限（`client.go:553-560, 954-960`）。0 = 不限 |
 | `server.limits.max_publishes_per_second` | int | 0（不限） | 单客户端发布速率上限（令牌桶，`client.go:516-518, 855`），超限返回 `RATE_LIMITED`。0 = 不限 |
 | `server.limits.max_message_size` | int | 0 = 默认 64 KB | 入站消息大小上限（字节）。0 时取 `DefaultMaxMessageSize`（64 KB，`defaults.go:8`，`node.go:564-569`）；非 0 即用配置值。该限制同时作用于 WebSocket（`conn.SetReadLimit`，`pkg/websocket/handler.go:60-62`）与 gRPC（`grpc.MaxRecvMsgSize`，`cmd/server/runtime.go:46`），两个传输保持一致。注意 0 的语义是"默认值"而非"不限" |
-| `server.acl.rules` | 数组 | 空 | 内置频道访问控制规则，见下 |
-| `server.acl.rules[].channel_pattern` | string | 必填 | 频道匹配模式，使用分段 glob `matchChannelPattern`（acl.go）：按 `.` 分段后逐段比对，`*` 匹配恰好一个非空段（与订阅 matcher 一致）、`**` 匹配零或多段（ACL 还允许 `**` 出现在中间，如 `a.**.b`）——不是 Go `path.Match`（其 `*` 会跨 `.` 匹配）。无匹配规则默认放行（Survey 例外：`CanSurvey` 默认拒绝） |
-| `server.acl.rules[].allow_subscribe` | string[] | 未设置 | 允许订阅该频道的用户 ID 列表；`"*"` 表示任何已认证用户（`acl.go:49-53`）。未设置该字段的规则不参与订阅判定 |
-| `server.acl.rules[].allow_publish` | string[] | 未设置 | 允许发布的用户 ID 列表；`"*"` 表示任何已认证用户。未设置该字段的规则不参与发布判定 |
-| `server.acl.rules[].allow_survey` | string[] | 未设置 | PR-07 起：允许在该频道发起客户端 Survey 的用户 ID 列表；`"*"` 表示任何已认证用户。**未设置 = 不打开 survey**：`CanSurvey` 默认拒绝（`acl.go`），与 subscribe/publish 的默认放行相反。Admin `Node.Survey` 不走 `CanSurvey` |
-| `server.acl.rules[].deny_all` | bool | `false` | 为 true 时阻断匹配频道上的一切订阅与发布 |
+| `server.grpc_admin.capabilities` | string[] | 未设置 | Admin Capability 闭集（PR-KA-A4 §7）。**省略（nil）= `DefaultAdminCapabilities`**：除 `pattern.global` 外全部位（history.read / presence.read / channels.list / session.act / user.fanout / subscribe.any / presence.large_snapshot / survey.bypass_gate）。**显式 `[]` = 零位**，锁死 Admin 数据面（GetHistory / GetPresence / GetChannels / 代订 / 按 user 扇出全部软失败）。未知名 → `Validate` 错误 |
+| `server.authorizer.default` | 对象 | 见各字段默认 | 未命中任何规则的频道的兜底 Effects（history/presence/recover/survey/transient 等）。各字段均可用指针覆盖默认；`history_ttl` / `max_survey_timeout` 用字符串以区分「未设置」与 `"0s"` |
+| `server.authorizer.rules` | 数组 | 空 | 授权表：pattern → allow 名单 / deny_all / Effects，按配置顺序求值（见下） |
+| `server.authorizer.rules[].pattern` | string | 必填 | 频道模式，与订阅 key 同一语言（authorizer.go `compilePattern`）：`*` 匹配恰好一个非空段、`**` 只允许在末尾、字面前缀不可为空。**`a.**.b`、`*.room`、`im.*.tick`、裸 `*` / `**` 均被 `Validate()` 拒绝**（§5.1） |
+| `server.authorizer.rules[].deny_all` | bool | `false` | 为 true 时对该 pattern 的订阅 / 发布 / Survey / 恢复 / 在场全部拒绝。**deny 不可被更具体的 allow 打洞**：要开洞就缩小 deny 的 pattern |
+| `server.authorizer.rules[].allow_subscribe` | string[] | 未设置 | 允许订阅的用户 ID 列表；`"*"` 表示任何已认证用户。**未设置 = 不约束订阅；显式 `[]` = 拒绝订阅**；非空名单不含该用户 = 拒绝。订阅判定是**语言包含**：`L(订阅 pattern) ∩ L(deny 规则) ≠ ∅` 即整条拒绝（§5.2，表驱动求交，不枚举频道） |
+| `server.authorizer.rules[].allow_publish` | string[] | 未设置 | 允许发布的用户 ID 列表；语义同 `allow_subscribe`，判定对象是精确频道 |
+| `server.authorizer.rules[].allow_survey` | string[] | 未设置 | 允许发起客户端 Survey 的用户 ID 列表；**未设置 = 不打开 survey**（Survey 默认拒绝，与 subscribe/publish 的默认放行相反），即使 Effects.survey=true。Admin 无 `survey.bypass_gate` 时同样受此名单约束 |
 | `server.require_auth` | bool | `false` | 拒绝空 token 的连接（`config.go:32` 注释：Reject connections with empty token）。开启后：连接未携带 token 直接拒绝（`AUTH_REQUIRED`，`client.go:405-416`）；携带 token 但**没有**匹配 `$authenticate` 路由的代理时同样拒绝——非空 token 不得绕过认证（`client.go:389-404`）。实际认证总是由代理后端完成，见 [proxy 节](#proxy-节) |
 | `server.presence.cluster_emit` | bool | `false` | 进程级 presence 开关（不是频道策略）。`false`（默认）：join/leave 只在本节点投递（PR-04a）。`true`（PR-04b）：join/leave 经 broker `PublishTransient` 到**精确业务频道**（`ml.type=presence` 帧），各节点改写回一等 `presence_event`——本节点与对端统一经 broker，**禁止**与本地投递叠用（内存 broker 同步进 handler、Redis 本进程 offset 0 不去重，叠用 = 本节点每人两条）。**只有全部节点升级到 PR-04a+ 后才能置 true**：混部旧节点会把 `ml.type=presence` 帧当作聊天 `publication` 投递给订阅者 |
 
-### 内置 ACL 求值语义
+### Authorizer 求值语义（PR-KA-A4 §5）
 
-内置规则仅在**没有代理 ACL 路由匹配**时作为兜底使用（`client.go:661-697` 订阅、`client.go:872-916` 发布；代理匹配方法名分别为 `"subscribe"` 与 `"publish"`）。`ACLEngine`（`acl.go:79-121`）的求值规则：
+旧的 `server.acl`（last-write-wins、中段 `**`）与 `server.channels`（first-match 平行表）**已删除**：YAML 仍写这两个键会让 `Validate()` 失败（KD-K31，无兼容期）。所有授权与频道策略来自 `server.authorizer` 一张表，由根包 `Authorizer.Decide` / `Authorizer.Effects` 求值：
 
-- **最严格者优先**：任一匹配规则设置 `deny_all` 即拒绝，与规则顺序无关——宽松规则无法绕过后续的 `deny_all`；
-- **最后写入者生效**：否则由最后一条匹配且带 allow 列表的规则决定（按配置顺序遍历）；只匹配到不带 allow 列表的规则时仅贡献其 `deny_all` 标志；
-- **默认放行**：没有任何规则匹配该频道时**订阅与发布**允许访问；**Survey 相反**——`CanSurvey` 默认拒绝，只有带 `allow_survey` 名单的规则才打开；
-- `"*"` 在 `allow_subscribe` / `allow_publish` / `allow_survey` 中表示任何已认证用户。
+- **订阅（SubscribePattern）**：默认放行。先做路由检查（`CompileInterest`，与 A3 同套规则）——不可路由的 pattern（`*.room`、裸 `**`）返回 `PATTERN_NOT_ROUTABLE`，先于 ACL；然后对该 principal 逐条 deny 规则（deny_all、空 allow 名单、不含该用户的名单）做**语言求交**，`L(p) ∩ L(d) ≠ ∅` → 拒绝（客户端信封 `ACL_DENIED`）。deny 不可被更具体的 allow 打洞（§9.2）。
+- **发布（Publish）**：精确频道，默认放行；`deny_all` 命中或 allow 名单未命中该用户 → 拒绝。**不要求 Coverage**（KD-K21）。
+- **Survey**：默认拒绝；`Effects.Survey==true` **且** 存在 `allow_survey` 命中该精确频道 **且** 无 deny 命中才放行。
+- **恢复（Recover）/ 在场（Presence）**：精确频道；默认跟随 `Effects(ch)`；`deny_all` 命中或通配频道 → 拒绝。
+- **Admin**：用户 ID 按 `"admin"` 匹配名单；另受 [Capability 闭集](#server-节) 约束（`GetHistory`/`GetPresence`/`GetChannels`/代订/按 user 扇出必须持位）。
 
-未配置任何 ACL 规则且无代理时，订阅与发布默认全部放行（内置引擎仅在 `rules` 非空时构建，`node.go:94-105`）。被拒绝的订阅/发布向客户端返回 `ACL_DENIED` 错误信封。
-
-### server.channels 频道策略
-
-`server.channels` 按**频道前缀**配置 history / presence / recover / survey / transient 等行为开关，让一台集群同时服务不同场景（IM 要历史、游戏 tick 强制瞬时、IoT 可关 presence）。**未配置 `server.channels` 时行为与现网完全一致**：引擎仍存在，解析结果即下表 `default`（history 开、presence 开、survey 关）。
+**Effects（`Authorizer.Effects(ch)`）** = `DefaultChannelPolicy()` overlay `server.authorizer.default`，再按表顺序 overlay **每一条**匹配规则（后写覆盖先写）——**不是 first-match**：通用规则写前面、特殊规则写后面即可。`TransientOnly` 强制 `History=false` 且 `Recover=false`。示例：
 
 ```yaml
 server:
-  channels:
-    default:              # 所有未命中策略频道的兜底（可省略，省略即下表默认）
-      history: true
-      history_size: 0     # 0 = broker 全局（memory 256 / redis stream_max_length）
-      history_ttl: ""     # 空 = broker 全局；memory broker 忽略并 Warn
-      presence: true
-      recover: true
-      survey: false       # 客户端 survey 默认关（KD-6）
-      recover_limit: 0    # 0 = MaxRecoveredPublications
-      max_survey_subscribers: 256
-      max_survey_timeout: "5s"
-      legacy_presence_channel: false
-      presence_snapshot_limit: 256
-    policies:             # 按配置顺序 first-match，更具体的必须写在前面
-      - pattern: "game.tick.**"
-        history: false
-        presence: false
-        recover: false
-        survey: false
-        transient_only: true
-      - pattern: "im.**"
+  authorizer:
+    rules:
+      - pattern: "game.**"         # 通用规则在前
         history: true
-        history_size: 5000
-        presence: true
-        recover: true
-        survey: false
+        survey: true
+      - pattern: "game.tick.**"    # 特殊规则在后，覆盖先前的字段
+        transient_only: true
+        recover: false
 ```
+
+`game.tick.fps` 命中两条规则：`transient_only` 生效 → 强制瞬时、不可恢复（`History=false` 强制），但先前的 `survey: true` overlay 保留。`game.room.1` 只命中 `game.**` → history + survey 开。
+
+**规则内联 Effects 字段**（`server.authorizer.default` 与每条 `rules[]` 均可写）：
 
 | 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `channels.default` | 对象 | 见下表各字段默认 | 未命中任何 `policies` 的频道的兜底策略。各字段均可用 `*`（指针）覆盖 default；`history_ttl` / `max_survey_timeout` 用字符串以区分「未设置」与 `"0s"` |
-| `channels.policies` | 数组 | 空 | 按前缀匹配的规则表，**first-match**（见下）。`pattern` 使用与订阅 matcher / ACL 同一套分段 glob 语法，但只允许末尾 `**`（`a.**.b` 会被 `Validate()` 拒绝） |
-| `channels.policies[].pattern` | string | 必填 | 频道 glob 模式，如 `game.tick.**`、`im.**`。**更具体的 pattern 必须写在前面** |
-| `channels.policies[].history` | bool | `true` | 是否写历史。`false` 与 `transient_only: true` 效果相同：发布改走瞬时（见下） |
-| `channels.policies[].history_size` | int | 0 = broker 全局 | 该前缀频道的历史容量：memory broker 每频道 ring 容量 / Redis 每条 `XADD` 的 `MAXLEN`。**只在该频道 ring 首次创建时生效**：已存在的内存 ring 不会因改大/改小立即重建，直到频道被回收；**改小 `history_size` 对已有频道不立即生效** |
-| `channels.policies[].history_ttl` | string | 空 = broker 全局 | 历史保留时长（Redis：每次发布后 `EXPIRE` 刷新）。**memory broker 无 TTL，配置了打 Warn 并忽略** |
-| `channels.policies[].presence` | bool | `true` | presence 开关。PR-04a 起由 `shouldTrackPresence` 读取：`false` 的频道不存 presence、不发 join/leave、无快照，`PresenceQuery` 返回 `POLICY_DENIED` |
-| `channels.policies[].recover` | bool | `true` | 恢复开关。PR-03 起由 `recoverSubscription` 读取：`false` 时恢复被跳过（客户端要了 recover 则返回 `RECOVER_SKIPPED`） |
-| `channels.policies[].survey` | bool | `false` | 客户端 survey 开关（KD-6 默认关）。**PR-07 起由 `handleSurvey` 读取**：`false` 时客户端 `SurveyRequest` 返回 `SURVEY_DISABLED` 且零下发；`true` 时还须 ACL `allow_survey` 与频道覆盖（`sessionCoversChannel`）全部通过才能发起 |
-| `channels.policies[].transient_only` | bool | `false` | 强制瞬时：发布只实时投递、绝不写历史。**隐含 History=false、Recover=false**（即使漏写）。对客户端：不带 `transient` 标志的发布也改走 `PublishTransient`、ack offset=0、不报错；对 Admin：`add_history=true` 被**拒绝**（计失败、不发布），`add_history=false` 仍可瞬时发布 |
-| `channels.policies[].recover_limit` | int | 0 = `MaxRecoveredPublications` | 恢复条数上限。PR-03 起由 `recoverSubscription` 读取：命中该上限（或请求级配额耗尽）时恢复结果标记 `truncated=true` |
-| `channels.policies[].max_survey_subscribers` | int | 256 | survey 订阅者上限。**PR-07 起在客户端 Survey 路径生效**：发起方本节点订阅者数（快路径，含通配命中）或集群预检总数超过该值 → `SURVEY_TOO_MANY_SUBSCRIBERS`、**零条** outbound `SurveyRequest`。`0` = 不限制。**Admin `Node.Survey` 不受此门限制** |
-| `channels.policies[].max_survey_timeout` | string | `5s` | 客户端 Survey 超时上限。**PR-07 起生效**：请求 `timeout_ms` 被钳制在 `[100ms, min(本值||5s, 10s)]`；`timeout_ms<=0` 用本值（默认 5s） |
-| `channels.policies[].legacy_presence_channel` | bool | `false` | PR-04a 起生效：为 `true` 时 join/leave 额外以旧 JSON 瞬时发布到精确频道的 `ch/__presence` 伴生频道（通配订阅从不写伴生）。默认不写伴生 |
-| `channels.policies[].presence_snapshot_limit` | int | 256 | PR-04a 起生效：`Connected.presence` / `SubscribeAck.presence` / `PresenceQuery` 快照的 clients 条数上限；`occupancy` 仍是全量计数，超出置 `truncated=true`。`0` = 全局默认 `MaxPresenceSnapshotClients`（256） |
+| `history` | bool | `true` | 是否写历史。`false` 与 `transient_only: true` 效果相同：发布改走瞬时（见下） |
+| `history_size` | int | 0 = broker 全局 | 该前缀频道的历史容量：memory broker 每频道 ring 容量 / Redis 每条 `XADD` 的 `MAXLEN`。**只在该频道 ring 首次创建时生效**：已存在的内存 ring 不会因改大/改小立即重建，直到频道被回收；**改小 `history_size` 对已有频道不立即生效** |
+| `history_ttl` | string | 空 = broker 全局 | 历史保留时长（Redis：每次发布后 `EXPIRE` 刷新）。**memory broker 无 TTL，配置了打 Warn 并忽略** |
+| `presence` | bool | `true` | presence 开关。由 `shouldTrackPresence` 读取：`false` 的频道不存 presence、不发 join/leave、无快照，`PresenceQuery` 返回 `POLICY_DENIED` |
+| `recover` | bool | `true` | 恢复开关。由 `recoverSubscription` 读取：`false` 时恢复被跳过（客户端要了 recover 则返回 `RECOVER_SKIPPED`） |
+| `survey` | bool | `false` | 客户端 survey 开关（KD-6 默认关）。`false` 时客户端 `SurveyRequest` 返回 `SURVEY_DISABLED` 且零下发；`true` 时还须 `allow_survey` 规则与频道覆盖（`sessionCoversChannel`）全部通过才能发起 |
+| `transient_only` | bool | `false` | 强制瞬时：发布只实时投递、绝不写历史。**隐含 History=false、Recover=false**（即使漏写）。对客户端：不带 `transient` 标志的发布也改走 `PublishTransient`、ack offset=0、不报错；对 Admin：`add_history=true` 被**拒绝**（计失败、不发布），`add_history=false` 仍可瞬时发布 |
+| `recover_limit` | int | 0 = `MaxRecoveredPublications` | 恢复条数上限。由 `recoverSubscription` 读取：命中该上限（或请求级配额耗尽）时恢复结果标记 `truncated=true` |
+| `max_survey_subscribers` | int | 256 | survey 订阅者上限。客户端 Survey 发起方本节点订阅者数（快路径，含通配命中）或集群预检总数超过该值 → `SURVEY_TOO_MANY_SUBSCRIBERS`、**零条** outbound `SurveyRequest`。`0` = 不限制。Admin 无 `survey.bypass_gate` 时同样受此门限制 |
+| `max_survey_timeout` | string | `5s` | 客户端 Survey 超时上限：请求 `timeout_ms` 被钳制在 `[100ms, min(本值||5s, 10s)]`；`timeout_ms<=0` 用本值（默认 5s） |
+| `legacy_presence_channel` | bool | `false` | 为 `true` 时 join/leave 额外以旧 JSON 瞬时发布到精确频道的 `ch/__presence` 伴生频道（通配订阅从不写伴生）。默认不写伴生 |
+| `presence_snapshot_limit` | int | 256 | `Connected.presence` / `SubscribeAck.presence` / `PresenceQuery` 快照的 clients 条数上限；`occupancy` 仍是全量计数，超出置 `truncated=true`。`0` = 全局默认 `MaxPresenceSnapshotClients`（256）。Admin `GetPresence` 无 `presence.large_snapshot` 时同样截断到该上限 |
 
-以上 `default` 与每条 `policies[].pattern` 均由 `Validate()` 校验：pattern 非空且合法（末尾 `**`）、`history_size >= 0`、两个 duration 可解析（`config/config.go` 的 `validateChannelPolicySpec`）。
-
-**匹配语义：first-match，与 ACL 相反。** 策略表按配置顺序求值，第一条 pattern 命中的规则生效（`ChannelPolicyEngine.For`，`channel_policy.go`）；ACL 是 denyAll 短路 + 最后一条带名单的规则胜出（last-write-wins，见 [内置 ACL 求值语义](#内置-acl-求值语义)）。同一套 glob 语法，两种顺序——**策略更具体的必须写前面，ACL 更具体的应写后面**。示例：
-
-```yaml
-server:
-  channels:
-    policies:
-      - pattern: "game.tick.**"    # 先写更具体：tick 命中它，不是 game.**
-        transient_only: true
-        recover: false
-      - pattern: "game.**"
-        history: true
-        survey: true
-```
-
-`game.tick.fps` 命中 `game.tick.**` → 强制瞬时、不可恢复。`game.room.1` 不匹配第一条，命中 `game.**` → history + survey 开。
+以上 `default` 与每条 `rules[].pattern` 均由 `Validate()` 校验：pattern 非空且合法（订阅 key 语言，见 §5.1）、`history_size >= 0`、两个 duration 可解析（`config/config.go` 的 `validateChannelPolicySpec`）。
 
 **transient_only 对客户端与 Admin 的差异**：
 
@@ -452,7 +404,7 @@ proxy:
 - `channel` 模式匹配目标频道，如 `chat.*`、`rpc.**`；
 - `method` 模式匹配 RPC 方法名，`"*"` 匹配一切方法；
 - **按配置顺序求值，首个匹配的代理生效**（`proxy/router.go:33-34, 60-71`）；
-- 无任何路由匹配时 `ProxyRPC` 返回 `ErrNoProxyFound`（`proxy/router.go:11`），客户端收到**回显应答**（`RpcReply` 原样返回请求 payload，`client.go:793-804`）；代理调用本身失败则返回 `PROXY_ERROR` 错误信封（`client.go:806-822`）。
+- 无任何路由匹配时 `ProxyRPC` 返回 `ErrNoProxyFound`（`proxy/router.go:11`），客户端收到**软失败** `NO_PROXY` 错误信封（`type=request_error`，PR-KA-A4 §8.3——不再回显请求体）；代理调用本身失败则返回 `PROXY_ERROR` 错误信封（`client.go:806-822`）。
 
 除路由外，代理类型选择规则（`node.go:505-517`）：显式配置 `grpc` 段 → gRPC 代理；显式配置 `http` 段 → HTTP 代理；两者皆无时按 `endpoint` 前缀判断（`http://` / `https://` → HTTP，否则 gRPC）。
 
@@ -471,7 +423,7 @@ proxy:
 | `OnUnsubscribed` | 取消订阅后（`client.go:1069-1074`） | 同上；错误被忽略 |
 | `OnDisconnected` | 客户端断开时（`client.go:211-215`） | 同上；错误被忽略 |
 
-**ACL 优先级**：`SubscribeAcl` / `PublishAcl` 存在匹配路由时由代理裁决（错误信封按代理返回透传）；无匹配路由时才回退到内置 `server.acl.rules`（`client.go:685-695, 902-916`），两者皆无则放行。
+**授权与代理的关系（PR-KA-A4 §8.1）**：订阅/发布**先**过静态 `Authorizer.Decide`，再查代理——`SubscribeAcl` / `PublishAcl` 存在匹配路由时作为**额外的门**：代理拒绝只否决这一次请求，代理允许也**不得**跳过静态 deny（`client.go:685-695, 902-916`）。两者皆无时按静态 `Decide` 默认叙事（订阅/发布默认放行）。
 
 ### 三层超时
 
@@ -522,16 +474,16 @@ server:
 前三项为 0（不限）；`max_message_size: 65536` 显式写出 64 KB，与 0（取默认 64 KB）效果一致。需要大于 64 KB 的负载时在此调大，WebSocket 与 gRPC 同步生效。
 
 ```yaml
-  acl:
+  authorizer:
     rules:
-      - channel_pattern: "chat.public.*"
+      - pattern: "chat.public.*"
         allow_subscribe: ["*"]
         allow_publish: ["alice", "bob"]
-      - channel_pattern: "chat.private.*"
+      - pattern: "chat.private.*"
         deny_all: true
 ```
 
-内置 ACL：`chat.public.*` 任何已认证用户可订阅、仅 `alice`/`bob` 可发布；`chat.private.*` 整体封锁。求值语义为"最严格者优先 + 最后写入者生效"（见 [内置 ACL 求值语义](#内置-acl-求值语义)），且仅在代理无对应路由时生效。
+授权表：`chat.public.*` 任何已认证用户可订阅、仅 `alice`/`bob` 可发布；`chat.private.*` 整体封锁。求值语义为「语言包含 + deny 不打洞」（见 [Authorizer 求值语义](#authorizer-求值语义pr-ka-a4-5)）：例如存在 `secret.**` deny_all 时，再写一条 `secret.lobby` 允许 `alice` 也不能让 `alice` 订进去。代理 `SubscribeAcl` / `PublishAcl` 命中时作为额外门，不能越过这里的静态 deny。
 
 ```yaml
 transport:
@@ -583,7 +535,7 @@ proxy:
         method: "*"
 ```
 
-注册名为 `example-grpc` 的 gRPC 代理，明文连接 `127.0.0.1:10091`，`channel: "*"` + `method: "*"` 匹配所有频道的所有方法。该代理同时承担 `$authenticate` 鉴权（`method: "*"` 覆盖了固定方法名）、`"subscribe"` / `"publish"` 的 ACL 裁决，以及 RPC 转发与四个连接生命周期通知——本例中内置 ACL 因此不会实际生效（代理路由总是优先）。`timeout: 30s` 与默认一致。注释掉的 `example-http` 段展示了 HTTP 代理形态（完整 URL 端点、附加头、TLS 选项）。
+注册名为 `example-grpc` 的 gRPC 代理，明文连接 `127.0.0.1:10091`，`channel: "*"` + `method: "*"` 匹配所有频道的所有方法。该代理同时承担 `$authenticate` 鉴权（`method: "*"` 覆盖了固定方法名）、`"subscribe"` / `"publish"` 的 ACL 裁决（作为静态 Authorizer 之外的额外门），以及 RPC 转发与四个连接生命周期通知——注意代理允许**不会**越过 `server.authorizer` 里的静态 deny（PR-KA-A4 §8.1）。`timeout: 30s` 与默认一致。注释掉的 `example-http` 段展示了 HTTP 代理形态（完整 URL 端点、附加头、TLS 选项）。
 
 ## 多节点注意
 

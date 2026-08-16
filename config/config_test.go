@@ -215,99 +215,101 @@ func boolPtr(v bool) *bool    { return &v }
 func intPtr(v int) *int       { return &v }
 func strPtr(v string) *string { return &v }
 
-// TestValidate_ChannelHistoryTTL verifies PR-02: an unparsable history_ttl
-// on a channel policy rule fails Validate().
-func TestValidate_ChannelHistoryTTL(t *testing.T) {
+// TestValidate_AuthorizerHistoryTTL verifies PR-KA-A4: an unparsable
+// history_ttl on an authorizer rule fails Validate().
+func TestValidate_AuthorizerHistoryTTL(t *testing.T) {
 	cfg := &Config{
 		Transport: validTransport(),
 		Server: Server{
-			Channels: ChannelConfig{
-				Policies: []ChannelPolicyRule{
+			Authorizer: AuthorizerConfig{
+				Rules: []AuthorizerRule{
 					{Pattern: "im.**", ChannelPolicySpec: ChannelPolicySpec{HistoryTTL: "not-a-duration"}},
 				},
 			},
 		},
 	}
-	assert.ErrorContains(t, cfg.Validate(), "server.channels.policies[0].history_ttl")
+	assert.ErrorContains(t, cfg.Validate(), "server.authorizer.rules[0].history_ttl")
 }
 
-// TestChannelPolicy_ValidateEmptyPattern verifies that a policy rule without
-// a pattern fails Validate().
-func TestChannelPolicy_ValidateEmptyPattern(t *testing.T) {
+// TestAuthorizer_ValidateEmptyPattern verifies that an authorizer rule
+// without a pattern fails Validate().
+func TestAuthorizer_ValidateEmptyPattern(t *testing.T) {
 	cfg := &Config{
 		Transport: validTransport(),
 		Server: Server{
-			Channels: ChannelConfig{
-				Policies: []ChannelPolicyRule{{Pattern: ""}},
+			Authorizer: AuthorizerConfig{
+				Rules: []AuthorizerRule{{Pattern: ""}},
 			},
 		},
 	}
-	assert.ErrorContains(t, cfg.Validate(), "server.channels.policies[0].pattern is required")
+	assert.ErrorContains(t, cfg.Validate(), "server.authorizer.rules[0].pattern is required")
 }
 
-// TestValidate_ChannelPolicyMiddleDoubleStarRejected pins the policy pattern
-// contract: policy patterns are aligned with the topic matcher, so "**" is
-// only allowed as the final segment ("a.**.b" is invalid) — unlike ACL
-// patterns which additionally allow middle "**".
-func TestValidate_ChannelPolicyMiddleDoubleStarRejected(t *testing.T) {
-	cfg := &Config{
-		Transport: validTransport(),
-		Server: Server{
-			Channels: ChannelConfig{
-				Policies: []ChannelPolicyRule{{Pattern: "a.**.b"}},
+// TestValidate_AuthorizerMiddleDoubleStarRejected pins the rule pattern
+// contract: rule patterns are part of the subscription key language, so "**"
+// is only allowed as the final segment ("a.**.b" is invalid) — the old ACL
+// middle-"**" dialect is gone (PR-KA-A4 §5.1).
+func TestValidate_AuthorizerMiddleDoubleStarRejected(t *testing.T) {
+	for _, pattern := range []string{"a.**.b", "*.room", "im.*.tick", "*", "**"} {
+		cfg := &Config{
+			Transport: validTransport(),
+			Server: Server{
+				Authorizer: AuthorizerConfig{
+					Rules: []AuthorizerRule{{Pattern: pattern}},
+				},
 			},
-		},
+		}
+		assert.ErrorContains(t, cfg.Validate(), "server.authorizer.rules[0].pattern", "pattern %q must be rejected", pattern)
 	}
-	assert.ErrorContains(t, cfg.Validate(), "server.channels.policies[0].pattern")
 }
 
-// TestValidate_ChannelPolicyNegativeHistorySize verifies history_size < 0 is
-// rejected for both the default spec and policy rules.
-func TestValidate_ChannelPolicyNegativeHistorySize(t *testing.T) {
+// TestValidate_AuthorizerNegativeHistorySize verifies history_size < 0 is
+// rejected for both the default spec and rule specs.
+func TestValidate_AuthorizerNegativeHistorySize(t *testing.T) {
 	cfg := &Config{
 		Transport: validTransport(),
 		Server: Server{
-			Channels: ChannelConfig{
+			Authorizer: AuthorizerConfig{
 				Default: ChannelPolicySpec{HistorySize: intPtr(-1)},
 			},
 		},
 	}
-	assert.ErrorContains(t, cfg.Validate(), "server.channels.default.history_size must be >= 0")
+	assert.ErrorContains(t, cfg.Validate(), "server.authorizer.default.history_size must be >= 0")
 
 	cfg = &Config{
 		Transport: validTransport(),
 		Server: Server{
-			Channels: ChannelConfig{
-				Policies: []ChannelPolicyRule{
+			Authorizer: AuthorizerConfig{
+				Rules: []AuthorizerRule{
 					{Pattern: "im.**", ChannelPolicySpec: ChannelPolicySpec{HistorySize: intPtr(-5)}},
 				},
 			},
 		},
 	}
-	assert.ErrorContains(t, cfg.Validate(), "server.channels.policies[0].history_size must be >= 0")
+	assert.ErrorContains(t, cfg.Validate(), "server.authorizer.rules[0].history_size must be >= 0")
 }
 
-// TestValidate_ChannelPolicyMaxSurveyTimeout verifies an unparsable
+// TestValidate_AuthorizerMaxSurveyTimeout verifies an unparsable
 // max_survey_timeout fails Validate().
-func TestValidate_ChannelPolicyMaxSurveyTimeout(t *testing.T) {
+func TestValidate_AuthorizerMaxSurveyTimeout(t *testing.T) {
 	cfg := &Config{
 		Transport: validTransport(),
 		Server: Server{
-			Channels: ChannelConfig{
+			Authorizer: AuthorizerConfig{
 				Default: ChannelPolicySpec{MaxSurveyTimeout: "soon"},
 			},
 		},
 	}
-	assert.ErrorContains(t, cfg.Validate(), "server.channels.default.max_survey_timeout")
+	assert.ErrorContains(t, cfg.Validate(), "server.authorizer.default.max_survey_timeout")
 }
 
-// TestValidate_ChannelPolicyValid verifies a full, valid server.channels
+// TestValidate_AuthorizerValid verifies a full, valid server.authorizer
 // block passes validation.
-func TestValidate_ChannelPolicyValid(t *testing.T) {
+func TestValidate_AuthorizerValid(t *testing.T) {
 	cfg := &Config{
 		Transport: validTransport(),
 		Server: Server{
-			Channels: ChannelConfig{
+			Authorizer: AuthorizerConfig{
 				Default: ChannelPolicySpec{
 					History:          boolPtr(true),
 					HistorySize:      intPtr(0),
@@ -317,36 +319,101 @@ func TestValidate_ChannelPolicyValid(t *testing.T) {
 					Survey:           boolPtr(false),
 					MaxSurveyTimeout: "5s",
 				},
-				Policies: []ChannelPolicyRule{
+				Rules: []AuthorizerRule{
 					{Pattern: "game.tick.**", ChannelPolicySpec: ChannelPolicySpec{
 						History:       boolPtr(false),
 						Presence:      boolPtr(false),
 						TransientOnly: boolPtr(true),
 					}},
-					{Pattern: "im.**", ChannelPolicySpec: ChannelPolicySpec{
-						History:     boolPtr(true),
-						HistorySize: intPtr(5000),
-					}},
+					{
+						Pattern:           "im.**",
+						DenyAll:           true,
+						AllowSubscribe:    []string{"*"},
+						AllowPublish:      []string{"alice"},
+						ChannelPolicySpec: ChannelPolicySpec{History: boolPtr(true), HistorySize: intPtr(5000)},
+					},
 				},
 			},
+			GRPCAdmin: GRPCAdmin{Capabilities: []string{
+				"history.read", "presence.read", "channels.list", "session.act",
+				"user.fanout", "subscribe.any", "presence.large_snapshot",
+				"survey.bypass_gate", "pattern.global",
+			}},
 		},
 	}
 	assert.NoError(t, cfg.Validate())
 }
 
-// TestACLRule_AllowSurvey verifies the ACLRule.allow_survey field (PR-07)
-// round-trips through YAML.
-func TestACLRule_AllowSurvey(t *testing.T) {
-	raw := []byte("channel_pattern: chat.**\nallow_survey:\n  - \"*\"\n  - alice\n")
-	var rule ACLRule
-	require.NoError(t, yaml.Unmarshal(raw, &rule))
-	require.Equal(t, "chat.**", rule.ChannelPattern)
-	require.Equal(t, []string{"*", "alice"}, rule.AllowSurvey)
-
+// TestValidate_RejectsServerACL verifies the removed server.acl block is
+// rejected (KD-K31: no compatibility period), even when parsed from YAML.
+func TestValidate_RejectsServerACL(t *testing.T) {
 	var cfg Config
 	require.NoError(t, yaml.Unmarshal([]byte("server:\n  acl:\n    rules:\n      - channel_pattern: chat.**\n        allow_survey: [\"*\"]\n"), &cfg))
 	require.Len(t, cfg.Server.ACL.Rules, 1)
 	require.Equal(t, []string{"*"}, cfg.Server.ACL.Rules[0].AllowSurvey)
+	cfg.Transport = validTransport()
+	assert.ErrorContains(t, cfg.Validate(), "server.acl is removed")
+
+	// The same rules expressed under server.authorizer pass.
+	cfg2 := &Config{
+		Transport: validTransport(),
+		Server: Server{
+			Authorizer: AuthorizerConfig{
+				Rules: []AuthorizerRule{
+					{Pattern: "chat.**", AllowSurvey: []string{"*"}, ChannelPolicySpec: ChannelPolicySpec{Survey: boolPtr(true)}},
+				},
+			},
+		},
+	}
+	assert.NoError(t, cfg2.Validate())
+}
+
+// TestValidate_RejectsServerChannels verifies the removed server.channels
+// block is rejected, for both the default spec and rule lists.
+func TestValidate_RejectsServerChannels(t *testing.T) {
+	cfg := &Config{
+		Transport: validTransport(),
+		Server: Server{
+			Channels: ChannelConfig{
+				Policies: []ChannelPolicyRule{
+					{Pattern: "im.**", ChannelPolicySpec: ChannelPolicySpec{History: boolPtr(false)}},
+				},
+			},
+		},
+	}
+	assert.ErrorContains(t, cfg.Validate(), "server.channels is removed")
+
+	cfg2 := &Config{
+		Transport: validTransport(),
+		Server: Server{
+			Channels: ChannelConfig{Default: ChannelPolicySpec{History: boolPtr(false)}},
+		},
+	}
+	assert.ErrorContains(t, cfg2.Validate(), "server.channels is removed")
+}
+
+// TestValidate_UnknownCapability verifies unknown capability names fail
+// Validate() (the set is closed).
+func TestValidate_UnknownCapability(t *testing.T) {
+	cfg := &Config{
+		Transport: validTransport(),
+		Server: Server{
+			GRPCAdmin: GRPCAdmin{Capabilities: []string{"history.read", "presence.write"}},
+		},
+	}
+	assert.ErrorContains(t, cfg.Validate(), "server.grpc_admin.capabilities[1]: unknown capability \"presence.write\"")
+}
+
+// TestValidate_CapabilitiesEmptyAllowed verifies an explicit empty
+// capabilities list is valid (it locks the admin data plane at runtime).
+func TestValidate_CapabilitiesEmptyAllowed(t *testing.T) {
+	cfg := &Config{
+		Transport: validTransport(),
+		Server: Server{
+			GRPCAdmin: GRPCAdmin{Capabilities: []string{}},
+		},
+	}
+	assert.NoError(t, cfg.Validate())
 }
 
 // TestValidate_PresenceClusterEmit verifies server.presence.cluster_emit

@@ -132,9 +132,9 @@ func TestWebSocket_DisconnectCleansUpSubscriptions(t *testing.T) {
 func TestWebSocket_ACL_SubscribeDenied(t *testing.T) {
 	ctx := t.Context()
 	node := messageloop.NewNode(&config.Server{
-		ACL: config.ACLConfig{
-			Rules: []config.ACLRule{
-				{ChannelPattern: "private.*", AllowSubscribe: []string{"admin"}},
+		Authorizer: config.AuthorizerConfig{
+			Rules: []config.AuthorizerRule{
+				{Pattern: "private.*", AllowSubscribe: []string{"admin"}},
 			},
 		},
 	})
@@ -189,9 +189,9 @@ func TestWebSocket_ACL_SubscribeDenied(t *testing.T) {
 func TestWebSocket_ACL_PublishDenied(t *testing.T) {
 	ctx := t.Context()
 	node := messageloop.NewNode(&config.Server{
-		ACL: config.ACLConfig{
-			Rules: []config.ACLRule{
-				{ChannelPattern: "readonly.*", AllowPublish: []string{"admin"}},
+		Authorizer: config.AuthorizerConfig{
+			Rules: []config.AuthorizerRule{
+				{Pattern: "readonly.*", AllowPublish: []string{"admin"}},
 			},
 		},
 	})

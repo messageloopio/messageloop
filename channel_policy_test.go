@@ -19,11 +19,15 @@ import (
 func policyBoolPtr(v bool) *bool { return &v }
 func policyIntPtr(v int) *int    { return &v }
 
+// Effects are resolved by the Authorizer (PR-KA-A4 §5.5): DefaultChannelPolicy
+// overlaid by server.authorizer.default, then by every matching rule in table
+// order (later overrides earlier). There is no first-match engine anymore.
+
 func TestChannelPolicy_DefaultWhenEmpty(t *testing.T) {
-	engine, err := NewChannelPolicyEngine(config.ChannelConfig{})
+	a, err := NewAuthorizer(config.AuthorizerConfig{})
 	require.NoError(t, err)
 
-	pol := engine.For("any.channel")
+	pol := a.Effects("any.channel")
 	assert.True(t, pol.History)
 	assert.True(t, pol.Presence)
 	assert.True(t, pol.Recover)
@@ -34,58 +38,66 @@ func TestChannelPolicy_DefaultWhenEmpty(t *testing.T) {
 	assert.Equal(t, 256, pol.PresenceSnapshotLimit)
 }
 
-// TestChannelPolicy_DefaultSpecOverridesDefault pins the YAML default spec
-// as the base overlay: e.g. default.history=false applies to every channel
-// that matches no policy rule.
+// TestChannelPolicy_DefaultSpecOverridesDefault pins the authorizer default
+// spec as the base overlay: e.g. default.history=false applies to every
+// channel that matches no rule.
 func TestChannelPolicy_DefaultSpecOverridesDefault(t *testing.T) {
-	engine, err := NewChannelPolicyEngine(config.ChannelConfig{
+	a, err := NewAuthorizer(config.AuthorizerConfig{
 		Default: config.ChannelPolicySpec{History: policyBoolPtr(false), Survey: policyBoolPtr(true)},
 	})
 	require.NoError(t, err)
 
-	pol := engine.For("unmatched.channel")
+	pol := a.Effects("unmatched.channel")
 	assert.False(t, pol.History)
 	assert.True(t, pol.Survey)
 }
 
-func TestChannelPolicy_FirstMatchWins(t *testing.T) {
-	engine, err := NewChannelPolicyEngine(config.ChannelConfig{
-		Policies: []config.ChannelPolicyRule{
+// TestChannelPolicy_OverlayOrder verifies the overlay semantics: every
+// matching rule contributes in table order and a later rule overrides an
+// earlier one. The recommended ordering is generic rules first, specific
+// rules last — the opposite of the old first-match engine.
+func TestChannelPolicy_OverlayOrder(t *testing.T) {
+	a, err := NewAuthorizer(config.AuthorizerConfig{
+		Rules: []config.AuthorizerRule{
+			{Pattern: "game.**", ChannelPolicySpec: config.ChannelPolicySpec{
+				History: policyBoolPtr(true),
+				Survey:  policyBoolPtr(true),
+			}},
 			{Pattern: "game.tick.**", ChannelPolicySpec: config.ChannelPolicySpec{TransientOnly: policyBoolPtr(true)}},
-			{Pattern: "game.**", ChannelPolicySpec: config.ChannelPolicySpec{History: policyBoolPtr(true), Survey: policyBoolPtr(true)}},
 		},
 	})
 	require.NoError(t, err)
 
-	// game.tick.fps must hit the first (more specific) rule, not the
-	// later game.** rule.
-	tick := engine.For("game.tick.fps")
+	// game.tick.fps matches both rules: the later transient_only rule wins
+	// for its fields; the earlier survey:true overlay survives (overlay, not
+	// first-match).
+	tick := a.Effects("game.tick.fps")
 	assert.True(t, tick.TransientOnly)
 	assert.False(t, tick.History)
-	assert.False(t, tick.Survey)
+	assert.True(t, tick.Survey, "the game.** survey:true overlay survives the later transient_only rule")
 
 	// game.room.1 matches only game.**.
-	room := engine.For("game.room.1")
+	room := a.Effects("game.room.1")
 	assert.False(t, room.TransientOnly)
 	assert.True(t, room.History)
 	assert.True(t, room.Survey)
 
 	// No match at all resolves to the compiled default.
-	other := engine.For("im.room.1")
+	other := a.Effects("im.room.1")
 	assert.False(t, other.TransientOnly)
 	assert.True(t, other.History)
 	assert.False(t, other.Survey)
 }
 
 func TestChannelPolicy_OverlayNilKeepsDefault(t *testing.T) {
-	engine, err := NewChannelPolicyEngine(config.ChannelConfig{
-		Policies: []config.ChannelPolicyRule{
+	a, err := NewAuthorizer(config.AuthorizerConfig{
+		Rules: []config.AuthorizerRule{
 			{Pattern: "im.**", ChannelPolicySpec: config.ChannelPolicySpec{HistorySize: policyIntPtr(5)}},
 		},
 	})
 	require.NoError(t, err)
 
-	pol := engine.For("im.room.42")
+	pol := a.Effects("im.room.42")
 	assert.Equal(t, 5, pol.HistorySize)
 	// Unset fields must keep the compiled default.
 	assert.True(t, pol.History, "unset history must keep default true")
@@ -97,35 +109,35 @@ func TestChannelPolicy_OverlayNilKeepsDefault(t *testing.T) {
 // TestChannelPolicy_ExplicitFalseOverridesDefault verifies an explicit false
 // beats a default true (the overlay must not skip set-but-false values).
 func TestChannelPolicy_ExplicitFalseOverridesDefault(t *testing.T) {
-	engine, err := NewChannelPolicyEngine(config.ChannelConfig{
-		Policies: []config.ChannelPolicyRule{
+	a, err := NewAuthorizer(config.AuthorizerConfig{
+		Rules: []config.AuthorizerRule{
 			{Pattern: "iot.**", ChannelPolicySpec: config.ChannelPolicySpec{Presence: policyBoolPtr(false)}},
 		},
 	})
 	require.NoError(t, err)
 
-	pol := engine.For("iot.device.1")
+	pol := a.Effects("iot.device.1")
 	assert.False(t, pol.Presence)
 	assert.True(t, pol.History)
 }
 
 func TestChannelPolicy_TransientOnlyImpliesNoHistory(t *testing.T) {
-	engine, err := NewChannelPolicyEngine(config.ChannelConfig{
-		Policies: []config.ChannelPolicyRule{
+	a, err := NewAuthorizer(config.AuthorizerConfig{
+		Rules: []config.AuthorizerRule{
 			{Pattern: "game.tick.**", ChannelPolicySpec: config.ChannelPolicySpec{TransientOnly: policyBoolPtr(true)}},
 		},
 	})
 	require.NoError(t, err)
 
-	pol := engine.For("game.tick.fps")
+	pol := a.Effects("game.tick.fps")
 	assert.True(t, pol.TransientOnly)
 	assert.False(t, pol.History, "transient_only must force History=false")
 	assert.False(t, pol.Recover, "transient_only must force Recover=false")
 
 	// A rule that sets transient_only=true and history=true must still end
 	// up with History=false.
-	engine2, err := NewChannelPolicyEngine(config.ChannelConfig{
-		Policies: []config.ChannelPolicyRule{
+	a2, err := NewAuthorizer(config.AuthorizerConfig{
+		Rules: []config.AuthorizerRule{
 			{Pattern: "tick.**", ChannelPolicySpec: config.ChannelPolicySpec{
 				TransientOnly: policyBoolPtr(true),
 				History:       policyBoolPtr(true),
@@ -133,40 +145,28 @@ func TestChannelPolicy_TransientOnlyImpliesNoHistory(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	pol2 := engine2.For("tick.1")
+	pol2 := a2.Effects("tick.1")
 	assert.True(t, pol2.TransientOnly)
 	assert.False(t, pol2.History)
 	assert.False(t, pol2.Recover)
 }
 
-// TestChannelPolicy_EngineDurationParseFallback verifies that an unparsable
-// duration in the engine (bypassing config.Validate) falls back to "not
-// overridden" instead of failing.
-func TestChannelPolicy_EngineDurationParseFallback(t *testing.T) {
-	engine, err := NewChannelPolicyEngine(config.ChannelConfig{
-		Default: config.ChannelPolicySpec{HistoryTTL: "not-a-duration"},
-	})
-	require.NoError(t, err)
-	pol := engine.For("any.channel")
-	assert.Zero(t, pol.HistoryTTL, "invalid duration must fall back to 0 (broker global)")
-	assert.True(t, pol.History)
-}
-
-// TestChannelPolicy_InvalidPatternErrors verifies the engine rejects invalid
-// policy patterns (defense in depth; config.Validate rejects them earlier).
+// TestChannelPolicy_InvalidPatternErrors verifies the authorizer rejects
+// invalid rule patterns (defense in depth; config.Validate rejects them
+// earlier).
 func TestChannelPolicy_InvalidPatternErrors(t *testing.T) {
-	_, err := NewChannelPolicyEngine(config.ChannelConfig{
-		Policies: []config.ChannelPolicyRule{{Pattern: "a.**.b"}},
+	_, err := NewAuthorizer(config.AuthorizerConfig{
+		Rules: []config.AuthorizerRule{{Pattern: "a.**.b"}},
 	})
 	require.Error(t, err)
 }
 
 // TestNodePublish_HistoryDisabled verifies Node.Publish refuses channels
-// whose policy disables history, for both transient_only and history=false.
+// whose Effects disable history, for both transient_only and history=false.
 func TestNodePublish_HistoryDisabled(t *testing.T) {
 	node := NewNode(&config.Server{
-		Channels: config.ChannelConfig{
-			Policies: []config.ChannelPolicyRule{
+		Authorizer: config.AuthorizerConfig{
+			Rules: []config.AuthorizerRule{
 				{Pattern: "game.tick.**", ChannelPolicySpec: config.ChannelPolicySpec{TransientOnly: policyBoolPtr(true)}},
 				{Pattern: "no-history.**", ChannelPolicySpec: config.ChannelPolicySpec{History: policyBoolPtr(false)}},
 			},
@@ -187,12 +187,12 @@ func TestNodePublish_HistoryDisabled(t *testing.T) {
 }
 
 // TestNodePublish_HistorySizeInjected verifies Node.Publish fills the
-// publication's HistorySize/HistoryTTL from the policy when the caller left
+// publication's HistorySize/HistoryTTL from the Effects when the caller left
 // them zero.
 func TestNodePublish_HistorySizeInjected(t *testing.T) {
 	node := NewNode(&config.Server{
-		Channels: config.ChannelConfig{
-			Policies: []config.ChannelPolicyRule{
+		Authorizer: config.AuthorizerConfig{
+			Rules: []config.AuthorizerRule{
 				{Pattern: "im.**", ChannelPolicySpec: config.ChannelPolicySpec{
 					HistorySize: policyIntPtr(5000),
 					HistoryTTL:  "48h",
@@ -227,8 +227,8 @@ func TestHandlePublish_PolicyForcesTransient(t *testing.T) {
 	ctx := context.Background()
 	metrics := NewMetrics(prometheus.NewRegistry())
 	node := NewNode(&config.Server{
-		Channels: config.ChannelConfig{
-			Policies: []config.ChannelPolicyRule{
+		Authorizer: config.AuthorizerConfig{
+			Rules: []config.AuthorizerRule{
 				{Pattern: "game.tick.**", ChannelPolicySpec: config.ChannelPolicySpec{TransientOnly: policyBoolPtr(true)}},
 			},
 		},
@@ -304,8 +304,8 @@ func TestHandlePublish_PolicyForcedNoMetricForDeclaredTransient(t *testing.T) {
 	ctx := context.Background()
 	metrics := NewMetrics(prometheus.NewRegistry())
 	node := NewNode(&config.Server{
-		Channels: config.ChannelConfig{
-			Policies: []config.ChannelPolicyRule{
+		Authorizer: config.AuthorizerConfig{
+			Rules: []config.AuthorizerRule{
 				{Pattern: "game.tick.**", ChannelPolicySpec: config.ChannelPolicySpec{TransientOnly: policyBoolPtr(true)}},
 			},
 		},
@@ -341,8 +341,8 @@ func TestHandlePublish_PolicyForcedNoMetricForDeclaredTransient(t *testing.T) {
 // keeps exactly the last 5 entries.
 func TestNodePublish_PolicyHistorySizeCapsRing(t *testing.T) {
 	node := NewNode(&config.Server{
-		Channels: config.ChannelConfig{
-			Policies: []config.ChannelPolicyRule{
+		Authorizer: config.AuthorizerConfig{
+			Rules: []config.AuthorizerRule{
 				{Pattern: "im.**", ChannelPolicySpec: config.ChannelPolicySpec{HistorySize: policyIntPtr(5)}},
 			},
 		},
@@ -367,8 +367,8 @@ func TestNodePublish_PolicyHistorySizeCapsRing(t *testing.T) {
 // available on the same channel.
 func TestNodePublish_PolicyDisabledHistoryStillTransientable(t *testing.T) {
 	node := NewNode(&config.Server{
-		Channels: config.ChannelConfig{
-			Policies: []config.ChannelPolicyRule{
+		Authorizer: config.AuthorizerConfig{
+			Rules: []config.AuthorizerRule{
 				{Pattern: "game.tick.**", ChannelPolicySpec: config.ChannelPolicySpec{TransientOnly: policyBoolPtr(true)}},
 			},
 		},

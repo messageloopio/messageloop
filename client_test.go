@@ -674,9 +674,27 @@ func TestClientSession_HandleMessage_RpcRequest_NoProxy(t *testing.T) {
 		t.Fatalf("HandleMessage() RpcRequest error = %v", err)
 	}
 
-	// Should echo back the event when no proxy is configured
+	// No proxy configured: a NO_PROXY error envelope, never an RpcReply echo
+	// (PR-KA-A4 §8.3).
 	if transport.getMessageCount() != 1 {
-		t.Errorf("Transport should have 1 message, got %d", transport.getMessageCount())
+		t.Fatalf("Transport should have 1 message, got %d", transport.getMessageCount())
+	}
+	var out clientpb.OutboundMessage
+	if err := (JSONMarshaler{}).Unmarshal(transport.getLastMessage(), &out); err != nil {
+		t.Fatalf("Unmarshal outbound message: %v", err)
+	}
+	if out.GetRpcReply() != nil {
+		t.Fatal("an RPC without a matching proxy must not be echoed as an RpcReply")
+	}
+	errObj := out.GetError()
+	if errObj == nil {
+		t.Fatal("expected an Error envelope, got none")
+	}
+	if errObj.Code != "NO_PROXY" {
+		t.Errorf("expected error code NO_PROXY, got %q", errObj.Code)
+	}
+	if errObj.Type != "request_error" {
+		t.Errorf("expected error type request_error, got %q", errObj.Type)
 	}
 }
 

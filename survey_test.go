@@ -1012,10 +1012,12 @@ func newSurveyClient(t *testing.T, node *Node, sessionID, userID, channel string
 // SurveyRequest.request_id; A receives the aggregated SurveyResult.
 func TestClientSurvey_RoundTrip(t *testing.T) {
 	node := NewNode(&config.Server{
-		Channels: config.ChannelConfig{Default: config.ChannelPolicySpec{Survey: policyBoolPtr(true)}},
-		ACL: config.ACLConfig{Rules: []config.ACLRule{
-			{ChannelPattern: "survey.**", AllowSurvey: []string{"*"}},
-		}},
+		Authorizer: config.AuthorizerConfig{
+			Default: config.ChannelPolicySpec{Survey: policyBoolPtr(true)},
+			Rules: []config.AuthorizerRule{
+				{Pattern: "survey.**", AllowSurvey: []string{"*"}},
+			},
+		},
 	})
 	require.NoError(t, node.Run(context.Background()))
 	ctx := context.Background()
@@ -1088,10 +1090,12 @@ func TestClientSurvey_DefaultDisabled(t *testing.T) {
 // delivery.
 func TestClientSurvey_NotCovered(t *testing.T) {
 	node := NewNode(&config.Server{
-		Channels: config.ChannelConfig{Default: config.ChannelPolicySpec{Survey: policyBoolPtr(true)}},
-		ACL: config.ACLConfig{Rules: []config.ACLRule{
-			{ChannelPattern: "**", AllowSurvey: []string{"*"}},
-		}},
+		Authorizer: config.AuthorizerConfig{
+			Default: config.ChannelPolicySpec{Survey: policyBoolPtr(true)},
+			Rules: []config.AuthorizerRule{
+				{Pattern: "csurvey.**", AllowSurvey: []string{"*"}},
+			},
+		},
 	})
 	require.NoError(t, node.Run(context.Background()))
 	ctx := context.Background()
@@ -1109,10 +1113,30 @@ func TestClientSurvey_NotCovered(t *testing.T) {
 // TestClientSurvey_TooManyLocal: a single node with > MaxSurveySubscribers
 // subscribers rejects synchronously with SURVEY_TOO_MANY_SUBSCRIBERS and
 // zero outbound SurveyRequests.
+// surveyOpenServer returns a server config with client survey enabled and
+// allow_survey opened on prefix (PR-KA-A4: survey is default-deny, an
+// allow_survey rule is required to open it).
+func surveyOpenServer(prefix string) *config.Server {
+	return &config.Server{
+		Authorizer: config.AuthorizerConfig{
+			Default: config.ChannelPolicySpec{Survey: policyBoolPtr(true)},
+			Rules: []config.AuthorizerRule{
+				{Pattern: prefix + ".**", AllowSurvey: []string{"*"}},
+			},
+		},
+	}
+}
+
+// surveyOpenNode returns a running node built from surveyOpenServer.
+func surveyOpenNode(t *testing.T, prefix string) *Node {
+	t.Helper()
+	node := NewNode(surveyOpenServer(prefix))
+	require.NoError(t, node.Run(context.Background()))
+	return node
+}
+
 func TestClientSurvey_TooManyLocal(t *testing.T) {
-	node := NewNode(&config.Server{
-		Channels: config.ChannelConfig{Default: config.ChannelPolicySpec{Survey: policyBoolPtr(true)}},
-	})
+	node := surveyOpenNode(t, "big")
 	require.NoError(t, node.Run(context.Background()))
 	ctx := context.Background()
 
@@ -1184,9 +1208,7 @@ func TestClientSurvey_CountOnlyCluster(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	node := NewNode(&config.Server{
-		Channels: config.ChannelConfig{Default: config.ChannelPolicySpec{Survey: policyBoolPtr(true)}},
-	})
+	node := surveyOpenNode(t, "count")
 	node.SetCluster(runtime)
 	ctx := context.Background()
 
@@ -1221,9 +1243,7 @@ func TestClientSurvey_CountOnlyCluster(t *testing.T) {
 // channels for survey initiation; surveying a wildcard pattern is a
 // BAD_REQUEST.
 func TestClientSurvey_WildcardCoverExact(t *testing.T) {
-	node := NewNode(&config.Server{
-		Channels: config.ChannelConfig{Default: config.ChannelPolicySpec{Survey: policyBoolPtr(true)}},
-	})
+	node := surveyOpenNode(t, "game")
 	require.NoError(t, node.Run(context.Background()))
 	ctx := context.Background()
 
@@ -1265,9 +1285,7 @@ func TestClientSurvey_WildcardCoverExact(t *testing.T) {
 // initiator's own SurveyReply and a Ping; the SurveyResult arrives
 // asynchronously (KD-15).
 func TestClientSurvey_NoDeadlockSelfAnswer(t *testing.T) {
-	node := NewNode(&config.Server{
-		Channels: config.ChannelConfig{Default: config.ChannelPolicySpec{Survey: policyBoolPtr(true)}},
-	})
+	node := surveyOpenNode(t, "self")
 	require.NoError(t, node.Run(context.Background()))
 	ctx := context.Background()
 
@@ -1301,9 +1319,7 @@ func TestClientSurvey_NoDeadlockSelfAnswer(t *testing.T) {
 // TestClientSurvey_AnswerTooLarge: an 8KiB answer is truncated to a
 // SURVEY_ANSWER_TOO_LARGE error with no payload.
 func TestClientSurvey_AnswerTooLarge(t *testing.T) {
-	node := NewNode(&config.Server{
-		Channels: config.ChannelConfig{Default: config.ChannelPolicySpec{Survey: policyBoolPtr(true)}},
-	})
+	node := surveyOpenNode(t, "large")
 	require.NoError(t, node.Run(context.Background()))
 	ctx := context.Background()
 
@@ -1344,27 +1360,53 @@ func TestClientSurvey_EchoGone(t *testing.T) {
 	}), "inbound SurveyRequest must no longer echo a SurveyReply")
 }
 
-// TestACL_CanSurveyDefaultDeny: CanSurvey defaults to deny — no rules and
-// rules that only list allow_subscribe never open survey; an explicit
-// allow_survey list opens it; deny_all short-circuits.
-func TestACL_CanSurveyDefaultDeny(t *testing.T) {
-	empty := NewACLEngine(nil)
-	require.True(t, empty.CanSubscribe("any.ch", "user-1"))
-	require.False(t, empty.CanSurvey("any.ch", "user-1"), "no rules must default to deny")
+// TestAuthorizer_SurveyGatePinning pins the survey gates through Decide:
+// CanSurvey defaults to deny — no rules and rules that only list
+// allow_subscribe never open survey; an explicit allow_survey list opens it;
+// deny_all short-circuits.
+func TestAuthorizer_SurveyGatePinning(t *testing.T) {
+	u := userPrincipal("user-1")
+	empty, err := NewAuthorizer(config.AuthorizerConfig{})
+	require.NoError(t, err)
+	require.True(t, empty.Decide(u, ActionSubscribePattern, "any.ch").Allow)
+	require.False(t, empty.Decide(u, ActionSurvey, "any.ch").Allow, "no rules must default to deny")
 
-	subOnly := NewACLEngine([]ACLRule{{ChannelPattern: "chat.**", AllowSubscribe: []string{"*"}}})
-	require.True(t, subOnly.CanSubscribe("chat.room", "user-1"))
-	require.False(t, subOnly.CanSurvey("chat.room", "user-1"),
+	subOnly, err := NewAuthorizer(config.AuthorizerConfig{
+		Rules: []config.AuthorizerRule{{Pattern: "chat.**", AllowSubscribe: []string{"*"}}},
+	})
+	require.NoError(t, err)
+	require.True(t, subOnly.Decide(u, ActionSubscribePattern, "chat.room").Allow)
+	require.False(t, subOnly.Decide(u, ActionSurvey, "chat.room").Allow,
 		"a rule that only lists allow_subscribe must not open survey")
 
-	open := NewACLEngine([]ACLRule{{ChannelPattern: "chat.**", AllowSurvey: []string{"*"}}})
-	require.True(t, open.CanSurvey("chat.room", "user-1"))
+	open, err := NewAuthorizer(config.AuthorizerConfig{
+		Rules: []config.AuthorizerRule{
+			{Pattern: "chat.**", AllowSurvey: []string{"*"}, ChannelPolicySpec: config.ChannelPolicySpec{Survey: policyBoolPtr(true)}},
+		},
+	})
+	require.NoError(t, err)
+	require.True(t, open.Decide(u, ActionSurvey, "chat.room").Allow)
 
-	gated := NewACLEngine([]ACLRule{{ChannelPattern: "chat.**", AllowSurvey: []string{"alice"}}})
-	require.True(t, gated.CanSurvey("chat.room", "alice"))
-	require.False(t, gated.CanSurvey("chat.room", "bob"))
+	gated, err := NewAuthorizer(config.AuthorizerConfig{
+		Rules: []config.AuthorizerRule{
+			{Pattern: "chat.**", AllowSurvey: []string{"alice"}, ChannelPolicySpec: config.ChannelPolicySpec{Survey: policyBoolPtr(true)}},
+		},
+	})
+	require.NoError(t, err)
+	require.True(t, gated.Decide(userPrincipal("alice"), ActionSurvey, "chat.room").Allow)
+	require.False(t, gated.Decide(u, ActionSurvey, "chat.room").Allow)
 
-	denied := NewACLEngine([]ACLRule{{ChannelPattern: "chat.**", AllowSurvey: []string{"*"}, DenyAll: true}})
-	require.False(t, denied.CanSurvey("chat.room", "user-1"),
+	denied, err := NewAuthorizer(config.AuthorizerConfig{
+		Rules: []config.AuthorizerRule{
+			{
+				Pattern:           "chat.**",
+				DenyAll:           true,
+				AllowSurvey:       []string{"*"},
+				ChannelPolicySpec: config.ChannelPolicySpec{Survey: policyBoolPtr(true)},
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, denied.Decide(u, ActionSurvey, "chat.room").Allow,
 		"deny_all must deny survey even with allow_survey")
 }
