@@ -171,10 +171,10 @@ func TestNewClient(t *testing.T) {
 	if client.node != node {
 		t.Error("client node should match provided node")
 	}
-	if client.transport != transport {
+	if client.attachment.Transport != transport {
 		t.Error("client transport should match provided transport")
 	}
-	if client.marshaler != marshaler {
+	if client.attachment.Marshaler != marshaler {
 		t.Error("client marshaler should match provided marshaler")
 	}
 	if client.session == "" {
@@ -761,7 +761,7 @@ func TestClientSession_CloseFunc_WithDisconnect(t *testing.T) {
 
 	// The closeFunc doesn't take parameters - it uses the Disconnect from creation
 	// Let's test the close method directly
-	err = client.close(DisconnectBadRequest)
+	err = client.Close(DisconnectBadRequest)
 	if err != nil {
 		t.Fatalf("close() error = %v", err)
 	}
@@ -1478,35 +1478,23 @@ func TestClientSession_PublishAck_Offset(t *testing.T) {
 	assert.Equal(t, uint64(2), ack.GetOffset())
 }
 
-func TestClientStatus_String(t *testing.T) {
+func TestSessionState_String(t *testing.T) {
 	tests := []struct {
-		name   string
-		status status
-		want   string
+		name  string
+		state SessionState
+		want  string
 	}{
-		{"connecting", statusConnecting, "1"},
-		{"connected", statusConnected, "2"},
-		{"closed", statusClosed, "3"},
+		{"authenticating", SessionAuthenticating, "1"},
+		{"attached", SessionAttached, "2"},
+		{"detached", SessionDetached, "3"},
+		{"closed", SessionClosed, "4"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.status.String(); got != tt.want {
-				t.Errorf("status.String() = %v, want %v", got, tt.want)
+			if got := tt.state.String(); got != tt.want {
+				t.Errorf("SessionState.String() = %v, want %v", got, tt.want)
 			}
 		})
-	}
-}
-
-func (s status) String() string {
-	switch s {
-	case statusConnecting:
-		return "1"
-	case statusConnected:
-		return "2"
-	case statusClosed:
-		return "3"
-	default:
-		return "unknown"
 	}
 }
 

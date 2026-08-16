@@ -2,7 +2,6 @@ package messageloop
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -201,7 +200,7 @@ func (n *Node) restoreLocalSubscription(ctx context.Context, ch string, sub Subs
 	mu.Lock()
 	defer mu.Unlock()
 
-	if _, exists := n.hub.LookupSubscriber(ch, sub.Client); exists {
+	if _, exists := n.hub.LookupSubscriber(ch, sub.Session); exists {
 		return nil
 	}
 
@@ -211,16 +210,16 @@ func (n *Node) restoreLocalSubscription(ctx context.Context, ch string, sub Subs
 	}
 	if first {
 		if err := n.broker.Subscribe(ch); err != nil {
-			n.hub.removeSub(ch, sub.Client)
+			n.hub.removeSub(ch, sub.Session)
 			return err
 		}
 		if n.metrics != nil {
 			n.metrics.ActiveChannels.Inc()
 		}
 	}
-	sub.Client.mu.Lock()
-	sub.Client.subscribedChannels[ch] = struct{}{}
-	sub.Client.mu.Unlock()
+	sub.Session.mu.Lock()
+	sub.Session.subscribedChannels[ch] = struct{}{}
+	sub.Session.mu.Unlock()
 	if n.metrics != nil {
 		n.metrics.SubscriptionsTotal.Inc()
 	}
@@ -231,18 +230,18 @@ func (n *Node) restoreLocalSubscription(ctx context.Context, ch string, sub Subs
 // the shared channel projection. The returned bool reports whether the
 // subscription was removed from the hub (true even when the subsequent broker
 // Unsubscribe fails, since the hub state has already been mutated).
-func (n *Node) removeLocalSubscriptionOnly(ch string, client *Client, updateMetrics bool) (bool, error) {
+func (n *Node) removeLocalSubscriptionOnly(ch string, session *Session, updateMetrics bool) (bool, error) {
 	mu := n.subLock(ch)
 	mu.Lock()
 	defer mu.Unlock()
 
-	last, removed := n.hub.removeSub(ch, client)
+	last, removed := n.hub.removeSub(ch, session)
 	if !removed {
 		return false, nil
 	}
-	client.mu.Lock()
-	delete(client.subscribedChannels, ch)
-	client.mu.Unlock()
+	session.mu.Lock()
+	delete(session.subscribedChannels, ch)
+	session.mu.Unlock()
 	if last {
 		if err := n.broker.Unsubscribe(ch); err != nil {
 			return true, err
@@ -255,67 +254,4 @@ func (n *Node) removeLocalSubscriptionOnly(ch string, client *Client, updateMetr
 		n.metrics.SubscriptionsTotal.Dec()
 	}
 	return true, nil
-}
-
-func (n *Node) evictSessionForTakeover(client *Client) error {
-	client.mu.Lock()
-	if client.status == statusClosed {
-		client.mu.Unlock()
-		return nil
-	}
-	client.status = statusClosed
-	if client.heartbeatCancel != nil {
-		client.heartbeatCancel()
-		client.heartbeatCancel = nil
-	}
-	channels := make([]string, 0, len(client.subscribedChannels))
-	for ch := range client.subscribedChannels {
-		channels = append(channels, ch)
-	}
-	sessionID := client.session
-	client.mu.Unlock()
-
-	// Remove every channel even when individual removals fail, so no channel
-	// is left behind; track which channels were actually removed from the hub
-	// for rollback and shared projection adjustment.
-	var evictErrs []error
-	removed := make([]string, 0, len(channels))
-	ephemeralByChannel := make(map[string]bool, len(channels))
-	for _, ch := range channels {
-		if stored, ok := n.hub.LookupSubscriber(ch, client); ok {
-			ephemeralByChannel[ch] = stored.Ephemeral
-		}
-		wasRemoved, err := n.removeLocalSubscriptionOnly(ch, client, true)
-		if err != nil {
-			evictErrs = append(evictErrs, fmt.Errorf("remove channel %s: %w", ch, err))
-		}
-		if !wasRemoved {
-			continue
-		}
-		removed = append(removed, ch)
-		n.adjustClusterChannelSubscriptionsTimeout(ch, -1)
-	}
-
-	if len(evictErrs) > 0 {
-		// Roll back every removed channel (and the projection deltas) so the
-		// session is not left half-evicted, then report the aggregated error.
-		rollbackCtx, cancel := context.WithTimeout(context.Background(), clusterEvictRollbackTimeout)
-		for _, ch := range removed {
-			if err := n.restoreLocalSubscription(rollbackCtx, ch, NewSubscriber(client, ephemeralByChannel[ch])); err != nil {
-				evictErrs = append(evictErrs, fmt.Errorf("rollback channel %s: %w", ch, err))
-			}
-			n.adjustClusterChannelSubscriptionsTimeout(ch, 1)
-		}
-		cancel()
-		return errors.Join(evictErrs...)
-	}
-
-	if sessionID != "" {
-		// Only evict the session when the registered client is still this
-		// one: a newer connection may have taken over the session ID between
-		// LookupSession and this removal, and RemoveSessionIfMatches
-		// protects it from being evicted by a stale takeover.
-		n.hub.RemoveSessionIfMatches(sessionID, client)
-	}
-	return client.transport.Close(Disconnect{})
 }

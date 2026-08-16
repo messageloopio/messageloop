@@ -150,9 +150,9 @@ func TestNode_EvictSessionForTakeover_RollbackClearsDeliveredOffsets(t *testing.
 	require.True(t, ok)
 	require.Equal(t, uint64(1), sub.DeliveredOffset)
 
-	// Swap in a broker that fails Unsubscribe so the eviction rolls back.
+	// Swap in a broker that fails Unsubscribe so the fence rolls back.
 	node.SetBroker(&evictTestBroker{failUnsubCh: "evict.off", subscribed: make(map[string]bool)})
-	err = node.evictSessionForTakeover(client)
+	err = client.Fence(DisconnectStale)
 	require.Error(t, err)
 
 	sub, ok = node.hub.LookupSubscriber("evict.off", client)

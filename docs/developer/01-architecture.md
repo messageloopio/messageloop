@@ -44,7 +44,7 @@ MessageLoop 的核心设计目标可以归纳为四点：
 | --- | --- | --- |
 | `Node` | node.go | 中央协调者，持有并装配所有子系统，对外暴露发布、订阅、Survey、代理等入口 |
 | `Hub` | hub.go | 连接与会话注册表（64 分片），通道订阅注册表（64 分片），通配符订阅匹配，每用户连接数限制 |
-| `Client` | client.go | 单条连接的生命周期与消息处理：鉴权、resume、限制执行、入站消息路由、写路径 |
+| `Session` | session.go、client.go | 单条连接的生命周期与消息处理：状态机（Authenticating/Attached/Detached/Closed）、鉴权、resume、写队列、限制执行、入站消息路由 |
 | `Broker` | broker.go、broker_memory.go、pkg/redisbroker/ | 发布/订阅与历史存储；内存实现与 Redis 实现 |
 | `Presence` | presence.go、presence_event.go、pkg/redisbroker/presence_redis.go | 频道内在线成员追踪与 join/leave 事件分发 |
 | `Survey` | survey.go、node.go | 向频道订阅者广播请求并带超时收集响应 |
@@ -98,8 +98,8 @@ MessageLoop 的核心设计目标可以归纳为四点：
 
 `Hub` 维护三类注册表：
 
-- `sessions map[string]*Client`：会话 ID → 连接，受 `hub.mu` 保护，用于会话查找与 resume。
-- `connShards [64]*connShard`：每个分片内含 `clients`（会话 ID → 连接）与 `users`（用户 ID → 会话集合），按 `index(userID)` 分片。
+- `sessions map[string]*Session`：会话 ID → 会话对象（PR-KA-B1 后为 `Session`，`Client` 仅作过渡别名），受 `hub.mu` 保护，用于会话查找与 resume。本机 resume 指针恒等：**不**扫描订阅分片、**不**重建通配 matcher 换指针。
+- `connShards [64]*connShard`：每个分片内含 `clients`（会话 ID → 会话）与 `users`（用户 ID → 会话集合），按 `index(userID)` 分片。
 - `subShards [64]*subShard`：每个分片内含 `subs`（频道 → 会话 ID → `Subscriber`），按 `index(channel)` 分片。
 
 关键方法与行为：
@@ -107,28 +107,43 @@ MessageLoop 的核心设计目标可以归纳为四点：
 | 方法 | 说明 |
 | --- | --- |
 | `index(s, n)` | FNV-64a 哈希取模分片 |
-| `addWithLimit` | 在 `connShard` 内注册连接；`maxConnsPerUser > 0` 且用户连接数已满时返回 `DisconnectConnectionLimit` |
+| `addWithLimit` | 在 `connShard` 内注册会话；`maxConnsPerUser > 0` 且用户连接数已满时返回 `DisconnectConnectionLimit` |
 | `addSub` / `removeSub` | 通配符订阅走 `wcSubs`（键为 `sessionID:channel`）+ `matcher`，精确订阅走 `subShard` |
 | `broadcastPublication` | 合并精确与通配符订阅者（按会话 ID 去重，保证同一客户端只收到一次），小扇出（≤8）串行发送，大扇出用受 `broadcastParallelLimit`（64）限流的并发发送 |
-| `LookupSession` / `LookupSubscriber` | 会话与订阅查找 |
-| `ReplaceSession` | resume 时原子替换会话指向的新 `Client`，并重写全部订阅分片与通配符订阅 |
-| `RemoveSessionIfMatches` | 仅在注册的客户端与当前连接一致时移除会话，防止失败的旧连接把已接管/已恢复的会话驱逐出去 |
+| `LookupSession` / `LookupSubscriber` | 会话与订阅查找（返回 `*Session`） |
+| `PrepareSessionUser` | 跨用户本机 resume 前原子执行：目标用户 `maxConnsPerUser` 限额检查 + `connShard` 用户归属迁移；失败不改动任何状态（旧会话保持 Attached） |
+| `RemoveSessionIfMatches` | 仅在注册的会话与当前会话一致时移除，防止失败的旧连接把已接管/已恢复的会话驱逐出去 |
 | `GetActiveChannels` | 管理 API 用的活跃频道列表（含订阅者数） |
 | `DrainAll` | 并发向所有连接发送 `Close(disconnect)` 并等待关闭 |
 
 消息 ID 规则：实时投递与恢复共用 `publicationID(channel, offset)`（`"频道-offset"`），客户端据此去重；瞬时事件（offset 为 0）回退为随机 UUID，避免同一频道所有瞬时事件共享同一个 ID。
 
-### 3.3 Client（client.go）
+### 3.3 Session（session.go、client.go）
 
-`Client` 代表一条连接，状态机为 `statusConnecting → statusConnected → statusClosed`。
+PR-KA-B1 起内核对象是 `Session`（可恢复逻辑连接，`type Client = Session` 仅作过渡别名）。状态机钉死为 `SessionAuthenticating → SessionAttached ⇄ SessionDetached → SessionClosed`：
+
+- `Authenticating`：`NewClient` 出生即赋值（不再靠零值），Connect 进行中。
+- `Attached`：正常服务，写队列由**一个** writer goroutine 排空。
+- `Detached`：**只**用于本机交接窗口（附件已撕、Session 留在 Hub、Directory 仍认本 fencing）。被抢节点不准进入。
+- `Closed`：终态。
+
+**关闭三动词**（§8）：
+
+| 动词 | 副作用 |
+| --- | --- |
+| `Close(reason)` | 真走：presence Leave + 撤订阅 + `RemoveSessionIfMatches` + Unbind（`deleteClusterSessionState`）+ 关附件；对已 Closed 幂等 |
+| `Fence(reason)` | 被抢：撤本地订阅与 Hub 条目 + 关附件；**不** Leave、**不** Unbind；对已 Closed 幂等 |
+| `Detach(reason)` | 本机撕附件：只关附件、停 writer、丢队列；Session 留在 Hub；对非 Attached 是 no-op |
+
+**写队列**（挂在 Session 上，三条传输不再做第二层有界队列）：Control 深度 32 / Data 深度 256；下一帧优先 Control（按信封分类：Ping/Pong、各类 Ack、Connected、Error、SubRefreshAck 为 Control；Publication、PresenceEvent、Survey 为 Data）。`Send` 入队并等待该帧落线（调用方同步观察写结果）；Data/Control 满 → `Close(DisconnectSlowConsumer)`（3512）。错误映射：`io.EOF` / gRPC `Canceled`/`Unavailable` / WS close 1000/1001 → 3000（`peer_closed`，**不是** 3512）；写超时 → 3512；`ErrSessionFenced` → `Fence(DisconnectStale)`（3502）。gRPC 传输的 `sendCh` 深度为 1（仅作 handoff），不保留 64 深的第二缓冲。
 
 **连接生命周期（`handleConnect`）**：
 
 1. 若已鉴权再发 Connect，返回 `DisconnectBadRequest`。
 2. 客户端可携带 `SessionId` 请求恢复；会话 ID 在鉴权之前就写入（鉴权代理需要它）。
 3. 鉴权：若带 `Token`，查找方法为 `$authenticate`（`SystemMethodAuthenticate`）的代理并调用 `Authenticate`；`requireAuth` 开启但无代理可验证 token 时拒绝（`DisconnectInvalidToken`）。
-4. 恢复：本地会话存在则复制其状态（频道、用户、租约版本）、`closeQuiet` 旧连接（不触发 presence 清理）、`ReplaceSession` 接管；本地不存在则尝试跨节点恢复（`resumeRemoteSession`）。未鉴权连接不能驱逐仍被服务的会话。
-5. `AddClient` 注册 + `MarkMetricsCharged`，集群模式下同步会话状态。
+4. 恢复：本地会话存在则**指针不动**——先查 `maxConnsPerUser`（跨用户，`PrepareSessionUser`，失败则旧会话保持 Attached、新连接 `DisconnectConnectionLimit`），再 `Detach` 旧附件、`Attach` 新附件；Attach 失败走真走 `Close(DisconnectInternal)`。新连接上那个临时 Authenticating 会话不进 Hub，变成读循环 shell 委托给被恢复的会话。本地不存在则尝试跨节点恢复（`resumeRemoteSession`）。未鉴权连接不能驱逐仍被服务的会话。
+5. `AddClient` 注册 + `MarkMetricsCharged`，集群模式下同步会话状态（本机 resume 走 same-fence Bind，版本 +1 后仍是自己）。
 6. 通知代理 `OnConnected`。
 7. 处理 Connect 携带的订阅列表：先做订阅数上限检查（超限 `DisconnectChannelLimit`），逐频道 Authorizer/代理检查，`AddSubscription` + presence 登记 + 异步发布 join 事件。
 8. 消息恢复：`sub.Recover` 时以 `sub.Offset+1` 为起点调 `broker.History`；若 broker 有 epoch（`Epoch()`）且与客户端携带的 `sub.Epoch` 不一致（或客户端未携带），从 0（开头）恢复；恢复总量受 `MaxRecoveredPublications`（1000）封顶。全部结果随 `Connected` 信封返回（含 `Resumed` 与 `Epoch` 字段）。
@@ -153,9 +168,9 @@ MessageLoop 的核心设计目标可以归纳为四点：
 - 发布速率：`limits.MaxPublishesPerSecond` 构造 `rate.Limiter`，超限回 `RATE_LIMITED` 错误信封（不断连）。
 - 消息大小：`node.MaxMessageSize()`（默认 64 KB），WebSocket 端经 `SetReadLimit` 强制，gRPC 端经 `MaxRecvMsgSize` 强制，两个传输读取同一入口保证一致。
 
-**写路径（`write`）**：从 `sync.Pool`（pool.go，初始容量 4096）取缓冲 → `marshaler.MarshalAppend` 序列化 → `transport.Write`；写入失败则异步 `close(DisconnectSlowConsumer)`。gRPC 传输会对缓冲做拷贝后再交给 worker，因为池化缓冲在 `Write` 返回后可能被复用。
+**写路径（`Send`/`enqueue`）**：从 `sync.Pool`（pool.go，初始容量 4096）取缓冲 → `marshaler.MarshalAppend` 序列化 → 入 Session 写队列（Control/Data 双车道，下一帧优先 Control）并等待该帧落线；写入失败按 §7 码表映射（`io.EOF` 等对端走 → 3000，写超时/队列满 → 3512，fenced → 3502）。Attached 期间由唯一 writer goroutine 排空；Detach/Fence/Close 停 writer 并丢弃队列。gRPC 传输对缓冲做拷贝后再交给 worker，因为池化缓冲在 `Write` 返回后可能被复用。
 
-**断开（`close`）**：标记关闭 → 取消心跳 → 并发（≤16）移除全部订阅 → presence 清理 + 逐个发布 leave 事件 → `RemoveSessionIfMatches` 后删除集群会话状态 → 递减连接指标 → 通知代理 `OnDisconnected` → `transport.Close(disconnect)`。
+**断开（`Close`/`Fence`/`Detach`）**：真走 `Close`：标记 Closed → 取消心跳 → 停 writer → 并发（≤16）移除全部订阅 → presence 清理 + 逐个发布 leave 事件 → `RemoveSessionIfMatches` 后删除集群会话状态 → 递减连接指标 → 通知代理 `OnDisconnected` → 关附件。被抢只准 `Fence`（无 Leave、无 Unbind）；本机交接用 `Detach`（只关附件、Session 留在 Hub）。
 
 ### 3.4 Broker（broker.go、broker_memory.go、pkg/redisbroker/）
 
@@ -327,19 +342,23 @@ Hub 的 `wcSubs` 记录每个通配符订阅（键 `sessionID:channel`），广�
   │── Connect ─────────►│                                  │
   │                     │── 鉴权：FindProxy("","$authenticate")
   │                     │── LookupSession(sessionId)
-  │                     │── 旧会话存在：
-  │                     │   复制旧状态 → 旧会话 closeQuiet
-  │                     │   → Hub.ReplaceSession(sessionId, 新Client)
-  │                     │── AddClient + MarkMetricsCharged
+  │                     │── 旧会话存在（PR-KA-B1，指针不动）：
+  │                     │   跨用户先 PrepareSessionUser（限额检查+connShard 迁移）
+  │                     │   → 旧会话 Detach（关旧附件，不 Leave、不撤订阅）
+  │                     │   → Attach(新附件)（失败则 Close(Internal) 真走）
+  │                     │   临时连接变成读循环 shell，委托给旧会话对象
+  │                     │── AddClient + MarkMetricsCharged（本机 resume 走 same-fence Bind）
   │                     │── 逐频道 Authorizer/代理 → AddSubscription(saga)
   │                     │── broker.History(offset+1)（校验 Epoch）
   │◄── Connected ───────┤      （Resumed=true, Publications=恢复的消息）
   │                     │
   │   连接中断（网络）   │
-  │                     │   失败的旧连接 close() 时:
-  │                     │   RemoveSessionIfMatches(sessionId, 旧Client)
-  │                     │   → 不匹配，不驱逐新会话（stale 保护）
+  │                     │   旧附件读循环结束时:
+  │                     │   closeFn 按附件身份校验 → 不再匹配当前附件
+  │                     │   → no-op（stale 保护，不驱逐被恢复的会话）
 ```
+
+被抢（跨节点 takeover）：旧节点收 `Evict`/写路径 fence 后**只准 `Fence`**（撤本地订阅与 Hub 条目 + 关附件；不 Leave、不 Unbind），随后真走由新 owner 负责。
 
 ### (b) 订阅 → 发布 → 投递（ack / offset）
 

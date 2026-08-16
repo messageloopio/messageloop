@@ -243,8 +243,9 @@ func TestHandlePublish_PolicyForcesTransient(t *testing.T) {
 	subscriber.mu.Lock()
 	subscriber.authenticated = true
 	subscriber.mu.Unlock()
+	require.NoError(t, subscriber.Attach(subscriber.attachment))
 	require.NoError(t, node.AddClient(subscriber))
-	require.NoError(t, node.AddSubscription(ctx, "game.tick.fps", Subscriber{Client: subscriber, Ephemeral: false}))
+	require.NoError(t, node.AddSubscription(ctx, "game.tick.fps", Subscriber{Session: subscriber, Ephemeral: false}))
 	subTransport.messages = nil
 
 	// A publisher client, authenticated via Connect.

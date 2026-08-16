@@ -117,6 +117,7 @@ func TestRPCTimeout_FastResponse(t *testing.T) {
 	client.authenticated = true
 	client.client = "test-client"
 	client.mu.Unlock()
+	assert.NoError(t, client.Attach(client.attachment))
 
 	// Send RPC request
 	s, _ := structpb.NewStruct(map[string]interface{}{"data": "test"})
@@ -166,6 +167,7 @@ func TestRPCTimeout_SlowResponse(t *testing.T) {
 	client.authenticated = true
 	client.client = "test-client"
 	client.mu.Unlock()
+	assert.NoError(t, client.Attach(client.attachment))
 
 	// Send RPC request
 	s, _ := structpb.NewStruct(map[string]interface{}{"data": "test"})

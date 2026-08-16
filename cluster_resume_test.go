@@ -98,7 +98,7 @@ func TestNode_EvictSessionForTakeover_RollsBackPartiallyRemovedChannels(t *testi
 		require.NoError(t, node.AddSubscription(context.Background(), ch, NewSubscriber(client, false)))
 	}
 
-	err = node.evictSessionForTakeover(client)
+	err = client.Fence(DisconnectStale)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsubscribe failed")
 
@@ -130,7 +130,7 @@ func TestNode_EvictSessionForTakeover_RollbackPreservesEphemeral(t *testing.T) {
 	require.NoError(t, node.AddSubscription(context.Background(), "evict.eph", NewSubscriber(client, true)))
 	require.NoError(t, node.AddSubscription(context.Background(), "evict.eph.fail", NewSubscriber(client, true)))
 
-	err = node.evictSessionForTakeover(client)
+	err = client.Fence(DisconnectStale)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "unsubscribe failed")
 
@@ -179,7 +179,7 @@ func TestNode_EvictSessionForTakeover_AdjustsSharedProjection(t *testing.T) {
 	require.NoError(t, node.AddClient(clientB))
 	require.NoError(t, node.AddSubscription(context.Background(), "news", NewSubscriber(clientB, false)))
 
-	require.NoError(t, node.evictSessionForTakeover(clientA))
+	require.NoError(t, clientA.Fence(DisconnectStale))
 
 	channels, err := node.Channels(context.Background())
 	require.NoError(t, err)
@@ -512,10 +512,12 @@ func TestNode_RestoreSessionSubscriptions_RollbackClearsPresence(t *testing.T) {
 	require.False(t, client.hasSubscription("rollback.ch.1"))
 }
 
-// TestNode_EvictSessionForTakeover_DoesNotDeleteNewSession verifies P1-C6:
-// the takeover eviction must not remove a session that a newer connection
-// has taken over between the session lookup and the removal.
-func TestNode_EvictSessionForTakeover_DoesNotDeleteNewSession(t *testing.T) {
+// TestNode_Fence_DoesNotDeleteNewSession verifies P1-C6 under PR-KA-B1
+// pointer stability: a stale Fence from an old incarnation of the session
+// object (already closed and removed) must not evict a newer session that
+// registered the same session ID afterwards — RemoveSessionIfMatches guards
+// on the registered pointer.
+func TestNode_Fence_DoesNotDeleteNewSession(t *testing.T) {
 	node := NewNode(nil)
 	clientA, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
 	require.NoError(t, err)
@@ -523,16 +525,19 @@ func TestNode_EvictSessionForTakeover_DoesNotDeleteNewSession(t *testing.T) {
 	require.NoError(t, node.AddClient(clientA))
 	require.NoError(t, node.AddSubscription(context.Background(), "news", NewSubscriber(clientA, false)))
 
-	// A newer connection takes over the same session ID while the stale
-	// takeover eviction is in flight.
+	// The old incarnation is closed and removed (e.g. a previous close or
+	// fence), then a NEW session registers the same session ID.
+	require.NoError(t, clientA.Close(Disconnect{}))
 	clientB, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
 	require.NoError(t, err)
 	clientB.ForceTestIDs("sess-shared", "user-shared", "client-b")
-	require.NoError(t, node.hub.ReplaceSession("sess-shared", clientB))
+	require.NoError(t, node.AddClient(clientB))
 
-	require.NoError(t, node.evictSessionForTakeover(clientA))
+	// A stale takeover fence arrives for the old incarnation: it must not
+	// evict the new session.
+	require.NoError(t, clientA.Fence(DisconnectStale))
 	require.Same(t, clientB, node.hub.LookupSession("sess-shared"),
-		"the new session must survive the stale client's eviction")
+		"the new session must survive the stale fence")
 }
 
 // TestNode_EvictSessionForTakeover_RemovesOwnSession verifies the matching
@@ -545,7 +550,7 @@ func TestNode_EvictSessionForTakeover_RemovesOwnSession(t *testing.T) {
 	client.ForceTestIDs("sess-own", "user-own", "client-own")
 	require.NoError(t, node.AddClient(client))
 
-	require.NoError(t, node.evictSessionForTakeover(client))
+	require.NoError(t, client.Fence(DisconnectStale))
 	require.Nil(t, node.hub.LookupSession("sess-own"))
 }
 

@@ -710,9 +710,10 @@ func TestHub_GetSubscribers(t *testing.T) {
 		clients[i].mu.Lock()
 		clients[i].authenticated = true
 		clients[i].mu.Unlock()
+		require.NoError(t, clients[i].Attach(clients[i].attachment))
 
 		_ = node.AddClient(clients[i])
-		err = node.AddSubscription(ctx, "test-channel", Subscriber{Client: clients[i], Ephemeral: false})
+		err = node.AddSubscription(ctx, "test-channel", Subscriber{Session: clients[i], Ephemeral: false})
 		if err != nil {
 			t.Fatalf("addSubscription() error = %v", err)
 		}

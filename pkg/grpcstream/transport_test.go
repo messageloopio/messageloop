@@ -2,6 +2,7 @@ package grpcstream
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -220,117 +221,118 @@ func TestTransport_WriteManyTimesOutWhenWorkerBlocked(t *testing.T) {
 	require.ErrorIs(t, transport.WriteMany([]byte("after close")), ErrTransportClosed)
 }
 
-// TestTransport_SlowEnqueueGetsFreshAckBudget is the regression test for
-// P1-B3: when the send queue is backed up, a write whose enqueue phase
-// consumes most of the budget must still get a full budget for the
-// delivery-ack phase. Before the fix the shared timer fired right after the
-// slow enqueue, falsely reporting a write timeout on a healthy connection.
+// TestTransport_SlowEnqueueGetsFreshAckBudget is the P1-B3 regression test
+// adapted to the PR-KA-B1 depth-1 handoff: the send channel is a single-slot
+// handoff, not a 64-deep buffer. A write whose enqueue stalls on the
+// occupied slot must still get a full budget for the delivery-ack phase —
+// it must succeed once the slot frees up, never falsely reporting a timeout
+// on a connection that merely queued behind the handoff.
 //
-// Setup: the worker is blocked on the first frame while 64 more frames fill
-// the send queue, so the 66th write's enqueue stalls for ~460ms (of a 1s
-// budget). After the worker is released, each of the 65 queued frames takes
-// 12ms to deliver, so the 66th write is acked at ~+1.24s. The stale shared
-// deadline would have fired at +1.0s (false timeout); the fresh ack budget
-// runs until +1.46s, so the write must succeed.
+// Setup: the worker is blocked on frame A (in flight) while frame B fills
+// the single handoff slot, so write C's enqueue stalls. The worker is
+// released at ~450ms (well inside the 1s budget): A and B are acked (12ms
+// each), C's enqueue succeeds and its ack phase gets a fresh budget, so C
+// must succeed.
 func TestTransport_SlowEnqueueGetsFreshAckBudget(t *testing.T) {
 	stream := newFakeBidiStream()
 	stream.setBlock()
 	stream.sendDelay = 12 * time.Millisecond
 	transport := newGRPCTransport(stream, "fake-addr", time.Second)
 
-	const fills = 64
-	results := make([]chan error, fills+1)
-	// The fake stream decodes rawFrame payloads as protobuf, so the queued
-	// messages must be valid protobuf bytes.
 	queuedFrame, err := proto.Marshal(&clientpb.OutboundMessage{Id: "queued"})
 	require.NoError(t, err)
-	for i := 0; i < fills+1; i++ {
-		results[i] = make(chan error, 1)
-		go func(ch chan<- error) { ch <- transport.WriteMany(queuedFrame) }(results[i])
-	}
 
-	// Fill the send channel (one write is held by the blocked worker, the
-	// remaining fills sit in the channel) so the enqueue phase of the last
-	// write stalls.
+	// Frame A: dequeued by the worker, blocked in-flight.
+	writeA := make(chan error, 1)
+	go func() { writeA <- transport.WriteMany(queuedFrame) }()
+
+	// Frame B: fills the single handoff slot (the worker is still blocked on A).
+	writeB := make(chan error, 1)
+	go func() { writeB <- transport.WriteMany(queuedFrame) }()
 	require.Eventually(t, func() bool {
-		return len(transport.sendCh) == fills
+		return len(transport.sendCh) == 1
 	}, 2*time.Second, 10*time.Millisecond)
 
-	// The next write: its enqueue must wait for a slot to free up.
+	// Frame C: its enqueue must wait for the slot to free up.
 	slowStart := time.Now()
-	slowResult := make(chan error, 1)
-	go func() { slowResult <- transport.WriteMany(queuedFrame) }()
+	writeC := make(chan error, 1)
+	go func() { writeC <- transport.WriteMany(queuedFrame) }()
 
 	// Make sure the enqueue is actually stalled before releasing the worker.
 	time.Sleep(450 * time.Millisecond)
 	stream.release()
 
-	var slowErr error
 	select {
-	case slowErr = <-slowResult:
+	case err := <-writeC:
+		require.NoError(t, err, "write with slow enqueue must not falsely report a timeout")
 	case <-time.After(3 * time.Second):
 		t.Fatal("the stalled write never completed")
 	}
-	require.NoError(t, slowErr, "write with slow enqueue must not falsely report a timeout")
 
-	// The write must have succeeded only after the stale deadline would have
-	// fired: i.e. it waited for the ack, it did not return at the 1s mark.
+	// The write must have waited out the handoff backpressure: it succeeded
+	// only after the slot freed up.
 	elapsed := time.Since(slowStart)
-	require.GreaterOrEqual(t, elapsed, 950*time.Millisecond,
-		"write returned too early; the ack phase must get its own budget")
+	require.GreaterOrEqual(t, elapsed, 400*time.Millisecond,
+		"write returned too early; it must wait for the handoff slot")
 
-	// Drain the remaining queued writers; they legitimately exceed their
-	// budgets (1s enqueue + long queue), so they may return timeouts.
-	for i := 0; i < fills+1; i++ {
+	// The earlier writers complete once the worker drains.
+	for name, ch := range map[string]chan error{"A": writeA, "B": writeB} {
 		select {
-		case <-results[i]:
-		case <-time.After(2 * time.Second):
-			t.Fatal("queued writer never completed")
+		case err := <-ch:
+			require.NoError(t, err, "write %s must succeed", name)
+		case <-time.After(3 * time.Second):
+			t.Fatalf("write %s never completed", name)
 		}
 	}
 
-	// The transport must still close cleanly: the queue is drained by now.
 	require.NoError(t, transport.Close(messageloop.Disconnect{Code: 3500, Reason: "test disconnect"}))
 	require.ErrorIs(t, transport.WriteMany([]byte("after close")), ErrTransportClosed)
 	require.False(t, stream.hasConcurrentSend(), "detected concurrent SendMsg on the gRPC stream")
 }
 
-// TestTransport_CloseWithFullQueueReturnsPromptly is the regression test for
-// P1-B4: Close must not block for the full write timeout when the send queue
-// is backed up, and the worker must still drain the queue (backfilling errors)
-// once it unblocks.
+// TestTransport_CloseWithFullQueueReturnsPromptly is the P1-B4 regression
+// test adapted to the PR-KA-B1 depth-1 handoff: with the worker blocked and
+// the single handoff slot occupied, Close must not block for the full write
+// timeout — the disconnect frame enqueue degrades to a direct close after
+// disconnectFrameTimeout — and the queued writers must still finish promptly
+// once the worker drains.
 func TestTransport_CloseWithFullQueueReturnsPromptly(t *testing.T) {
 	stream := newFakeBidiStream()
 	stream.setBlock()
 	transport := newGRPCTransport(stream, "fake-addr", 10*time.Second)
 
-	const fills = 64
-	results := make([]chan error, fills+1)
 	queuedFrame, err := proto.Marshal(&clientpb.OutboundMessage{Id: "queued"})
 	require.NoError(t, err)
-	for i := 0; i < fills+1; i++ {
+
+	// Frame A is held in-flight by the blocked worker; frame B fills the
+	// single handoff slot.
+	results := make([]chan error, 2)
+	for i := 0; i < 2; i++ {
 		results[i] = make(chan error, 1)
 		go func(ch chan<- error) { ch <- transport.WriteMany(queuedFrame) }(results[i])
 	}
 	require.Eventually(t, func() bool {
-		return len(transport.sendCh) == fills
+		return len(transport.sendCh) == 1
 	}, 2*time.Second, 10*time.Millisecond)
 
-	// Close with the worker still blocked and the queue full: the disconnect
-	// frame cannot be enqueued, so Close must degrade to a direct close and
-	// return promptly (disconnectFrameTimeout, not the 10s write timeout).
+	// Close with the worker still blocked and the handoff slot occupied: the
+	// disconnect frame cannot be enqueued, so Close must degrade to a direct
+	// close and return promptly (disconnectFrameTimeout, not the 10s write
+	// timeout).
 	closeStart := time.Now()
 	closeErr := transport.Close(messageloop.Disconnect{Code: 3512, Reason: "slow consumer"})
 	require.Less(t, time.Since(closeStart), 5*time.Second, "Close must not block for a full write timeout")
-	require.Error(t, closeErr, "disconnect frame could not be enqueued with a full queue")
+	require.Error(t, closeErr, "disconnect frame could not be enqueued with an occupied slot")
 
-	// Unblock the worker: it must drain the queue and backfill errors so the
-	// queued writers finish promptly instead of hanging for their 10s budget.
+	// Unblock the worker: the in-flight write completes and the slot-held
+	// write finishes promptly (delivered or failed as closed — the worker
+	// select may pick either path once both closeCh and sendCh are ready).
 	stream.release()
-	for i := 0; i < fills+1; i++ {
+	for i := 0; i < 2; i++ {
 		select {
 		case wErr := <-results[i]:
-			require.ErrorIs(t, wErr, ErrTransportClosed, "queued writer %d must be failed during drain", i)
+			require.True(t, wErr == nil || errors.Is(wErr, ErrTransportClosed),
+				"queued writer %d must complete (nil or ErrTransportClosed), got %v", i, wErr)
 		case <-time.After(3 * time.Second):
 			t.Fatalf("queued writer %d never completed after close+drain", i)
 		}

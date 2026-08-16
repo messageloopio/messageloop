@@ -91,7 +91,7 @@ func (hm *HeartbeatManager) heartbeatLoop(ctx context.Context, client *Client) {
 		case <-pingCh:
 			pingTimer.Reset(hm.jitter(hm.config.PingInterval))
 			client.mu.Lock()
-			closed := client.status == statusClosed
+			closed := client.state == SessionClosed
 			client.mu.Unlock()
 			if closed {
 				return
@@ -135,7 +135,7 @@ func (c *Client) armPingDeadline(timeout time.Duration) {
 		// ping or already cancelled by inbound traffic; the status check
 		// keeps the callback from firing after any other close path.
 		c.mu.Lock()
-		fired := c.pingDeadline == deadline && c.status != statusClosed
+		fired := c.pingDeadline == deadline && c.state != SessionClosed
 		if fired {
 			c.pingDeadline = nil
 		}
@@ -173,7 +173,7 @@ func (c *Client) disconnectHeartbeatTimeout() {
 	if !c.heartbeatDisconnectOnce.CompareAndSwap(false, true) {
 		return
 	}
-	_ = c.close(DisconnectIdleTimeout)
+	_ = c.Close(DisconnectIdleTimeout)
 	if c.node.metrics != nil {
 		c.node.metrics.HeartbeatIdleDisconnects.Inc()
 	}

@@ -3,7 +3,7 @@
 | 字段 | 值 |
 | --- | --- |
 | 标题 | `session: stable Session object, attachable transport, send queue` |
-| 状态 | **Ready**（尚未实现） |
+| 状态 | **Accepted**（2026-08-16 主 agent 终验通过，尚未 commit） |
 | 依赖 | A4 已合。在 `v2` 分支上做 |
 | 设计来源 | [kernel-architecture.md](../kernel-architecture.md) Session Plane、KD-K2、KD-K3、KD-K5、KD-K6、KD-K31 |
 | 验收人 | 主 agent |
@@ -229,3 +229,16 @@ if err := existing.Attach(newAtt); err != nil {
 ## 12. 实现备注（完成后填写）
 
 （实现者填写）
+
+### 实现摘要（PR-KA-B1，2026-08-16）
+
+- **对象**：`Session`（session.go）持有 `state` / `attachment` / `out`（Control 32 / Data 256 双车道写队列）+ 原 Client 字段；`type Client = Session` 过渡别名。`NewClient` 出生即 `SessionAuthenticating`（不再靠零值）。
+- **Hub**：`sessions map[string]*Session`、`Subscriber.Session`；`ReplaceSession` 删除，改为 `PrepareSessionUser`（跨用户 resume 的限额检查 + connShard 迁移，原子、失败零副作用）。本机 resume 不再扫 subShard、不重建 matcher。
+- **handleConnect**：本机 resume 走 `existing.Detach → existing.Attach(newAtt)`，临时 Authenticating 会话不进 Hub，变成读循环 shell（`delegate` 委托）；跨用户先 `PrepareSessionUser`（失败旧会话保持 Attached、新连接 3504）。`Attach` 失败 → `existing.Close(DisconnectInternal)` 真走（§5 空洞修复）。
+- **三动词**：`Close`（Leave+Unbind+撤订阅+关附件，幂等）、`Fence`（不 Leave、不 Unbind；含部分失败回滚并恢复 Attached）、`Detach`（只关附件停 writer 丢队列；非 Attached no-op）。`close`/`closeQuiet`/`evictSessionForTakeover`/`disconnectFenced` 旧语义删除，takeover 命令与 fenced ping 走 `Fence(DisconnectStale)`。
+- **写队列**：`Send` 入队并按信封分类（Control 优先，下一帧选择）；Attach 起唯一 writer 排空，Detach/Fence/Close 停 writer 丢队列。`Send` 等待该帧落线（done channel），调用方同步观察写结果；Authenticating 窗口（无 writer）直写附件（鉴权拒绝信封仍能落线），Detached/Closed 快速失败。Data/Control 满 → `Close(3512)`。错误映射：`io.EOF`/`net.ErrClosed`/WS close 1000/1001/gRPC Canceled/Unavailable → 3000；写超时等 → 3512；`ErrSessionFenced` → Fence 3502。
+- **gRPC 传输**：`sendCh` 64 → 1（仅 handoff，不再当第二缓冲）；相关两条 P1-B3/B4 回归测试改写为深度 1 语义。
+- **出站大小上限**：`MaxMessageSize` 适用于普通帧；`Connected` 信封豁免（恢复批次仍一帧最多 1000 条，B3 流式恢复再切帧）。
+- **附带修复**：`pkg/quicstream/server.go` `s.ln` 的 Start/Close 数据竞争（基线已存在，`go test -race` 门禁需要；改动仅加锁读）。
+- **文档**：`docs/developer/01-architecture.md` Client/Hub/接管段改写为 Session/Attachment/三动词叙事。
+

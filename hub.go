@@ -45,7 +45,7 @@ func publicationMessageID(channel string, offset uint64) string {
 
 type Hub struct {
 	mu              sync.RWMutex
-	sessions        map[string]*Client
+	sessions        map[string]*Session
 	connShards      [numHubShards]*connShard
 	subShards       [numHubShards]*subShard
 	maxConnsPerUser int
@@ -63,7 +63,7 @@ type Hub struct {
 // newHub initializes Hub.
 func newHub(maxTimeLagMilli int64, maxConnsPerUser int) *Hub {
 	h := &Hub{
-		sessions:        map[string]*Client{},
+		sessions:        map[string]*Session{},
 		maxConnsPerUser: maxConnsPerUser,
 		matcher:         topics.NewCSTrieMatcher(),
 		wcSubs:          make(map[string]*topics.Subscription),
@@ -98,7 +98,7 @@ func (h *Hub) addWildcardSub(ch string, sub Subscriber) (bool, error) {
 	h.wcSubsMu.Lock()
 	defer h.wcSubsMu.Unlock()
 
-	key := sub.Client.SessionID() + ":" + ch
+	key := sub.Session.SessionID() + ":" + ch
 	if _, exists := h.wcSubs[key]; exists {
 		return false, nil
 	}
@@ -111,14 +111,14 @@ func (h *Hub) addWildcardSub(ch string, sub Subscriber) (bool, error) {
 }
 
 // removeSub removes connection from clientHub subscriptions registry.
-func (h *Hub) removeSub(ch string, c *Client) (bool, bool) {
+func (h *Hub) removeSub(ch string, c *Session) (bool, bool) {
 	if isWildcard(ch) {
 		return h.removeWildcardSub(ch, c)
 	}
 	return h.subShards[index(ch, numHubShards)].removeSub(ch, c)
 }
 
-func (h *Hub) removeWildcardSub(ch string, c *Client) (bool, bool) {
+func (h *Hub) removeWildcardSub(ch string, c *Session) (bool, bool) {
 	h.wcSubsMu.Lock()
 	defer h.wcSubsMu.Unlock()
 
@@ -145,21 +145,21 @@ func index(s string, numBuckets int) int {
 type connShard struct {
 	mu sync.RWMutex
 	// match client ID with actual client connection.
-	clients map[string]*Client
+	clients map[string]*Session
 	// registry to hold active client connections grouped by user.
 	users map[string]map[string]struct{}
 }
 
 func newConnShard() *connShard {
 	return &connShard{
-		clients: make(map[string]*Client),
+		clients: make(map[string]*Session),
 		users:   make(map[string]map[string]struct{}),
 	}
 }
 
 // addWithLimit adds a connection into the registry, enforcing per-user connection limits.
 // Returns DisconnectConnectionLimit if maxPerUser > 0 and the limit is reached.
-func (h *connShard) addWithLimit(c *Client, maxPerUser int) error {
+func (h *connShard) addWithLimit(c *Session, maxPerUser int) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -215,12 +215,12 @@ func newSubShard(maxTimeLagMilli int64) *subShard {
 	}
 }
 
-// Subscriber represents a client that can subscribe to channels.
+// Subscriber represents a session subscribed to a channel.
 type Subscriber struct {
-	Client    *Client
+	Session   *Session
 	Ephemeral bool
 	// DeliveredOffset is the highest offset of a publication successfully
-	// delivered to Client on this exact channel. Maintained by the broadcast
+	// delivered to Session on this exact channel. Maintained by the broadcast
 	// path under the subShard lock (see recordDeliveredOffsets) and read by
 	// the cluster snapshot path via LookupSubscriber; it feeds
 	// ClusterSessionSnapshot.ChannelOffsets for exact cross-node resume.
@@ -230,9 +230,9 @@ type Subscriber struct {
 }
 
 // NewSubscriber creates a new Subscriber.
-func NewSubscriber(client *Client, ephemeral bool) Subscriber {
+func NewSubscriber(session *Session, ephemeral bool) Subscriber {
 	return Subscriber{
-		Client:    client,
+		Session:   session,
 		Ephemeral: ephemeral,
 	}
 }
@@ -253,7 +253,7 @@ func (h *subShard) addSub(ch string, sub Subscriber) (bool, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	uid := sub.Client.SessionID()
+	uid := sub.Session.SessionID()
 
 	_, ok := h.subs[ch]
 	if !ok {
@@ -281,7 +281,7 @@ func (h *subShard) addSub(ch string, sub Subscriber) (bool, error) {
 // removeSub removes connection from clientHub subscriptions registry.
 // Returns true if channel does not have any subscribers left in first return value.
 // Returns true if found and really removed from registry in second return value.
-func (h *subShard) removeSub(ch string, c *Client) (bool, bool) {
+func (h *subShard) removeSub(ch string, c *Session) (bool, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -308,9 +308,9 @@ func (h *subShard) removeSub(ch string, c *Client) (bool, bool) {
 }
 
 // add adds a connection into the hub, enforcing per-user connection limits.
-func (h *Hub) add(c *Client) error {
+func (h *Hub) add(c *Session) error {
 	// h.mu is taken before the connShard lock, matching RemoveSessionIfMatches
-	// and ReplaceSession: addWithLimit checks the per-user limit and registers
+	// and PrepareSessionUser: addWithLimit checks the per-user limit and registers
 	// the connection atomically under the shard lock, and the sessions map
 	// update is serialized under h.mu.
 	h.mu.Lock()
@@ -363,22 +363,22 @@ func (h *Hub) broadcastPublication(ch string, pub *Publication) error {
 	// Merge exact and wildcard subscribers by session ID: a client subscribed
 	// to the channel exactly and via a wildcard pattern must receive the
 	// publication only once, with a single message ID.
-	subscribers := make(map[string]*Client)
+	subscribers := make(map[string]*Session)
 	for _, client := range h.GetSubscribers(ch) {
 		subscribers[client.SessionID()] = client
 	}
 	for _, candidate := range h.matcher.Lookup(ch) {
 		sub, ok := candidate.(Subscriber)
-		if !ok || sub.Client == nil {
+		if !ok || sub.Session == nil {
 			continue
 		}
-		subscribers[sub.Client.SessionID()] = sub.Client
+		subscribers[sub.Session.SessionID()] = sub.Session
 	}
 	if len(subscribers) == 0 {
 		return nil
 	}
 
-	clients := make([]*Client, 0, len(subscribers))
+	clients := make([]*Session, 0, len(subscribers))
 	for _, client := range subscribers {
 		clients = append(clients, client)
 	}
@@ -448,7 +448,7 @@ func (h *Hub) broadcastPublication(ch string, pub *Publication) error {
 		for i, client := range clients {
 			sem <- struct{}{}
 			wg.Add(1)
-			go func(i int, client *Client) {
+			go func(i int, client *Session) {
 				defer func() {
 					if r := recover(); r != nil {
 						log.ErrorContext(ctx, "panic in send publication", fmt.Errorf("panic: %v, channel: %s", r, ch))
@@ -488,7 +488,7 @@ func (h *Hub) broadcastPublication(ch string, pub *Publication) error {
 // size, never one per subscriber. Wildcard patterns are not channels and
 // never receive offset tracking (their deliveries are not resumable
 // per-channel); the guard keeps their records untouched.
-func (h *Hub) recordDeliveredOffsets(ch string, offset uint64, clients []*Client, delivered []bool) {
+func (h *Hub) recordDeliveredOffsets(ch string, offset uint64, clients []*Session, delivered []bool) {
 	if isWildcard(ch) || len(delivered) == 0 {
 		return
 	}
@@ -529,7 +529,7 @@ func (h *Hub) RemoveSession(sessionID string) {
 // On close this prevents a failed or stale connection from evicting a session
 // that a newer client has taken over or is resuming. It returns true when the
 // session was removed.
-func (h *Hub) RemoveSessionIfMatches(sessionID string, c *Client) bool {
+func (h *Hub) RemoveSessionIfMatches(sessionID string, c *Session) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -550,7 +550,7 @@ func (h *Hub) RemoveSessionIfMatches(sessionID string, c *Client) bool {
 }
 
 // GetSubscribers returns a copy of all subscribers for a given channel.
-func (h *Hub) GetSubscribers(ch string) []*Client {
+func (h *Hub) GetSubscribers(ch string) []*Session {
 	shard := h.subShards[index(ch, numHubShards)]
 	shard.mu.RLock()
 	defer shard.mu.RUnlock()
@@ -560,29 +560,29 @@ func (h *Hub) GetSubscribers(ch string) []*Client {
 		return nil
 	}
 
-	result := make([]*Client, 0, len(subscribers))
+	result := make([]*Session, 0, len(subscribers))
 	for _, sub := range subscribers {
-		result = append(result, sub.Client)
+		result = append(result, sub.Session)
 	}
 	return result
 }
 
 // GetMatchingSubscribers returns exact and wildcard subscribers that match the given channel.
-func (h *Hub) GetMatchingSubscribers(ch string) []*Client {
-	matched := make(map[string]*Client)
+func (h *Hub) GetMatchingSubscribers(ch string) []*Session {
+	matched := make(map[string]*Session)
 	for _, client := range h.GetSubscribers(ch) {
 		matched[client.SessionID()] = client
 	}
 
 	for _, candidate := range h.matcher.Lookup(ch) {
 		sub, ok := candidate.(Subscriber)
-		if !ok || sub.Client == nil {
+		if !ok || sub.Session == nil {
 			continue
 		}
-		matched[sub.Client.SessionID()] = sub.Client
+		matched[sub.Session.SessionID()] = sub.Session
 	}
 
-	result := make([]*Client, 0, len(matched))
+	result := make([]*Session, 0, len(matched))
 	for _, client := range matched {
 		result = append(result, client)
 	}
@@ -596,7 +596,7 @@ func (h *Hub) GetMatchingSubscribers(ch string) []*Client {
 // ephemeral flag. GetMatchingSubscribers loses the flag, so the presence
 // delivery path collects recipients here instead.
 type presenceRecipient struct {
-	client    *Client
+	client    *Session
 	ephemeral bool
 }
 
@@ -606,7 +606,7 @@ type presenceRecipient struct {
 // subscription's ephemeral flag.
 func (h *Hub) presenceRecipients(ch string) []presenceRecipient {
 	recipients := make(map[string]presenceRecipient)
-	add := func(client *Client, ephemeral bool) {
+	add := func(client *Session, ephemeral bool) {
 		if client == nil {
 			return
 		}
@@ -627,7 +627,7 @@ func (h *Hub) presenceRecipients(ch string) []presenceRecipient {
 	shard.mu.RLock()
 	if subs, ok := shard.subs[ch]; ok {
 		for _, sub := range subs {
-			add(sub.Client, sub.Ephemeral)
+			add(sub.Session, sub.Ephemeral)
 		}
 	}
 	shard.mu.RUnlock()
@@ -637,7 +637,7 @@ func (h *Hub) presenceRecipients(ch string) []presenceRecipient {
 		if !ok {
 			continue
 		}
-		add(sub.Client, sub.Ephemeral)
+		add(sub.Session, sub.Ephemeral)
 	}
 
 	result := make([]presenceRecipient, 0, len(recipients))
@@ -651,7 +651,7 @@ func (h *Hub) presenceRecipients(ch string) []presenceRecipient {
 }
 
 // LookupSubscriber returns the current subscriber record for a client/channel pair.
-func (h *Hub) LookupSubscriber(ch string, c *Client) (Subscriber, bool) {
+func (h *Hub) LookupSubscriber(ch string, c *Session) (Subscriber, bool) {
 	if isWildcard(ch) {
 		h.wcSubsMu.Lock()
 		defer h.wcSubsMu.Unlock()
@@ -677,7 +677,7 @@ func (h *Hub) LookupSubscriber(ch string, c *Client) (Subscriber, bool) {
 
 // LookupSession returns a client session by session ID.
 // Returns nil if session not found.
-func (h *Hub) LookupSession(sessionID string) *Client {
+func (h *Hub) LookupSession(sessionID string) *Session {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return h.sessions[sessionID]
@@ -688,7 +688,7 @@ func (h *Hub) LookupSession(sessionID string) *Client {
 // even when the per-user registry contains anonymous connections under the
 // empty key: anonymous sessions are never addressable by the user-based admin
 // API.
-func (h *Hub) SessionsByUser(userID string) []*Client {
+func (h *Hub) SessionsByUser(userID string) []*Session {
 	if userID == "" {
 		return nil
 	}
@@ -700,7 +700,7 @@ func (h *Hub) SessionsByUser(userID string) []*Client {
 	if !ok {
 		return nil
 	}
-	result := make([]*Client, 0, len(sessionIDs))
+	result := make([]*Session, 0, len(sessionIDs))
 	for sessionID := range sessionIDs {
 		if client, ok := shard.clients[sessionID]; ok {
 			result = append(result, client)
@@ -715,7 +715,7 @@ func (h *Hub) SessionsByUser(userID string) []*Client {
 // DrainAll sends a disconnect to all connected clients and waits for them to close.
 func (h *Hub) DrainAll(disconnect Disconnect) {
 	h.mu.RLock()
-	sessions := make([]*Client, 0, len(h.sessions))
+	sessions := make([]*Session, 0, len(h.sessions))
 	for _, c := range h.sessions {
 		sessions = append(sessions, c)
 	}
@@ -724,7 +724,7 @@ func (h *Hub) DrainAll(disconnect Disconnect) {
 	var wg sync.WaitGroup
 	for _, c := range sessions {
 		wg.Add(1)
-		go func(c *Client) {
+		go func(c *Session) {
 			defer wg.Done()
 			_ = c.Close(disconnect)
 		}(c)
@@ -769,92 +769,65 @@ func (h *Hub) GetActiveChannels() []ChannelInfo {
 	return result
 }
 
-// ReplaceSession atomically replaces a session's client reference in the sessions map
-// and all subscription shards. Used for session resumption. It enforces the same
-// per-user connection limit as addWithLimit: replacing with a client of a different
-// user that already sits at the limit fails with DisconnectConnectionLimit.
-func (h *Hub) ReplaceSession(sessionID string, newClient *Client) error {
+// PrepareSessionUser atomically moves a session's connShard registration to a
+// new user, enforcing maxConnsPerUser for the target user. It backs the
+// cross-user local resume: the limit check and the migration run under the
+// shard lock (matching addWithLimit) so a concurrent AddClient cannot claim
+// the last slot in between (TOCTOU fix). The sessions map entry is untouched:
+// the session pointer stays stable. A same-user call is a no-op. On failure
+// nothing is mutated, so the old session stays fully Attached.
+func (h *Hub) PrepareSessionUser(sessionID string, c *Session, newUser string) error {
 	h.mu.Lock()
-	oldClient, exists := h.sessions[sessionID]
-	if !exists {
-		h.mu.Unlock()
+	defer h.mu.Unlock()
+
+	oldUser := c.UserID()
+	if oldUser == newUser {
+		return nil
+	}
+	oldIdx := index(oldUser, numHubShards)
+	newIdx := index(newUser, numHubShards)
+	if oldIdx == newIdx {
+		shard := h.connShards[oldIdx]
+		shard.mu.Lock()
+		defer shard.mu.Unlock()
+		if h.maxConnsPerUser > 0 && len(shard.users[newUser]) >= h.maxConnsPerUser {
+			return DisconnectConnectionLimit
+		}
+		if users, ok := shard.users[oldUser]; ok {
+			delete(users, sessionID)
+			if len(users) == 0 {
+				delete(shard.users, oldUser)
+			}
+		}
+		shard.clients[sessionID] = c
+		if _, ok := shard.users[newUser]; !ok {
+			shard.users[newUser] = make(map[string]struct{})
+		}
+		shard.users[newUser][sessionID] = struct{}{}
 		return nil
 	}
 
-	// Per-user connection limit: a same-user replacement keeps the user's
-	// connection count unchanged; a different user must have room. The limit
-	// check and the shard registration are atomic under the shard lock (a
-	// concurrent AddClient only takes the shard lock), so the last slot
-	// cannot be claimed in between (TOCTOU fix). h.mu is held throughout so
-	// a concurrent close() cannot evict the session mid-replacement.
-	oldIdx := index(oldClient.UserID(), numHubShards)
-	newIdx := index(newClient.UserID(), numHubShards)
+	// Different shards: check the target limit first, then move the entry.
 	newShard := h.connShards[newIdx]
 	newShard.mu.Lock()
-	if h.maxConnsPerUser > 0 && oldClient.UserID() != newClient.UserID() &&
-		len(newShard.users[newClient.UserID()]) >= h.maxConnsPerUser {
-		newShard.mu.Unlock()
-		h.mu.Unlock()
+	defer newShard.mu.Unlock()
+	if h.maxConnsPerUser > 0 && len(newShard.users[newUser]) >= h.maxConnsPerUser {
 		return DisconnectConnectionLimit
 	}
-	if oldIdx != newIdx {
-		h.connShards[oldIdx].remove(sessionID)
-	} else {
-		// Same shard: the old entry is overwritten below; drop the old
-		// user's registration first so the count does not leak.
-		if users, ok := newShard.users[oldClient.UserID()]; ok {
-			delete(users, sessionID)
-			if len(users) == 0 {
-				delete(newShard.users, oldClient.UserID())
-			}
+	oldShard := h.connShards[oldIdx]
+	oldShard.mu.Lock()
+	delete(oldShard.clients, sessionID)
+	if users, ok := oldShard.users[oldUser]; ok {
+		delete(users, sessionID)
+		if len(users) == 0 {
+			delete(oldShard.users, oldUser)
 		}
 	}
-	newShard.clients[sessionID] = newClient
-	uid := newClient.UserID()
-	if _, ok := newShard.users[uid]; !ok {
-		newShard.users[uid] = make(map[string]struct{})
+	oldShard.mu.Unlock()
+	newShard.clients[sessionID] = c
+	if _, ok := newShard.users[newUser]; !ok {
+		newShard.users[newUser] = make(map[string]struct{})
 	}
-	newShard.users[uid][sessionID] = struct{}{}
-	newShard.mu.Unlock()
-
-	h.sessions[sessionID] = newClient
-	h.mu.Unlock()
-
-	// Replace subscriber references in all subShards
-	for i := 0; i < numHubShards; i++ {
-		shard := h.subShards[i]
-		shard.mu.Lock()
-		for _, subs := range shard.subs {
-			if sub, ok := subs[sessionID]; ok {
-				sub.Client = newClient
-				subs[sessionID] = sub
-			}
-		}
-		shard.mu.Unlock()
-	}
-
-	// Replace wildcard subscriptions. The matcher stores the Subscriber as an
-	// interface value copy, so each subscription of this session must be
-	// rebuilt: Unsubscribe the old record, Subscribe with the new client.
-	h.wcSubsMu.Lock()
-	for key, topicSub := range h.wcSubs {
-		if !strings.HasPrefix(key, sessionID+":") {
-			continue
-		}
-		sub, ok := topicSub.Subscriber.(Subscriber)
-		if !ok {
-			continue
-		}
-		h.matcher.Unsubscribe(topicSub)
-		newSub, err := h.matcher.Subscribe(topicSub.Topic, Subscriber{Client: newClient, Ephemeral: sub.Ephemeral})
-		if err != nil {
-			log.ErrorContext(context.Background(), "failed to rebuild wildcard subscription during session replace",
-				err, "topic", topicSub.Topic, "session", sessionID)
-			delete(h.wcSubs, key)
-			continue
-		}
-		h.wcSubs[key] = newSub
-	}
-	h.wcSubsMu.Unlock()
+	newShard.users[newUser][sessionID] = struct{}{}
 	return nil
 }

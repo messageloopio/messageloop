@@ -309,7 +309,7 @@ func (n *Node) handleClusterTakeoverCommand(ctx context.Context, cmd *ClusterCom
 		return result
 	}
 
-	if err := n.evictSessionForTakeover(client); err != nil {
+	if err := client.Fence(DisconnectStale); err != nil {
 		result.Status = ClusterCommandStatusFailed
 		result.ErrorCode = "SESSION_TAKEOVER_FAILED"
 		result.ErrorMessage = err.Error()

@@ -1525,15 +1525,10 @@ func (m *userPerClientAuthProxy) Authenticate(_ context.Context, req *proxy.Auth
 	return &proxy.AuthenticateProxyResponse{UserInfo: &proxy.UserInfo{ID: "user-" + req.ClientID}}, nil
 }
 
-// TestClient_Connect_ResumeAtUserLimit_NoZombie documents the P1-A2 failure
-// shape: the old session's transport is closed quietly (closeQuiet ran)
-// before the hub replaces the session. The connect path inherits the old
-// session's user before ReplaceSession, so the per-user limit can never
-// reject a resume (same-user replacement keeps the count unchanged); the
-// hub-level rejection is exercised directly in
-// TestHub_ReplaceSession_FailureKeepsOldSessionIntact. Here we verify the
-// resume leaves no zombie: the old session is fully replaced, its
-// subscription follows the session, and the old transport stays closed.
+// TestClient_Connect_ResumeAtUserLimit_NoZombie documents the PR-KA-B1 §6
+// shape: a same-user local resume keeps the Session object (and its
+// subscriptions) stable, the old transport is detached, and no zombie can
+// exist because there is no replaced object.
 func TestClient_Connect_ResumeAtUserLimit_NoZombie(t *testing.T) {
 	ctx := context.Background()
 	node := NewNode(&config.Server{RequireAuth: true, Limits: config.Limits{MaxConnectionsPerUser: 1}})
@@ -1578,7 +1573,7 @@ func TestClient_Connect_ResumeAtUserLimit_NoZombie(t *testing.T) {
 
 	// C (user-a) resumes A's session. The resume inherits user-a, so the
 	// per-user limit of 1 does not reject it (same-user replacement keeps the
-	// count unchanged); the session must be replaced cleanly.
+	// count unchanged); the session must be handed over cleanly.
 	transportC := &capturingTransport{}
 	clientC, _, err := NewClient(ctx, node, transportC, JSONMarshaler{})
 	require.NoError(t, err)
@@ -1590,30 +1585,47 @@ func TestClient_Connect_ResumeAtUserLimit_NoZombie(t *testing.T) {
 	}
 	require.NoError(t, clientC.HandleMessage(ctx, resumeC))
 
-	// The replacement connection stays up and owns the session...
+	// The new connection stays up and serves the SAME session object...
 	require.False(t, transportC.isClosed())
-	assert.Same(t, clientC, node.Hub().LookupSession(sessionA), "the session must be replaced by the new client")
-	// ...the subscription followed the session (deliveries reach the new
-	// client, not a zombie)...
+	assert.Same(t, clientA, node.Hub().LookupSession(sessionA), "the resumed session pointer must be stable")
+	// ...the subscription still points at the same session (no shard scan,
+	// no matcher rebuild)...
 	assert.Equal(t, 1, node.Hub().NumSubscribers("zombie-ch"))
-	sub, ok := node.Hub().LookupSubscriber("zombie-ch", clientC)
+	sub, ok := node.Hub().LookupSubscriber("zombie-ch", clientA)
 	require.True(t, ok)
-	assert.Same(t, clientC, sub.Client)
-	// ...and the old transport was closed quietly, never re-registered.
-	assert.True(t, transportA.isClosed(), "the old session transport was closed quietly")
+	assert.Same(t, clientA, sub.Session)
+	// ...the new connection's writes go through the session's writer to the
+	// new transport, and the old transport was closed by Detach.
+	require.True(t, transportA.isClosed(), "the detached transport is closed by Detach")
+
+	// Post-resume traffic on the NEW connection's read loop must delegate to
+	// the resumed session: a Ping is answered with a Pong on the new
+	// transport, and the resumed session's state (subscribedChannels) is
+	// used.
+	transportC.messages = nil
+	pingC := &clientpb.InboundMessage{
+		Id: "msg-c2",
+		Envelope: &clientpb.InboundMessage_Ping{
+			Ping: &clientpb.Ping{},
+		},
+	}
+	require.NoError(t, clientC.HandleMessage(ctx, pingC))
+	require.Equal(t, 1, transportC.getMessageCount(), "post-resume traffic must be served via the resumed session")
+	var pong clientpb.OutboundMessage
+	require.NoError(t, JSONMarshaler{}.Unmarshal(transportC.getMessage(0), &pong))
+	require.NotNil(t, pong.GetPong(), "post-resume Ping must be answered with a Pong")
 
 	// The unrelated B session is untouched.
 	assert.Same(t, clientB, node.Hub().LookupSession(sessionB))
 	assert.False(t, transportB.isClosed())
 }
 
-// TestClient_Connect_ResumeReplaceFailure_RollsBackOldSession exercises the
-// P1-A2 rollback path at the client level: when a resume fails at
-// ReplaceSession because the authenticating user already sits at the per-user
-// connection limit, the old session's subscriptions, presence, hub entry and
-// cluster state must all be cleaned up per the client.go rollback path — no
-// zombie may remain.
-func TestClient_Connect_ResumeReplaceFailure_RollsBackOldSession(t *testing.T) {
+// TestClient_Connect_ResumeAtUserLimit_KeepsOldSessionAttached exercises
+// PR-KA-B1 §6.5 / §9.3: when a cross-user resume hits the per-user
+// connection limit, the OLD session must stay fully Attached (hub entry,
+// subscriptions, presence, cluster state, transport open) and only the new
+// connection is closed.
+func TestClient_Connect_ResumeAtUserLimit_KeepsOldSessionAttached(t *testing.T) {
 	ctx := context.Background()
 	directory := &recordingSessionDirectory{fakeSessionDirectory: &fakeSessionDirectory{}}
 	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-a", IncarnationID: "inc-a", Backend: "memory"}, ClusterDependencies{
@@ -1668,8 +1680,8 @@ func TestClient_Connect_ResumeReplaceFailure_RollsBackOldSession(t *testing.T) {
 	sessionB := clientB.SessionID()
 
 	// C authenticates as user-b (at its connection limit) and tries to resume
-	// A's session: the authenticated user overrides the inherited one, so
-	// ReplaceSession must fail with DisconnectConnectionLimit.
+	// A's session: the per-user limit check runs BEFORE the old attachment is
+	// detached, so the old session survives untouched.
 	transportC := &capturingTransport{}
 	clientC, _, err := NewClient(ctx, node, transportC, JSONMarshaler{})
 	require.NoError(t, err)
@@ -1685,15 +1697,17 @@ func TestClient_Connect_ResumeReplaceFailure_RollsBackOldSession(t *testing.T) {
 	require.True(t, transportC.isClosed())
 	assert.Equal(t, DisconnectConnectionLimit.Code, transportC.getCloseReason().Code)
 
-	// ...and the old session is fully evicted: no hub entry, no subscription,
-	// no presence, no cluster state.
-	assert.Nil(t, node.Hub().LookupSession(sessionA), "the failed resume must evict the old session")
-	assert.Zero(t, node.Hub().NumSubscribers("zombie-ch"), "the old session's subscription must be removed")
+	// ...and the old session is still fully Attached: hub entry,
+	// subscription, presence, cluster state and an open transport.
+	assert.Same(t, clientA, node.Hub().LookupSession(sessionA), "the old session must stay in the hub")
+	assert.Equal(t, SessionAttached, clientA.State(), "the old session must stay Attached")
+	assert.Equal(t, 1, node.Hub().NumSubscribers("zombie-ch"), "the old session's subscription must stay")
 	present, err = node.presence.Get(ctx, "zombie-ch")
 	require.NoError(t, err)
-	assert.Empty(t, present, "the old session's presence must be removed")
-	assert.True(t, directory.deletedLease, "the old session's lease must be deleted")
-	assert.True(t, directory.deletedSnapshot, "the old session's snapshot must be deleted")
+	assert.Contains(t, present, sessionA, "the old session's presence must stay")
+	assert.False(t, transportA.isClosed(), "the old session's transport must stay open")
+	require.False(t, directory.deletedLease, "the old session's lease must not be deleted")
+	require.False(t, directory.deletedSnapshot, "the old session's snapshot must not be deleted")
 
 	// The unrelated B session is untouched.
 	assert.Same(t, clientB, node.Hub().LookupSession(sessionB))
@@ -1838,23 +1852,24 @@ func TestNode_Run_BrokerStartFailureReturnsError(t *testing.T) {
 	assert.Contains(t, err.Error(), "redis connection refused")
 }
 
-// --- Fix task 8: statusConnected must be set once the connect completes ---
+// --- Fix task 8: SessionAttached must be set once the connect completes ---
 
-func TestClient_Connect_SetsStatusConnected(t *testing.T) {
+func TestClient_Connect_SetsStateAttached(t *testing.T) {
 	ctx := context.Background()
 	node := NewNode(nil)
 	transport := &capturingTransport{}
 
 	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	require.NoError(t, err)
-	assert.NotEqual(t, statusConnected, client.status)
+	assert.Equal(t, SessionAuthenticating, client.State(), "NewClient must start in Authenticating")
+	assert.NotEqual(t, SessionAttached, client.State())
 
 	connectMsg := &clientpb.InboundMessage{
 		Id:       "msg-1",
 		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: "client-1"}},
 	}
 	require.NoError(t, client.HandleMessage(ctx, connectMsg))
-	assert.Equal(t, statusConnected, client.status, "a successful connect must move the client to statusConnected")
+	assert.Equal(t, SessionAttached, client.State(), "a successful connect must move the client to SessionAttached")
 }
 
 // --- Fix task 14: subscription limits must count only newly added channels

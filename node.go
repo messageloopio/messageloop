@@ -386,7 +386,7 @@ func (n *Node) AddSubscription(ctx context.Context, ch string, sub Subscriber) e
 	mu.Lock()
 	defer mu.Unlock()
 
-	if _, exists := n.hub.LookupSubscriber(ch, sub.Client); exists {
+	if _, exists := n.hub.LookupSubscriber(ch, sub.Session); exists {
 		return nil
 	}
 
@@ -401,28 +401,28 @@ func (n *Node) AddSubscription(ctx context.Context, ch string, sub Subscriber) e
 				return err
 			},
 			rollback: func() {
-				_, _ = n.hub.removeSub(ch, sub.Client)
+				_, _ = n.hub.removeSub(ch, sub.Session)
 			},
 		},
 		{
 			name: "track.client",
 			commit: func() error {
-				sub.Client.mu.Lock()
-				defer sub.Client.mu.Unlock()
+				sub.Session.mu.Lock()
+				defer sub.Session.mu.Unlock()
 				// Reject subscriptions on a closing/closed client: close()
 				// snapshots subscribedChannels under this same lock, so a
 				// subscribe admitted here after the snapshot would never be
 				// cleaned up and would leak in the hub (P1-A3).
-				if sub.Client.status == statusClosed {
+				if sub.Session.state == SessionClosed {
 					return fmt.Errorf("client is closed")
 				}
-				sub.Client.subscribedChannels[ch] = struct{}{}
+				sub.Session.subscribedChannels[ch] = struct{}{}
 				return nil
 			},
 			rollback: func() {
-				sub.Client.mu.Lock()
-				delete(sub.Client.subscribedChannels, ch)
-				sub.Client.mu.Unlock()
+				sub.Session.mu.Lock()
+				delete(sub.Session.subscribedChannels, ch)
+				sub.Session.mu.Unlock()
 			},
 		},
 		{
@@ -452,12 +452,12 @@ func (n *Node) AddSubscription(ctx context.Context, ch string, sub Subscriber) e
 		{
 			name: "cluster.session",
 			commit: func() error {
-				return n.syncClusterSessionState(ctx, sub.Client)
+				return n.syncClusterSessionState(ctx, sub.Session)
 			},
 			rollback: func() {
 				rctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
-				_ = n.syncClusterSessionState(rctx, sub.Client)
+				_ = n.syncClusterSessionState(rctx, sub.Session)
 			},
 		},
 		{

@@ -179,7 +179,11 @@ func newGRPCTransport(
 		remoteAddr:   remoteAddr,
 		closeCh:      make(chan struct{}),
 		writeTimeout: writeTimeout,
-		sendCh:       make(chan sendRequest, 64),
+		// Depth 1: the send channel is only a handoff from the session's
+		// writer goroutine to the gRPC worker, never a second bounded buffer.
+		// A deeper queue would delay the slow-consumer disconnect (3512) so
+		// far that the client cannot observe it (PR-KA-B1 §7).
+		sendCh: make(chan sendRequest, 1),
 	}
 	// Single worker goroutine serializes all sends to the gRPC stream. It is
 	// shut down via closeCh; sendCh is never closed.

@@ -90,6 +90,8 @@ func (s *Server) Name() string {
 }
 
 func (s *Server) Addr() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s == nil || s.ln == nil {
 		return ""
 	}
@@ -106,8 +108,11 @@ func (s *Server) Start(ctx context.Context) error {
 	} else {
 		log.InfoContext(ctx, "starting quic server", "addr", s.Addr())
 	}
+	s.mu.Lock()
+	ln := s.ln
+	s.mu.Unlock()
 	for {
-		conn, err := s.ln.Accept(ctx)
+		conn, err := ln.Accept(ctx)
 		if err != nil {
 			if s.stopped.Load() || errors.Is(err, quic.ErrServerClosed) || errors.Is(err, context.Canceled) {
 				return nil
