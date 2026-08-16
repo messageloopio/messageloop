@@ -416,20 +416,29 @@ func TestValidate_CapabilitiesEmptyAllowed(t *testing.T) {
 	assert.NoError(t, cfg.Validate())
 }
 
-// TestValidate_PresenceClusterEmit verifies server.presence.cluster_emit
-// parses as a plain bool: the zero value is false (PR-04a behavior) and an
-// explicit true passes Validate() without extra rules.
-func TestValidate_PresenceClusterEmit(t *testing.T) {
+// TestValidate_PresenceClusterEmitRemoved verifies server.presence.cluster_emit
+// is removed (PR-KA-B2): an absent field parses to nil and validates, while
+// a YAML that spells the key (true or false) must fail Validate with a
+// "cluster_emit is removed" message.
+func TestValidate_PresenceClusterEmitRemoved(t *testing.T) {
 	cfg := &Config{
 		Transport: validTransport(),
 	}
-	require.False(t, cfg.Server.Presence.ClusterEmit,
-		"cluster_emit must default to false (PR-04a behavior)")
+	require.Nil(t, cfg.Server.Presence.ClusterEmit,
+		"cluster_emit must parse to nil when absent")
 
-	cfg = &Config{
-		Transport: validTransport(),
-		Server:    Server{Presence: Presence{ClusterEmit: true}},
+	require.NoError(t, cfg.Validate())
+
+	for _, tc := range []Presence{
+		{ClusterEmit: boolPtr(true)},
+		{ClusterEmit: boolPtr(false)},
+	} {
+		cfg = &Config{
+			Transport: validTransport(),
+			Server:    Server{Presence: tc},
+		}
+		err := cfg.Validate()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "cluster_emit is removed")
 	}
-	require.True(t, cfg.Server.Presence.ClusterEmit)
-	assert.NoError(t, cfg.Validate())
 }

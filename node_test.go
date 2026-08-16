@@ -923,6 +923,8 @@ func (failTransientBroker) Start(context.Context, PublicationHandler) error { re
 func (failTransientBroker) Subscribe(string) error                          { return nil }
 func (failTransientBroker) Unsubscribe(string) error                        { return nil }
 func (failTransientBroker) Publish(string, *Publication) (uint64, error)    { return 0, nil }
+func (failTransientBroker) PublishOccupancy(string, OccupancyEvent) error   { return nil }
+func (failTransientBroker) SetOccupancyHandler(OccupancyHandler) error      { return nil }
 func (failTransientBroker) PublishTransient(string, *Publication) error {
 	return errors.New("injected transient failure")
 }

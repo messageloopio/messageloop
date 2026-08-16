@@ -70,10 +70,9 @@ server:
       #   allow_survey: ["*"]
       #   survey: true
   # presence:
-  #   cluster_emit: false   # Process-wide presence switch (not a channel policy).
-  #                         # true = publish join/leave through the broker so other
-  #                         # nodes deliver them. Change to true only after EVERY node
-  #                         # is on PR-04a+; older nodes deliver these frames as chat.
+  #   # server.presence.cluster_emit is REMOVED (PR-KA-B2): occupancy always
+  #   # crosses nodes over the live bus on the exact channel. Do not write the
+  #   # key; config.Validate rejects it.
 
 transport:
   websocket:

@@ -3,7 +3,7 @@
 | 字段 | 值 |
 | --- | --- |
 | 标题 | `occupancy: live-bus only, OccupancyGen, drop Hub.node and cluster_emit` |
-| 状态 | **Ready**（尚未实现） |
+| 状态 | **Accepted**（2026-08-17 主 agent 终验通过，尚未 commit） |
 | 依赖 | B1 已合（Session 稳定）。A3 LiveBus 编译已在。在 `v2` 分支上做 |
 | 设计来源 | [kernel-architecture.md](../kernel-architecture.md) Occupancy、KD-K7、KD-K8、KD-K9、KD-K9b、KD-K31 |
 | 验收人 | 主 agent |
@@ -183,4 +183,45 @@ Redis：`PUBLISH PubSubPrefix+ch`，payload 类型 **不是** `pub`。`runPubSub
 
 ## 10. 实现备注（完成后填写）
 
-（实现者填写）
+**实现者**：B2 工程师（2026-08-17，分支 `v2`）
+
+**改动文件**
+
+- 新增 `occupancy.go` / `occupancy_test.go`：`OccupancyEvent`、`ErrLateOccupancy`、`OccupancyGenSource`、`SyntheticLeaveReporter`；gen==0/nil 丢弃、late sentinel、`§8.1` 源码级抽查测试。
+- `broker.go`：`Broker` 增加 `PublishOccupancy` + `SetOccupancyHandler`；新增 `OccupancyHandler` 类型。
+- `broker_memory.go` / `broker_memory_test.go`：occupancy handler 登记；`PublishOccupancy` 只按 `interested(ch)` 同步调 handler，不写历史、不进 publication handler；两项单测用 `Ready()` 同步（无固定 Sleep）。
+- `presence.go`：`memoryPresenceStore` 实现 `NextOccupancyGen`（每频道进程内 `uint64`）。
+- `node.go`：删 `presenceClusterEmitFlag` / `presenceClusterEmit()` / `emitPresence`；`presenceJoin`/`presenceLeave` 存完 store 后 `publishOccupancy(ch, evt)`（只 `PublishOccupancy`，不 `PublishTransient`、不本地 deliver）；新增 `nextOccupancyGen`（presence 适配器发号，无适配器回退节点本地计数）、`onOccupancy`（gen==0/nil 丢、`last_applied[ch][session]` 弃迟到并返回 `ErrLateOccupancy`、`deliverPresenceEvent` 排除 subject）、`onSyntheticLeave`（Redis Get 修剪幽灵成员→合成 leave）；`Run` 登记 occupancy handler + synthetic-leave hook。
+- `hub.go`：删 `node *Node` 回指针与 `broadcastPublication` 的 `ml.type` 分支；`NewNode` 不再赋值。
+- `presence_event.go`：删 `PresenceMetaTypeKey/Value`、`presencePublication`、`parsePresencePublication`；保留 legacy companion 路径。
+- `pkg/redisbroker/message.go`：`messageTypeOccupancy` + `redisOccupancy` 信封（`t:"occupancy"`，不是 `pub`）；`serializeOccupancy`/`deserializeOccupancy`（protojson）。
+- `pkg/redisbroker/pubsub.go`：`runPubSub` 在 `interested()` 后按 `Type` 分支——`pub` 走 `deliverOnce`，`occupancy` 走 occupancy handler（不经 `deliverOnce`，无 stream offset）；worker pool 增 occupancy 投递。
+- `pkg/redisbroker/redis.go`：`occHandler`、`occupancyFailures`、`SetOccupancyHandler`、`PublishOccupancy`（只 PUBLISH，不写 Stream）。
+- `pkg/redisbroker/presence_redis.go`：`NextOccupancyGen` = `INCR ml:presence:occ:gen:<ch>`；`Get` 修剪 TTL 蒸发幽灵时调 `SetSyntheticLeaveHook` 注册的回调。
+- `config/config.go`（`ClusterEmit` 改 `*bool` + Validate 拒绝 `cluster_emit is removed`）、`config_test.go`、`config-example.yaml`。
+- `cluster_v1_e2e_test.go` / `cluster_redis_integration_test.go`：presence 跨节点测试改写为默认 Occupancy 路径，`time.Sleep` 改为 `require.Never`；wildcard 跨节点 + 无关节点收不到的负断言之锚定。
+- 编译修复的 Broker 测试桩：`client_test.go`、`client_fix_test.go`、`cluster_resume_test.go`、`health_test.go`、`node_test.go`、`recover_test.go`、`pkg/grpcstream/api_handler_test.go`、`presence_test.go`（countingBroker 记 occupancy）。
+- `metrics_test.go`：presence_failures op 标签 `rewrite`→`gen`/`late`（re编译修复目的之外的指标一致性小改）。
+- 文档：`docs/developer/01-architecture.md`、`02-configuration.md`、`04-cluster.md` 去 cluster_emit / ml.type 叙事。
+
+**§8 逐条证据**
+
+1. 仓库无 `Hub.node`、无 `cluster_emit` 热路径、无 `broadcastPublication` 认 `ml.type`：`TestOccupancy_NoForbiddenProductionRemnants` 读 `hub.go`（无 `node *Node`/`ml.type`）、`node.go`（无 `presenceClusterEmit`/`emitPresence`）、`presence_event.go`（无 `ml.type`/`presencePublication`）。人工核对 `git grep` 无残留。
+2. Occupancy 不走 `PublishTransient`；Publication handler 看不到 join/leave：`TestPresence_OccupancyNotPublication`（transientChannels 为空）、`TestMemoryBroker_PublishOccupancy_NeverPublication`、`TestRedisBroker_LiveSubscription_OccupancyFollowsInterest`（occupancy 到 occupation handler，pub handler 收不到）。
+3. `im.**` 节点收 `im.room.1` 的 join；只订无关频道收不到：`TestPresence_OccupancyWildcardAcrossNodes`（Redis，A 订 `im.**` 收到 exact join；nodeC 只订 `chat.1` 经 `require.Never` 断言收不到）、`TestRedisBroker_LiveSubscription_OccupancyNotInterested`。
+4. OccupancyGen 单调；迟到事件丢弃：`TestPresence_OccupancyGenOrderingAndDedupe`（leave.gen>join.gen；重放旧 join 返回 `ErrLateOccupancy` 且不投递）、`TestRedisPresenceStore_NextOccupancyGenIncr`、`TestMemoryBroker_..._InterestGate`。
+5. 本机恰好一条不双发：`TestPresence_OccupancySinglePathExactlyOne`（transportA/C 各一条 join，joiner 无，PublishOccupancy 恰一次）+ Redis 版 `TestPresence_OccupancyAcrossRedisExactlyOne` 的 `require.Never`。
+6. 未改 A1/A2/A3/A4 热路径：改动仅命中规格书 §2 允许路径；`git status` 无 `authorizer.go`/`interest.go`/`recover.go`/`cluster.go`/`channel_policy.go`。
+7. 测试命令绿：见下。
+
+**测试命令与结果**
+
+```
+go test ./...            → 全绿（含 Redis 集成，本机 127.0.0.1:6379 可用）
+go test -race . ./pkg/redisbroker → 全绿
+go build ./... / go vet ./...     → 无输出
+```
+
+**偏离（应无）**
+
+无功能偏离。两处范围说明：`pkg/redisbroker/presence_redis_test.go`、`broker_memory_test.go` 为 §2 允许的「必要测试」；`metrics_test.go` 的 `rewrite`→`gen`/`late` 标签序列更新服务于「删 rewrite 路径」的剩余引用（不属编译失败项，属 §2 意图内的一致性改动）。`docs/developer/05-observability.md` 等规格书 §2 未列出的历史文档未改（约束 1）。

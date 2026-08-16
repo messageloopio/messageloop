@@ -10,6 +10,7 @@ import (
 	"github.com/messageloopio/messageloop"
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/pkg/topics"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
 	"github.com/stretchr/testify/require"
 )
 
@@ -604,6 +605,103 @@ func TestRedisBroker_LiveSubscription_DynamicRemove(t *testing.T) {
 	_, err := brokerB.Publish("im.x", &messageloop.Publication{Payload: []byte("x"), Kind: messageloop.PayloadKindBinary})
 	require.NoError(t, err)
 	expectNoDelivery(t, received, 1500*time.Millisecond)
+}
+
+// TestRedisBroker_LiveSubscription_OccupancyFollowsInterest pins B2 §5.2:
+// an occupancy publish on im.room.1 reaches the occupancy handler of a node
+// whose compiled interest covers it (im.**), never the publication handler,
+// and carries its gen unchanged. Occupancy has no stream offset, so it is
+// not deduplicated by deliverOnce.
+func TestRedisBroker_LiveSubscription_OccupancyFollowsInterest(t *testing.T) {
+	redisCfg := requireCommandBusRedis(t)
+	brokerA := New(redisCfg).(*redisBroker)
+	brokerB := New(redisCfg).(*redisBroker)
+	t.Cleanup(func() { _ = brokerB.client.Close() })
+
+	occA := make(chan messageloop.OccupancyEvent, 8)
+	pubA := make(chan string, 8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	started := make(chan error, 1)
+	require.NoError(t, brokerA.SetOccupancyHandler(func(_ string, evt messageloop.OccupancyEvent) error {
+		occA <- evt
+		return nil
+	}))
+	go func() {
+		started <- brokerA.Start(ctx, func(ch string, _ *messageloop.Publication) error {
+			pubA <- ch
+			return nil
+		})
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-started:
+		case <-time.After(3 * time.Second):
+		}
+	})
+
+	require.NoError(t, brokerA.Subscribe("im.**"))
+	waitLiveActive(t, brokerA, []string{brokerA.opts.PubSubPrefix + "im", brokerA.opts.PubSubPrefix + "im.*"})
+
+	// A real publication still reaches the publication handler.
+	_, err := brokerB.Publish("im.room.1", &messageloop.Publication{Payload: []byte("m1"), Kind: messageloop.PayloadKindBinary})
+	require.NoError(t, err)
+	expectReceived(t, pubA, "im.room.1")
+
+	// A live occupancy event reaches only the occupancy handler, gen intact.
+	require.NoError(t, brokerB.PublishOccupancy("im.room.1", messageloop.OccupancyEvent{
+		Gen:   7,
+		Event: &clientpb.PresenceEvent{Action: "join", Info: &clientpb.PresenceInfo{SessionId: "sess-x"}},
+	}))
+	select {
+	case evt := <-occA:
+		require.Equal(t, uint64(7), evt.Gen, "the gen must survive the live bus untouched")
+		require.Equal(t, "join", evt.Event.GetAction())
+	case <-time.After(5 * time.Second):
+		t.Fatal("the interested node's occupancy handler did not receive im.room.1 join")
+	}
+	expectNoDelivery(t, pubA, 300*time.Millisecond)
+}
+
+// TestRedisBroker_LiveSubscription_OccupancyNotInterested pins B2 §8.3: a
+// node subscribed only to chat.1 never invokes its occupancy handler for an
+// im.room.1 event, and its publication handler stays untouched.
+func TestRedisBroker_LiveSubscription_OccupancyNotInterested(t *testing.T) {
+	redisCfg := requireCommandBusRedis(t)
+	brokerA := New(redisCfg).(*redisBroker)
+	brokerB := New(redisCfg).(*redisBroker)
+	t.Cleanup(func() { _ = brokerB.client.Close() })
+
+	occA := make(chan messageloop.OccupancyEvent, 8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	started := make(chan error, 1)
+	require.NoError(t, brokerA.SetOccupancyHandler(func(_ string, evt messageloop.OccupancyEvent) error {
+		occA <- evt
+		return nil
+	}))
+	go func() { started <- brokerA.Start(ctx, func(string, *messageloop.Publication) error { return nil }) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-started:
+		case <-time.After(3 * time.Second):
+		}
+	})
+
+	require.NoError(t, brokerA.Subscribe("chat.1"))
+	waitLiveActive(t, brokerA, []string{brokerA.opts.PubSubPrefix + "chat.1"})
+
+	require.NoError(t, brokerB.PublishOccupancy("im.room.1", messageloop.OccupancyEvent{
+		Gen:   3,
+		Event: &clientpb.PresenceEvent{Action: "join", Info: &clientpb.PresenceInfo{SessionId: "sess-y"}},
+	}))
+	select {
+	case evt := <-occA:
+		t.Fatalf("a node without im-tree interest must not receive im.room.1 occupancy (got gen %d)", evt.Gen)
+	case <-time.After(1 * time.Second):
+	}
 }
 
 // TestRedisBroker_Subscribe_RejectsUnroutable pins A3 §8-2 on the Redis side:

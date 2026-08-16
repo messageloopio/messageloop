@@ -93,3 +93,60 @@ func TestRedisPresenceStore_RemoveIsAtomic(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, present, "c-race", "online member must be visible after Add")
 }
+
+// TestRedisPresenceStore_NextOccupancyGenIncr pins B2 §4: the Redis presence
+// adapter issues strictly increasing per-channel generations via INCR.
+func TestRedisPresenceStore_NextOccupancyGenIncr(t *testing.T) {
+	redisCfg := requireCommandBusRedis(t)
+	store := NewPresenceStore(redisCfg).(*redisPresenceStore)
+	t.Cleanup(func() { _ = store.client.Close() })
+	ctx := context.Background()
+
+	g1, err := store.NextOccupancyGen(ctx, "ch-a")
+	require.NoError(t, err)
+	require.Greater(t, g1, uint64(0), "the first gen is 1-based, never 0")
+	g2, err := store.NextOccupancyGen(ctx, "ch-a")
+	require.NoError(t, err)
+	require.Greater(t, g2, g1, "gens are strictly increasing per channel")
+	gOther, err := store.NextOccupancyGen(ctx, "ch-b")
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), gOther, "gens are per-channel, not global")
+}
+
+// TestRedisPresenceStore_SyntheticLeaveHookOnPrune pins B2 §5.3: when Get
+// prunes a ghost member whose TTL key evaporated, the synthetic-leave hook
+// fires for that (channel, client). No fixed sleeps: the member TTL is
+// shortened and Then the hook is observed via Eventually.
+func TestRedisPresenceStore_SyntheticLeaveHookOnPrune(t *testing.T) {
+	redisCfg := requireCommandBusRedis(t)
+	store := NewPresenceStore(redisCfg).(*redisPresenceStore)
+	t.Cleanup(func() { _ = store.client.Close() })
+	ctx := context.Background()
+	ch := "ghost.prune.ch"
+
+	var mu sync.Mutex
+	var pruned []string
+	store.SetSyntheticLeaveHook(func(_ context.Context, gotCh, clientID string) {
+		mu.Lock()
+		defer mu.Unlock()
+		if gotCh == ch {
+			pruned = append(pruned, clientID)
+		}
+	})
+
+	require.NoError(t, store.Add(ctx, ch, &messageloop.PresenceInfo{ClientID: "ghost1", UserID: "u1"}))
+	// Fast-forward the member TTL so the next Get fast-forwards the expiry.
+	require.NoError(t, store.client.Expire(ctx, store.memberKey(ch, "ghost1"), 500*time.Millisecond).Err())
+
+	require.Eventually(t, func() bool {
+		if _, err := store.Get(ctx, ch); err != nil {
+			return false
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		return len(pruned) == 1
+	}, 5*time.Second, 25*time.Millisecond, "the evicted ghost member must synthesize a leave")
+	mu.Lock()
+	require.Equal(t, []string{"ghost1"}, pruned)
+	mu.Unlock()
+}

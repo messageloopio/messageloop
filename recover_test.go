@@ -49,6 +49,8 @@ func (g *gapHistoryBroker) Publish(ch string, pub *Publication) (uint64, error) 
 	return 0, nil
 }
 func (g *gapHistoryBroker) PublishTransient(ch string, pub *Publication) error { return nil }
+func (g *gapHistoryBroker) PublishOccupancy(string, OccupancyEvent) error      { return nil }
+func (g *gapHistoryBroker) SetOccupancyHandler(OccupancyHandler) error         { return nil }
 
 func (g *gapHistoryBroker) History(ch string, sinceOffset uint64, limit int) (*HistoryPage, error) {
 	return &HistoryPage{Gap: true, GapReason: g.reason}, nil

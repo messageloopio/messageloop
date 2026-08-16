@@ -23,6 +23,9 @@ type redisBroker struct {
 	client  *redis.Client
 	opts    *Options
 	handler messageloop.PublicationHandler
+	// occHandler receives live occupancy events (B2). Set via
+	// SetOccupancyHandler before Start; never the publication handler.
+	occHandler messageloop.OccupancyHandler
 	// epoch is set by initEpoch during Start and read concurrently by
 	// Publish/PublishTransient/Epoch, so it is guarded by atomic.Value.
 	epoch atomic.Value
@@ -64,6 +67,9 @@ type redisBroker struct {
 	// deliver). Guarded by atomic ops; wiring into Prometheus would require
 	// a metrics hook on the broker.
 	handlerFailures atomic.Uint64
+	// occupancyFailures counts occupancy handler errors, panics and
+	// malformed occupancy envelopes that were dropped.
+	occupancyFailures atomic.Uint64
 	// catchUpGaps counts reconnect catch-up ranges that could not be
 	// replayed in full (see checkCatchUpGap).
 	catchUpGaps atomic.Uint64
@@ -403,6 +409,32 @@ func (b *redisBroker) PublishTransient(ch string, pub *messageloop.Publication) 
 		return err
 	}
 	return b.client.Publish(ctx, b.opts.PubSubPrefix+ch, pubSubData).Err()
+}
+
+// SetOccupancyHandler registers the live occupancy handler; it must be called
+// before Start. Occupancy events never reach the publication handler (B2).
+func (b *redisBroker) SetOccupancyHandler(handler messageloop.OccupancyHandler) error {
+	b.occHandler = handler
+	return nil
+}
+
+// PublishOccupancy broadcasts an occupancy event on the exact channel's
+// pub/sub name. It never writes a Stream entry, so the event is never
+// replayed by catch-up and never appears in History. The live envelope type
+// is not "pub": the consumer routes it to the occupancy handler instead of
+// the publication handler (B2 §5.2).
+func (b *redisBroker) PublishOccupancy(ch string, evt messageloop.OccupancyEvent) error {
+	if err := topics.ValidateTopic(ch); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	payload, err := serializeOccupancy(evt)
+	if err != nil {
+		return err
+	}
+	return b.client.Publish(ctx, b.opts.PubSubPrefix+ch, payload).Err()
 }
 
 // History returns a page of publications stored for ch with offset >=

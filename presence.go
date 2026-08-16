@@ -41,12 +41,14 @@ type PresenceStore interface {
 type memoryPresenceStore struct {
 	mu   sync.RWMutex
 	data map[string]map[string]*PresenceInfo // ch -> clientID -> info
+	gens map[string]uint64                   // ch -> occupancy gen counter (B2 §4)
 }
 
 // NewMemoryPresenceStore returns an in-process PresenceStore.
 func NewMemoryPresenceStore() PresenceStore {
 	return &memoryPresenceStore{
 		data: make(map[string]map[string]*PresenceInfo),
+		gens: make(map[string]uint64),
 	}
 }
 
@@ -89,3 +91,17 @@ func (s *memoryPresenceStore) Get(_ context.Context, ch string) (map[string]*Pre
 }
 
 var _ PresenceStore = (*memoryPresenceStore)(nil)
+var _ OccupancyGenSource = (*memoryPresenceStore)(nil)
+
+// NextOccupancyGen returns the next strictly-increasing per-channel
+// generation for this process (B2 §4: memory = in-process uint64 per
+// channel; Join/Leave/synthetic leave each take a new value).
+func (s *memoryPresenceStore) NextOccupancyGen(_ context.Context, ch string) (uint64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.gens == nil {
+		s.gens = make(map[string]uint64)
+	}
+	s.gens[ch]++
+	return s.gens[ch], nil
+}

@@ -146,7 +146,7 @@ server:
 | `server.authorizer.rules[].allow_publish` | string[] | 未设置 | 允许发布的用户 ID 列表；语义同 `allow_subscribe`，判定对象是精确频道 |
 | `server.authorizer.rules[].allow_survey` | string[] | 未设置 | 允许发起客户端 Survey 的用户 ID 列表；**未设置 = 不打开 survey**（Survey 默认拒绝，与 subscribe/publish 的默认放行相反），即使 Effects.survey=true。Admin 无 `survey.bypass_gate` 时同样受此名单约束 |
 | `server.require_auth` | bool | `false` | 拒绝空 token 的连接（`config.go:32` 注释：Reject connections with empty token）。开启后：连接未携带 token 直接拒绝（`AUTH_REQUIRED`，`client.go:405-416`）；携带 token 但**没有**匹配 `$authenticate` 路由的代理时同样拒绝——非空 token 不得绕过认证（`client.go:389-404`）。实际认证总是由代理后端完成，见 [proxy 节](#proxy-节) |
-| `server.presence.cluster_emit` | bool | `false` | 进程级 presence 开关（不是频道策略）。`false`（默认）：join/leave 只在本节点投递（PR-04a）。`true`（PR-04b）：join/leave 经 broker `PublishTransient` 到**精确业务频道**（`ml.type=presence` 帧），各节点改写回一等 `presence_event`——本节点与对端统一经 broker，**禁止**与本地投递叠用（内存 broker 同步进 handler、Redis 本进程 offset 0 不去重，叠用 = 本节点每人两条）。**只有全部节点升级到 PR-04a+ 后才能置 true**：混部旧节点会把 `ml.type=presence` 帧当作聊天 `publication` 投递给订阅者 |
+| `server.presence.cluster_emit` | — | **已删除** | **PR-KA-B2 移除**：Occupancy 跨节点统一走 LiveBus 精确频道 + `CompileInterest`（见 [presence 跨节点](./04-cluster.md)）。写进 YAML（无论 true/false）都会让 `Validate()` 以 `cluster_emit is removed` 失败；`server.presence` 块现在为空（仅保留以兼容解析） |
 
 ### Authorizer 求值语义（PR-KA-A4 §5）
 

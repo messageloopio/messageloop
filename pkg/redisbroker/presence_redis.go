@@ -17,6 +17,11 @@ import (
 type redisPresenceStore struct {
 	client *redis.Client
 	opts   *Options
+	// synLeaveHook is invoked for every ghost member pruned by an existing
+	// Get/refresh path whose TTL evaporated (B2 §5.3). Set via
+	// SetSyntheticLeaveHook before the store is used concurrently; the
+	// pruned client ID is the membership key (session ID in v1.0).
+	synLeaveHook func(ctx context.Context, ch, clientID string)
 }
 
 // NewPresenceStore returns a Redis-backed PresenceStore.
@@ -34,6 +39,33 @@ func (s *redisPresenceStore) indexKey(ch string) string {
 
 func (s *redisPresenceStore) memberKey(ch, clientID string) string {
 	return fmt.Sprintf("%smember:%s:%s", s.opts.PresencePrefix, ch, clientID)
+}
+
+// occupancyGenKey is the cluster-wide per-channel occupancy generation
+// counter (B2 §4: Redis = INCR, no random UUIDs).
+func (s *redisPresenceStore) occupancyGenKey(ch string) string {
+	return fmt.Sprintf("%socc:gen:%s", s.opts.PresencePrefix, ch)
+}
+
+// SetSyntheticLeaveHook registers the callback invoked for every ghost member
+// pruned because its TTL key evaporated (B2 §5.3). The memory store has no
+// TTL and never reports.
+func (s *redisPresenceStore) SetSyntheticLeaveHook(hook func(ctx context.Context, ch, clientID string)) {
+	s.synLeaveHook = hook
+}
+
+// NextOccupancyGen returns a cluster-wide strictly-increasing generation per
+// channel via INCR (B2 §4). The counter is not bounded and not expired: an
+// old comparison can never alias a fresh generation.
+func (s *redisPresenceStore) NextOccupancyGen(ctx context.Context, ch string) (uint64, error) {
+	gen, err := s.client.Incr(ctx, s.occupancyGenKey(ch)).Result()
+	if err != nil {
+		return 0, err
+	}
+	if gen <= 0 {
+		return 0, fmt.Errorf("occupancy gen for %q overflowed", ch)
+	}
+	return uint64(gen), nil
 }
 
 // presenceRemoveScript atomically removes a member and prunes an index left
@@ -126,6 +158,15 @@ func (s *redisPresenceStore) Get(ctx context.Context, ch string) (map[string]*me
 
 	if len(staleClientIDs) > 0 {
 		_ = s.client.SRem(ctx, s.indexKey(ch), staleClientIDs).Err()
+		// Ghost members whose TTL key evaporated synthesize a leave at the
+		// existing pruning point (B2 §5.3): the node turns each pruned
+		// membership into an occupancy leave so covered subscribers learn the
+		// session vanished.
+		if s.synLeaveHook != nil {
+			for _, clientID := range staleClientIDs {
+				s.synLeaveHook(ctx, ch, clientID)
+			}
+		}
 	}
 
 	return result, nil

@@ -64,10 +64,11 @@ type Server struct {
 // Presence is the process-wide presence control-plane switch.
 // It is not a channel policy (those stay under server.channels).
 type Presence struct {
-	// ClusterEmit, when true, publishes first-class presence events
-	// through the broker so other nodes can rewrite them. Default false.
-	// Turn on only after every node is on PR-04a+.
-	ClusterEmit bool `yaml:"cluster_emit" json:"cluster_emit" mapstructure:"cluster_emit"`
+	// ClusterEmit is removed in PR-KA-B2: occupancy always crosses nodes
+	// over the LiveBus (exact channels + compiled Interest), so the old
+	// dual-path switch is gone. The field stays declared so YAML still
+	// parses and Validate can reject it; nothing may read it.
+	ClusterEmit *bool `yaml:"cluster_emit" json:"cluster_emit" mapstructure:"cluster_emit"`
 }
 
 // ChannelConfig is the removed server.channels block (PR-KA-A4 / KD-K31: no
@@ -431,6 +432,9 @@ func (c *Config) Validate() error {
 	}
 	if len(c.Server.Channels.Policies) > 0 || channelPolicySpecSet(c.Server.Channels.Default) {
 		return fmt.Errorf("server.channels is removed; move policy to server.authorizer")
+	}
+	if c.Server.Presence.ClusterEmit != nil {
+		return fmt.Errorf("server.presence.cluster_emit is removed; occupancy always crosses nodes over the live bus (exact channel + compiled Interest)")
 	}
 
 	// Validate the authorizer table: the default Effects spec and every rule.

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
 	"github.com/messageloopio/messageloop/pkg/topics"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -798,4 +799,51 @@ func TestMemoryBroker_Subscribe_RejectsUnroutablePatterns(t *testing.T) {
 	_, err = b.Publish("im", publishPub([]byte("m3"), false))
 	require.NoError(t, err)
 	require.Equal(t, 2, cp.count(), "Subscribe(\"im.**\") must deliver \"im\" too")
+}
+
+// TestMemoryBroker_PublishOccupancy_InterestGate pins B2 §5.2: the memory
+// broker invokes the occupancy handler only when this node is interested in
+// the exact channel (exact or compiled pattern), never when it is not.
+func TestMemoryBroker_PublishOccupancy_InterestGate(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	b := NewMemoryBroker(MemoryBrokerOptions{})
+
+	var occMu sync.Mutex
+	var occ []OccupancyEvent
+	require.NoError(t, b.SetOccupancyHandler(func(_ string, evt OccupancyEvent) error {
+		occMu.Lock()
+		defer occMu.Unlock()
+		occ = append(occ, evt)
+		return nil
+	}))
+	go func() { _ = b.Start(ctx, func(string, *Publication) error { return nil }) }()
+	<-b.(interface{ Ready() <-chan struct{} }).Ready()
+
+	require.NoError(t, b.Subscribe("im.**"))
+	require.NoError(t, b.PublishOccupancy("im.room.1", OccupancyEvent{Gen: 1, Event: &clientpb.PresenceEvent{Action: "join"}}))
+	occMu.Lock()
+	require.Len(t, occ, 1, "an im.** interest covers im.room.1 occupancy")
+	occMu.Unlock()
+
+	require.NoError(t, b.PublishOccupancy("stocks.1", OccupancyEvent{Gen: 2, Event: &clientpb.PresenceEvent{Action: "join"}}))
+	occMu.Lock()
+	require.Len(t, occ, 1, "an unrelated channel must not reach the occupancy handler")
+	occMu.Unlock()
+}
+
+// TestMemoryBroker_PublishOccupancy_NeverPublication pins B2 §8.2: occupancy
+// events must never reach the publication handler.
+func TestMemoryBroker_PublishOccupancy_NeverPublication(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	b := NewMemoryBroker(MemoryBrokerOptions{})
+	mp := &collectedPubs{}
+	require.NoError(t, b.SetOccupancyHandler(func(string, OccupancyEvent) error { return nil }))
+	go func() { _ = b.Start(ctx, mp.handle) }()
+	<-b.(interface{ Ready() <-chan struct{} }).Ready()
+
+	require.NoError(t, b.Subscribe("chat.1"))
+	require.NoError(t, b.PublishOccupancy("chat.1", OccupancyEvent{Gen: 1, Event: &clientpb.PresenceEvent{Action: "join"}}))
+	require.Zero(t, mp.count(), "the publication handler must never see occupancy")
 }

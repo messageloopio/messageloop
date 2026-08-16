@@ -41,11 +41,13 @@ type Node struct {
 	adminCaps   Capability
 	requireAuth bool
 	healthCheck func(context.Context) error
-	// presenceClusterEmitFlag mirrors server.presence.cluster_emit: when true
-	// first-class presence events are published through the broker instead of
-	// being delivered locally (PR-04b). False keeps the PR-04a local-only
-	// path.
-	presenceClusterEmitFlag bool
+	// occupancy tracking (B2): lastApplied records the highest applied gen
+	// per (channel, session) so late/replayed occupancy events are dropped;
+	// occGens is the in-process per-channel gen fallback for presence
+	// adapters without a gen source.
+	occMu       sync.Mutex
+	lastApplied map[string]map[string]uint64 // ch -> session -> last applied gen
+	occGens     map[string]uint64            // ch -> fallback gen counter
 }
 
 const (
@@ -82,7 +84,6 @@ func NewNode(cfg *config.Server) *Node {
 		presence:    NewMemoryPresenceStore(),
 		requireAuth: cfg != nil && cfg.RequireAuth,
 	}
-	node.hub.node = node
 
 	if cfg != nil && cfg.RPCTimeout != "" {
 		rpcTimeout, err := time.ParseDuration(cfg.RPCTimeout)
@@ -162,15 +163,6 @@ func NewNode(cfg *config.Server) *Node {
 		}
 	}
 
-	if cfg != nil {
-		node.presenceClusterEmitFlag = cfg.Presence.ClusterEmit
-	}
-	if node.presenceClusterEmitFlag {
-		log.WarnContext(context.Background(),
-			"presence cluster_emit enabled: every node must already run PR-04a+ or presence events are delivered as chat publications",
-			"presence.cluster_emit", true)
-	}
-
 	return node
 }
 
@@ -183,12 +175,26 @@ func (n *Node) Run(ctx context.Context) error {
 		}
 	}
 
+	// The presence store's TTL-evaporation prune point (Redis only) feeds the
+	// occupancy emit path: every ghost member pruned by an existing Get
+	// synthesizes a leave with a fresh generation (B2 §5.3).
+	if reporter, ok := n.presence.(SyntheticLeaveReporter); ok {
+		reporter.SetSyntheticLeaveHook(func(ctx context.Context, ch, clientID string) {
+			n.onSyntheticLeave(ctx, ch, clientID)
+		})
+	}
+
 	// Broker failures are funneled through an error channel instead of a
 	// panic: a broker that fails to start (e.g. Redis unreachable) must
 	// surface as a Run error so the caller (lynx) can react, rather than
 	// crashing the process after Run has returned (P1-A6).
 	startErr := make(chan error, 1)
 	go func() {
+		if err := n.broker.SetOccupancyHandler(n.onOccupancy); err != nil {
+			log.ErrorContext(ctx, "failed to register occupancy handler", err)
+			startErr <- err
+			return
+		}
 		if err := n.broker.Start(ctx, func(ch string, pub *Publication) error {
 			return n.hub.broadcastPublication(ch, pub)
 		}); err != nil {
@@ -1156,8 +1162,8 @@ func presenceChannel(ch string) string {
 // PublishPresenceJoin publishes a presence join event to the channel's presence sub-channel.
 // Presence events are transient: they are delivered in real time but never
 // written to broker history, so they do not leak into the recovery stream.
-// PR-04a: kept for the legacy companion path (legacy_presence_channel=true)
-// and for direct callers; the first-class path emits through emitPresence.
+// Kept for the legacy companion path (legacy_presence_channel=true) and for
+// direct callers; first-class occupancy flows over the live bus instead.
 func (n *Node) PublishPresenceJoin(channel, clientID, userID string) {
 	evt := newPresenceEvent("join", channel, clientID, userID)
 	data, err := marshalPresenceEvent(evt)
@@ -1204,11 +1210,12 @@ func (n *Node) shouldTrackPresence(ch string, ephemeral bool) bool {
 	return !ephemeral && !isWildcard(ch) && n.ChannelPolicy(ch).Presence
 }
 
-// presenceJoin records a session's presence in ch and emits the join event,
-// excluding the joining session itself (no self-join). The store write is
-// best-effort: a failure warns and counts op=store but never rolls back the
-// subscription. Legacy companion publication runs only when the channel
-// policy opts in and shouldTrackPresence already excluded wildcards.
+// presenceJoin records a session's presence in ch and emits the join event
+// over the LiveBus as an occupancy event, excluding the joining session
+// itself (no self-join). The store write is best-effort: a failure warns and
+// counts op=store but never rolls back the subscription. Legacy companion
+// publication runs only when the channel policy opts in and
+// shouldTrackPresence already excluded wildcards.
 func (n *Node) presenceJoin(ctx context.Context, ch string, c *Client) {
 	if c == nil {
 		return
@@ -1226,25 +1233,28 @@ func (n *Node) presenceJoin(ctx context.Context, ch string, c *Client) {
 			n.metrics.PresenceFailures.WithLabelValues("store").Inc()
 		}
 	}
-	n.emitPresence(ch, &clientpb.PresenceEvent{
-		Channel: ch,
-		Action:  PresenceActionJoin,
-		Info: &clientpb.PresenceInfo{
-			SessionId:   c.SessionID(),
-			UserId:      c.UserID(),
-			ClientId:    c.ClientID(),
-			ConnectedAt: c.connectedAt.UnixMilli(),
+	n.publishOccupancy(ch, OccupancyEvent{
+		Event: &clientpb.PresenceEvent{
+			Channel: ch,
+			Action:  PresenceActionJoin,
+			Info: &clientpb.PresenceInfo{
+				SessionId:   c.SessionID(),
+				UserId:      c.UserID(),
+				ClientId:    c.ClientID(),
+				ConnectedAt: c.connectedAt.UnixMilli(),
+			},
 		},
-	}, c.SessionID())
+	})
 	if n.ChannelPolicy(ch).LegacyPresenceChannel {
 		go n.PublishPresenceJoin(ch, c.SessionID(), c.UserID())
 	}
 }
 
 // presenceLeave removes a session's presence from ch and emits the leave
-// event, excluding the leaving session itself. Only called for subscriptions
-// that were tracked (shouldTrackPresence), so wildcard and ephemeral
-// subscriptions never leak a leave.
+// event over the LiveBus as an occupancy event, excluding the leaving session
+// itself. Only called for subscriptions that were tracked
+// (shouldTrackPresence), so wildcard and ephemeral subscriptions never leak a
+// leave.
 func (n *Node) presenceLeave(ctx context.Context, ch, sessionID, userID string, ephemeral bool) {
 	if !n.shouldTrackPresence(ch, ephemeral) {
 		return
@@ -1263,55 +1273,119 @@ func (n *Node) presenceLeave(ctx context.Context, ch, sessionID, userID string, 
 		info.ClientId = sess.ClientID()
 		info.ConnectedAt = sess.connectedAt.UnixMilli()
 	}
-	n.emitPresence(ch, &clientpb.PresenceEvent{
-		Channel: ch,
-		Action:  PresenceActionLeave,
-		Info:    info,
-	}, sessionID)
+	n.publishOccupancy(ch, OccupancyEvent{
+		Event: &clientpb.PresenceEvent{
+			Channel: ch,
+			Action:  PresenceActionLeave,
+			Info:    info,
+		},
+	})
 	if n.ChannelPolicy(ch).LegacyPresenceChannel {
 		go n.PublishPresenceLeave(ch, sessionID, userID)
 	}
 }
 
-// presenceClusterEmit reports whether first-class presence events are
-// published through the broker (server.presence.cluster_emit, PR-04b)
-// instead of being delivered locally (PR-04a).
-func (n *Node) presenceClusterEmit() bool {
-	return n.presenceClusterEmitFlag
-}
-
-// emitPresence is the presence emission path. With cluster_emit=false
-// (default, PR-04a) first-class events are delivered locally only. With
-// cluster_emit=true (PR-04b) the ONLY delivery path is a transient
-// publication on the exact business channel, which every node (including
-// this one) rewrites back into first-class events; the two paths must never
-// stack — the memory broker runs the handler synchronously and Redis
-// delivers its own PUBLISH back via PSubscribe with offset 0 (no dedupe),
-// so stacking would double-deliver on this node.
-func (n *Node) emitPresence(ch string, evt *clientpb.PresenceEvent, excludeSession string) {
-	if n.presenceClusterEmit() {
-		if isWildcard(ch) || evt == nil {
-			return
-		}
-		pub := presencePublication(evt)
-		if pub == nil {
-			if n.metrics != nil {
-				n.metrics.PresenceFailures.WithLabelValues("emit").Inc()
-			}
-			return
-		}
-		// Publish through the broker directly: Node.PublishTransient also
-		// increments MessagesPublished, and presence frames are not chat.
-		if err := n.broker.PublishTransient(ch, pub); err != nil {
-			log.WarnContext(context.Background(), "failed to emit presence",
-				err, "channel", ch)
-			if n.metrics != nil {
-				n.metrics.PresenceFailures.WithLabelValues("emit").Inc()
-			}
-		}
+// publishOccupancy attaches the next monotonic generation and fans the event
+// on the LiveBus for the exact channel. A gen issuance failure (or a
+// PublishOccupancy failure) warns and counts but never rolls back the
+// subscription: the next snapshot covers any missed event (KD-K14).
+func (n *Node) publishOccupancy(ch string, evt OccupancyEvent) {
+	if evt.Event == nil {
 		return
 	}
-	n.deliverPresenceEvent(ch, evt, excludeSession)
+	gen := n.nextOccupancyGen(ch)
+	if gen == 0 {
+		return
+	}
+	evt.Gen = gen
+	if err := n.broker.PublishOccupancy(ch, evt); err != nil {
+		log.WarnContext(context.Background(), "failed to emit occupancy", err, "channel", ch)
+		if n.metrics != nil {
+			n.metrics.PresenceFailures.WithLabelValues("emit").Inc()
+		}
+	}
+}
+
+// nextOccupancyGen issues the per-channel occupancy generation: the wired
+// presence adapter owns cross-node monotonicity (memory = in-process counter,
+// Redis = INCR), with an in-process per-channel fallback so a node without a
+// gen-capable adapter still keeps same-node ordering. Returns 0 on failure,
+// in which case callers drop the emit.
+func (n *Node) nextOccupancyGen(ch string) uint64 {
+	if src, ok := n.presence.(OccupancyGenSource); ok {
+		gen, err := src.NextOccupancyGen(context.Background(), ch)
+		if err != nil {
+			log.WarnContext(context.Background(), "occupancy gen failed", err, "channel", ch)
+			if n.metrics != nil {
+				n.metrics.PresenceFailures.WithLabelValues("gen").Inc()
+			}
+			return 0
+		}
+		return gen
+	}
+	n.occMu.Lock()
+	defer n.occMu.Unlock()
+	if n.occGens == nil {
+		n.occGens = make(map[string]uint64)
+	}
+	n.occGens[ch]++
+	return n.occGens[ch]
+}
+
+// onOccupancy is the LiveBus occupancy receiver (registered as the broker's
+// occupancy handler). It dedupes by generation per (channel, session) and
+// fans the event out to every locally covered subscriber except the event
+// subject itself (self-join/leave). It never touches the publication path.
+func (n *Node) onOccupancy(ch string, evt OccupancyEvent) error {
+	if evt.Gen == 0 || evt.Event == nil {
+		log.WarnContext(context.Background(), "dropping invalid occupancy event", "channel", ch, "gen", evt.Gen)
+		return nil
+	}
+	sid := evt.Event.Info.GetSessionId()
+	if sid == "" {
+		log.WarnContext(context.Background(), "dropping occupancy event without session", "channel", ch, "gen", evt.Gen)
+		return nil
+	}
+	evt.Event.Channel = ch
+
+	n.occMu.Lock()
+	if n.lastApplied == nil {
+		n.lastApplied = make(map[string]map[string]uint64)
+	}
+	bySession := n.lastApplied[ch]
+	if bySession == nil {
+		bySession = make(map[string]uint64)
+		n.lastApplied[ch] = bySession
+	}
+	if last, ok := bySession[sid]; ok && evt.Gen <= last {
+		n.occMu.Unlock()
+		if n.metrics != nil {
+			n.metrics.PresenceFailures.WithLabelValues("late").Inc()
+		}
+		return ErrLateOccupancy
+	}
+	bySession[sid] = evt.Gen
+	n.occMu.Unlock()
+
+	n.deliverPresenceEvent(ch, evt.Event, sid)
+	return nil
+}
+
+// onSyntheticLeave builds and emits a leave for a ghost member whose TTL
+// evaporated in the Redis presence store (B2 §5.3). The store only knows the
+// membership key, so the info is minimal; a fresh generation guarantees the
+// leave is newer than any previously applied event for that session.
+func (n *Node) onSyntheticLeave(ctx context.Context, ch, sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	n.publishOccupancy(ch, OccupancyEvent{
+		Event: &clientpb.PresenceEvent{
+			Channel: ch,
+			Action:  PresenceActionLeave,
+			Info:    &clientpb.PresenceInfo{SessionId: sessionID},
+		},
+	})
 }
 
 // deliverPresenceEvent fans a presence event out to every session covered by

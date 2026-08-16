@@ -71,6 +71,12 @@ func (b *failPublishBroker) PublishTransient(ch string, pub *messageloop.Publica
 	return nil
 }
 
+func (b *failPublishBroker) PublishOccupancy(ch string, evt messageloop.OccupancyEvent) error {
+	return nil
+}
+
+func (b *failPublishBroker) SetOccupancyHandler(messageloop.OccupancyHandler) error { return nil }
+
 func (b *failPublishBroker) History(ch string, sinceOffset uint64, limit int) (*messageloop.HistoryPage, error) {
 	return nil, nil
 }
@@ -121,6 +127,12 @@ func (b *probeBroker) Publish(ch string, pub *messageloop.Publication) (uint64, 
 }
 
 func (b *probeBroker) PublishTransient(ch string, pub *messageloop.Publication) error { return nil }
+
+func (b *probeBroker) PublishOccupancy(ch string, evt messageloop.OccupancyEvent) error {
+	return nil
+}
+
+func (b *probeBroker) SetOccupancyHandler(messageloop.OccupancyHandler) error { return nil }
 
 func (b *probeBroker) History(ch string, sinceOffset uint64, limit int) (*messageloop.HistoryPage, error) {
 	b.historyCalls++

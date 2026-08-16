@@ -23,20 +23,22 @@ import (
 
 func testBoolPtr(v bool) *bool { return &v }
 
-// TestPresence_ClusterEmitWildcardAcrossNodes closes the PR-04b wildcard
-// gap: A subscribes the wildcard pattern im.** on nodeA, B joins the exact
-// channel im.room.1 on nodeB, cluster_emit=true. A receives the join as a
-// first-class PresenceEvent{channel=im.room.1} (never as a publication) and
-// B receives no self-join. The local TestPresence_WildcardSubscriberReceives
-// exact-join test cannot cover this: cross-node fan-out needs the Redis
-// broker pipe.
-func TestPresence_ClusterEmitWildcardAcrossNodes(t *testing.T) {
+// TestPresence_OccupancyWildcardAcrossNodes proves B2 cross-node wildcard
+// coverage over the Redis live bus: A subscribes the wildcard pattern im.** on
+// nodeA, B joins the exact channel im.room.1 on nodeB. A receives the join as
+// a first-class PresenceEvent{channel=im.room.1} (never as a publication) and
+// B receives no self-join. A node that is not interested in the im tree (the
+// second leg of this test) never receives the event. The local
+// TestPresence_OccupancyWildcardCoverage test cannot cover this: cross-node
+// fan-out needs the Redis broker pipe.
+func TestPresence_OccupancyWildcardAcrossNodes(t *testing.T) {
 	redisCfg := requireClusterRedis(t, clusterRedisIntegrationDB)
 	ctx := context.Background()
 
 	newNode := func() *messageloop.Node {
-		node := messageloop.NewNode(&config.Server{Presence: config.Presence{ClusterEmit: true}})
+		node := messageloop.NewNode(nil)
 		node.SetBroker(redisbroker.New(redisCfg))
+		node.SetPresenceStore(redisbroker.NewPresenceStore(redisCfg))
 		nodeCtx, cancel := context.WithCancel(ctx)
 		t.Cleanup(func() { cancel(); node.Shutdown() })
 		require.NoError(t, node.Run(nodeCtx))
@@ -71,9 +73,9 @@ func TestPresence_ClusterEmitWildcardAcrossNodes(t *testing.T) {
 	_, transportA := connectAndSubscribe(t, nodeA, "client-a", pattern)
 	transportA.clearMessages()
 
-	// B joins the exact channel on nodeB. With cluster_emit=true the join is
-	// published through the shared Redis broker; A's wildcard subscription
-	// must receive the exact-channel event.
+	// B joins the exact channel on nodeB: the join is published as an
+	// occupancy event on the exact channel through the shared Redis broker.
+	// A's compiled interest (im.* + im) must receive the exact-channel event.
 	clientB, transportB := connectAndSubscribe(t, nodeB, "client-b", exact)
 
 	require.Eventually(t, func() bool {
@@ -82,14 +84,36 @@ func TestPresence_ClusterEmitWildcardAcrossNodes(t *testing.T) {
 			events[0].GetInfo().GetSessionId() == clientB.SessionID()
 	}, 5*time.Second, 25*time.Millisecond, "A's wildcard subscription must receive the exact-channel join")
 
-	// Give any (wrong) duplicate delivery a chance to land, then pin counts.
-	time.Sleep(300 * time.Millisecond)
-	events := integrationPresenceEventsOf(transportA)
-	require.Len(t, events, 1, "A must receive exactly one join")
-	require.Zero(t, integrationPublicationCount(transportA),
-		"presence frames must never become publications on the wildcard side")
+	// No duplicate delivery may land after the expected single event.
+	require.Never(t, func() bool {
+		return len(integrationPresenceEventsOf(transportA)) != 1
+	}, 300*time.Millisecond, 50*time.Millisecond)
 	require.Empty(t, integrationPresenceEventsOf(transportB),
 		"the joiner must not receive its own join")
+	require.Zero(t, integrationPublicationCount(transportA),
+		"occupancy frames must never become publications on the wildcard side")
+
+	// A node with no interest in the im tree (only chat.1) receives nothing
+	// for im.room.1: occupancy follows compiled interest (B2 §8.3). Anchor the
+	// negative window behind the leave A (interested) actually receives, so
+	// the assertion is meaningful rather than trivially passing before the
+	// event crossed the bus.
+	nodeC := newNode()
+	_, uninterestedTransport := connectAndSubscribe(t, nodeC, "client-c", "chat.1")
+	require.NoError(t, clientB.HandleMessage(ctx, &clientpb.InboundMessage{
+		Id: "unsubscribe-b",
+		Envelope: &clientpb.InboundMessage_Unsubscribe{
+			Unsubscribe: &clientpb.Unsubscribe{Subscriptions: []*clientpb.Subscription{{Channel: exact}}},
+		},
+	}))
+	require.Eventually(t, func() bool {
+		events := integrationPresenceEventsOf(transportA)
+		return len(events) == 2 && events[1].GetAction() == "leave"
+	}, 5*time.Second, 25*time.Millisecond, "A must receive B's exact-channel leave")
+	require.Never(t, func() bool {
+		return len(integrationPresenceEventsOf(uninterestedTransport)) > 0
+	}, 300*time.Millisecond, 50*time.Millisecond,
+		"a node subscribed only to chat.1 must not receive im.room.1 occupancy")
 }
 
 // TestSubscribe_RecoverRedisHistory proves the PR-03 Subscribe recovery on

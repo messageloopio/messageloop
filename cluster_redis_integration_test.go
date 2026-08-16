@@ -589,19 +589,20 @@ func integrationPublicationCount(transport *integrationCapturingTransport) int {
 	return count
 }
 
-// TestPresence_ClusterEmitRedisExactlyOne proves cross-node presence emit
-// (PR-04b) over the shared Redis broker with no double delivery: A (node 1)
-// and C (node 2) are subscribed to the same exact channel, B joins on node
-// 1. A and C each receive exactly one join for B; B receives no self-join.
-// The cluster control plane is deliberately OFF — presence emit only needs
-// the Redis pub/sub pipe.
-func TestPresence_ClusterEmitRedisExactlyOne(t *testing.T) {
+// TestPresence_OccupancyAcrossRedisExactlyOne proves cross-node occupancy
+// (B2) over the shared Redis broker with no double delivery: A (node 1) and
+// C (node 2) are subscribed to the same exact channel, B joins on node 1. A
+// and C each receive exactly one join for B; B receives no self-join. The
+// cluster control plane is deliberately OFF — occupancy emit only needs the
+// Redis pub/sub pipe.
+func TestPresence_OccupancyAcrossRedisExactlyOne(t *testing.T) {
 	redisCfg := requireClusterRedis(t, clusterRedisIntegrationDB)
 	ctx := context.Background()
 
 	newNode := func() *messageloop.Node {
-		node := messageloop.NewNode(&config.Server{Presence: config.Presence{ClusterEmit: true}})
+		node := messageloop.NewNode(nil)
 		node.SetBroker(redisbroker.New(redisCfg))
+		node.SetPresenceStore(redisbroker.NewPresenceStore(redisCfg))
 		nodeCtx, cancel := context.WithCancel(ctx)
 		t.Cleanup(func() { cancel(); node.Shutdown() })
 		require.NoError(t, node.Run(nodeCtx))
@@ -651,16 +652,16 @@ func TestPresence_ClusterEmitRedisExactlyOne(t *testing.T) {
 		return len(events) == 1 && events[0].GetInfo().GetSessionId() == clientB.SessionID()
 	}, 5*time.Second, 25*time.Millisecond, "C must receive exactly one join for B")
 
-	// Give any (wrong) late self-join or double delivery a chance to land.
-	time.Sleep(300 * time.Millisecond)
-	require.Len(t, integrationPresenceEventsOf(transportA), 1,
-		"a stacked local+broker path would deliver a second join to A")
-	require.Len(t, integrationPresenceEventsOf(transportC), 1,
-		"a stacked local+broker path would deliver a second join to C")
+	// No second delivery may land afterwards (a stacked/duplicated path
+	// would append a second join to either transport).
+	require.Never(t, func() bool {
+		return len(integrationPresenceEventsOf(transportA)) != 1 || len(integrationPresenceEventsOf(transportC)) != 1
+	}, 300*time.Millisecond, 50*time.Millisecond,
+		"a stacked local+bus path would deliver a second join to A or C")
 	require.Empty(t, integrationPresenceEventsOf(transportB),
 		"the joiner must not receive its own join")
 	require.Zero(t, integrationPublicationCount(transportA),
-		"presence frames must never become publications")
+		"occupancy frames must never become publications")
 }
 
 // TestAdmin_DisconnectUsersAcrossNodes verifies PR-06 cross-node: user U has

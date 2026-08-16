@@ -53,6 +53,7 @@ type channelHistory struct {
 
 type memoryBroker struct {
 	handler     atomic.Pointer[PublicationHandler]
+	occHandler  atomic.Pointer[OccupancyHandler]
 	historySize int
 	epoch       string
 
@@ -243,6 +244,41 @@ func (b *memoryBroker) Publish(ch string, pub *Publication) (uint64, error) {
 		}()
 	}
 	return offset, nil
+}
+
+// SetOccupancyHandler registers the live occupancy handler. Occupancy events
+// never reach the publication handler.
+func (b *memoryBroker) SetOccupancyHandler(handler OccupancyHandler) error {
+	b.occHandler.Store(&handler)
+	return nil
+}
+
+// PublishOccupancy invokes the occupancy handler only when this node is
+// interested in ch (exact or wildcard match), mirroring PublishTransient's
+// interest gate. It never writes history. Synchronous by design (B2 §5.2);
+// the handler's error or panic is logged and never fails the Join/Leave.
+func (b *memoryBroker) PublishOccupancy(ch string, evt OccupancyEvent) error {
+	if err := topics.ValidateTopic(ch); err != nil {
+		return err
+	}
+	handler := b.occHandler.Load()
+	if handler == nil || !b.interested(ch) {
+		return nil
+	}
+	ctx := context.Background()
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.ErrorContext(ctx, "memory broker: occupancy handler panicked; event dropped",
+					fmt.Errorf("panic: %v", r), "channel", ch)
+			}
+		}()
+		if err := (*handler)(ch, evt); err != nil {
+			log.ErrorContext(ctx, "memory broker: occupancy handler failed; event dropped",
+				err, "channel", ch)
+		}
+	}()
+	return nil
 }
 
 // PublishTransient delivers payload to subscribers in real time without

@@ -2,7 +2,10 @@ package messageloop
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -340,21 +343,32 @@ func TestPresence_ConnectedSnapshotFilled(t *testing.T) {
 	require.Equal(t, connected.GetSessionId(), client.SessionID())
 }
 
-// countingBroker records every PublishTransient channel so tests can prove
-// whether companion presence frames were written.
+// countingBroker records every PublishTransient / PublishOccupancy channel
+// so tests can prove whether companion presence frames or occupancy events
+// were written, without delivering them.
 type countingBroker struct {
 	mu        sync.Mutex
 	transient []string
+	occupancy []string
 }
 
 func (b *countingBroker) Start(context.Context, PublicationHandler) error { return nil }
 func (b *countingBroker) Subscribe(string) error                          { return nil }
 func (b *countingBroker) Unsubscribe(string) error                        { return nil }
 func (b *countingBroker) Publish(string, *Publication) (uint64, error)    { return 0, nil }
+func (b *countingBroker) SetOccupancyHandler(OccupancyHandler) error      { return nil }
 func (b *countingBroker) PublishTransient(ch string, _ *Publication) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.transient = append(b.transient, ch)
+	return nil
+}
+func (b *countingBroker) PublishOccupancy(ch string, evt OccupancyEvent) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if evt.Event != nil {
+		b.occupancy = append(b.occupancy, fmt.Sprintf("%s|%s|%d", ch, evt.Event.GetAction(), evt.Gen))
+	}
 	return nil
 }
 func (b *countingBroker) History(string, uint64, int) (*HistoryPage, error) { return nil, nil }
@@ -372,6 +386,42 @@ func (b *countingBroker) publishedTo(ch string) bool {
 		}
 	}
 	return false
+}
+
+// occupancyEmits returns the recorded (channel|action|gen) occupancy
+// publishes, in record order.
+func (b *countingBroker) occupancyEmits() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]string(nil), b.occupancy...)
+}
+
+// clearOccupancy drops the recorded occupancy publishes (to focus later
+// assertions on a single session's events).
+func (b *countingBroker) clearOccupancy() {
+	b.mu.Lock()
+	b.occupancy = nil
+	b.mu.Unlock()
+}
+
+// publishedOccupancyTo reports whether an occupancy with the given action was
+// published to ch.
+func (b *countingBroker) publishedOccupancyTo(ch, action string) bool {
+	return lastGenOf(b.occupancyEmits(), ch, action) > 0
+}
+
+// lastGenOf returns the largest gen recorded for (ch, action), 0 if none.
+func lastGenOf(emits []string, ch, action string) uint64 {
+	prefix := ch + "|" + action + "|"
+	var maxGen uint64
+	for _, emit := range emits {
+		if strings.HasPrefix(emit, prefix) {
+			if n, err := strconv.ParseUint(emit[len(prefix):], 10, 64); err == nil && n > maxGen {
+				maxGen = n
+			}
+		}
+	}
+	return maxGen
 }
 
 func TestPresence_NoCompanionByDefault(t *testing.T) {
@@ -412,9 +462,9 @@ func TestPresence_LegacyCompanionExactOnly(t *testing.T) {
 	}, time.Second, 10*time.Millisecond, "legacy_presence_channel=true must write the exact companion channel")
 
 	_, _ = connectAndSubscribe(t, node, "client-b", &clientpb.Subscription{Channel: "im.**"})
-	// Give any (wrong) async writes a chance to land.
-	time.Sleep(50 * time.Millisecond)
-	assert.False(t, broker.publishedTo(presenceChannel("im.**")),
+	require.Never(t, func() bool {
+		return broker.publishedTo(presenceChannel("im.**"))
+	}, 500*time.Millisecond, 25*time.Millisecond,
 		"wildcard subscriptions must never write a companion channel")
 }
 
@@ -423,63 +473,40 @@ func TestPresence_ValidateTopicCompanionStillRejected(t *testing.T) {
 	require.ErrorIs(t, topics.ValidateTopic("a.**.b/__presence"), topics.ErrBadTopic)
 }
 
-func TestPresence_BroadcastPresenceNotPublication(t *testing.T) {
+// TestPresence_BroadcastIgnoresMlTypeAnnotations pins B2 §5.4/§8.1: the hub
+// no longer recognizes an "ml.type=presence" publication annotation — such a
+// frame (a legacy/rogue chat publication) is delivered as a plain
+// publication, never rewritten into a presence event. Occupancy events have
+// their own live-bus type and never reach broadcastPublication.
+func TestPresence_BroadcastIgnoresMlTypeAnnotations(t *testing.T) {
 	ctx := context.Background()
-	reg := prometheus.NewRegistry()
-	metrics := NewMetrics(reg)
 	node := NewNode(nil)
-	node.SetMetrics(metrics)
 	require.NoError(t, node.Run(ctx))
 
-	const ch = "rewrite.ch"
-	client, transport := connectAndSubscribe(t, node, "client-a", &clientpb.Subscription{Channel: ch})
-	transport.messages = nil
-
-	evt := &clientpb.PresenceEvent{
-		Action: "join",
-		Info:   &clientpb.PresenceInfo{SessionId: "sess-x", UserId: "user-x", ClientId: "client-x"},
-	}
-	require.NoError(t, node.hub.broadcastPublication(ch, presencePublication(evt)))
-
-	events := presenceEventsOf(t, transport)
-	require.Len(t, events, 1)
-	require.Equal(t, ch, events[0].GetChannel(), "an empty event channel is filled from the frame channel")
-	require.Equal(t, "sess-x", events[0].GetInfo().GetSessionId())
-	require.Zero(t, publicationsOf(t, transport), "a presence frame must never become a publication")
-	require.Zero(t, testutil.ToFloat64(metrics.MessagesDelivered), "presence delivery must not count MessagesDelivered")
-
-	// A non-presence publication still flows unchanged.
-	require.NoError(t, node.hub.broadcastPublication(ch, &Publication{
-		Payload: []byte("hello"),
-		Kind:    PayloadKindText,
-		Offset:  7,
-	}))
-	require.Equal(t, 1, publicationsOf(t, transport))
-	require.Equal(t, float64(1), testutil.ToFloat64(metrics.MessagesDelivered))
-	require.NotNil(t, client)
-}
-
-func TestPresence_BroadcastUnparseablePresenceDropped(t *testing.T) {
-	ctx := context.Background()
-	reg := prometheus.NewRegistry()
-	metrics := NewMetrics(reg)
-	node := NewNode(nil)
-	node.SetMetrics(metrics)
-	require.NoError(t, node.Run(ctx))
-
-	const ch = "drop.ch"
+	const ch = "plain.ch"
 	_, transport := connectAndSubscribe(t, node, "client-a", &clientpb.Subscription{Channel: ch})
 	transport.messages = nil
 
-	badPub := &Publication{
-		Payload:  []byte("not-json"),
+	legacyFrame := &Publication{
+		Payload:  []byte(`{"__type":"presence","action":"join"}`),
 		Kind:     PayloadKindJSON,
-		Metadata: map[string]string{PresenceMetaTypeKey: PresenceMetaTypeValue},
+		Offset:   7,
+		Metadata: map[string]string{"ml.type": "presence"},
 	}
-	require.NoError(t, node.hub.broadcastPublication(ch, badPub))
-	require.Zero(t, publicationsOf(t, transport), "an unparseable presence frame must be dropped, not forwarded")
-	require.Empty(t, presenceEventsOf(t, transport))
-	require.Equal(t, float64(1), testutil.ToFloat64(metrics.PresenceFailures.WithLabelValues("rewrite")))
+	require.NoError(t, node.hub.broadcastPublication(ch, legacyFrame))
+
+	require.Equal(t, 1, publicationsOf(t, transport),
+		"with the ml.type rewrite gone the frame must flow as a publication")
+	require.Empty(t, presenceEventsOf(t, transport),
+		"the hub must never rewrite a publication into a presence event")
+
+	// A normal publication still flows unchanged.
+	require.NoError(t, node.hub.broadcastPublication(ch, &Publication{
+		Payload: []byte("hello"),
+		Kind:    PayloadKindText,
+		Offset:  8,
+	}))
+	require.Equal(t, 2, publicationsOf(t, transport))
 }
 
 func TestPresence_RestoreWildcardSkipsStore(t *testing.T) {
@@ -587,137 +614,210 @@ func TestPresence_ClusterUnsubscribeEphemeralEmitsNoLeave(t *testing.T) {
 	require.NotContains(t, present, clientB.SessionID())
 }
 
-// TestPresence_ClusterEmitDefaultLocalOnly pins the PR-04b gate: with the
-// default (or explicit false) cluster_emit, join events are delivered
-// locally and the exact channel is never PublishTransient'd.
-func TestPresence_ClusterEmitDefaultLocalOnly(t *testing.T) {
+// TestPresence_OccupancySinglePathExactlyOne proves the B2 single path: a
+// Join writes the store and issues exactly ONE occupancy publish on the live
+// bus (never a transient publication), and the joining peer's covered
+// subscribers each receive exactly one PresenceEvent join — no double
+// delivery from a stacked local+bus path.
+func TestPresence_OccupancySinglePathExactlyOne(t *testing.T) {
 	ctx := context.Background()
-	reg := prometheus.NewRegistry()
-	metrics := NewMetrics(reg)
-	node := NewNode(&config.Server{})
-	node.SetMetrics(metrics)
+
+	// Broker spy: one occupancy publish, zero transient publications.
 	broker := &countingBroker{}
-	node.SetBroker(broker)
-	require.NoError(t, node.Run(ctx))
+	spyReg := prometheus.NewRegistry()
+	spyMetrics := NewMetrics(spyReg)
+	spyNode := NewNode(nil)
+	spyNode.SetMetrics(spyMetrics)
+	spyNode.SetBroker(broker)
+	require.NoError(t, spyNode.Run(ctx))
+	const ch = "single.path.ch"
+	_, _ = connectAndSubscribe(t, spyNode, "client-a", &clientpb.Subscription{Channel: ch})
+	// Focus on B's join: client-a's own join already hit the spy.
+	broker.clearOccupancy()
+	_, _ = connectAndSubscribe(t, spyNode, "client-b", &clientpb.Subscription{Channel: ch})
+	require.Len(t, broker.occupancyEmits(), 1,
+		"joining must emit exactly one occupancy join on the live bus")
+	require.True(t, broker.publishedOccupancyTo(ch, "join"))
+	require.False(t, broker.publishedTo(ch), "occupancy must never use PublishTransient")
 
-	const ch = "local.emit.ch"
-	clientA, transportA := connectAndSubscribe(t, node, "client-a", &clientpb.Subscription{Channel: ch})
-	transportA.messages = nil
-
-	_, _ = connectAndSubscribe(t, node, "client-b", &clientpb.Subscription{Channel: ch})
-
-	events := presenceEventsOf(t, transportA)
-	require.Len(t, events, 1, "A must receive exactly one local join")
-	require.Equal(t, "join", events[0].GetAction())
-	require.Equal(t, ch, events[0].GetChannel())
-	assert.False(t, broker.publishedTo(ch),
-		"cluster_emit=false must never publish the exact channel transiently")
-	require.Zero(t, publicationsOf(t, transportA), "presence must not arrive as a publication")
-	require.NotNil(t, clientA)
-}
-
-// TestPresence_ClusterEmitMemoryExactlyOne exercises the cluster_emit=true
-// path on the in-process broker: A and C (subscribed to the exact channel)
-// each receive exactly one join for B, B receives no self-join, and the
-// events never count as delivered messages.
-func TestPresence_ClusterEmitMemoryExactlyOne(t *testing.T) {
-	ctx := context.Background()
+	// Real memory broker: clients receive exactly one join each, no
+	// publication, joiner receives none; neither MessagesPublished nor
+	// MessagesDelivered are touched by occupancy.
 	reg := prometheus.NewRegistry()
 	metrics := NewMetrics(reg)
-	node := NewNode(&config.Server{Presence: config.Presence{ClusterEmit: true}})
+	node := NewNode(nil)
 	node.SetMetrics(metrics)
 	require.NoError(t, node.Run(ctx))
-
-	const ch = "emit.memory.ch"
 	_, transportA := connectAndSubscribe(t, node, "client-a", &clientpb.Subscription{Channel: ch})
 	_, transportC := connectAndSubscribe(t, node, "client-c", &clientpb.Subscription{Channel: ch})
 	transportA.messages = nil
 	transportC.messages = nil
-
 	clientB, transportB := connectAndSubscribe(t, node, "client-b", &clientpb.Subscription{Channel: ch})
 
 	eventsA := presenceEventsOf(t, transportA)
-	require.Len(t, eventsA, 1, "A must receive exactly one join for B")
+	require.Len(t, eventsA, 1)
 	require.Equal(t, "join", eventsA[0].GetAction())
 	require.Equal(t, ch, eventsA[0].GetChannel())
 	require.Equal(t, clientB.SessionID(), eventsA[0].GetInfo().GetSessionId())
-
-	eventsC := presenceEventsOf(t, transportC)
-	require.Len(t, eventsC, 1, "C must receive exactly one join for B")
-	require.Equal(t, clientB.SessionID(), eventsC[0].GetInfo().GetSessionId())
-
+	require.Len(t, presenceEventsOf(t, transportC), 1, "C must receive exactly one join")
 	require.Empty(t, presenceEventsOf(t, transportB), "the joiner must not receive its own join")
 	require.Zero(t, publicationsOf(t, transportA), "presence frames must never become publications")
-	require.Zero(t, testutil.ToFloat64(metrics.MessagesDelivered),
-		"presence delivery must not count MessagesDelivered")
 	require.Zero(t, testutil.ToFloat64(metrics.MessagesPublished),
-		"presence emit must not count MessagesPublished")
+		"occupancy emit must not count MessagesPublished")
+	require.Zero(t, testutil.ToFloat64(metrics.MessagesDelivered),
+		"occupancy delivery must not count MessagesDelivered")
 }
 
-// TestPresence_ClusterEmitMemoryNoDoublePath guards against the forbidden
-// stacked path: if emitPresence also ran deliverPresenceEvent locally, A
-// would see two joins (one direct, one via the broker rewrite).
-func TestPresence_ClusterEmitMemoryNoDoublePath(t *testing.T) {
+// TestPresence_OccupancyNotPublication pins B2 §8.2: a join/leave is an
+// occupancy event, never a publication — the broker records no transient
+// publication, and no publication reaches the client envelope.
+func TestPresence_OccupancyNotPublication(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode(&config.Server{Presence: config.Presence{ClusterEmit: true}})
+	broker := &countingBroker{}
+	node := NewNode(nil)
+	node.SetBroker(broker)
 	require.NoError(t, node.Run(ctx))
 
-	const ch = "emit.nodouble.ch"
-	_, transportA := connectAndSubscribe(t, node, "client-a", &clientpb.Subscription{Channel: ch})
-	_, transportC := connectAndSubscribe(t, node, "client-c", &clientpb.Subscription{Channel: ch})
-	transportA.messages = nil
-	transportC.messages = nil
-
+	const ch = "np.ch"
+	_, _ = connectAndSubscribe(t, node, "client-a", &clientpb.Subscription{Channel: ch})
 	_, _ = connectAndSubscribe(t, node, "client-b", &clientpb.Subscription{Channel: ch})
 
-	require.Len(t, presenceEventsOf(t, transportA), 1,
-		"a stacked local+broker path would deliver two joins to A")
-	require.Len(t, presenceEventsOf(t, transportC), 1,
-		"a stacked local+broker path would deliver two joins to C")
+	require.True(t, broker.publishedOccupancyTo(ch, "join"),
+		"join must flow as one occupancy publish")
+	require.Empty(t, broker.transientChannels(),
+		"occupancy is not a transient publication, so nothing may be PublishTransient'd")
 }
 
-// TestPresence_ClusterEmitWildcardStillLocalCovered verifies wildcard
-// subscribers keep receiving exact-channel events under cluster_emit=true:
-// the frame is published on the exact channel only, and the wildcard
-// subscriber is covered by the matcher through the broadcast rewrite.
-func TestPresence_ClusterEmitWildcardStillLocalCovered(t *testing.T) {
+// TestPresence_OccupancyGenOrderingAndDedupe pins B2 §5.3/§7.5: an explicit
+// leave takes a fresh gen greater than the join it follows, and a receiver
+// drops a replayed/late event with gen <= last_applied[ch][session]
+// (counting it as ErrLateOccupancy).
+func TestPresence_OccupancyGenOrderingAndDedupe(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode(&config.Server{Presence: config.Presence{ClusterEmit: true}})
+
+	// Emit side: the presence adapter issues strictly increasing gens per
+	// channel, so the leave always outnumbers its preceding join.
+	broker := &countingBroker{}
+	node := NewNode(nil)
+	node.SetBroker(broker)
 	require.NoError(t, node.Run(ctx))
 
-	_, transportA := connectAndSubscribe(t, node, "client-a", &clientpb.Subscription{Channel: "chat.**"})
+	const ch = "gen.ch"
+	clientB, _ := connectAndSubscribe(t, node, "client-b", &clientpb.Subscription{Channel: ch})
+	joinGen := lastGenOf(broker.occupancyEmits(), ch, "join")
+	require.Greater(t, joinGen, uint64(0), "the join must carry a non-zero gen")
+
+	require.NoError(t, clientB.Close(Disconnect{}))
+	leaveGen := func() uint64 {
+		// The disconnect path emits leave from the session teardown; wait for
+		// it instead of sleeping.
+		var gen uint64
+		require.Eventually(t, func() bool {
+			gen = lastGenOf(broker.occupancyEmits(), ch, "leave")
+			return gen > 0
+		}, time.Second, 10*time.Millisecond, "leaving must emit an occupancy leave")
+		return gen
+	}()
+	require.Greater(t, leaveGen, joinGen, "an explicit leave must take a fresh gen")
+
+	// Receiver side: a replayed older gen is dropped by last_applied.
+	recv := NewNode(nil)
+	require.NoError(t, recv.Run(ctx))
+	_, transportA := connectAndSubscribe(t, recv, "client-a", &clientpb.Subscription{Channel: ch})
 	transportA.messages = nil
+	evt := func(gen uint64, action string) OccupancyEvent {
+		return OccupancyEvent{
+			Event: &clientpb.PresenceEvent{Channel: ch, Action: action,
+				Info: &clientpb.PresenceInfo{SessionId: "sess-z"}},
+			Gen: gen,
+		}
+	}
 
-	clientB, _ := connectAndSubscribe(t, node, "client-b", &clientpb.Subscription{Channel: "chat.room.1"})
-
+	require.NoError(t, recv.onOccupancy(ch, evt(5, "join")))
+	require.Len(t, presenceEventsOf(t, transportA), 1)
+	require.ErrorIs(t, recv.onOccupancy(ch, evt(3, "join")), ErrLateOccupancy,
+		"an older gen must be counted and dropped")
+	require.Len(t, presenceEventsOf(t, transportA), 1,
+		"the replayed join must not be delivered a second time")
+	require.NoError(t, recv.onOccupancy(ch, evt(6, "leave")))
 	events := presenceEventsOf(t, transportA)
-	require.Len(t, events, 1, "wildcard coverage must still deliver the exact-channel join")
-	require.Equal(t, "chat.room.1", events[0].GetChannel())
-	require.Equal(t, "join", events[0].GetAction())
-	require.Equal(t, clientB.SessionID(), events[0].GetInfo().GetSessionId())
-	require.Zero(t, publicationsOf(t, transportA), "presence must not arrive as a publication")
+	require.Len(t, events, 2)
+	require.Equal(t, "leave", events[1].GetAction())
 }
 
-// TestPresence_ClusterEmitFalseUnaffected pins the default path: with
-// cluster_emit unset the node behaves exactly as PR-04a (local delivery,
-// snapshot on subscribe, no self-join).
-func TestPresence_ClusterEmitFalseUnaffected(t *testing.T) {
+// TestPresence_OccupancyWildcardCoverage pins B2 §5.2/§7.3: a session
+// subscribed only to im.** covers the exact im.room.1 channel, receives its
+// join, and the wildcard pattern itself never enters the store.
+func TestPresence_OccupancyWildcardCoverage(t *testing.T) {
 	ctx := context.Background()
 	node := NewNode(nil)
 	require.NoError(t, node.Run(ctx))
 
-	const ch = "emit.off.ch"
-	clientA, transportA := connectAndSubscribe(t, node, "client-a", &clientpb.Subscription{Channel: ch})
+	_, transportA := connectAndSubscribe(t, node, "client-a", &clientpb.Subscription{Channel: "im.**"})
 	transportA.messages = nil
 
-	clientB, transportB := connectAndSubscribe(t, node, "client-b", &clientpb.Subscription{Channel: ch})
+	clientB, _ := connectAndSubscribe(t, node, "client-b", &clientpb.Subscription{Channel: "im.room.1"})
 
 	events := presenceEventsOf(t, transportA)
-	require.Len(t, events, 1, "A must receive exactly one join")
+	require.Len(t, events, 1, "wildcard coverage must deliver the exact-channel join")
+	require.Equal(t, "im.room.1", events[0].GetChannel())
 	require.Equal(t, "join", events[0].GetAction())
-	require.Equal(t, ch, events[0].GetChannel())
 	require.Equal(t, clientB.SessionID(), events[0].GetInfo().GetSessionId())
-	require.Empty(t, presenceEventsOf(t, transportB), "the joiner must not receive its own join")
-	require.Zero(t, publicationsOf(t, transportA))
-	require.NotNil(t, clientA)
+	require.Zero(t, publicationsOf(t, transportA), "presence must not arrive as a publication")
+
+	present, err := node.Presence(ctx, "im.**")
+	require.NoError(t, err)
+	require.Empty(t, present, "wildcard patterns must not be presence store keys")
+	present, err = node.Presence(ctx, "im.room.1")
+	require.NoError(t, err)
+	require.Contains(t, present, clientB.SessionID())
+}
+
+// failingPresenceStore embeds a working store but fails every Add so tests
+// can prove store failures never unwind the subscription (B2 §7.7).
+type failingPresenceStore struct {
+	PresenceStore
+}
+
+func (f *failingPresenceStore) Add(context.Context, string, *PresenceInfo) error {
+	return errors.New("injected store failure")
+}
+
+// TestPresence_OccupancyStoreFailureKeepsSubscription pins B2 §7.7: when the
+// store Add fails, the subscription stays live and no disconnect happens —
+// the join is still emitted over the live bus.
+func TestPresence_OccupancyStoreFailureKeepsSubscription(t *testing.T) {
+	ctx := context.Background()
+	node := NewNode(nil)
+	node.SetPresenceStore(&failingPresenceStore{PresenceStore: NewMemoryPresenceStore()})
+	require.NoError(t, node.Run(ctx))
+
+	const ch = "store.fail.ch"
+	client, transport := connectAndSubscribe(t, node, "client-a", &clientpb.Subscription{Channel: ch})
+
+	require.Equal(t, 1, node.Hub().NumSubscribers(ch),
+		"a store failure must not roll back the subscription")
+	require.False(t, transport.isClosed(), "a store failure must not disconnect the client")
+	require.NotNil(t, client)
+}
+
+// TestPresence_OccupancyReconnectDoesNotRejoin pins B2 §6: a heartbeat-style
+// store refresh is not a join, so refreshing presence for an already tracked
+// session never emits a second occupancy event (no gen noise).
+func TestPresence_OccupancyReconnectDoesNotRejoin(t *testing.T) {
+	ctx := context.Background()
+	broker := &countingBroker{}
+	node := NewNode(nil)
+	node.SetBroker(broker)
+	require.NoError(t, node.Run(ctx))
+
+	const ch = "refresh.ch"
+	client, _ := connectAndSubscribe(t, node, "client-a", &clientpb.Subscription{Channel: ch})
+
+	// Refresh the TTL exactly like the heartbeat path (store.Add directly,
+	// no presenceJoin).
+	require.NoError(t, node.SetPresenceForSession(ctx, ch, client))
+
+	require.Len(t, broker.occupancyEmits(), 1,
+		"a store refresh must not emit a second join")
 }

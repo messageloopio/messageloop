@@ -202,14 +202,11 @@ PR-KA-B1 起内核对象是 `Session`（可恢复逻辑连接，`type Client = S
 
 `PresenceInfo` 含 `ClientID`、`UserID`、`ConnectedAt`。默认实现为 `NewMemoryPresenceStore`（进程内 map）；集群模式用 Redis 实现（pkg/redisbroker/presence_redis.go）：每（频道, 客户端）一个带 TTL 的键（`PresenceTTL` 默认 60s）+ 每频道一个集合索引，`Get` 时清理过期成员。
 
-join/leave 事件默认以**一等 `presence_event` 信封**分发，不走伴生频道。订阅了精确频道 `C` 的客户端默认就能收到 `C` 上的 join/leave 与快照（`Connected.presence` / `SubscribeAck.presence`，或主动发 `PresenceQuery`）；通配订阅者收到其 pattern 覆盖的每个**精确频道**上的事件。
+join/leave 事件以 **Occupancy** 概念分发（B2）：每次 Join/Leave 取一个单调 **OccupancyGen**（memory：进程内每频道计数器；Redis：`INCR ml:presence:occ:gen:<ch>`），存完 store 后**只**调用 `broker.PublishOccupancy(exactCh, evt)` 走 **LiveBus 精确频道**。订阅了精确频道 `C` 的客户端默认就能收到 `C` 上的 join/leave 与快照（`Connected.presence` / `SubscribeAck.presence`，或主动发 `PresenceQuery`）；通配订阅者收到其 pattern 覆盖的每个**精确频道**上的事件——跨节点只靠 LiveBus 的 Interest（精确或 `CompileInterest` 编译的 pattern）决定谁能收到，`im.**` 的节点能收到 `im.room.1` 的 join，只订 `chat.1` 的节点收不到。
 
-投递入口是 `emitPresence`（node.go），两条路径**互斥**、禁止叠用：
+接收（本机与跨节点同一条，`Node.onOccupancy`/`occupancy.go`）：`gen==0` 或 `Event==nil` 丢弃；`gen <= lastApplied[ch][session]` 判为迟到（`ErrLateOccupancy`，计数），否则记 `lastApplied` 并经 `deliverPresenceEvent` 扇到 Coverage 订阅者（跳过 ephemeral 与事件主体自己）。事件**不进 Stream、不是 Publication 信封**、**不计** `MessagesPublished`/`MessagesDelivered`。**没有** PR-04b 的 `cluster_emit` 开关，**没有** Hub 对 `ml.type=presence` 帧的改写——`Hub` 不再认识 occupancy。
 
-- `server.presence.cluster_emit=false`（默认，PR-04a）：只调 `deliverPresenceEvent` 在本节点扇出——遍历精确频道订阅者（`subShard`，保留 ephemeral 标志）+ matcher 命中的通配订阅者，按会话去重，跳过 ephemeral 订阅与事件主体（加入者/离开者不收自己的事件），且**不计** `MessagesDelivered`。
-- `cluster_emit=true`（PR-04b，需全部节点升级后才能开）：**唯一**投递路径是 `PublishTransient(精确业务频道, ml.type=presence 帧)`，本节点与对端节点统一经 broker → `broadcastPublication` 改写回一等 `presence_event`（`hub.go` 的 presence 分支：跳过 ephemeral、不 `MessagesDelivered++`、写出 `presence_event`，**不当** `publication` 投递）。
-
-事件只实时投递、永不进入 broker 历史，因此不会混入恢复消息流。只有频道策略 `legacy_presence_channel=true` 时，才额外把旧 JSON 格式（`__type: "presence"`、`action`、`channel`、`client_id`、`user_id`、`timestamp`）瞬时发布到 `presenceChannel(ch) = ch + "/__presence"` 伴生频道（`PublishPresenceJoin`/`PublishPresenceLeave`，仅精确频道，通配从不写伴生）。
+只有频道策略 `legacy_presence_channel=true` 时，才额外把旧 JSON 格式（`__type: "presence"`、`action`、`channel`、`client_id`、`user_id`、`timestamp`）瞬时发布到 `presenceChannel(ch) = ch + "/__presence"` 伴生频道（`PublishPresenceJoin`/`PublishPresenceLeave`，仅精确频道，通配从不写伴生）。Redis 端 presence store `Get` 清理 TTL 蒸发的幽灵成员时，对该 session 合成一条 leave 并取新 gen 再 `PublishOccupancy`（B2 §5.3；memory store 无 TTL 无合成）。
 
 ### 3.6 Survey（survey.go、node.go）
 
@@ -424,30 +421,29 @@ Admin 路径：
   │                   │  读循环不被阻塞，KD-15）        │
 ```
 
-### (e) presence 加入 / 离开事件（一等信封，默认本地投递）
+### (e) presence 加入 / 离开事件（Occupancy，只走 LiveBus 精确频道）
 
 ```
-订阅客户端            Node                             其他订阅者
+订阅客户端            Node                              LiveBus / 其他订阅者
   │── Subscribe ────►│                                  │
   │                  │── presence.Add(ch, info)         │
   │◄── SubscribeAck ─┤（含 presence 快照，含自己；       │
   │                  │  无 self-join 事件）              │
-  │                  │── emitPresence(ch, join) ───────►│
-  │                  │    cluster_emit=false（默认）：    │  deliverPresenceEvent：
-  │                  │    deliverPresenceEvent 本节点扇出 │  跳过 ephemeral 与事件主体，
-  │                  │    （精确 + matcher 通配命中，      │  不计 MessagesDelivered
-  │                  │     按会话去重）                   │
+  │                  │── gen = nextOccupancyGen(ch)     │
+  │                  │── PublishOccupancy(ch, join) ───►│ 跨节点：按 Interest
+  │                  │                                 │ （精确 / im.** 编译）
+  │                  │◄── onOccupancy(ch, join) ────────┤ 过滤；gen<=last_applied
+  │                  │   deliverPresenceEvent 本机扇出   │ 弃迟到；
+  │                  │   （精确 + matcher 通配命中，      │ 跳过 ephemeral 与事件主体，
+  │                  │    按会话去重，events 不进历史）   │ 不计 Messages*
   │── Unsubscribe ──►│                                  │
   │                  │── presence.Remove                 │
-  │                  │── emitPresence(ch, leave) ───────►│
+  │                  │── PublishOccupancy(ch, leave) ───►│
   │                  │                                  │
-  │                  │    cluster_emit=true 时唯一路径：   │
-  │                  │    PublishTransient(ch, ml.type=presence 帧) → broker
-  │                  │    → 各节点 broadcastPublication 改写回一等 presence_event
-  │                  │    （不再调 deliverPresenceEvent；通配订阅者经 matcher
-  │                  │     收精确频道事件；事件不进历史/恢复流）
   │                  │    仅 legacy_presence_channel=true 时额外写 ch/__presence 伴生
 ```
+
+Occupancy 事件**不是** Publication（改走 broker 的实时 `occupancy` 消息类型，Redis 端与 `pub` 信封分开解析），**不**复用 `PublishTransient`，`Hub.broadcastPublication` 只扇 `Publication`，没有 `ml.type` 改写分支。
 
 ### (f) 经管理 API 查询历史
 

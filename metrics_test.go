@@ -59,22 +59,25 @@ func TestMetricsTransportLabel(t *testing.T) {
 	require.Equal(t, "ws", MetricsTransportLabel("unknown"))
 }
 
-// TestMetrics_PresenceFailuresRegistered verifies PR-04a/04b: the
-// presence_failures_total counter vector is registered with the op label and
-// counts each failure operation (deliver/store/rewrite/companion/emit).
+// TestMetrics_PresenceFailuresRegistered verifies the presence_failures_total
+// counter vector is registered with the op label and counts each failure
+// operation (deliver/store/gen/late/companion/emit). The old rewrite op is
+// gone with the ml.type broadcast rewrite (B2).
 func TestMetrics_PresenceFailuresRegistered(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	metrics := NewMetrics(reg)
 
 	metrics.PresenceFailures.WithLabelValues("store").Inc()
 	metrics.PresenceFailures.WithLabelValues("deliver").Inc()
-	metrics.PresenceFailures.WithLabelValues("rewrite").Inc()
+	metrics.PresenceFailures.WithLabelValues("gen").Inc()
+	metrics.PresenceFailures.WithLabelValues("late").Inc()
 	metrics.PresenceFailures.WithLabelValues("companion").Inc()
 	metrics.PresenceFailures.WithLabelValues("emit").Inc()
 
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.PresenceFailures.WithLabelValues("store")))
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.PresenceFailures.WithLabelValues("deliver")))
-	require.Equal(t, float64(1), testutil.ToFloat64(metrics.PresenceFailures.WithLabelValues("rewrite")))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.PresenceFailures.WithLabelValues("gen")))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.PresenceFailures.WithLabelValues("late")))
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.PresenceFailures.WithLabelValues("companion")))
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.PresenceFailures.WithLabelValues("emit")))
 

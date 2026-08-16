@@ -54,10 +54,6 @@ type Hub struct {
 	matcher  topics.Matcher
 	wcSubsMu sync.Mutex
 	wcSubs   map[string]*topics.Subscription // key: "sessionID:channel"
-
-	// node back-reference lets broadcastPublication delegate presence frame
-	// rewrites to the node's deliverPresenceEvent. Set by NewNode.
-	node *Node
 }
 
 // newHub initializes Hub.
@@ -331,35 +327,6 @@ func (h *Hub) NumSubscribers(ch string) int {
 }
 
 func (h *Hub) broadcastPublication(ch string, pub *Publication) error {
-	// Presence frames (ml.type=presence) never become chat publications:
-	// they are rewritten into first-class presence events and dropped here.
-	// Phase 1 emit never produces such frames (emitPresence is local-only),
-	// so this branch is exercised by injected tests.
-	if pub != nil && pub.Metadata[PresenceMetaTypeKey] == PresenceMetaTypeValue {
-		evt := parsePresencePublication(pub)
-		if evt == nil {
-			log.WarnContext(context.Background(), "dropping unparseable presence publication", "channel", ch)
-			if h.node != nil && h.node.metrics != nil {
-				h.node.metrics.PresenceFailures.WithLabelValues("rewrite").Inc()
-			}
-			return nil
-		}
-		if evt.Channel == "" {
-			evt.Channel = ch
-		}
-		if h.node != nil {
-			// Exclude the event subject itself: with cluster_emit the joiner
-			// is already subscribed to the exact channel, so without this the
-			// rewritten event would be a self-join.
-			exclude := ""
-			if evt.Info != nil {
-				exclude = evt.Info.GetSessionId()
-			}
-			h.node.deliverPresenceEvent(evt.Channel, evt, exclude)
-		}
-		return nil
-	}
-
 	// Merge exact and wildcard subscribers by session ID: a client subscribed
 	// to the channel exactly and via a wildcard pattern must receive the
 	// publication only once, with a single message ID.

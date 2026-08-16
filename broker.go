@@ -82,6 +82,11 @@ func (p *Publication) PayloadProto() *sharedpb.Payload {
 // on a subscribed channel.
 type PublicationHandler func(ch string, pub *Publication) error
 
+// OccupancyHandler is invoked for live occupancy events. It must not be the
+// publication handler. Errors are logged; they never fail Join/Leave
+// (KD-K14).
+type OccupancyHandler func(channel string, evt OccupancyEvent) error
+
 // HistoryGapReason classifies why a history page cannot prove full coverage
 // of the requested offset range.
 type HistoryGapReason int
@@ -160,6 +165,16 @@ type Broker interface {
 	// leak into the recovery message stream. Malformed channels are rejected
 	// with topics.ErrBadTopic like Publish.
 	PublishTransient(ch string, pub *Publication) error
+
+	// PublishOccupancy fans an occupancy event on the live bus for exact
+	// channel ch. It never writes Stream/history. Delivery follows Interest
+	// (exact or compiled pattern): only a node interested in ch invokes its
+	// occupancy handler. Handler errors do not fail the call (KD-K14).
+	PublishOccupancy(ch string, evt OccupancyEvent) error
+
+	// SetOccupancyHandler registers the live occupancy handler; it must be
+	// called before Start. The publication handler never receives occupancy.
+	SetOccupancyHandler(handler OccupancyHandler) error
 
 	// History returns a page of publications stored for ch with offset >=
 	// sinceOffset, plus gap metadata (see HistoryPage). limit <= 0 uses

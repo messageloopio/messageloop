@@ -1031,6 +1031,12 @@ func (f *fakeEpochHistoryBroker) PublishTransient(ch string, pub *Publication) e
 	return nil
 }
 
+func (f *fakeEpochHistoryBroker) PublishOccupancy(ch string, evt OccupancyEvent) error {
+	return nil
+}
+
+func (f *fakeEpochHistoryBroker) SetOccupancyHandler(OccupancyHandler) error { return nil }
+
 func (f *fakeEpochHistoryBroker) History(ch string, sinceOffset uint64, limit int) (*HistoryPage, error) {
 	result := make([]*Publication, 0, len(f.pubs))
 	for _, p := range f.pubs {
@@ -1842,6 +1848,8 @@ func (b *failStartBroker) Subscribe(string) error                            { r
 func (b *failStartBroker) Unsubscribe(string) error                          { return nil }
 func (b *failStartBroker) Publish(string, *Publication) (uint64, error)      { return 0, nil }
 func (b *failStartBroker) PublishTransient(string, *Publication) error       { return nil }
+func (b *failStartBroker) PublishOccupancy(string, OccupancyEvent) error     { return nil }
+func (b *failStartBroker) SetOccupancyHandler(OccupancyHandler) error        { return nil }
 func (b *failStartBroker) History(string, uint64, int) (*HistoryPage, error) { return nil, nil }
 
 func TestNode_Run_BrokerStartFailureReturnsError(t *testing.T) {

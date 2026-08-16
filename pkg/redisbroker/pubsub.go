@@ -278,10 +278,12 @@ func (b *redisBroker) rebuildLiveSubs(ctx context.Context, pubsub *redis.PubSub)
 	return nil
 }
 
-// delivery is one queued handler invocation.
+// delivery is one queued handler invocation: either a publication or an
+// occupancy event (never both).
 type delivery struct {
 	channel string
 	pub     *messageloop.Publication
+	occ     *messageloop.OccupancyEvent
 }
 
 // startDeliveryWorkers launches the bounded handler pool; workers exit when
@@ -299,7 +301,11 @@ func (b *redisBroker) startDeliveryWorkers(ctx context.Context) {
 				case <-ctx.Done():
 					return
 				case d := <-q:
-					b.deliver(d.channel, d.pub)
+					if d.occ != nil {
+						b.deliverOccupancy(d.channel, *d.occ)
+					} else {
+						b.deliver(d.channel, d.pub)
+					}
 				}
 			}
 		}(queue)
@@ -325,6 +331,17 @@ func (b *redisBroker) dispatch(channel string, pub *messageloop.Publication) {
 		return
 	}
 	b.deliver(channel, pub)
+}
+
+// dispatchOccupancy hands an occupancy event to the worker owning its
+// channel, preserving per-channel ordering with publications. Before Start
+// the occupancy handler runs inline.
+func (b *redisBroker) dispatchOccupancy(channel string, occ *messageloop.OccupancyEvent) {
+	if b.deliveryActive.Load() {
+		b.deliverChans[deliveryWorkerIndex(channel)] <- delivery{channel: channel, occ: occ}
+		return
+	}
+	b.deliverOccupancy(channel, *occ)
 }
 
 // runPubSubWithRetry wraps runPubSub with exponential backoff reconnection.
@@ -438,11 +455,28 @@ func (b *redisBroker) runPubSub(ctx context.Context) error {
 				}
 
 				redisMsg, err := deserializeMessage([]byte(m.Payload))
-				if err != nil || redisMsg.Type != messageTypePublication {
+				if err != nil {
 					continue
 				}
-
-				b.deliverOnce(channelName, messageToPublication(channelName, redisMsg, redisMsg.Offset))
+				switch redisMsg.Type {
+				case messageTypePublication:
+					b.deliverOnce(channelName, messageToPublication(channelName, redisMsg, redisMsg.Offset))
+				case messageTypeOccupancy:
+					// Occupancy has no stream offset: it must never go
+					// through deliverOnce or the publication handler. It is
+					// fanned to the occupancy handler only (B2).
+					occ, derr := deserializeOccupancy([]byte(m.Payload))
+					if derr != nil {
+						b.occupancyFailures.Add(1)
+						log.WarnContext(context.Background(), "live bus: dropped malformed occupancy event",
+							"channel", channelName, "error", derr)
+						continue
+					}
+					b.dispatchOccupancy(channelName, occ)
+				default:
+					// Unknown live envelope type: never a publication, never
+					// occupancy — drop.
+				}
 			default:
 				// *redis.Pong (go-redis health pings) and anything else.
 			}
@@ -588,6 +622,26 @@ func (b *redisBroker) deliver(channel string, pub *messageloop.Publication) {
 	if err := b.handler(channel, pub); err != nil {
 		b.handlerFailures.Add(1)
 		log.ErrorContext(context.Background(), "publication handler failed", err, "channel", channel)
+	}
+}
+
+// deliverOccupancy invokes the occupancy handler, converting a panic into a
+// logged error so a misbehaving handler cannot take down a worker. Occupancy
+// handler errors are logged and counted, never propagated (KD-K14).
+func (b *redisBroker) deliverOccupancy(channel string, evt messageloop.OccupancyEvent) {
+	if b.occHandler == nil {
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			b.occupancyFailures.Add(1)
+			log.ErrorContext(context.Background(), "panic in occupancy handler",
+				fmt.Errorf("panic: %v, channel: %s", r, channel))
+		}
+	}()
+	if err := b.occHandler(channel, evt); err != nil {
+		b.occupancyFailures.Add(1)
+		log.ErrorContext(context.Background(), "occupancy handler failed", err, "channel", channel)
 	}
 }
 
