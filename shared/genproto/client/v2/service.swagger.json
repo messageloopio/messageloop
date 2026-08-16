@@ -1,0 +1,662 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "client/v2/service.proto",
+    "version": "version not set"
+  },
+  "tags": [
+    {
+      "name": "MessageLoopService"
+    }
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "paths": {},
+  "definitions": {
+    "clientv2Connect": {
+      "type": "object",
+      "properties": {
+        "clientId": {
+          "type": "string"
+        },
+        "clientType": {
+          "type": "string"
+        },
+        "token": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "subscriptions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/clientv2Subscription"
+          }
+        },
+        "sessionId": {
+          "type": "string",
+          "title": "上次会话 ID，为空表示新连接"
+        },
+        "caps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "clientv2Connected": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "subscriptions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/clientv2Subscription"
+          },
+          "title": "必须带回 ephemeral"
+        },
+        "resumed": {
+          "type": "boolean",
+          "title": "是否成功恢复会话"
+        },
+        "streamEpoch": {
+          "type": "string",
+          "title": "broker 实例标识，用于防止重启后 offset 混淆"
+        },
+        "acceptedCaps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "clientv2Message": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "channel": {
+          "type": "string"
+        },
+        "position": {
+          "$ref": "#/definitions/v2Position"
+        },
+        "payload": {
+          "$ref": "#/definitions/sharedv2Payload"
+        },
+        "metadata": {
+          "$ref": "#/definitions/sharedv2Metadata"
+        },
+        "replay": {
+          "type": "boolean",
+          "title": "恢复流回放"
+        }
+      }
+    },
+    "clientv2OutboundMessage": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "time": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "error": {
+          "$ref": "#/definitions/sharedv2Error"
+        },
+        "connected": {
+          "$ref": "#/definitions/clientv2Connected"
+        },
+        "subscribeAck": {
+          "$ref": "#/definitions/clientv2SubscribeAck"
+        },
+        "unsubscribeAck": {
+          "$ref": "#/definitions/clientv2UnsubscribeAck"
+        },
+        "publishAck": {
+          "$ref": "#/definitions/clientv2PublishAck"
+        },
+        "publication": {
+          "$ref": "#/definitions/messageloopclientv2Publication"
+        },
+        "recoverComplete": {
+          "$ref": "#/definitions/v2RecoverComplete"
+        },
+        "rpcReply": {
+          "$ref": "#/definitions/clientv2RpcReply"
+        },
+        "subRefreshAck": {
+          "$ref": "#/definitions/clientv2SubRefreshAck"
+        },
+        "surveyRequest": {
+          "$ref": "#/definitions/messageloopclientv2SurveyRequest"
+        },
+        "surveyReply": {
+          "$ref": "#/definitions/clientv2SurveyReply"
+        },
+        "surveyResult": {
+          "$ref": "#/definitions/messageloopclientv2SurveyResult"
+        },
+        "presence": {
+          "$ref": "#/definitions/clientv2PresenceSnapshot"
+        },
+        "presenceEvent": {
+          "$ref": "#/definitions/clientv2PresenceEvent"
+        },
+        "ping": {
+          "$ref": "#/definitions/clientv2Ping"
+        },
+        "pong": {
+          "$ref": "#/definitions/clientv2Pong"
+        }
+      },
+      "title": "服务端 -\u003e 客户端"
+    },
+    "clientv2Ping": {
+      "type": "object"
+    },
+    "clientv2Pong": {
+      "type": "object"
+    },
+    "clientv2PresenceEvent": {
+      "type": "object",
+      "properties": {
+        "channel": {
+          "type": "string",
+          "title": "始终是精确频道"
+        },
+        "action": {
+          "type": "string",
+          "title": "\"join\" | \"leave\""
+        },
+        "info": {
+          "$ref": "#/definitions/messageloopclientv2PresenceInfo"
+        },
+        "gen": {
+          "type": "string",
+          "format": "uint64",
+          "title": "OccupancyGen"
+        }
+      }
+    },
+    "clientv2PresenceQuery": {
+      "type": "object",
+      "properties": {
+        "channel": {
+          "type": "string",
+          "title": "精确频道"
+        }
+      }
+    },
+    "clientv2PresenceSnapshot": {
+      "type": "object",
+      "properties": {
+        "channel": {
+          "type": "string"
+        },
+        "clients": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/messageloopclientv2PresenceInfo"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "occupancy": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    },
+    "clientv2Publish": {
+      "type": "object",
+      "properties": {
+        "channel": {
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/definitions/sharedv2Payload"
+        },
+        "metadata": {
+          "$ref": "#/definitions/sharedv2Metadata"
+        },
+        "token": {
+          "type": "string"
+        },
+        "transient": {
+          "type": "boolean"
+        },
+        "idempotencyKey": {
+          "type": "string"
+        }
+      }
+    },
+    "clientv2PublishAck": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "title": "消息 ID，便于追踪"
+        },
+        "position": {
+          "$ref": "#/definitions/v2Position",
+          "title": "transient / 无历史 → offset 缺省"
+        }
+      }
+    },
+    "clientv2RpcReply": {
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/definitions/sharedv2Payload"
+        },
+        "metadata": {
+          "$ref": "#/definitions/sharedv2Metadata"
+        },
+        "error": {
+          "$ref": "#/definitions/sharedv2Error"
+        }
+      }
+    },
+    "clientv2RpcRequest": {
+      "type": "object",
+      "properties": {
+        "channel": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/definitions/sharedv2Payload"
+        },
+        "metadata": {
+          "$ref": "#/definitions/sharedv2Metadata"
+        }
+      }
+    },
+    "clientv2SubRefresh": {
+      "type": "object",
+      "properties": {
+        "channels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "clientv2SubRefreshAck": {
+      "type": "object"
+    },
+    "clientv2Subscribe": {
+      "type": "object",
+      "properties": {
+        "subscriptions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/clientv2Subscription"
+          }
+        }
+      }
+    },
+    "clientv2SubscribeAck": {
+      "type": "object",
+      "properties": {
+        "subscriptions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/clientv2Subscription"
+          }
+        },
+        "recover": {
+          "$ref": "#/definitions/v2RecoverState",
+          "title": "批量里任一频道 pending 则 PENDING"
+        },
+        "streamEpoch": {
+          "type": "string"
+        },
+        "presence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/clientv2PresenceSnapshot"
+          },
+          "title": "仅精确且非 ephemeral"
+        },
+        "error": {
+          "$ref": "#/definitions/sharedv2Error",
+          "title": "仅 recover=FAILED 时"
+        }
+      }
+    },
+    "clientv2Subscription": {
+      "type": "object",
+      "properties": {
+        "channel": {
+          "type": "string"
+        },
+        "ephemeral": {
+          "type": "boolean"
+        },
+        "token": {
+          "type": "string"
+        },
+        "recover": {
+          "type": "boolean",
+          "title": "是否需要恢复离线消息"
+        },
+        "cursor": {
+          "$ref": "#/definitions/v2Position",
+          "title": "恢复起点提示；unset 表示无提示"
+        },
+        "fresh": {
+          "type": "boolean",
+          "title": "显式从头；禁止用 cursor.offset==0 表示从头"
+        }
+      }
+    },
+    "clientv2SurveyAnswer": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/definitions/sharedv2Payload"
+        },
+        "metadata": {
+          "$ref": "#/definitions/sharedv2Metadata"
+        },
+        "error": {
+          "$ref": "#/definitions/sharedv2Error"
+        }
+      }
+    },
+    "clientv2SurveyReply": {
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/definitions/sharedv2Payload"
+        },
+        "metadata": {
+          "$ref": "#/definitions/sharedv2Metadata"
+        },
+        "error": {
+          "$ref": "#/definitions/sharedv2Error"
+        }
+      }
+    },
+    "clientv2Unsubscribe": {
+      "type": "object",
+      "properties": {
+        "subscriptions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/clientv2Subscription"
+          }
+        }
+      }
+    },
+    "clientv2UnsubscribeAck": {
+      "type": "object",
+      "properties": {
+        "subscriptions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/clientv2Subscription"
+          }
+        }
+      }
+    },
+    "messageloopclientv2PresenceInfo": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "clientId": {
+          "type": "string",
+          "title": "Connect.client_id（设备/端），不是 session"
+        },
+        "connectedAt": {
+          "type": "string",
+          "format": "int64"
+        }
+      }
+    },
+    "messageloopclientv2Publication": {
+      "type": "object",
+      "properties": {
+        "messages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/clientv2Message"
+          }
+        }
+      }
+    },
+    "messageloopclientv2SurveyRequest": {
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/definitions/sharedv2Payload"
+        },
+        "metadata": {
+          "$ref": "#/definitions/sharedv2Metadata"
+        },
+        "channel": {
+          "type": "string"
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    },
+    "messageloopclientv2SurveyResult": {
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "type": "string"
+        },
+        "channel": {
+          "type": "string"
+        },
+        "answers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/clientv2SurveyAnswer"
+          }
+        },
+        "error": {
+          "$ref": "#/definitions/sharedv2Error"
+        }
+      },
+      "title": "客户端 Survey 汇总。与 server.v2.SurveyResult 同名不同包。"
+    },
+    "protobufAny": {
+      "type": "object",
+      "properties": {
+        "@type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": {}
+    },
+    "protobufNullValue": {
+      "type": "string",
+      "enum": [
+        "NULL_VALUE"
+      ],
+      "default": "NULL_VALUE",
+      "description": "`NullValue` is a singleton enumeration to represent the null value for the\n`Value` type union.\n\nThe JSON representation for `NullValue` is JSON `null`.\n\n - NULL_VALUE: Null value."
+    },
+    "rpcStatus": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/protobufAny"
+          }
+        }
+      }
+    },
+    "sharedv2Error": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "Well-known string codes (not an enum): AUTH_REQUIRED, AUTH_ERROR,\nRATE_LIMITED, RPC_TIMEOUT, PROXY_ERROR, NO_PROXY, BAD_REQUEST,\nPERMISSION_DENIED, POLICY_DENIED, RECOVER_FAILED, RECOVER_SKIPPED,\nSURVEY_DISABLED, SURVEY_TOO_MANY_SUBSCRIBERS, PATTERN_NOT_ROUTABLE."
+        },
+        "type": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object"
+        }
+      }
+    },
+    "sharedv2Metadata": {
+      "type": "object",
+      "properties": {
+        "entries": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "title": "统一的元数据类型"
+    },
+    "sharedv2Payload": {
+      "type": "object",
+      "properties": {
+        "contentType": {
+          "type": "string",
+          "title": "数据内容类型 (e.g., \"application/json\", \"text/plain\", \"application/octet-stream\")"
+        },
+        "json": {
+          "type": "object",
+          "title": "JSON 对象，编码时可读"
+        },
+        "binary": {
+          "type": "string",
+          "format": "byte",
+          "title": "二进制数据"
+        },
+        "text": {
+          "type": "string",
+          "title": "文本数据"
+        }
+      },
+      "title": "统一的数据载荷类型"
+    },
+    "v2GapReason": {
+      "type": "string",
+      "enum": [
+        "GAP_REASON_UNSPECIFIED",
+        "GAP_REASON_NONE",
+        "GAP_REASON_HEAD_TRIMMED",
+        "GAP_REASON_EMPTY_EXPIRED",
+        "GAP_REASON_EPOCH_RESET"
+      ],
+      "default": "GAP_REASON_UNSPECIFIED",
+      "title": "恢复 / 历史读取时的缺口原因"
+    },
+    "v2Position": {
+      "type": "object",
+      "properties": {
+        "streamEpoch": {
+          "type": "string"
+        },
+        "offset": {
+          "type": "string",
+          "format": "uint64"
+        }
+      },
+      "title": "流内位置：epoch + 偏移。offset 缺省 = unset（无历史 / transient）；\n禁止用 0 表示 unset 或「从头」。"
+    },
+    "v2RecoverComplete": {
+      "type": "object",
+      "properties": {
+        "channel": {
+          "type": "string"
+        },
+        "position": {
+          "$ref": "#/definitions/v2Position"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "gap": {
+          "type": "boolean"
+        },
+        "gapReason": {
+          "$ref": "#/definitions/v2GapReason"
+        },
+        "error": {
+          "$ref": "#/definitions/sharedv2Error",
+          "title": "SKIPPED/FAILED 细节"
+        }
+      }
+    },
+    "v2RecoverState": {
+      "type": "string",
+      "enum": [
+        "RECOVER_STATE_UNSPECIFIED",
+        "RECOVER_STATE_NONE",
+        "RECOVER_STATE_PENDING",
+        "RECOVER_STATE_SKIPPED",
+        "RECOVER_STATE_FAILED"
+      ],
+      "default": "RECOVER_STATE_UNSPECIFIED"
+    }
+  }
+}

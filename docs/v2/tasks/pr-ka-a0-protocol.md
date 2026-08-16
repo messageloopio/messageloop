@@ -3,7 +3,7 @@
 | 字段 | 值 |
 | --- | --- |
 | 标题 | `proto: add messageloop client/server/shared v2 for independent kernel` |
-| 状态 | **Ready**（尚未实现） |
+| 状态 | **Accepted**（2026-08-16 主 agent 终验通过，尚未 commit） |
 | 依赖 | 无。可与 PR-KA-A1 并行（无文件交集） |
 | 设计来源 | [kernel-architecture.md](../kernel-architecture.md) Protocol、KD-K11、KD-K16、KD-K17、KD-K22、**KD-K31** |
 | 验收人 | 主 agent |
@@ -262,3 +262,8 @@ task generate-protocol
 - 任何偏离（应无）
 
 ## 9. 实现备注（完成后由实现者填写）
+
+- 2026-08-16 已实现：新增 `protocol/{shared,client,server}/v2/*.proto`（4 个源文件），运行 `task generate-protocol`（`buf generate`）成功，生成 Go（`shared/genproto/**/v2/*.pb.go`、`*_grpc.pb.go`）与 TS（`sdks/ts/src/proto/**/v2/*_pb.ts`）。
+- 字段号与 §4 完全一致；`Connected` 无 publications / recover_results；未定义 `RecoverResult`；`Subscription` 为 `cursor`（`Position`）+ `fresh`；`PresenceInfo.client_id` 为设备/端；`Error` 注释无 `ACL_DENIED`。
+- `openapiv2` 插件会顺带重写 v1 swagger.json（与本次改动无关的既有漂移），已 `git checkout` 还原，未纳入改动。
+- `go build ./...`、`go test ./...` 全绿；`sdks/ts` `tsc --noEmit` 通过。v1 proto 与运行时零改动。

@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package messageloop.shared.v2;
+
+import "google/protobuf/struct.proto";
+
+option go_package = "github.com/messageloopio/messageloop/shared/genproto/shared/v2;sharedv2";
+
+// 流内位置：epoch + 偏移。offset 缺省 = unset（无历史 / transient）；
+// 禁止用 0 表示 unset 或「从头」。
+message Position {
+  string stream_epoch = 1;
+  optional uint64 offset = 2;
+}
+
+// 恢复 / 历史读取时的缺口原因
+enum GapReason {
+  GAP_REASON_UNSPECIFIED = 0;
+  GAP_REASON_NONE = 1;
+  GAP_REASON_HEAD_TRIMMED = 2;
+  GAP_REASON_EMPTY_EXPIRED = 3;
+  GAP_REASON_EPOCH_RESET = 4;
+}
+
+// 统一的数据载荷类型
+message Payload {
+  string content_type = 1;              // 数据内容类型 (e.g., "application/json", "text/plain", "application/octet-stream")
+  oneof data {
+    google.protobuf.Struct json = 2;    // JSON 对象，编码时可读
+    bytes binary = 3;                   // 二进制数据
+    string text = 4;                    // 文本数据
+  }
+}
+
+// 统一的元数据类型
+message Metadata {
+  map<string, string> entries = 1;
+}
