@@ -644,7 +644,7 @@ Session 与 Stream 同区域。**跨区域 Directory Bind 直接禁止。** 只�
 | **A1** | 删除热路径 `PutSessionLease`；续约 same-fence Bind；活节点 takeover 失败回滚。规格：[pr-ka-a1-fencing.md](tasks/pr-ka-a1-fencing.md) | B CAS 后 A ping 不得抢回 |
 | **A2** | History 可检测 gap；停 XDel-on-fail；Publish 成功合同；memory 看 Interest。规格：[pr-ka-a2-history.md](tasks/pr-ka-a2-history.md) | 四条验收测试绿 |
 | **A3** | Interest 自己计数；LiveBus 编译；禁止 `PSubscribe *`。规格：[pr-ka-a3-livebus.md](tasks/pr-ka-a3-livebus.md) | 不可路由 pattern 有测试 |
-| **A4** | Authorizer 一张表 + 语言包含；Capability 闭集；新 YAML | 表驱动 deny 用例全绿 |
+| **A4** | Authorizer 一张表 + 语言包含；Capability 闭集；新 YAML。规格：[pr-ka-a4-authorizer.md](tasks/pr-ka-a4-authorizer.md) | 表驱动 deny 用例全绿 |
 | **B1** | Session/Attachment + 写队列 + 状态机 | 本机接管不扫分片换指针 |
 | **B2** | Occupancy 只走 LiveBus + OccupancyGen | 无 `Hub.node`、无 `cluster_emit` |
 | **B3** | 流式恢复（写队列已在） | SDK 一条消费路径 |
