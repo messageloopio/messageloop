@@ -548,3 +548,149 @@ func TestNode_EvictSessionForTakeover_RemovesOwnSession(t *testing.T) {
 	require.NoError(t, node.evictSessionForTakeover(client))
 	require.Nil(t, node.hub.LookupSession("sess-own"))
 }
+
+// --- PR-KA-A1: failed takeover of a live node must roll back the CAS ---
+
+// TestResumeRemoteSession_TakeoverFailureRollsBackCAS verifies §6.5: when
+// the CAS claims the lease but the takeover of a still-alive old node fails,
+// the lease must be CAS'd back to the original owner and the resume must
+// return the takeover error.
+func TestResumeRemoteSession_TakeoverFailureRollsBackCAS(t *testing.T) {
+	original := &ClusterSessionLease{
+		SessionID:     "sess-rollback",
+		NodeID:        "node-b",
+		IncarnationID: "inc-b",
+		LeaseVersion:  7,
+		ExpiresAt:     time.Now().Add(time.Hour),
+	}
+	directory := &fakeSessionDirectory{
+		lease: original,
+		nodeLease: &ClusterNodeLease{
+			NodeID:        "node-b",
+			IncarnationID: "inc-b",
+			ExpiresAt:     time.Now().Add(time.Hour),
+		},
+		snapshot: &ClusterSessionSnapshot{
+			SessionID:     "sess-rollback",
+			UserID:        "user-1",
+			ClientID:      "client-1",
+			Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "news"}},
+		},
+	}
+	bus := &fakeClusterCommandBus{result: &ClusterCommandResult{Status: ClusterCommandStatusFailed, ErrorMessage: "takeover rejected"}}
+	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-a", IncarnationID: "inc-a", Backend: "memory"}, ClusterDependencies{
+		SessionDirectory: directory,
+		CommandBus:       bus,
+		QueryStore:       fakeQueryStore{},
+	})
+	require.NoError(t, err)
+
+	node := NewNode(nil)
+	node.SetCluster(runtime)
+	client, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
+	require.NoError(t, err)
+
+	_, resumed, err := node.resumeRemoteSession(context.Background(), client, "sess-rollback")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "takeover rejected")
+	require.False(t, resumed)
+
+	// The lease is back with the original owner: the claimed fencing was
+	// CAS'd back (expected = node-a's claim, desired = the original record).
+	lease, err := directory.GetSessionLease(context.Background(), "sess-rollback")
+	require.NoError(t, err)
+	require.Equal(t, "node-b", lease.NodeID)
+	require.Equal(t, "inc-b", lease.IncarnationID)
+	require.Equal(t, uint64(7), lease.LeaseVersion)
+	require.Equal(t, "node-a", directory.casExpected.NodeID, "rollback CAS must expect the claimed lease")
+	require.Equal(t, uint64(8), directory.casExpected.LeaseVersion, "rollback CAS must expect the claimed version")
+}
+
+// TestResumeRemoteSession_TakeoverFailureDeadNodeKeepsClaim verifies §6.6
+// (KD-K30 bypass): when the takeover fails but the old node's lease is gone,
+// the resume keeps the new CAS and continues.
+func TestResumeRemoteSession_TakeoverFailureDeadNodeKeepsClaim(t *testing.T) {
+	directory := &fakeSessionDirectory{
+		lease: &ClusterSessionLease{
+			SessionID:     "sess-dead",
+			NodeID:        "node-b",
+			IncarnationID: "inc-b",
+			LeaseVersion:  7,
+			ExpiresAt:     time.Now().Add(time.Hour),
+		},
+		// nodeLease is left nil: the old node is dead.
+		snapshot: &ClusterSessionSnapshot{
+			SessionID:     "sess-dead",
+			UserID:        "user-1",
+			ClientID:      "client-1",
+			Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "news"}},
+		},
+	}
+	bus := &fakeClusterCommandBus{result: &ClusterCommandResult{Status: ClusterCommandStatusFailed, ErrorMessage: "command timed out"}}
+	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-a", IncarnationID: "inc-a", Backend: "memory"}, ClusterDependencies{
+		SessionDirectory: directory,
+		CommandBus:       bus,
+		QueryStore:       fakeQueryStore{},
+	})
+	require.NoError(t, err)
+
+	node := NewNode(nil)
+	node.SetCluster(runtime)
+	client, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
+	require.NoError(t, err)
+
+	snapshot, resumed, err := node.resumeRemoteSession(context.Background(), client, "sess-dead")
+	require.NoError(t, err)
+	require.True(t, resumed)
+	require.NotNil(t, snapshot)
+
+	lease, err := directory.GetSessionLease(context.Background(), "sess-dead")
+	require.NoError(t, err)
+	require.Equal(t, "node-a", lease.NodeID)
+	require.Equal(t, uint64(8), lease.LeaseVersion)
+}
+
+// TestResumeRemoteSession_NodeLeaseLookupErrorStillRollsBack verifies §5.4:
+// when GetNodeLease itself fails, the rollback must still be attempted and
+// the lease lookup error returned.
+func TestResumeRemoteSession_NodeLeaseLookupErrorStillRollsBack(t *testing.T) {
+	original := &ClusterSessionLease{
+		SessionID:     "sess-lookup",
+		NodeID:        "node-b",
+		IncarnationID: "inc-b",
+		LeaseVersion:  7,
+		ExpiresAt:     time.Now().Add(time.Hour),
+	}
+	directory := &fakeSessionDirectory{
+		lease:        original,
+		nodeLeaseErr: errors.New("node lease store down"),
+		snapshot: &ClusterSessionSnapshot{
+			SessionID:     "sess-lookup",
+			UserID:        "user-1",
+			ClientID:      "client-1",
+			Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "news"}},
+		},
+	}
+	bus := &fakeClusterCommandBus{result: &ClusterCommandResult{Status: ClusterCommandStatusFailed, ErrorMessage: "takeover rejected"}}
+	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-a", IncarnationID: "inc-a", Backend: "memory"}, ClusterDependencies{
+		SessionDirectory: directory,
+		CommandBus:       bus,
+		QueryStore:       fakeQueryStore{},
+	})
+	require.NoError(t, err)
+
+	node := NewNode(nil)
+	node.SetCluster(runtime)
+	client, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
+	require.NoError(t, err)
+
+	_, resumed, err := node.resumeRemoteSession(context.Background(), client, "sess-lookup")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "node lease store down")
+	require.False(t, resumed)
+
+	lease, err := directory.GetSessionLease(context.Background(), "sess-lookup")
+	require.NoError(t, err)
+	require.Equal(t, "node-b", lease.NodeID)
+	require.Equal(t, uint64(7), lease.LeaseVersion)
+}

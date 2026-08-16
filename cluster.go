@@ -63,6 +63,13 @@ type ClusterLifecycle interface {
 // The user→sessions index (AddUserSession/RemoveUserSession/ListUserSessions)
 // is a hint for user-targeted admin operations: it is never authoritative,
 // expansions always re-check the session lease.
+//
+// Lease writes on production hot paths must go through
+// CompareAndSwapSessionLease (same-fence refresh, or CAS(nil) for first
+// registration): PutSessionLease is an unconditional SET that would write a
+// fenced owner's lease back over the new owner (KD-K4), so it must not be
+// called from syncClusterSessionState, the ping/pong refresh, or
+// resumeRemoteSession.
 type SessionDirectory interface {
 	ClusterLifecycle
 	PutNodeLease(ctx context.Context, lease *ClusterNodeLease, ttl time.Duration) error

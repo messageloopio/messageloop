@@ -81,11 +81,21 @@ func (n *Node) resumeRemoteSession(ctx context.Context, client *Client, sessionI
 		if err := n.requestSessionTakeover(ctx, lease); err != nil {
 			nodeLease, leaseErr := directory.GetNodeLease(ctx, lease.NodeID, lease.IncarnationID)
 			if leaseErr != nil {
+				// Still attempt the rollback before reporting the lease
+				// lookup failure.
+				n.rollbackSessionTakeover(ctx, directory, desired, lease)
 				return nil, false, leaseErr
 			}
 			if nodeLease != nil {
+				// The old node is still alive (the KD-K30 dead-node bypass
+				// does not apply): give the fencing back so the directory
+				// keeps recognizing the old owner instead of a takeover that
+				// never completed.
+				n.rollbackSessionTakeover(ctx, directory, desired, lease)
 				return nil, false, err
 			}
+			// nodeLease == nil: the old node is dead (KD-K30). Keep the new
+			// CAS and continue the resume.
 		}
 	}
 
@@ -109,6 +119,17 @@ func (n *Node) resumeRemoteSession(ctx context.Context, client *Client, sessionI
 	client.mu.Unlock()
 
 	return snapshot, true, nil
+}
+
+// rollbackSessionTakeover returns the session lease to its pre-takeover owner
+// after a failed takeover: the fencing claimed by the CAS is CAS'd back to the
+// original record (claimed and original must not be swapped). A failed
+// rollback is logged and never treated as a successful resume — the caller
+// still returns the original takeover error.
+func (n *Node) rollbackSessionTakeover(ctx context.Context, directory SessionDirectory, claimed, original *ClusterSessionLease) {
+	if _, err := directory.CompareAndSwapSessionLease(ctx, claimed, original, n.sessionLeaseTTL()); err != nil {
+		log.ErrorContext(ctx, "failed to roll back session takeover lease", err, "session", claimed.SessionID)
+	}
 }
 
 func (n *Node) requestSessionTakeover(ctx context.Context, lease *ClusterSessionLease) error {

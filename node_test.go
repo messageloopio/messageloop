@@ -842,7 +842,7 @@ func BenchmarkNode_SubLock(b *testing.B) {
 // connection in ConnectionsTotal.
 func TestNode_AddClient_ClusterSyncFailure_NoGaugeIncrease(t *testing.T) {
 	directory := &fakeSessionDirectory{}
-	directory.putLeaseErr = errors.New("lease write failed")
+	directory.casErr = errors.New("lease write failed")
 	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-a", IncarnationID: "inc-a", Backend: "memory"}, ClusterDependencies{
 		SessionDirectory: directory,
 		CommandBus:       &fakeClusterCommandBus{},

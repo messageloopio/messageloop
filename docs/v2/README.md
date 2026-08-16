@@ -7,6 +7,6 @@
 | [内核架构重设](kernel-architecture.md) | Draft | 靶心：Session/Attachment、四平面、fencing、宪法、KD-K31 |
 | [独立评审](kernel-architecture-review.md) | Review | 2026-08-16 两路评审；修订对照见文首 |
 | [PR-KA-A0 实现规格](tasks/pr-ka-a0-protocol.md) | Accepted | 冻结 client/server/shared **v2** proto；[prompt](tasks/pr-ka-a0-prompt.md) |
-| [PR-KA-A1 实现规格](tasks/pr-ka-a1-fencing.md) | Ready | 续约 same-fence CAS、删盲写 Put、resume 回滚；[prompt](tasks/pr-ka-a1-prompt.md) |
+| [PR-KA-A1 实现规格](tasks/pr-ka-a1-fencing.md) | Accepted | 续约 same-fence CAS、删盲写 Put、resume 回滚；[prompt](tasks/pr-ka-a1-prompt.md) |
 
 第三方实现：复制对应 `tasks/pr-ka-*-prompt.md` 围栏全文；规格与靶心冲突时以该步规格为准。

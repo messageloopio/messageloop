@@ -3,7 +3,7 @@
 | 字段 | 值 |
 | --- | --- |
 | 标题 | `cluster: refresh session lease with same-fence CAS; rollback failed takeover` |
-| 状态 | **Ready**（尚未实现） |
+| 状态 | **Accepted**（2026-08-16 主 agent 终验通过，尚未 commit） |
 | 依赖 | 无。可与 PR-KA-A0 并行。**不**依赖 v2 proto |
 | 设计来源 | [kernel-architecture.md](../kernel-architecture.md) Cluster / Bind、KD-K4、KD-K5、KD-K30、KD-K31 |
 | 验收人 | 主 agent |
@@ -159,3 +159,13 @@ if 需要对旧 owner 发 takeover:
 - 偏离（应无）
 
 ## 10. 实现备注（完成后填写）
+
+### 完成情况（2026-08-16）
+
+- 实现文件：`cluster_state.go`、`cluster_resume.go`、`client.go`、`cluster.go`（仅注释）。
+- 测试：`cluster_state_test.go`（§6.1/6.2/6.3）、`cluster_resume_test.go`（§6.5/6.6 + §5.4 GetNodeLease 错误仍回滚）、`client_fix_test.go`（§6.4 ping fenced 3502）、`cluster_remote_test.go`（fake 改造）。
+- 文档：`docs/developer/04-cluster.md`（§4.1/4.3/4.4/4.5；ChannelOffsets/BrokerEpoch 已填充的旧文修正）。
+- `syncClusterSessionState` 零 `PutSessionLease`；热路径 grep 无生产调用。
+- 一处伪代码解释：§5.1 中间分支的版本比较实现为「NodeID/IncarnationID 不同 → fenced；Directory 版本 > 本地版本 → fenced；本地版本 ≥ Directory 版本 → same-fence CAS（相等时刷新，本地更大时写透本机接管已 +1 的版本，不新建递增）」。若不写透，`handleConnect` 的本机 resume 内存版本 +1 后同步必被 fenced，集群模式本机 resume 将永远失败（§6.7「现有 resume 测试仍绿」要求）。刷新路径从不 +1。
+- `noopSessionDirectory.CompareAndSwapSessionLease` 由 `(false,nil)` 改为 `(true,nil)`：noop 后端没有可冲突的远程 Directory，新 sync 依赖 CAS 成功。
+- 验证：`go test ./...` 全绿；`go test -race .` 全绿；另起真实 Redis 容器跑通全部 `TestClusterRedis_*` 集成测试（含 `TestClusterRedis_RemoteResumeTakeover`）。

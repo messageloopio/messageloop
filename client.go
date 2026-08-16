@@ -1399,10 +1399,59 @@ func (c *Client) throttledClusterRefresh() {
 			clusterCtx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
 			defer cancel()
 			if err := c.node.syncClusterSessionState(clusterCtx, c); err != nil {
+				if errors.Is(err, ErrSessionFenced) {
+					// Another node claimed the session: this attachment's
+					// fencing is gone. Disconnect (3502) without unbinding
+					// the directory lease or deleting cluster state — the
+					// new owner is serving the session.
+					log.WarnContext(clusterCtx, "session fenced by another owner, disconnecting", "session", c.session)
+					c.disconnectFenced()
+					return
+				}
 				log.WarnContext(clusterCtx, "failed to refresh cluster session state", "session", c.session, "error", err)
 			}
 		}()
 	}
+}
+
+// disconnectFenced closes a client whose session fencing was invalidated by
+// another owner (ErrSessionFenced from the directory refresh). It disconnects
+// with DisconnectStale (3502) and drops the local hub registration so the
+// node stops serving the dead attachment — but it must not delete the
+// cluster state and must not emit presence leave: the session now belongs to
+// the new owner, and touching the directory would clobber it.
+func (c *Client) disconnectFenced() {
+	c.mu.Lock()
+	if c.status == statusClosed {
+		c.mu.Unlock()
+		return
+	}
+	c.status = statusClosed
+	if c.heartbeatCancel != nil {
+		c.heartbeatCancel()
+		c.heartbeatCancel = nil
+	}
+	channels := make([]string, 0, len(c.subscribedChannels))
+	for ch := range c.subscribedChannels {
+		channels = append(channels, ch)
+	}
+	sessionID := c.session
+	c.mu.Unlock()
+
+	for _, ch := range channels {
+		removed, err := c.node.removeLocalSubscriptionOnly(ch, c, true)
+		if err != nil {
+			log.WarnContext(context.Background(), "failed to remove subscription during fenced disconnect", "channel", ch, "session", sessionID, "error", err)
+			continue
+		}
+		if removed {
+			c.node.adjustClusterChannelSubscriptionsTimeout(ch, -1)
+		}
+	}
+	if sessionID != "" {
+		c.node.hub.RemoveSessionIfMatches(sessionID, c)
+	}
+	_ = c.transport.Close(DisconnectStale)
 }
 
 func (c *Client) handleSubRefresh(ctx context.Context, in *clientpb.InboundMessage, refresh *clientpb.SubRefresh) error {

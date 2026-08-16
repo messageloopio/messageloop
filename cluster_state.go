@@ -27,6 +27,10 @@ const (
 var (
 	// ErrClusterCommandUnsupported indicates the current cluster command bus cannot execute distributed commands.
 	ErrClusterCommandUnsupported = errors.New("cluster command bus is not configured")
+	// ErrSessionFenced means Directory no longer recognizes this node's fencing
+	// for the session. Callers that hold a local attachment must Fence it
+	// (DisconnectStale) and must not Unbind the new owner's lease.
+	ErrSessionFenced = errors.New("session fenced by another owner")
 )
 
 // ClusterNodeLease represents the liveness record for a node incarnation.
@@ -105,8 +109,11 @@ func (noopSessionDirectory) PutSessionLease(context.Context, *ClusterSessionLeas
 	return nil
 }
 
+// CompareAndSwapSessionLease on the noop directory always succeeds: there is
+// no remote directory to conflict with, so the local sync must never be
+// fenced by a lease it cannot even read back.
 func (noopSessionDirectory) CompareAndSwapSessionLease(context.Context, *ClusterSessionLease, *ClusterSessionLease, time.Duration) (bool, error) {
-	return false, nil
+	return true, nil
 }
 
 func (noopSessionDirectory) GetSessionLease(context.Context, string) (*ClusterSessionLease, error) {
@@ -237,17 +244,62 @@ func (n *Node) clusterQueryStore() ClusterQueryStore {
 	return n.cluster.QueryStore()
 }
 
+// syncClusterSessionState writes the cluster-visible lease and snapshot for a
+// client session (AddClient, subscription saga, throttled ping/pong refresh).
+// The lease is never blindly PUT: it is claimed or refreshed with
+// CompareAndSwapSessionLease so a fencing taken over by another node is never
+// written back (KD-K4). A refresh keeps the lease version unchanged; only
+// resumeRemoteSession bumps it during a cross-node takeover.
 func (n *Node) syncClusterSessionState(ctx context.Context, client *Client) error {
 	if !n.ClusterEnabled() || client == nil {
 		return nil
 	}
 
 	directory := n.clusterSessionDirectory()
-	lease := n.clusterSessionLease(client)
+	desired := n.clusterSessionLease(client)
 	snapshot := n.clusterSessionSnapshot(client)
 
-	if err := directory.PutSessionLease(ctx, lease, n.sessionLeaseTTL()); err != nil {
+	current, err := directory.GetSessionLease(ctx, desired.SessionID)
+	if err != nil {
 		return err
+	}
+
+	// First registration: the directory has no record, so claim it with
+	// CAS(expected=nil). A blind SET could overwrite a lease another node
+	// registered in the meantime.
+	if current == nil {
+		ok, err := directory.CompareAndSwapSessionLease(ctx, nil, desired, n.sessionLeaseTTL())
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return ErrSessionFenced
+		}
+		return directory.PutSessionSnapshot(ctx, snapshot, defaultClusterSessionSnapshotTTL)
+	}
+
+	// The directory records a different fencing (another node's CAS won the
+	// session): this attachment is fenced and must not write anything back.
+	if current.NodeID != n.ClusterNodeID() || current.IncarnationID != n.ClusterIncarnationID() {
+		return ErrSessionFenced
+	}
+	// A directory version newer than the local one means this attachment is
+	// stale (a newer generation already synced). An equal version is the
+	// same-fence refresh: TTL / LastActivity / UserID are refreshed and the
+	// lease version stays unchanged. A local version strictly greater is the
+	// local-takeover persist path: handleConnect bumps the version on a
+	// same-node resume and this write records that bump without creating a
+	// new one (refresh never increments).
+	if current.LeaseVersion > desired.LeaseVersion {
+		return ErrSessionFenced
+	}
+
+	ok, err := directory.CompareAndSwapSessionLease(ctx, current, desired, n.sessionLeaseTTL())
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrSessionFenced
 	}
 	return directory.PutSessionSnapshot(ctx, snapshot, defaultClusterSessionSnapshotTTL)
 }

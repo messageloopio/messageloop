@@ -751,19 +751,20 @@ func TestClient_Close_RemovesAllSubscriptions(t *testing.T) {
 
 // --- P2-21: pings must throttle the presence/cluster refresh work ---
 
-// countingSessionDirectory counts every lease/snapshot write so tests can
-// observe how often syncClusterSessionState runs.
+// countingSessionDirectory counts every lease (CAS) / snapshot write so
+// tests can observe how often syncClusterSessionState runs.
 type countingSessionDirectory struct {
 	*fakeSessionDirectory
 	mu   sync.Mutex
 	puts int
 }
 
-func (c *countingSessionDirectory) PutSessionLease(context.Context, *ClusterSessionLease, time.Duration) error {
+func (c *countingSessionDirectory) CompareAndSwapSessionLease(ctx context.Context, expected, desired *ClusterSessionLease, ttl time.Duration) (bool, error) {
+	ok, err := c.fakeSessionDirectory.CompareAndSwapSessionLease(ctx, expected, desired, ttl)
 	c.mu.Lock()
 	c.puts++
 	c.mu.Unlock()
-	return nil
+	return ok, err
 }
 
 func (c *countingSessionDirectory) PutSessionSnapshot(context.Context, *ClusterSessionSnapshot, time.Duration) error {
@@ -802,7 +803,8 @@ func TestClient_HandlePing_ThrottlesClusterRefresh(t *testing.T) {
 	}
 	require.NoError(t, client.HandleMessage(ctx, connectMsg))
 
-	// Baseline after connect: each cluster sync writes a lease and a snapshot.
+	// Baseline after connect: each cluster sync writes a lease (via CAS)
+	// and a snapshot.
 	baseline := directory.count()
 
 	// A burst of pings within the throttle interval must only trigger one
@@ -830,6 +832,52 @@ func TestClient_HandlePing_ThrottlesClusterRefresh(t *testing.T) {
 	require.NoError(t, client.HandleMessage(ctx, latePing))
 	require.Eventually(t, func() bool { return directory.count() >= baseline+4 }, time.Second, 10*time.Millisecond)
 	assert.Equal(t, baseline+4, directory.count())
+}
+
+// --- PR-KA-A1: a fenced ping refresh must disconnect with 3502 ---
+
+// TestClient_PingRefresh_FencedDisconnects verifies §6.4: when the directory
+// no longer recognizes this node's fencing (another node claimed the
+// session), the throttled ping refresh disconnects the client with 3502 and
+// leaves the new owner's lease untouched.
+func TestClient_PingRefresh_FencedDisconnects(t *testing.T) {
+	ctx := context.Background()
+	directory := &fakeSessionDirectory{lease: &ClusterSessionLease{
+		SessionID:     "sess-fenced",
+		NodeID:        "node-b",
+		IncarnationID: "inc-b",
+		LeaseVersion:  3,
+		ExpiresAt:     time.Now().Add(time.Hour),
+	}}
+	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-a", IncarnationID: "inc-a", Backend: "memory"}, ClusterDependencies{
+		SessionDirectory: directory,
+		CommandBus:       &fakeClusterCommandBus{},
+		QueryStore:       fakeQueryStore{},
+	})
+	require.NoError(t, err)
+
+	node := NewNode(nil)
+	node.SetCluster(runtime)
+
+	transport := &capturingTransport{}
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
+	require.NoError(t, err)
+	client.ForceTestIDs("sess-fenced", "user-fenced", "client-fenced")
+
+	// Drive the refresh branch directly (the 10s throttle is not a
+	// synchronization point): the sync must detect the fencing and close
+	// the connection with DisconnectStale (3502) without unbinding the
+	// directory lease.
+	client.throttledClusterRefresh()
+	require.Eventually(t, func() bool { return transport.isClosed() }, time.Second, 10*time.Millisecond)
+	assert.Equal(t, DisconnectStale.Code, transport.getCloseReason().Code)
+
+	// The new owner's lease is untouched: no delete, no write-back.
+	lease, err := directory.GetSessionLease(ctx, "sess-fenced")
+	require.NoError(t, err)
+	require.NotNil(t, lease)
+	require.Equal(t, "node-b", lease.NodeID)
+	require.Equal(t, uint64(3), lease.LeaseVersion)
 }
 
 // --- P2-22: clients without an epoch must recover from the beginning ---
@@ -1274,7 +1322,7 @@ func TestClient_NonEphemeralSubscription_PresenceAndEvents(t *testing.T) {
 // closed with DisconnectInternal, not left half-open.
 func TestClient_Connect_AddClientClusterSyncFailureDisconnects(t *testing.T) {
 	ctx := context.Background()
-	directory := &fakeSessionDirectory{putLeaseErr: errors.New("redis down")}
+	directory := &fakeSessionDirectory{casErr: errors.New("redis down")}
 	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-a", IncarnationID: "inc-a", Backend: "memory"}, ClusterDependencies{
 		SessionDirectory: directory,
 		CommandBus:       &fakeClusterCommandBus{},

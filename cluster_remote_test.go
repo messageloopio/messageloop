@@ -2,6 +2,7 @@ package messageloop
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 )
 
 type fakeSessionDirectory struct {
+	mu        sync.Mutex
 	lease     *ClusterSessionLease
 	snapshot  *ClusterSessionSnapshot
 	nodeLease *ClusterNodeLease
@@ -17,12 +19,16 @@ type fakeSessionDirectory struct {
 	nodeLeases map[string]*ClusterNodeLease
 	// leases overrides GetSessionLease lookups keyed by session ID.
 	leases map[string]*ClusterSessionLease
+	// nodeLeaseErr makes GetNodeLease fail (simulating an unreachable store).
+	nodeLeaseErr error
 
 	// CAS bookkeeping (see CompareAndSwapSessionLease).
 	casCalls     int
 	casExpected  *ClusterSessionLease
 	casDesired   *ClusterSessionLease
 	forceCasFail bool
+	// casErr makes CompareAndSwapSessionLease fail with a store error.
+	casErr error
 
 	// putLeaseErr makes PutSessionLease fail (simulating a cluster sync error).
 	putLeaseErr error
@@ -46,6 +52,11 @@ func (f *fakeSessionDirectory) PutNodeLease(context.Context, *ClusterNodeLease, 
 	return nil
 }
 func (f *fakeSessionDirectory) GetNodeLease(_ context.Context, nodeID, incarnationID string) (*ClusterNodeLease, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.nodeLeaseErr != nil {
+		return nil, f.nodeLeaseErr
+	}
 	if f.nodeLeases != nil {
 		return f.nodeLeases[nodeID+":"+incarnationID], nil
 	}
@@ -56,16 +67,25 @@ func (f *fakeSessionDirectory) PutSessionLease(context.Context, *ClusterSessionL
 }
 
 // CompareAndSwapSessionLease simulates version-based CAS semantics: the swap
-// only succeeds when the current lease matches the expected one.
+// only succeeds when the current lease matches the expected one. The check
+// and the swap are atomic under the fake's mutex so concurrent CAS(nil)
+// claims race like the real directory (exactly one wins). A nil current
+// lease matches a nil expected lease (first registration).
 func (f *fakeSessionDirectory) CompareAndSwapSessionLease(_ context.Context, expected, desired *ClusterSessionLease, _ time.Duration) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.casCalls++
 	f.casExpected = expected
 	f.casDesired = desired
 	if f.forceCasFail {
 		return false, nil
 	}
-	if f.lease == nil {
-		return false, nil
+	if f.casErr != nil {
+		return false, f.casErr
+	}
+	if f.lease == nil && expected == nil {
+		f.lease = desired
+		return true, nil
 	}
 	if !fakeLeaseEqual(f.lease, expected) {
 		return false, nil
@@ -87,6 +107,8 @@ func fakeLeaseEqual(left, right *ClusterSessionLease) bool {
 }
 
 func (f *fakeSessionDirectory) GetSessionLease(_ context.Context, sessionID string) (*ClusterSessionLease, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.leases != nil {
 		return f.leases[sessionID], nil
 	}
@@ -97,6 +119,8 @@ func (f *fakeSessionDirectory) PutSessionSnapshot(context.Context, *ClusterSessi
 	return nil
 }
 func (f *fakeSessionDirectory) GetSessionSnapshot(context.Context, string) (*ClusterSessionSnapshot, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.snapshot, nil
 }
 func (f *fakeSessionDirectory) DeleteSessionSnapshot(context.Context, string) error { return nil }

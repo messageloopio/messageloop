@@ -199,15 +199,23 @@ cluster:
 | 数据 | 键 | TTL | 内容要点 |
 | --- | --- | --- | --- |
 | 会话租约 | `ml:cluster:session:lease:<sessionID>` | 默认 600 秒；按心跳配置缩短（`sessionLeaseTTL` = `max(30s, 2×idle_timeout, 3×ping_interval, idle_timeout+10s+10s)`，须覆盖心跳周期并留出续约抖动余量；心跳禁用时保持 600s） | `SessionID`、`NodeID`、`IncarnationID`、`UserID`、`ClientID`、`LeaseVersion`、`Authenticated`、`ConnectedAt`、`LastActivityAt`、`ExpiresAt` |
-| 会话快照 | `ml:cluster:session:snapshot:<sessionID>` | 24 小时（`defaultClusterSessionSnapshotTTL`） | 会话身份（user/client/protocol）、订阅列表（`Subscriptions`）、`AuthContext`；结构上还声明了 `ChannelOffsets` 与 `BrokerEpoch` 字段，但当前填充逻辑未写入（见 4.4） |
+| 会话快照 | `ml:cluster:session:snapshot:<sessionID>` | 24 小时（`defaultClusterSessionSnapshotTTL`） | 会话身份（user/client/protocol）、订阅列表（`Subscriptions`）、`AuthContext`；另含逐频道 `ChannelOffsets`（上次成功投递的历史 offset）与 `BrokerEpoch`（快照时刻的 broker 世代），供精确跨节点恢复（见 4.4） |
 
 会话所有权 = 「会话租约指向的节点实例正在服务该会话」。`LeaseVersion` 是所有权代际计数：新连接从 1 起，每次 resume/takeover 递增（`client.go`、`cluster_resume.go`）。它被用于接管时的版本校验，防止旧代际的接管命令误伤新代际的会话。
 
-会话状态的写入时机（`syncClusterSessionState`，`cluster_state.go:202-215`）：
+**会话租约的写入只走 CAS，没有盲写（PR-KA-A1）**。`syncClusterSessionState`（`cluster_state.go`）是唯一的热路径写入方，它的三种情形：
+
+- **首次登记**：Directory 中无该 session 的租约 → `CompareAndSwapSessionLease(expected=nil)` 抢注（版本 1）。
+- **same-fence 续约**：租约仍指向本节点实例且版本与本地一致 → `CompareAndSwapSessionLease(expected=当前租约)` 刷新 TTL / `LastActivityAt` / `UserID` 等，**`LeaseVersion` 不递增**。任何分支都不再调用 `PutSessionLease`（无条件 `SET` 会把已被他节点 CAS 抢走的所有权写回去）。
+- **fencing 失效（`ErrSessionFenced`）**：Directory 上的租约已不属于本节点实例（被其他节点 CAS 抢走），或版本比本地更新（本附件已陈旧）→ 返回错误，**不写回**。ping/pong 刷新路径收到该错误即用 3502（`DisconnectStale`）断开本连接，且**不删除** Directory 里的租约（那会误删新 owner 的 fencing）。
+
+版本的唯一递增点在 `resumeRemoteSession` 的抢权 CAS（旧版本 +1 后原子写入）；本机接管（同节点 resume）把内存版本 +1 后经同节点的 CAS 写透，续约本身从不 `+1`。
+
+会话状态的写入时机（`syncClusterSessionState`）：
 
 - 连接建立（`AddClient`）；
 - 每次订阅/退订（订阅 Saga 的 `cluster.session` 步骤，`node.go`，受 2 秒 `clusterStepTimeout` 约束，失败不阻塞客户端操作路径）；
-- 客户端 ping/pong 触发的状态刷新，节流为最多每 10 秒一次（`pingClusterRefreshInterval`，`client.go:354-358`）。
+- 客户端 ping/pong 触发的状态刷新，节流为最多每 10 秒一次（`pingClusterRefreshInterval`）。刷新只做 same-fence CAS，且检测到 fencing 失效（`ErrSessionFenced`）时以 3502 断开，其余错误维持 Warn 不断开（避免 Redis 抖动踢光全员）。
 
 会话关闭时的清理（`deleteClusterSessionState`，`cluster_state.go:217-242`）带所有权检查：只有租约已过期、或租约确属本节点实例时才删除租约与快照；若租约仍有效且属于**其他**节点实例，说明该会话已被他处接管，本地状态必须保留。
 
@@ -226,7 +234,7 @@ cluster:
 
 1. 读会话租约与会话快照；两者缺一即放弃恢复（返回未恢复）。
 2. 若租约有效且属于其他节点实例：向该节点发送 `takeover` 命令（`requestSessionTakeover`，`cluster_resume.go:90-110`）。takeover 命令携带 `LeaseVersion` 与元数据 `new_node_id` / `new_incarnation_id`；目标节点执行 `handleClusterTakeoverCommand`（`cluster_commands.go:242-267`）：先校验 `LeaseVersion` 与本地一致（不一致返回 `LEASE_VERSION_MISMATCH`），再 `evictSessionForTakeover` 驱逐旧连接。
-3. **接管失败时的降级**：若 takeover 命令失败（例如目标节点刚宕机、命令超时），则检查目标节点的节点租约——节点租约也已不存在时，视为旧节点已死，继续执行恢复；节点租约仍在则中止恢复（`cluster_resume.go:56-66`）。
+3. **接管失败时的降级**：若 takeover 命令失败（例如目标节点刚宕机、命令超时），则检查目标节点的节点租约——节点租约也已不存在时，视为旧节点已死，继续执行恢复；节点租约仍在则中止恢复，并把抢占到的租约 **CAS 回滚**到原 owner（把 fencing 还回去，`cluster_resume.go` 的 `rollbackSessionTakeover`）；节点租约查询本身失败时同样先尝试回滚再返回错误。
 4. 恢复成功后在本地重建会话状态：身份字段、订阅集合、`clusterLeaseVersion = 旧租约版本 + 1`，并 `AddClient` 注册；随后 `restoreSessionSubscriptions`（`cluster_resume.go:112-127`）逐频道重建订阅 + presence 登记 + 本节点投影 +1，任一频道失败则回滚已恢复的频道（含投影补偿 -1）。
 
 **驱逐（`evictSessionForTakeover`，`cluster_resume.go:196-249`）**：标记旧连接关闭、取消心跳、逐个移除其全部频道订阅并同步投影 -1；任何频道移除失败都会把已移除的频道整体回滚（恢复订阅 + 投影 +1），保证不留下"半驱逐"状态；最后从 hub 移除会话并关闭传输。集成测试 `TestClusterRedis_RemoteResumeTakeover` 验证了完整链路：node B 上的新连接把 node A 上的旧连接驱逐，新连接收到 `Connected{Resumed: true}` 且订阅被恢复。
@@ -235,7 +243,7 @@ cluster:
 
 跨节点恢复中，**历史消息的续读**走客户端协议原有的 epoch 校验逻辑（`client.go:600-689`）：Redis broker 的 epoch 存于固定键 **`ml:broker:epoch`**（`defaultEpochKey`，`options.go:18`），首个启动的节点经 `SETNX` 写入随机 UUID（`redis.go` 的 `initEpoch`），之后所有节点读取同一值——**集群共享、跨节点一致、跨重启持久**（`epoch_test.go` 的 `SharedAcrossNodes` / `PersistedAcrossRestart` 两测试为证）。订阅者请求恢复（`sub.Recover`）时，携带的 `sub.Epoch` 与当前节点的 broker epoch 不一致（包括未携带 epoch）即视为 offset 无效，从历史开头（offset 0）恢复；epoch 匹配则从 `sub.Offset+1` 续读。
 
-集群部署下的推论：由于 epoch 是集群共享的，客户端在节点 A 建立订阅时拿到的 epoch 在节点 B 依然有效——跨节点恢复时**epoch 校验可以通过**，续读位置由客户端携带的逐频道 offset 决定（`client.go:642`），不再需要从历史开头全量恢复。全量恢复仅发生在客户端未携带 epoch（旧 SDK）或携带陈旧 epoch（epoch 键被清理/重建）时。会话快照中预留的 `ChannelOffsets` 与 `BrokerEpoch` 字段仍未被填充（`cluster_state.go:274-309`），即快照本身不承载续读位置，续读完全依赖客户端自带 offset；跨节点按 offset 续读因此已可工作，但快照侧的能力仍属未完成功能。
+集群部署下的推论：由于 epoch 是集群共享的，客户端在节点 A 建立订阅时拿到的 epoch 在节点 B 依然有效——跨节点恢复时**epoch 校验可以通过**，续读位置由服务端快照中的逐频道 `ChannelOffsets` 决定（`client.go`、`recover.go`）：`ChannelOffsets` 记录本节点对该会话逐频道**最后一次成功投递**的历史 offset（由 hub 广播路径的 `DeliveredOffset` 填充，`hub.go`），跨节点恢复时从 `ChannelOffsets[ch]+1` 续读，**服务端记录优先于客户端携带的 offset**；快照缺失该频道的 offset（从未投递过历史或纯瞬时消息）则跳过恢复。快照同时携带 `BrokerEpoch`（快照时刻的 broker 世代），世代与当前不一致时强制全量恢复。全量恢复仅发生在客户端未携带 epoch（旧 SDK）、携带陈旧 epoch（epoch 键被清理/重建）或快照世代不匹配时。
 
 ### 4.5 按 user 展开的用户索引（user index）
 
@@ -250,7 +258,7 @@ cluster:
 | `ml:cluster:user:member:<userID>:<sessionID>` | string（值 `"1"`） | 与 session lease 相同（`sessionLeaseTTL()`） | 成员键：续期时随 lease 一起刷新 |
 | `ml:cluster:user:sessions:<userID>` | set | 无（成员过期靠 repair 修剪） | 用户→session 集合；展开时 `SMEMBERS` 后逐个 `GET` lease 校验 |
 
-**维护**：所有 lease 写入路径共用单一 helper `SyncUserIndex`（根包 `cluster_user_index.go`），由 Redis directory 在 `PutSessionLease` / `CompareAndSwapSessionLease`（成功时）/ `DeleteSessionLease` 之后调用（Delete 先 `GET` lease 以得知 user 再 `SREM`）：
+**维护**：所有 lease 写入路径共用单一 helper `SyncUserIndex`（根包 `cluster_user_index.go`），由 Redis directory 在 lease 写（`CompareAndSwapSessionLease` 成功——热路径唯一写入方式；`PutSessionLease` 仅保留为适配器方法，生产热路径已不再调用）/ `DeleteSessionLease` 之后调用（Delete 先 `GET` lease 以得知 user 再 `SREM`）：
 
 - Delete（`newLease == nil`）：`RemoveUserSession(旧 user, session)`；
 - Put/CAS 成功：user 相同 → `AddUserSession`（刷新 TTL）；user 变了 → 先 `RemoveUserSession` 旧 user 再 `AddUserSession` 新 user（resume 后 re-auth 换 user 的场景，`PutSessionLease` 先读旧 lease 用于比对）；
