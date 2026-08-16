@@ -23,7 +23,7 @@ func (fakeBrokerNoReady) Subscribe(string) error                          { retu
 func (fakeBrokerNoReady) Unsubscribe(string) error                        { return nil }
 func (fakeBrokerNoReady) Publish(string, *Publication) (uint64, error) { return 0, nil }
 func (fakeBrokerNoReady) PublishTransient(string, *Publication) error  { return nil }
-func (fakeBrokerNoReady) History(string, uint64, int) ([]*Publication, error) {
+func (fakeBrokerNoReady) History(string, uint64, int) (*HistoryPage, error) {
 	return nil, nil
 }
 

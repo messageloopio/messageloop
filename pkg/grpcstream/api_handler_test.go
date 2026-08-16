@@ -71,7 +71,7 @@ func (b *failPublishBroker) PublishTransient(ch string, pub *messageloop.Publica
 	return nil
 }
 
-func (b *failPublishBroker) History(ch string, sinceOffset uint64, limit int) ([]*messageloop.Publication, error) {
+func (b *failPublishBroker) History(ch string, sinceOffset uint64, limit int) (*messageloop.HistoryPage, error) {
 	return nil, nil
 }
 
@@ -120,7 +120,7 @@ func (b *probeBroker) Publish(ch string, pub *messageloop.Publication) (uint64, 
 
 func (b *probeBroker) PublishTransient(ch string, pub *messageloop.Publication) error { return nil }
 
-func (b *probeBroker) History(ch string, sinceOffset uint64, limit int) ([]*messageloop.Publication, error) {
+func (b *probeBroker) History(ch string, sinceOffset uint64, limit int) (*messageloop.HistoryPage, error) {
 	return nil, nil
 }
 

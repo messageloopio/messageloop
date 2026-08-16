@@ -192,8 +192,9 @@ func TestGRPC_AdminAPI_Publish_JSONPayload(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	pubs, err := node.Broker().History("json-admin", 0, 0)
+	page, err := node.Broker().History("json-admin", 0, 0)
 	require.NoError(t, err)
+	pubs := page.Pubs()
 	require.Len(t, pubs, 1)
 	require.Equal(t, messageloop.PayloadKindJSON, pubs[0].Kind)
 

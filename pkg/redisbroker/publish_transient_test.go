@@ -21,14 +21,14 @@ func TestRedisBroker_PublishTransientSkipsHistory(t *testing.T) {
 	err := broker.PublishTransient(ch, &messageloop.Publication{Payload: []byte("join"), Kind: messageloop.PayloadKindText})
 	require.NoError(t, err)
 
-	pubs, err := broker.History(ch, 0, 0)
+	page, err := broker.History(ch, 0, 0)
 	require.NoError(t, err)
-	require.Empty(t, pubs, "transient publications must not appear in history")
+	require.Empty(t, page.Pubs(), "transient publications must not appear in history")
 
 	offset, err := broker.Publish(ch, &messageloop.Publication{Payload: []byte("normal"), Kind: messageloop.PayloadKindText})
 	require.NoError(t, err)
 	require.NotZero(t, offset)
-	pubs, err = broker.History(ch, 0, 0)
+	page, err = broker.History(ch, 0, 0)
 	require.NoError(t, err)
-	require.Len(t, pubs, 1, "regular publications on the same channel must still be recorded")
+	require.Len(t, page.Pubs(), 1, "regular publications on the same channel must still be recorded")
 }

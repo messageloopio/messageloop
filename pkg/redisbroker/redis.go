@@ -3,6 +3,7 @@ package redisbroker
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -271,19 +272,46 @@ func (b *redisBroker) Publish(ch string, pub *messageloop.Publication) (uint64, 
 	if err != nil {
 		return 0, err
 	}
+	b.updateFirstRetained(ctx, ch, offset, ttl)
 	if err := b.client.Publish(ctx, b.opts.PubSubPrefix+ch, pubSubData).Err(); err != nil {
-		// Roll back the stream entry so history never contains a message
-		// that was not actually delivered in real time. XADD and PUBLISH are
-		// not atomic; a leftover entry is only acceptable when the rollback
-		// itself fails (clients can still recover it from history).
-		if delErr := b.client.XDel(ctx, stream, id).Err(); delErr != nil {
-			log.ErrorContext(ctx, "failed to roll back stream entry after pubsub failure",
-				delErr, "stream", stream, "id", id)
-		}
-		return 0, err
+		// Publish success means the log accepted the message (KD-K14): a
+		// pub/sub delivery failure is a log/metrics event, never a reason to
+		// roll back the stream entry (no XDel) or to fail the caller.
+		log.WarnContext(ctx, "pub/sub delivery failed; stream entry retained",
+			"stream", stream, "id", id, "error", err)
 	}
-
 	return offset, nil
+}
+
+// updateFirstRetained refreshes the first_retained marker for ch after a
+// successful XADD: the stream's first-entry ID read via XINFO, falling back
+// to the just-assigned offset when XINFO is unavailable and no marker exists
+// yet. The marker expires with the same TTL as the stream, so a fully
+// expired channel cannot claim retained coverage. Best effort: failures are
+// logged, the marker stays stale at worst.
+func (b *redisBroker) updateFirstRetained(ctx context.Context, ch string, fallback uint64, ttl time.Duration) {
+	retainedKey := b.opts.StreamPrefix + "retained:" + ch
+	if info, err := b.client.XInfoStream(ctx, b.opts.StreamPrefix+ch).Result(); err == nil && info.FirstEntry.ID != "" {
+		if first := parseStreamOffset(info.FirstEntry.ID); first > 0 {
+			if err := b.client.Set(ctx, retainedKey, strconv.FormatUint(first, 10), ttl).Err(); err != nil {
+				log.WarnContext(ctx, "failed to write first_retained marker", "channel", ch, "error", err)
+			}
+			return
+		}
+	}
+	// XINFO unavailable or the stream reports no first entry: only write the
+	// fallback when no marker exists, so a stale marker never claims a wider
+	// retained range than reality.
+	exists, err := b.client.Exists(ctx, retainedKey).Result()
+	if err != nil {
+		log.WarnContext(ctx, "failed to check first_retained marker", "channel", ch, "error", err)
+		return
+	}
+	if exists == 0 {
+		if err := b.client.Set(ctx, retainedKey, strconv.FormatUint(fallback, 10), ttl).Err(); err != nil {
+			log.WarnContext(ctx, "failed to write first_retained marker", "channel", ch, "error", err)
+		}
+	}
 }
 
 // PublishTransient broadcasts via Pub/Sub only, without writing to the Redis
@@ -314,8 +342,9 @@ func (b *redisBroker) PublishTransient(ch string, pub *messageloop.Publication) 
 	return b.client.Publish(ctx, b.opts.PubSubPrefix+ch, pubSubData).Err()
 }
 
-// History returns publications stored for ch with offset >= sinceOffset.
-func (b *redisBroker) History(ch string, sinceOffset uint64, limit int) ([]*messageloop.Publication, error) {
+// History returns a page of publications stored for ch with offset >=
+// sinceOffset, plus gap metadata.
+func (b *redisBroker) History(ch string, sinceOffset uint64, limit int) (*messageloop.HistoryPage, error) {
 	return b.getHistory(ch, sinceOffset, limit)
 }
 

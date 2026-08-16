@@ -178,7 +178,7 @@ func (n *Node) recoverSubscription(
 		return n.finishRecovery(ctx, res, path)
 	}
 
-	historyPubs, err := n.broker.History(sub.Channel, sinceOffset, limit)
+	historyPage, err := n.broker.History(sub.Channel, sinceOffset, limit)
 	if err != nil {
 		// The subscription is already committed and must not be rolled back:
 		// a history hiccup must not prevent the client from entering the
@@ -188,6 +188,7 @@ func (n *Node) recoverSubscription(
 		return n.finishRecovery(ctx, res, path)
 	}
 
+	historyPubs := historyPage.Pubs()
 	for _, pub := range historyPubs {
 		res.Publications = append(res.Publications, publicationToClient(sub.Channel, pub))
 	}
@@ -197,7 +198,18 @@ func (n *Node) recoverSubscription(
 		quota.remaining -= len(historyPubs)
 	}
 
-	if len(historyPubs) == limit {
+	gap := historyPage != nil && historyPage.Gap
+	if gap {
+		n.observeRecoveryGap(historyPage.GapReason)
+	}
+
+	if gap && len(historyPubs) == 0 {
+		// A gap with an empty batch means the client's cursor cannot be
+		// proven covered: never claim RecoverOK (that would be "pretending
+		// to have caught up"). Report truncated and echo the cursor so the
+		// client can fall back or retry.
+		res.Status = RecoverTruncated
+	} else if len(historyPubs) == limit {
 		// Conservative: a full batch means the broker may have more.
 		res.Status = RecoverTruncated
 	} else if epochReset {
@@ -230,6 +242,22 @@ func (n *Node) recoverSkipReason(sub *clientpb.Subscription, snapshot *ClusterSe
 		}
 	}
 	return ""
+}
+
+// observeRecoveryGap records the history gap reason metric for one channel
+// recovery attempt.
+func (n *Node) observeRecoveryGap(reason HistoryGapReason) {
+	if n.metrics == nil {
+		return
+	}
+	label := "unknown"
+	switch reason {
+	case HistoryGapHeadTrimmed:
+		label = "head_trimmed"
+	case HistoryGapEmptyExpired:
+		label = "empty_expired"
+	}
+	n.metrics.RecoveryGapTotal.WithLabelValues(label).Inc()
 }
 
 // finishRecovery records the metrics and log line for one recovery attempt.

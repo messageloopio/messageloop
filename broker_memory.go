@@ -2,6 +2,7 @@ package messageloop
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -31,6 +32,9 @@ func NewMemoryBroker(opts MemoryBrokerOptions) Broker {
 		historySize: size,
 		history:     make(map[string]*channelHistory),
 		subs:        make(map[string]int),
+		wcCounts:    make(map[string]int),
+		wcHandles:   make(map[string]*topics.Subscription),
+		matcher:     topics.NewCSTrieMatcher(),
 		ready:       make(chan struct{}),
 		epoch:       uuid.NewString(),
 	}
@@ -54,9 +58,14 @@ type memoryBroker struct {
 
 	mu      sync.RWMutex
 	history map[string]*channelHistory
-	subs    map[string]int // subscriber count per channel
-	ready   chan struct{}
-	once    sync.Once
+	subs    map[string]int // exact channel subscriber count
+	// Wildcard interest mirrors the Redis broker: patterns are reference
+	// counted and matched against concrete channels via the topic matcher.
+	wcCounts  map[string]int                 // wildcard pattern refcount
+	wcHandles map[string]*topics.Subscription // pattern -> matcher handle
+	matcher   topics.Matcher                 // wildcard pattern matching
+	ready     chan struct{}
+	once      sync.Once
 }
 
 // Start stores the handler and blocks until ctx is cancelled.
@@ -73,11 +82,26 @@ func (b *memoryBroker) Ready() <-chan struct{} {
 	return b.ready
 }
 
-// Subscribe increments the subscriber count for ch. The channel's history is
-// retained while at least one subscriber is registered.
+// Subscribe registers the node's interest in ch. Wildcard patterns are
+// matched against concrete channels via the topic matcher (same semantics as
+// the Redis broker's interested()); exact channels and patterns are both
+// reference counted. The channel's history is retained while at least one
+// subscriber is registered.
 func (b *memoryBroker) Subscribe(ch string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if isWildcard(ch) {
+		b.wcCounts[ch]++
+		if b.wcCounts[ch] == 1 {
+			sub, err := b.matcher.Subscribe(ch, ch)
+			if err != nil {
+				delete(b.wcCounts, ch)
+				return err
+			}
+			b.wcHandles[ch] = sub
+		}
+		return nil
+	}
 	b.subs[ch]++
 	return nil
 }
@@ -86,8 +110,10 @@ func (b *memoryBroker) Subscribe(ch string) error {
 // subscriber leaves and the channel has no retained history entries, the
 // channel's history entry is reclaimed so the history map does not grow
 // without bound. History is intentionally retained while the last subscriber
-// is away so that reconnect with recovery still works; the ring buffer
-// capacity bounds the retained entries per channel.
+// is away so that reconnect with recovery still works; a channel that has
+// ever published (nextOff > 0) is never reclaimed by an empty ring, because
+// its offsets must stay detectable as gaps for recovering clients. The ring
+// buffer capacity bounds the retained entries per channel.
 //
 // Publish takes b.mu only to resolve the channelHistory reference and releases
 // it before taking h.mu; Unsubscribe holds b.mu while deleting the map entry,
@@ -96,6 +122,19 @@ func (b *memoryBroker) Subscribe(ch string) error {
 func (b *memoryBroker) Unsubscribe(ch string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if isWildcard(ch) {
+		if b.wcCounts[ch] > 0 {
+			b.wcCounts[ch]--
+			if b.wcCounts[ch] == 0 {
+				delete(b.wcCounts, ch)
+				if sub, ok := b.wcHandles[ch]; ok {
+					b.matcher.Unsubscribe(sub)
+					delete(b.wcHandles, ch)
+				}
+			}
+		}
+		return nil
+	}
 	if b.subs[ch] > 0 {
 		b.subs[ch]--
 	}
@@ -103,9 +142,9 @@ func (b *memoryBroker) Unsubscribe(ch string) error {
 		delete(b.subs, ch)
 		if h, ok := b.history[ch]; ok {
 			h.mu.Lock()
-			empty := h.count == 0
+			reclaim := h.count == 0 && h.nextOff == 0
 			h.mu.Unlock()
-			if empty {
+			if reclaim {
 				delete(b.history, ch)
 			}
 		}
@@ -113,6 +152,23 @@ func (b *memoryBroker) Unsubscribe(ch string) error {
 	return nil
 }
 
+// interested reports whether this node wants messages for the given concrete
+// channel: an exact subscription or any wildcard pattern that matches it
+// (aligned with the Redis broker's interested()).
+func (b *memoryBroker) interested(ch string) bool {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if b.subs[ch] > 0 {
+		return true
+	}
+	return len(b.matcher.Lookup(ch)) > 0
+}
+
+// Publish writes the publication to the channel ring and, only when this
+// node is interested (exact or wildcard match), delivers it to the handler.
+// The handler's error or panic never negates the publish: the offset is
+// already assigned and the history entry written, so the failure is logged
+// and Publish still returns (offset, nil).
 func (b *memoryBroker) Publish(ch string, pub *Publication) (uint64, error) {
 	// Channels with explicit empty segments ("a.", ".a", "a..b") and the
 	// empty channel are rejected up front so malformed channels never produce
@@ -166,15 +222,28 @@ func (b *memoryBroker) Publish(ch string, pub *Publication) (uint64, error) {
 	}
 	h.mu.Unlock()
 
-	if h := b.handler.Load(); h != nil {
-		return offset, (*h)(ch, &stored)
+	if handler := b.handler.Load(); handler != nil && b.interested(ch) {
+		ctx := context.Background()
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.ErrorContext(ctx, "memory broker: publish handler panicked; publish stands",
+						fmt.Errorf("panic: %v", r), "channel", ch, "offset", offset)
+				}
+			}()
+			if err := (*handler)(ch, &stored); err != nil {
+				log.ErrorContext(ctx, "memory broker: publish handler failed; publish stands",
+					err, "channel", ch, "offset", offset)
+			}
+		}()
 	}
 	return offset, nil
 }
 
 // PublishTransient delivers payload to subscribers in real time without
 // writing history. The offset is always 0 because transient publications
-// have no history entry.
+// have no history entry. Like Publish, the handler is only invoked when this
+// node is interested, and a handler error/panic never propagates.
 func (b *memoryBroker) PublishTransient(ch string, pub *Publication) error {
 	if err := topics.ValidateTopic(ch); err != nil {
 		return err
@@ -184,18 +253,45 @@ func (b *memoryBroker) PublishTransient(ch string, pub *Publication) error {
 	stored.Offset = 0
 	stored.Epoch = b.epoch
 	stored.Time = time.Now().UnixMilli()
-	if h := b.handler.Load(); h != nil {
-		return (*h)(ch, &stored)
+	if handler := b.handler.Load(); handler != nil && b.interested(ch) {
+		ctx := context.Background()
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.ErrorContext(ctx, "memory broker: transient handler panicked; publish stands",
+						fmt.Errorf("panic: %v", r), "channel", ch)
+				}
+			}()
+			if err := (*handler)(ch, &stored); err != nil {
+				log.ErrorContext(ctx, "memory broker: transient handler failed; publish stands",
+					err, "channel", ch)
+			}
+		}()
 	}
 	return nil
 }
 
-func (b *memoryBroker) History(ch string, sinceOffset uint64, limit int) ([]*Publication, error) {
+// History returns a page of publications stored for ch with offset >=
+// sinceOffset, plus gap metadata (§5 of the A2 spec): sinceOffset 0 reads
+// from the head (no gap); a positive sinceOffset with no retained entries is
+// HistoryGapEmptyExpired; retained entries starting after sinceOffset are
+// HistoryGapHeadTrimmed. FirstRetained is the oldest retained offset, or 0
+// when nothing is retained.
+func (b *memoryBroker) History(ch string, sinceOffset uint64, limit int) (*HistoryPage, error) {
 	b.mu.RLock()
 	h, ok := b.history[ch]
 	b.mu.RUnlock()
+
+	page := &HistoryPage{}
 	if !ok {
-		return nil, nil
+		// Nothing ever published (or the empty ring was reclaimed): an empty
+		// page is a clean read only from the beginning; any positive offset
+		// cannot be proven covered.
+		if sinceOffset > 0 {
+			page.Gap = true
+			page.GapReason = HistoryGapEmptyExpired
+		}
+		return page, nil
 	}
 
 	if limit <= 0 {
@@ -204,6 +300,21 @@ func (b *memoryBroker) History(ch string, sinceOffset uint64, limit int) ([]*Pub
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
+	if h.count == 0 {
+		if sinceOffset > 0 {
+			page.Gap = true
+			page.GapReason = HistoryGapEmptyExpired
+		}
+		return page, nil
+	}
+
+	firstRetained := h.entries[h.head].Offset
+	page.FirstRetained = firstRetained
+	if sinceOffset > 0 && firstRetained > sinceOffset {
+		page.Gap = true
+		page.GapReason = HistoryGapHeadTrimmed
+	}
 
 	var result []*Publication
 	for i := 0; i < h.count; i++ {
@@ -216,7 +327,9 @@ func (b *memoryBroker) History(ch string, sinceOffset uint64, limit int) ([]*Pub
 			break
 		}
 	}
-	return result, nil
+	page.Publications = result
+	page.Truncated = limit > 0 && len(result) == limit
+	return page, nil
 }
 
 var _ Broker = (*memoryBroker)(nil)

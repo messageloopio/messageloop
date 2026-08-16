@@ -278,9 +278,9 @@ func TestHandlePublish_PolicyForcesTransient(t *testing.T) {
 	assert.Equal(t, uint64(0), pubAck.GetOffset())
 
 	// Nothing written to history.
-	history, err := node.Broker().History("game.tick.fps", 0, 0)
+	page, err := node.Broker().History("game.tick.fps", 0, 0)
 	require.NoError(t, err)
-	require.Empty(t, history, "policy-forced transient must not write history")
+	require.Empty(t, page.Pubs(), "policy-forced transient must not write history")
 
 	// The subscriber still receives the tick in real time.
 	require.Eventually(t, func() bool {
@@ -354,8 +354,9 @@ func TestNodePublish_PolicyHistorySizeCapsRing(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, uint64(i+1), offset)
 	}
-	history, err := node.Broker().History("im.room.1", 0, 0)
+	page, err := node.Broker().History("im.room.1", 0, 0)
 	require.NoError(t, err)
+	history := page.Pubs()
 	require.Len(t, history, 5, "policy history_size=5 must cap the fresh channel ring")
 	require.Equal(t, "m-5", string(history[0].Payload))
 	require.Equal(t, "m-9", string(history[4].Payload))

@@ -192,7 +192,7 @@ func TestMetrics_HeartbeatIdleDisconnectsRegistered(t *testing.T) {
 		"messageloop_heartbeat_idle_disconnects_total must be registered")
 }
 
-// TestMetrics_RecoveryRegistered verifies PR-03: the three recovery metrics
+// TestMetrics_RecoveryRegistered verifies PR-03: the recovery metrics
 // are registered under their full names and record a truncated recovery.
 func TestMetrics_RecoveryRegistered(t *testing.T) {
 	reg := prometheus.NewRegistry()
@@ -202,10 +202,12 @@ func TestMetrics_RecoveryRegistered(t *testing.T) {
 	metrics.RecoveryPublications.WithLabelValues("connect").Observe(1000)
 	metrics.RecoveryTruncatedTotal.WithLabelValues("connect").Inc()
 	metrics.RecoveryTotal.WithLabelValues("subscribe", "skipped").Inc()
+	metrics.RecoveryGapTotal.WithLabelValues("head_trimmed").Inc()
 
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.RecoveryTotal.WithLabelValues("connect", "truncated")))
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.RecoveryTruncatedTotal.WithLabelValues("connect")))
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.RecoveryTotal.WithLabelValues("subscribe", "skipped")))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.RecoveryGapTotal.WithLabelValues("head_trimmed")))
 
 	families, err := reg.Gather()
 	require.NoError(t, err)
@@ -216,6 +218,7 @@ func TestMetrics_RecoveryRegistered(t *testing.T) {
 	require.True(t, names["messageloop_recovery_total"], "messageloop_recovery_total must be registered")
 	require.True(t, names["messageloop_recovery_publications"], "messageloop_recovery_publications must be registered")
 	require.True(t, names["messageloop_recovery_truncated_total"], "messageloop_recovery_truncated_total must be registered")
+	require.True(t, names["messageloop_recovery_gap_total"], "messageloop_recovery_gap_total must be registered")
 
 	foundCapBucket := false
 	for _, family := range families {

@@ -205,15 +205,15 @@ func TestNode_PresenceEventsNotInHistory(t *testing.T) {
 	node.PublishPresenceJoin("presence-hist.ch", "client-1", "user-1")
 	node.PublishPresenceLeave("presence-hist.ch", "client-1", "user-1")
 
-	pubs, err := node.Broker().History(ch, 0, 0)
+	page, err := node.Broker().History(ch, 0, 0)
 	require.NoError(t, err)
-	require.Empty(t, pubs, "presence join/leave events must not appear in history")
+	require.Empty(t, page.Pubs(), "presence join/leave events must not appear in history")
 
 	_, err = node.Broker().Publish(ch, publishPub([]byte("normal"), true))
 	require.NoError(t, err)
-	pubs, err = node.Broker().History(ch, 0, 0)
+	page, err = node.Broker().History(ch, 0, 0)
 	require.NoError(t, err)
-	require.Len(t, pubs, 1, "a regular publish on the same channel must still be recorded")
+	require.Len(t, page.Pubs(), 1, "a regular publish on the same channel must still be recorded")
 }
 
 // TestNode_PublishPresenceJoin_DistinctMessageIDs verifies the final-review
@@ -920,7 +920,7 @@ func (failTransientBroker) Publish(string, *Publication) (uint64, error)    { re
 func (failTransientBroker) PublishTransient(string, *Publication) error {
 	return errors.New("injected transient failure")
 }
-func (failTransientBroker) History(string, uint64, int) ([]*Publication, error) { return nil, nil }
+func (failTransientBroker) History(string, uint64, int) (*HistoryPage, error) { return nil, nil }
 
 // Task 13d follow-up (P1): presence publish failures must increment the
 // PresencePublishFailures gauge, and successful publishes must not.

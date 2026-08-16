@@ -82,16 +82,53 @@ func (p *Publication) PayloadProto() *sharedpb.Payload {
 // on a subscribed channel.
 type PublicationHandler func(ch string, pub *Publication) error
 
+// HistoryGapReason classifies why a history page cannot prove full coverage
+// of the requested offset range.
+type HistoryGapReason int
+
+const (
+	// HistoryGapNone means the retained entries provably cover the requested
+	// offset range (including reading from the beginning with sinceOffset 0).
+	HistoryGapNone HistoryGapReason = iota
+	// HistoryGapHeadTrimmed means retained entries start after sinceOffset:
+	// the head was trimmed and entries between sinceOffset and the first
+	// retained offset may be missing.
+	HistoryGapHeadTrimmed
+	// HistoryGapEmptyExpired means nothing is retained and it cannot be
+	// proven that the retained region still covers sinceOffset (e.g. the
+	// channel never had entries, or its history expired/never existed).
+	// Prefer false positives: a client-supplied garbage offset gets this
+	// reason too.
+	HistoryGapEmptyExpired
+)
+
+// HistoryPage is one page of channel history plus gap metadata.
+type HistoryPage struct {
+	Publications  []*Publication
+	Truncated     bool            // len(Publications) == limit && limit > 0
+	Gap           bool            // GapReason != HistoryGapNone
+	GapReason     HistoryGapReason
+	FirstRetained uint64          // oldest retained offset; 0 = unknown / never published
+}
+
+// Pubs returns the page publications, nil for a nil page.
+func (p *HistoryPage) Pubs() []*Publication {
+	if p == nil {
+		return nil
+	}
+	return p.Publications
+}
+
 // Broker manages pub/sub message routing and optional per-channel history.
 //
 // Delivery error contract: a handler error means the delivery to local
-// subscribers failed, not the publish itself. Synchronous in-memory
-// implementations (memoryBroker) propagate handler errors back from Publish.
-// Asynchronous implementations (Redis: a pub/sub consumer loop) MUST NOT
-// propagate delivery errors to Publish callers — the publication has already
+// subscribers failed, not the publish itself. Neither implementation
+// propagates delivery errors to Publish callers — the publication has already
 // been accepted by the transport by the time the handler runs, and delivery
 // failures are logged/metrics events there. Publish callers must not rely on
-// the handler's return value for either implementation.
+// the handler's return value for either implementation; a successful Publish
+// only promises the message was accepted (and written to history when
+// history applies).
 //
 // Lifecycle: Start must be called once before Publish/Subscribe/History.
 // Start blocks until the provided context is cancelled — call it as a goroutine:
@@ -124,8 +161,10 @@ type Broker interface {
 	// with topics.ErrBadTopic like Publish.
 	PublishTransient(ch string, pub *Publication) error
 
-	// History returns publications stored for ch with offset >= sinceOffset.
-	// limit <= 0 uses DefaultHistoryLimit as a safety cap.
-	// Returns an empty slice (not an error) when history is disabled or empty.
-	History(ch string, sinceOffset uint64, limit int) ([]*Publication, error)
+	// History returns a page of publications stored for ch with offset >=
+	// sinceOffset, plus gap metadata (see HistoryPage). limit <= 0 uses
+	// DefaultHistoryLimit as a safety cap. An empty page is not an error;
+	// error is reserved for transport/storage failures. Gap detection must
+	// never report HistoryGapNone for an empty batch with sinceOffset > 0.
+	History(ch string, sinceOffset uint64, limit int) (*HistoryPage, error)
 }

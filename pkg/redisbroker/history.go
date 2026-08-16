@@ -8,18 +8,25 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lynx-go/x/log"
 	"github.com/messageloopio/messageloop"
 	"github.com/redis/go-redis/v9"
 )
 
 // getHistory retrieves publications from the Redis Stream for ch with
-// offset >= sinceOffset, matching the Broker.History contract (broker.go).
-// limit <= 0 returns all available entries.
-func (b *redisBroker) getHistory(ch string, sinceOffset uint64, limit int) ([]*messageloop.Publication, error) {
+// offset >= sinceOffset, matching the Broker.History contract (broker.go):
+// limit <= 0 uses DefaultHistoryLimit. Gap detection follows the §5 table:
+// sinceOffset 0 reads from the head (no gap); a positive sinceOffset with no
+// entries is HistoryGapEmptyExpired (the stream may have expired or never
+// existed — false positives allowed); retained entries starting after
+// sinceOffset are HistoryGapHeadTrimmed. FirstRetained comes from the
+// first_retained marker, falling back to the first entry of this batch.
+func (b *redisBroker) getHistory(ch string, sinceOffset uint64, limit int) (*messageloop.HistoryPage, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	stream := b.opts.StreamPrefix + ch
+	page := &messageloop.HistoryPage{}
 
 	if limit <= 0 {
 		limit = messageloop.DefaultHistoryLimit
@@ -60,7 +67,35 @@ func (b *redisBroker) getHistory(ch string, sinceOffset uint64, limit int) ([]*m
 			Epoch:       redisMsg.Epoch,
 		})
 	}
-	return pubs, nil
+	page.Publications = pubs
+
+	// FirstRetained: the marker is best effort — a read failure falls back
+	// to the first entry of this batch instead of failing the whole page.
+	firstRetained := uint64(0)
+	if raw, err := b.client.Get(ctx, b.opts.StreamPrefix+"retained:"+ch).Result(); err == nil {
+		firstRetained, _ = strconv.ParseUint(raw, 10, 64)
+	} else if !errors.Is(err, redis.Nil) {
+		log.WarnContext(ctx, "failed to read first_retained marker; falling back to the first batch entry",
+			"channel", ch, "error", err)
+	}
+	if firstRetained == 0 && len(messages) > 0 {
+		firstRetained = parseStreamOffset(messages[0].ID)
+	}
+	page.FirstRetained = firstRetained
+
+	if sinceOffset > 0 {
+		if len(pubs) == 0 {
+			// An empty batch with a positive cursor cannot be proven covered:
+			// the stream may have expired or never existed. Never claim None.
+			page.Gap = true
+			page.GapReason = messageloop.HistoryGapEmptyExpired
+		} else if firstRetained > sinceOffset {
+			page.Gap = true
+			page.GapReason = messageloop.HistoryGapHeadTrimmed
+		}
+	}
+	page.Truncated = limit > 0 && len(pubs) == limit
+	return page, nil
 }
 
 // streamStartID builds the inclusive Redis Stream start ID ("ts-seq") for the

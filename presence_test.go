@@ -357,7 +357,7 @@ func (b *countingBroker) PublishTransient(ch string, _ *Publication) error {
 	b.transient = append(b.transient, ch)
 	return nil
 }
-func (b *countingBroker) History(string, uint64, int) ([]*Publication, error) { return nil, nil }
+func (b *countingBroker) History(string, uint64, int) (*HistoryPage, error) { return nil, nil }
 
 func (b *countingBroker) transientChannels() []string {
 	b.mu.Lock()

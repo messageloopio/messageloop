@@ -12,6 +12,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// historyPubs fetches a history page and returns its publications, failing
+// the test on a storage error.
+func historyPubs(t *testing.T, b Broker, ch string, since uint64, limit int) []*Publication {
+	t.Helper()
+	page, err := b.History(ch, since, limit)
+	require.NoError(t, err)
+	return page.Pubs()
+}
+
 // newTestBroker creates a started broker with a handler that collects publications.
 func newTestBroker(t *testing.T, opts MemoryBrokerOptions) (Broker, *collectedPubs, context.CancelFunc) {
 	t.Helper()
@@ -88,16 +97,14 @@ func TestMemoryBroker_History_RetainedAfterLastUnsubscribe(t *testing.T) {
 	_, err := b.Publish("ch", publishPub([]byte("x"), false))
 	require.NoError(t, err)
 
-	pubs, err := b.History("ch", 0, 0)
-	require.NoError(t, err)
+	pubs := historyPubs(t, b, "ch", 0, 0)
 	require.Len(t, pubs, 1)
 
 	require.NoError(t, b.Unsubscribe("ch"))
 
 	// History is intentionally retained while the last subscriber is away so
 	// that reconnect with recovery still works.
-	pubs, err = b.History("ch", 0, 0)
-	require.NoError(t, err)
+	pubs = historyPubs(t, b, "ch", 0, 0)
 	assert.Len(t, pubs, 1, "history must be retained for recovery after the last unsubscribe")
 }
 
@@ -121,13 +128,11 @@ func TestMemoryBroker_History_KeptWhileSubscribersRemain(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, b.Unsubscribe("ch"))
-	pubs, err := b.History("ch", 0, 0)
-	require.NoError(t, err)
+	pubs := historyPubs(t, b, "ch", 0, 0)
 	assert.Len(t, pubs, 1, "history must remain while subscribers are still present")
 
 	require.NoError(t, b.Unsubscribe("ch"))
-	pubs, err = b.History("ch", 0, 0)
-	require.NoError(t, err)
+	pubs = historyPubs(t, b, "ch", 0, 0)
 	assert.Len(t, pubs, 1, "history remains for recovery even after the last subscriber leaves")
 }
 
@@ -172,6 +177,7 @@ func TestMemoryBroker_Start_BlocksUntilCtxDone(t *testing.T) {
 func TestMemoryBroker_Publish_CallsHandler(t *testing.T) {
 	b, cp, cancel := newTestBroker(t, MemoryBrokerOptions{})
 	defer cancel()
+	require.NoError(t, b.Subscribe("ch"))
 
 	offset, err := b.Publish("ch", publishPub([]byte("hello"), false))
 	if err != nil {
@@ -198,6 +204,7 @@ func TestMemoryBroker_Publish_CallsHandler(t *testing.T) {
 func TestMemoryBroker_Publish_Kind(t *testing.T) {
 	b, cp, cancel := newTestBroker(t, MemoryBrokerOptions{})
 	defer cancel()
+	require.NoError(t, b.Subscribe("ch"))
 
 	_, _ = b.Publish("ch", publishPub([]byte("text"), true))
 	if pub := cp.last(); pub.Kind != PayloadKindText {
@@ -212,6 +219,7 @@ func TestMemoryBroker_Publish_Kind(t *testing.T) {
 func TestMemoryBroker_Publish_TimeSet(t *testing.T) {
 	b, cp, cancel := newTestBroker(t, MemoryBrokerOptions{})
 	defer cancel()
+	require.NoError(t, b.Subscribe("ch"))
 
 	before := time.Now().UnixMilli()
 	_, _ = b.Publish("ch", publishPub([]byte("x"), false))
@@ -237,19 +245,37 @@ func TestMemoryBroker_Publish_NoHandler(t *testing.T) {
 func TestMemoryBroker_Publish_HandlerError(t *testing.T) {
 	b, cp, cancel := newTestBroker(t, MemoryBrokerOptions{})
 	defer cancel()
+	require.NoError(t, b.Subscribe("ch"))
 
 	cp.err = DisconnectBadRequest
-	_, err := b.Publish("ch", publishPub([]byte("x"), false))
-	if err != DisconnectBadRequest {
-		t.Errorf("expected DisconnectBadRequest, got %v", err)
+	offset, err := b.Publish("ch", publishPub([]byte("x"), false))
+	require.NoError(t, err, "a handler error must not negate the publish")
+	require.NotZero(t, offset, "the assigned offset must still be reported")
+}
+
+func TestMemoryBroker_Publish_HandlerPanic(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	b := NewMemoryBroker(MemoryBrokerOptions{})
+	require.NoError(t, b.Subscribe("ch"))
+	go func() { _ = b.Start(ctx, func(_ string, _ *Publication) error { panic("boom") }) }()
+	select {
+	case <-b.(*memoryBroker).ready:
+	case <-time.After(time.Second):
+		t.Fatal("broker never became ready")
 	}
+
+	offset, err := b.Publish("ch", publishPub([]byte("x"), false))
+	require.NoError(t, err, "a handler panic must not negate the publish")
+	require.NotZero(t, offset, "the assigned offset must still be reported")
+	require.Len(t, historyPubs(t, b, "ch", 0, 0), 1, "the publication must still be in history")
 }
 
 func TestMemoryBroker_Publish_MultipleChannels(t *testing.T) {
 	b, cp, cancel := newTestBroker(t, MemoryBrokerOptions{})
 	defer cancel()
-
 	for _, ch := range []string{"a", "b", "c"} {
+		require.NoError(t, b.Subscribe(ch))
 		_, _ = b.Publish(ch, publishPub([]byte(ch), false))
 	}
 	if cp.count() != 3 {
@@ -272,14 +298,14 @@ func TestMemoryBroker_Publish_RejectsMalformedChannel(t *testing.T) {
 	}
 
 	assert.Zero(t, cp.count(), "no publication may reach the handler for malformed channels")
-	pubs, err := b.History("a.", 0, 0)
-	assert.NoError(t, err)
+	pubs := historyPubs(t, b, "a.", 0, 0)
 	assert.Empty(t, pubs, "no history may be recorded for malformed channels")
 }
 
 func TestMemoryBroker_Publish_ConcurrentSafe(t *testing.T) {
 	b, cp, cancel := newTestBroker(t, MemoryBrokerOptions{})
 	defer cancel()
+	require.NoError(t, b.Subscribe("ch"))
 
 	const n = 100
 	var wg sync.WaitGroup
@@ -327,10 +353,7 @@ func TestMemoryBroker_Offset_PerChannel(t *testing.T) {
 
 func TestMemoryBroker_History_Empty(t *testing.T) {
 	b := NewMemoryBroker(MemoryBrokerOptions{})
-	pubs, err := b.History("ch", 0, 0)
-	if err != nil {
-		t.Fatalf("History: %v", err)
-	}
+	pubs := historyPubs(t, b, "ch", 0, 0)
 	if len(pubs) != 0 {
 		t.Errorf("expected 0 pubs, got %d", len(pubs))
 	}
@@ -341,10 +364,7 @@ func TestMemoryBroker_History_All(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		_, _ = b.Publish("ch", publishPub([]byte{byte(i)}, false))
 	}
-	pubs, err := b.History("ch", 0, 0)
-	if err != nil {
-		t.Fatalf("History: %v", err)
-	}
+	pubs := historyPubs(t, b, "ch", 0, 0)
 	if len(pubs) != 5 {
 		t.Fatalf("expected 5 pubs, got %d", len(pubs))
 	}
@@ -361,10 +381,7 @@ func TestMemoryBroker_History_SinceOffset(t *testing.T) {
 		_, _ = b.Publish("ch", publishPub([]byte{byte(i)}, false))
 	}
 	// offsets 1-6; since=4 returns 4,5,6
-	pubs, err := b.History("ch", 4, 0)
-	if err != nil {
-		t.Fatalf("History: %v", err)
-	}
+	pubs := historyPubs(t, b, "ch", 4, 0)
 	if len(pubs) != 3 {
 		t.Fatalf("expected 3 pubs since offset 4, got %d", len(pubs))
 	}
@@ -378,10 +395,7 @@ func TestMemoryBroker_History_Limit(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		_, _ = b.Publish("ch", publishPub([]byte{byte(i)}, false))
 	}
-	pubs, err := b.History("ch", 0, 3)
-	if err != nil {
-		t.Fatalf("History: %v", err)
-	}
+	pubs := historyPubs(t, b, "ch", 0, 3)
 	if len(pubs) != 3 {
 		t.Fatalf("expected 3 pubs with limit=3, got %d", len(pubs))
 	}
@@ -394,10 +408,7 @@ func TestMemoryBroker_History_RingBuffer(t *testing.T) {
 		_, _ = b.Publish("ch", publishPub([]byte{byte(i)}, false))
 	}
 	// offsets 1-7; ring of 4 retains 4,5,6,7
-	pubs, err := b.History("ch", 0, 0)
-	if err != nil {
-		t.Fatalf("History: %v", err)
-	}
+	pubs := historyPubs(t, b, "ch", 0, 0)
 	if len(pubs) != size {
 		t.Fatalf("expected %d pubs (ring size), got %d", size, len(pubs))
 	}
@@ -415,8 +426,8 @@ func TestMemoryBroker_History_MultiChannel_Isolated(t *testing.T) {
 	_, _ = b.Publish("b", publishPub([]byte("b1"), false))
 	_, _ = b.Publish("a", publishPub([]byte("a2"), false))
 
-	pufsA, _ := b.History("a", 0, 0)
-	pufsB, _ := b.History("b", 0, 0)
+	pufsA := historyPubs(t, b, "a", 0, 0)
+	pufsB := historyPubs(t, b, "b", 0, 0)
 	if len(pufsA) != 2 {
 		t.Errorf("channel a: expected 2 pubs, got %d", len(pufsA))
 	}
@@ -436,8 +447,7 @@ func TestMemoryBroker_PerChannelHistorySize(t *testing.T) {
 		_, err := b.Publish("cap-ch", pub)
 		require.NoError(t, err)
 	}
-	pubs, err := b.History("cap-ch", 0, 0)
-	require.NoError(t, err)
+	pubs := historyPubs(t, b, "cap-ch", 0, 0)
 	require.Len(t, pubs, 3, "ring with per-channel HistorySize=3 must keep only the last 3 entries")
 	require.Equal(t, "c", string(pubs[0].Payload))
 	require.Equal(t, "e", string(pubs[2].Payload))
@@ -457,8 +467,7 @@ func TestMemoryBroker_ExistingRingKeepsCap(t *testing.T) {
 		_, err := b.Publish("keep-cap", pub)
 		require.NoError(t, err)
 	}
-	pubs, err := b.History("keep-cap", 0, 0)
-	require.NoError(t, err)
+	pubs := historyPubs(t, b, "keep-cap", 0, 0)
 	require.Len(t, pubs, defaultMemoryHistorySize,
 		"an existing ring must keep the broker default cap, not the later HistorySize=2")
 }
@@ -486,8 +495,7 @@ func TestMemoryBroker_ReclaimedRingUsesNewSize(t *testing.T) {
 	_, err = b.Publish("reclaim-ch", publishPub([]byte("fourth"), false))
 	require.NoError(t, err)
 
-	pubs, err := b.History("reclaim-ch", 0, 0)
-	require.NoError(t, err)
+	pubs := historyPubs(t, b, "reclaim-ch", 0, 0)
 	require.Len(t, pubs, 2, "reclaimed ring must be reallocated with the new HistorySize=2")
 	require.Equal(t, "third", string(pubs[0].Payload))
 	require.Equal(t, "fourth", string(pubs[1].Payload))
@@ -502,6 +510,180 @@ func TestMemoryBroker_HistoryTTLIgnored(t *testing.T) {
 	offset, err := b.Publish("ttl-ch", pub)
 	require.NoError(t, err)
 	require.NotZero(t, offset)
+}
+
+// --- A2: publish contract, interest gating, history gap page ---
+
+// TestMemoryBroker_Publish_HandlerErrorKeepsHistory verifies §10.1: when the
+// handler returns an error, Publish still reports the assigned offset with
+// err=nil and the publication is readable from History.
+func TestMemoryBroker_Publish_HandlerErrorKeepsHistory(t *testing.T) {
+	b, cp, cancel := newTestBroker(t, MemoryBrokerOptions{})
+	defer cancel()
+	require.NoError(t, b.Subscribe("ch"))
+
+	cp.err = DisconnectBadRequest
+	offset, err := b.Publish("ch", publishPub([]byte("x"), false))
+	require.NoError(t, err, "handler failure must not negate the publish")
+	require.NotZero(t, offset, "the assigned offset must be reported")
+	pubs := historyPubs(t, b, "ch", 0, 0)
+	require.Len(t, pubs, 1, "the publication must be in history")
+	require.Equal(t, offset, pubs[0].Offset)
+}
+
+// TestMemoryBroker_NoInterestSkipsHandler verifies §10.2: without a
+// Subscribe, the handler is never called, while a history-writing Publish
+// still lands in the ring.
+func TestMemoryBroker_NoInterestSkipsHandler(t *testing.T) {
+	b, cp, cancel := newTestBroker(t, MemoryBrokerOptions{})
+	defer cancel()
+
+	offset, err := b.Publish("ch", publishPub([]byte("x"), false))
+	require.NoError(t, err)
+	require.NotZero(t, offset)
+	require.Zero(t, cp.count(), "no interest means no handler invocation")
+
+	require.NoError(t, b.PublishTransient("ch", publishPub([]byte("t"), false)))
+	require.Zero(t, cp.count(), "transient publish without interest must skip the handler")
+}
+
+// TestMemoryBroker_WildcardInterest verifies §10.3: Subscribe("forex.*")
+// matches Publish("forex.eur") but not Publish("stocks.us").
+func TestMemoryBroker_WildcardInterest(t *testing.T) {
+	b, cp, cancel := newTestBroker(t, MemoryBrokerOptions{})
+	defer cancel()
+	require.NoError(t, b.Subscribe("forex.*"))
+
+	_, err := b.Publish("forex.eur", publishPub([]byte("eur"), false))
+	require.NoError(t, err)
+	_, err = b.Publish("stocks.us", publishPub([]byte("us"), false))
+	require.NoError(t, err)
+
+	require.Equal(t, 1, cp.count(), "only the wildcard-matched publish may reach the handler")
+	require.Equal(t, "forex.eur", cp.last().Channel)
+}
+
+// TestMemoryBroker_WildcardUnsubscribeToZero verifies a wildcard pattern is
+// removed from the matcher when its refcount drops to zero, so interest is
+// no longer reported.
+func TestMemoryBroker_WildcardUnsubscribeToZero(t *testing.T) {
+	b, cp, cancel := newTestBroker(t, MemoryBrokerOptions{})
+	defer cancel()
+	require.NoError(t, b.Subscribe("forex.*"))
+	require.NoError(t, b.Subscribe("forex.*"))
+	require.NoError(t, b.Unsubscribe("forex.*"))
+	_, err := b.Publish("forex.eur", publishPub([]byte("eur"), false))
+	require.NoError(t, err)
+	require.Equal(t, 1, cp.count(), "a refcounted wildcard still has interest while one subscriber remains")
+	require.NoError(t, b.Unsubscribe("forex.*"))
+	_, err = b.Publish("forex.eur", publishPub([]byte("eur2"), false))
+	require.NoError(t, err)
+	require.Equal(t, 1, cp.count(), "interest must be gone after the last wildcard unsubscribe")
+}
+
+// TestMemoryBroker_ExactAndWildcardInterest verifies §10.3 + hard constraint
+// 4: Subscribe("im.**") alone makes Publish("im.room.1") reach the handler,
+// and an exact subscription counts as interest too.
+func TestMemoryBroker_ExactAndWildcardInterest(t *testing.T) {
+	b, cp, cancel := newTestBroker(t, MemoryBrokerOptions{})
+	defer cancel()
+	require.NoError(t, b.Subscribe("im.**"))
+
+	_, err := b.Publish("im.room.1", publishPub([]byte("m1"), false))
+	require.NoError(t, err)
+	require.Equal(t, 1, cp.count(), "Publish(\"im.room.1\") must reach the handler with only Subscribe(\"im.**\")")
+	require.Equal(t, "im.room.1", cp.last().Channel)
+}
+
+// TestMemoryBroker_History_HeadTrimmed verifies §10.4: with a size-2 ring
+// and offsets 1,2,3, History(ch, 1) excludes offset 1, reports
+// GapReason=HeadTrimmed and FirstRetained=2.
+func TestMemoryBroker_History_HeadTrimmed(t *testing.T) {
+	b := NewMemoryBroker(MemoryBrokerOptions{HistorySize: 2})
+	for i := 0; i < 3; i++ {
+		_, err := b.Publish("ch", publishPub([]byte{byte('a' + i)}, false))
+		require.NoError(t, err)
+	}
+
+	page, err := b.History("ch", 1, 0)
+	require.NoError(t, err)
+	require.Equal(t, []uint64{2, 3}, offsetsOf(page.Pubs()), "offset 1 must be trimmed")
+	require.True(t, page.Gap)
+	require.Equal(t, HistoryGapHeadTrimmed, page.GapReason)
+	require.Equal(t, uint64(2), page.FirstRetained)
+	require.False(t, page.Truncated)
+}
+
+// TestMemoryBroker_History_EmptyExpiredSince verifies §10.5: a positive
+// sinceOffset with no retained entries (never published) reports
+// EmptyExpired with an empty batch — never None.
+func TestMemoryBroker_History_EmptyExpiredSince(t *testing.T) {
+	b := NewMemoryBroker(MemoryBrokerOptions{})
+	page, err := b.History("never.published", 5, 0)
+	require.NoError(t, err)
+	require.Empty(t, page.Pubs())
+	require.True(t, page.Gap, "since>0 with no retained entries must never be HistoryGapNone")
+	require.Equal(t, HistoryGapEmptyExpired, page.GapReason)
+	require.Zero(t, page.FirstRetained)
+
+	// A channel that published but whose ring was emptied behaves the same.
+	require.NoError(t, b.Subscribe("emptied.ch"))
+	_, err = b.Publish("emptied.ch", publishPub([]byte("x"), false))
+	require.NoError(t, err)
+	require.NoError(t, b.Unsubscribe("emptied.ch"))
+	mb := b.(*memoryBroker)
+	mb.mu.Lock()
+	if h, ok := mb.history["emptied.ch"]; ok {
+		h.mu.Lock()
+		h.count = 0
+		h.mu.Unlock()
+	}
+	mb.mu.Unlock()
+	page, err = b.History("emptied.ch", 1, 0)
+	require.NoError(t, err)
+	require.Empty(t, page.Pubs())
+	require.Equal(t, HistoryGapEmptyExpired, page.GapReason)
+}
+
+// TestMemoryBroker_History_ZeroSinceUnpublished verifies §10.6: reading from
+// the beginning of a never-published channel is a clean empty page with
+// GapReason=None.
+func TestMemoryBroker_History_ZeroSinceUnpublished(t *testing.T) {
+	b := NewMemoryBroker(MemoryBrokerOptions{})
+	page, err := b.History("ch", 0, 0)
+	require.NoError(t, err)
+	require.Empty(t, page.Pubs())
+	require.False(t, page.Gap, "since=0 reads from the head: no gap")
+	require.Equal(t, HistoryGapNone, page.GapReason)
+	require.Zero(t, page.FirstRetained)
+}
+
+// TestMemoryBroker_History_TruncatedFlag verifies Truncated mirrors
+// len(Publications)==limit when limit > 0.
+func TestMemoryBroker_History_TruncatedFlag(t *testing.T) {
+	b := NewMemoryBroker(MemoryBrokerOptions{})
+	for i := 0; i < 5; i++ {
+		_, err := b.Publish("ch", publishPub([]byte{byte(i)}, false))
+		require.NoError(t, err)
+	}
+	page, err := b.History("ch", 0, 3)
+	require.NoError(t, err)
+	require.Len(t, page.Pubs(), 3)
+	require.True(t, page.Truncated)
+	require.False(t, page.Gap)
+
+	page, err = b.History("ch", 0, 0)
+	require.NoError(t, err)
+	require.Len(t, page.Pubs(), 5)
+	require.False(t, page.Truncated)
+}
+
+func offsetsOf(pubs []*Publication) []uint64 {
+	offsets := make([]uint64, 0, len(pubs))
+	for _, p := range pubs {
+		offsets = append(offsets, p.Offset)
+	}
+	return offsets
 }
 
 // --- node integration ---
@@ -572,8 +754,7 @@ func TestMemoryBroker_Publish_PreservesKindAndMetadata(t *testing.T) {
 	require.NoError(t, err)
 	require.NotZero(t, offset)
 
-	history, err := b.History("ch", 0, 0)
-	require.NoError(t, err)
+	history := historyPubs(t, b, "ch", 0, 0)
 	require.Len(t, history, 1)
 	h := history[0]
 	require.Equal(t, PayloadKindJSON, h.Kind)

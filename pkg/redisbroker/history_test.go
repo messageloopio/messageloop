@@ -53,8 +53,9 @@ func TestRedisBroker_PerPublishHistorySize(t *testing.T) {
 		})
 		require.NoError(t, err)
 	}
-	pubs, err := broker.History(ch, 0, 0)
+	page, err := broker.History(ch, 0, 0)
 	require.NoError(t, err)
+	pubs := page.Pubs()
 	require.Len(t, pubs, 3, "per-publication HistorySize=3 must cap the stream to the last 3 entries")
 	require.Equal(t, "c", string(pubs[0].Payload))
 	require.Equal(t, "e", string(pubs[2].Payload))
@@ -157,16 +158,88 @@ func TestRedisBroker_History_InclusiveSinceOffset(t *testing.T) {
 
 	// Recovery from o2 must include o2 itself and o3 (exclusive behavior
 	// would only return o3).
-	pubs, err := broker.History(ch, o2, 0)
+	page, err := broker.History(ch, o2, 0)
 	require.NoError(t, err)
+	pubs := page.Pubs()
 	require.Len(t, pubs, 2, "History(ch, o2) must return o2 and o3")
 	require.Equal(t, o2, pubs[0].Offset)
 	require.Equal(t, o3, pubs[1].Offset)
+	require.False(t, page.Gap, "sinceOffset within the retained range is not a gap")
+	require.True(t, page.FirstRetained <= o2, "FirstRetained must be the stream head")
 
 	// Full scan regression: from the beginning all three must be returned.
 	all, err := broker.History(ch, 0, 0)
 	require.NoError(t, err)
-	require.Len(t, all, 3, "History(ch, 0) must return all entries")
+	require.Len(t, all.Pubs(), 3, "History(ch, 0) must return all entries")
+	require.False(t, all.Gap, "reading from the head is never a gap")
+}
+
+// TestRedisBroker_History_EmptyExpiredSince verifies §10.8: History on a
+// channel that never had entries with sinceOffset > 0 reports an empty page
+// with GapReason=EmptyExpired, never None.
+func TestRedisBroker_History_EmptyExpiredSince(t *testing.T) {
+	redisCfg := requireCommandBusRedis(t)
+	broker := New(redisCfg).(*redisBroker)
+	t.Cleanup(func() { _ = broker.client.Close() })
+
+	page, err := broker.History("never-published", 42, 0)
+	require.NoError(t, err)
+	require.Empty(t, page.Pubs())
+	require.True(t, page.Gap, "since>0 with no retained entries must never be HistoryGapNone")
+	require.Equal(t, messageloop.HistoryGapEmptyExpired, page.GapReason)
+	require.Zero(t, page.FirstRetained)
+}
+
+// TestRedisBroker_History_HeadTrimmed verifies the retained marker drives
+// gap detection: with MAXLEN=2 the first entry is trimmed, so a sinceOffset
+// below the retained head reports GapReason=HeadTrimmed.
+func TestRedisBroker_History_HeadTrimmed(t *testing.T) {
+	redisCfg := requireCommandBusRedis(t)
+	broker := New(redisCfg).(*redisBroker)
+	t.Cleanup(func() { _ = broker.client.Close() })
+	broker.opts.StreamApproximate = false
+
+	ch := "history-head-trimmed"
+	offsets := make([]uint64, 0, 3)
+	for i := 0; i < 3; i++ {
+		offset, err := broker.Publish(ch, &messageloop.Publication{
+			Payload:     []byte{byte('a' + i)},
+			Kind:        messageloop.PayloadKindBinary,
+			HistorySize: 2,
+		})
+		require.NoError(t, err)
+		offsets = append(offsets, offset)
+	}
+	o1, o3 := offsets[0], offsets[2]
+
+	page, err := broker.History(ch, o1, 0)
+	require.NoError(t, err)
+	require.Len(t, page.Pubs(), 2, "entries o2 and o3 remain")
+	require.True(t, page.Gap, "the first entry was trimmed")
+	require.Equal(t, messageloop.HistoryGapHeadTrimmed, page.GapReason)
+	require.Greater(t, page.FirstRetained, o1, "FirstRetained must point past the trimmed entry")
+	require.LessOrEqual(t, page.FirstRetained, o3)
+}
+
+// TestRedisBroker_History_NoGapAtHeadWithMarker verifies the marker keeps
+// reporting no gap for an untrimmed stream even after a fresh channel.
+func TestRedisBroker_History_NoGapAtHeadWithMarker(t *testing.T) {
+	redisCfg := requireCommandBusRedis(t)
+	broker := New(redisCfg).(*redisBroker)
+	t.Cleanup(func() { _ = broker.client.Close() })
+
+	ch := "history-no-gap"
+	offsets := make([]uint64, 0, 2)
+	for i := 0; i < 2; i++ {
+		offset, err := broker.Publish(ch, &messageloop.Publication{Payload: []byte("m"), Kind: messageloop.PayloadKindBinary})
+		require.NoError(t, err)
+		offsets = append(offsets, offset)
+	}
+	page, err := broker.History(ch, offsets[0], 0)
+	require.NoError(t, err)
+	require.Len(t, page.Pubs(), 2)
+	require.False(t, page.Gap, "an untrimmed stream covering sinceOffset is not a gap")
+	require.Equal(t, offsets[0], page.FirstRetained)
 }
 
 // Task 12: old stream entries written without the kind field must deserialize

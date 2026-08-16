@@ -528,9 +528,9 @@ func TestClientSession_HandleMessage_Publish_Transient(t *testing.T) {
 	}
 	require.NoError(t, client.HandleMessage(ctx, regularMsg))
 
-	history, err := node.Broker().History("test-channel", 0, 100)
+	historyPage, err := node.Broker().History("test-channel", 0, 100)
 	require.NoError(t, err)
-	require.Len(t, history, 1, "regular publish must be stored in history")
+	require.Len(t, historyPage.Pubs(), 1, "regular publish must be stored in history")
 
 	// Reset transport messages（regular 发布的 ack 不计入 transient 断言）
 	transport.messages = nil
@@ -564,9 +564,9 @@ func TestClientSession_HandleMessage_Publish_Transient(t *testing.T) {
 
 	// Transient publish must NOT be stored in history (still exactly the
 	// single regular publication).
-	history, err = node.Broker().History("test-channel", 0, 100)
+	historyPage, err = node.Broker().History("test-channel", 0, 100)
 	require.NoError(t, err)
-	require.Len(t, history, 1, "transient publish must not be stored in history")
+	require.Len(t, historyPage.Pubs(), 1, "transient publish must not be stored in history")
 }
 
 func TestClientSession_HandleMessage_Subscribe(t *testing.T) {
@@ -1259,7 +1259,7 @@ func (f *fakeHistoryBroker) PublishTransient(ch string, pub *Publication) error 
 	return nil
 }
 
-func (f *fakeHistoryBroker) History(ch string, sinceOffset uint64, limit int) ([]*Publication, error) {
+func (f *fakeHistoryBroker) History(ch string, sinceOffset uint64, limit int) (*HistoryPage, error) {
 	result := make([]*Publication, 0, len(f.pubs))
 	for _, p := range f.pubs {
 		if p.Offset >= sinceOffset {
@@ -1269,7 +1269,7 @@ func (f *fakeHistoryBroker) History(ch string, sinceOffset uint64, limit int) ([
 			result = append(result, p)
 		}
 	}
-	return result, nil
+	return &HistoryPage{Publications: result}, nil
 }
 
 func TestNode_Connect_RecoveryIDsMatchRealtime(t *testing.T) {

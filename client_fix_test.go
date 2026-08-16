@@ -131,8 +131,9 @@ func TestClientSession_HandleMessage_Publish_JSONPayload(t *testing.T) {
 
 	// The published bytes must be parseable JSON with the exact content (not
 	// the structpb protobuf text format).
-	pubs, err := node.Broker().History("json-ch", 0, 0)
+	page, err := node.Broker().History("json-ch", 0, 0)
 	require.NoError(t, err)
+	pubs := page.Pubs()
 	require.Len(t, pubs, 1)
 	require.Equal(t, PayloadKindJSON, pubs[0].Kind)
 
@@ -907,7 +908,7 @@ func (f *fakeEpochHistoryBroker) PublishTransient(ch string, pub *Publication) e
 	return nil
 }
 
-func (f *fakeEpochHistoryBroker) History(ch string, sinceOffset uint64, limit int) ([]*Publication, error) {
+func (f *fakeEpochHistoryBroker) History(ch string, sinceOffset uint64, limit int) (*HistoryPage, error) {
 	result := make([]*Publication, 0, len(f.pubs))
 	for _, p := range f.pubs {
 		if p.Offset >= sinceOffset {
@@ -917,7 +918,7 @@ func (f *fakeEpochHistoryBroker) History(ch string, sinceOffset uint64, limit in
 			result = append(result, p)
 		}
 	}
-	return result, nil
+	return &HistoryPage{Publications: result}, nil
 }
 
 func TestClient_Connect_RecoveryFromZeroWhenClientEpochMissing(t *testing.T) {
@@ -1703,7 +1704,7 @@ func (b *failStartBroker) Subscribe(string) error { return nil }
 func (b *failStartBroker) Unsubscribe(string) error { return nil }
 func (b *failStartBroker) Publish(string, *Publication) (uint64, error) { return 0, nil }
 func (b *failStartBroker) PublishTransient(string, *Publication) error { return nil }
-func (b *failStartBroker) History(string, uint64, int) ([]*Publication, error) { return nil, nil }
+func (b *failStartBroker) History(string, uint64, int) (*HistoryPage, error) { return nil, nil }
 
 func TestNode_Run_BrokerStartFailureReturnsError(t *testing.T) {
 	node := NewNode(nil)

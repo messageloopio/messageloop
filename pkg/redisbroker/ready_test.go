@@ -29,23 +29,32 @@ func (failPublishHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis
 	return next
 }
 
-// TestRedisBroker_Publish_PubSubFailureRollsBackStream verifies that a failed
-// PUBLISH rolls back the stream entry (XDEL) so history stays consistent with
-// what was actually delivered in real time.
-func TestRedisBroker_Publish_PubSubFailureRollsBackStream(t *testing.T) {
+// TestRedisBroker_Publish_PubSubFailureKeepsStream verifies §7.1/§10.7: a
+// failed PUBLISH must NOT roll back the stream entry (zero XDel) and Publish
+// must still return the assigned offset with err=nil — the stream log already
+// accepted the message (KD-K14).
+func TestRedisBroker_Publish_PubSubFailureKeepsStream(t *testing.T) {
 	redisCfg := requireCommandBusRedis(t)
 	broker := New(redisCfg).(*redisBroker)
 	t.Cleanup(func() { _ = broker.client.Close() })
 	broker.client.AddHook(failPublishHook{})
 
-	ch := "publish-rollback"
-	_, err := broker.Publish(ch, &messageloop.Publication{Payload: []byte("msg"), Kind: messageloop.PayloadKindBinary})
-	require.Error(t, err, "publish must fail when the pub/sub delivery fails")
+	ch := "publish-no-rollback"
+	offset, err := broker.Publish(ch, &messageloop.Publication{Payload: []byte("msg"), Kind: messageloop.PayloadKindBinary})
+	require.NoError(t, err, "a pub/sub delivery failure must not negate the publish")
+	require.NotZero(t, offset, "the assigned stream offset must be reported")
 
 	stream := broker.opts.StreamPrefix + ch
 	length, lerr := broker.client.XLen(context.Background(), stream).Result()
 	require.NoError(t, lerr)
-	require.Zero(t, length, "stream entry must be rolled back after a pubsub failure")
+	require.Equal(t, int64(1), length, "the stream entry must be retained after a pubsub failure")
+
+	// The history page still serves the entry, and its retained marker was
+	// written with the entry's own offset.
+	page, herr := broker.History(ch, 0, 0)
+	require.NoError(t, herr)
+	require.Len(t, page.Pubs(), 1)
+	require.Equal(t, offset, page.FirstRetained)
 }
 
 // requireCommandBusRedis lives in cluster_command_bus_test.go; this test file

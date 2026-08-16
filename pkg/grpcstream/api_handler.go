@@ -325,10 +325,11 @@ func firstNonEmpty(values ...string) string {
 func (h *apiServiceHandler) GetHistory(ctx context.Context, req *serverpb.GetHistoryRequest) (*serverpb.GetHistoryResponse, error) {
 	log.InfoContext(ctx, "server side API GetHistory", "channel", req.Channel, "since_offset", req.SinceOffset, "limit", req.Limit)
 
-	pubs, err := h.node.Broker().History(req.Channel, req.SinceOffset, int(req.Limit))
+	page, err := h.node.Broker().History(req.Channel, req.SinceOffset, int(req.Limit))
 	if err != nil {
 		return nil, err
 	}
+	pubs := page.Pubs()
 
 	result := make([]*serverpb.HistoryPublication, 0, len(pubs))
 	for _, pub := range pubs {

@@ -23,12 +23,35 @@ type countingRecoveryBroker struct {
 	historyErr   error
 }
 
-func (c *countingRecoveryBroker) History(ch string, sinceOffset uint64, limit int) ([]*Publication, error) {
+func (c *countingRecoveryBroker) History(ch string, sinceOffset uint64, limit int) (*HistoryPage, error) {
 	c.historyCalls.Add(1)
 	if c.historyErr != nil {
 		return nil, c.historyErr
 	}
 	return c.fakeEpochHistoryBroker.History(ch, sinceOffset, limit)
+}
+
+// gapHistoryBroker returns an empty history page with the given gap reason,
+// proving recoverSubscription never claims RecoverOK on an unprovable empty
+// batch (A2 §10.9).
+type gapHistoryBroker struct {
+	reason HistoryGapReason
+}
+
+func (g *gapHistoryBroker) Start(ctx context.Context, handler PublicationHandler) error {
+	<-ctx.Done()
+	return nil
+}
+
+func (g *gapHistoryBroker) Subscribe(string) error   { return nil }
+func (g *gapHistoryBroker) Unsubscribe(string) error { return nil }
+func (g *gapHistoryBroker) Publish(ch string, pub *Publication) (uint64, error) {
+	return 0, nil
+}
+func (g *gapHistoryBroker) PublishTransient(ch string, pub *Publication) error { return nil }
+
+func (g *gapHistoryBroker) History(ch string, sinceOffset uint64, limit int) (*HistoryPage, error) {
+	return &HistoryPage{Gap: true, GapReason: g.reason}, nil
 }
 
 // recoveryPubs builds history publications for channel ch with offsets
@@ -385,6 +408,31 @@ func TestSubscribe_ResubscribeCatchUp(t *testing.T) {
 	assert.Equal(t, uint64(8), second.GetRecoverResults()[0].GetOffset())
 	assert.Equal(t, 1, node.Hub().NumSubscribers("resub.ch"),
 		"re-subscribe is catch-up on the same session, not a second subscriber")
+}
+
+// --- §10.9: an empty batch with a gap must never claim RecoverOK ---
+
+func TestSubscribe_RecoverEmptyBatchGapIsTruncated(t *testing.T) {
+	ctx := context.Background()
+	reg := prometheus.NewRegistry()
+	metrics := NewMetrics(reg)
+	node := NewNode(nil)
+	node.SetMetrics(metrics)
+	node.SetBroker(&gapHistoryBroker{reason: HistoryGapEmptyExpired})
+	require.NoError(t, node.Run(ctx))
+
+	ack := subscribeAck(t, node, []*clientpb.Subscription{
+		{Channel: "gap.ch", Recover: true, Offset: 5, Epoch: "v2"},
+	})
+
+	assert.Empty(t, ack.GetPublications())
+	require.Len(t, ack.GetRecoverResults(), 1)
+	res := ack.GetRecoverResults()[0]
+	assert.True(t, res.GetRecovered())
+	assert.True(t, res.GetTruncated(), "an empty batch with a gap must be truncated, not RecoverOK")
+	assert.Equal(t, uint64(5), res.GetOffset(), "the cursor must be echoed")
+	assert.Equal(t, float64(1), testutil.ToFloat64(metrics.RecoveryGapTotal.WithLabelValues("empty_expired")),
+		"messageloop_recovery_gap_total{reason=empty_expired} must increment")
 }
 
 // --- §9.10: an empty successful batch echoes the cursor, not 0 ---
