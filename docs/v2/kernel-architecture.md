@@ -654,8 +654,7 @@ Session 与 Stream 同区域。**跨区域 Directory Bind 直接禁止。** 只�
 | **C2** | `node_epoch` 只准 INCR。规格：[pr-ka-c2-epoch.md](tasks/pr-ka-c2-epoch.md) | 生产 incarnation 无 UUID；同 node 两次启动 epoch 严格 +1 |
 | **C3** | NodeRPC 请求改 Redis Stream。规格：[pr-ka-c3-stream.md](tasks/pr-ka-c3-stream.md) | 请求无 `cmd:req:` Pub/Sub；HMAC 拒绝也 XACK |
 | **C4** | History 稠密 seq，真中洞检测（Q8）。规格：[pr-ka-c4-dense-seq.md](tasks/pr-ka-c4-dense-seq.md) | 页内中洞报 `middle`；发号与 XADD 原子，无假洞 |
-
-`ml2:` 键前缀仍是后续独立刀。
+| **C5** | Redis 键前缀换代 `ml:` → `ml2:`。规格：[pr-ka-c5-keyprefix.md](tasks/pr-ka-c5-keyprefix.md) | 生产代码零 `ml:` 字面量；键结构/语义不变 |
 
 A0–A4 可在仍叫 `*Client` 的代码上先改合同；B1 再改对象名。不必等「旧 RC」。
 
