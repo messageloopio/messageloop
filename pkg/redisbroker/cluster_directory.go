@@ -41,6 +41,28 @@ func (d *redisSessionDirectory) nodeLeaseKey(nodeID, incarnationID string) strin
 	return fmt.Sprintf("%s%s:%s", d.opts.ClusterNodePrefix, nodeID, incarnationID)
 }
 
+// nodeEpochKey is the monotone counter key for a node's process generations
+// (KD-K27). It deliberately sits at ml:cluster:node_epoch:{nodeID}, NOT
+// under the ml:cluster:node: prefix, so the ListNodeLeases SCAN never picks
+// it up.
+func (d *redisSessionDirectory) nodeEpochKey(nodeID string) string {
+	return d.opts.ClusterPrefix + "node_epoch:" + nodeID
+}
+
+// NextNodeEpoch allocates the node's next process generation with a single
+// INCR; the first issue for a nodeID is 1. The decimal rendering of the
+// returned epoch (messageloop.FormatNodeEpoch) is the IncarnationID.
+func (d *redisSessionDirectory) NextNodeEpoch(ctx context.Context, nodeID string) (uint64, error) {
+	if nodeID == "" {
+		return 0, errors.New("node_epoch: node_id is required")
+	}
+	epoch, err := d.client.Incr(ctx, d.nodeEpochKey(nodeID)).Uint64()
+	if err != nil {
+		return 0, fmt.Errorf("node_epoch INCR for node %s: %w", nodeID, err)
+	}
+	return epoch, nil
+}
+
 func (d *redisSessionDirectory) sessionLeaseKey(sessionID string) string {
 	return d.opts.ClusterSessionLeasePrefix + sessionID
 }
@@ -348,3 +370,4 @@ func clusterSessionLeaseEqual(left, right *messageloop.ClusterSessionLease) bool
 var _ messageloop.SessionDirectory = (*redisSessionDirectory)(nil)
 var _ messageloop.ClusterSessionLeaseLister = (*redisSessionDirectory)(nil)
 var _ messageloop.ClusterNodeLeaseLister = (*redisSessionDirectory)(nil)
+var _ messageloop.NodeEpochAllocator = (*redisSessionDirectory)(nil)

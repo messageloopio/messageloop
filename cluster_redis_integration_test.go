@@ -500,11 +500,17 @@ func newClusterRedisTestNodeWithConfig(t *testing.T, parent context.Context, red
 	node.SetBroker(redisbroker.New(redisCfg))
 	node.SetPresenceStore(redisbroker.NewPresenceStore(redisCfg))
 
-	cluster, err := messageloop.NewCluster(messageloop.ClusterOptions{Enabled: true, NodeID: nodeID, Backend: "redis"}, messageloop.ClusterDependencies{})
-	require.NoError(t, err)
-
+	// The redis session directory allocates the node epoch (KD-K27); the
+	// first NewCluster only exists to resolve the incarnation used to wire
+	// the bus / lease manager below.
 	clusterDeps := messageloop.ClusterDependencies{}
 	clusterDeps.SessionDirectory = redisbroker.NewSessionDirectory(redisCfg)
+
+	cluster, err := messageloop.NewCluster(messageloop.ClusterOptions{Enabled: true, NodeID: nodeID, Backend: "redis"}, messageloop.ClusterDependencies{
+		SessionDirectory: clusterDeps.SessionDirectory,
+	})
+	require.NoError(t, err)
+
 	clusterDeps.CommandBus = redisbroker.NewClusterCommandBus(redisCfg, cluster.NodeID(), cluster.IncarnationID(), testClusterHMACKey)
 	clusterDeps.QueryStore = redisbroker.NewClusterQueryStore(redisCfg, cluster.NodeID(), cluster.IncarnationID())
 	clusterDeps.NodeLeaseManager = messageloop.NewClusterNodeLeaseManager(clusterDeps.SessionDirectory, messageloop.ClusterNodeLeaseManagerConfig{

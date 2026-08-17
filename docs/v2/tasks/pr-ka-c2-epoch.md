@@ -3,7 +3,7 @@
 | 字段 | 值 |
 | --- | --- |
 | 标题 | `cluster: allocate incarnation as monotonic node_epoch; no UUID` |
-| 状态 | **Ready** |
+| 状态 | **Accepted**（2026-08-17 主 agent 终验通过，尚未 commit） |
 | 依赖 | C1 已合（`0adfdf3`）。在 `v2` 分支上做 |
 | 设计来源 | [kernel-architecture.md](../kernel-architecture.md) 三把时钟、KD-K27、KD-K31 |
 | 验收人 | 主 agent |
@@ -157,4 +157,13 @@ opts.IncarnationID = FormatNodeEpoch(epoch)
 
 ## 10. 实现备注（完成后填写）
 
-（实现者填写）
+已实现（v2 分支，基于 C1 `0adfdf3`）：
+
+- `cluster_epoch.go`（新）：`NodeEpochAllocator`、`FormatNodeEpoch`、`ParseNodeEpoch`（只认非零 epoch 的规范十进制形式，`"inc-a"`/`"0"`/`"01"` → false）、`NodeEpochNewer`（数值比较，`"10"` 新于 `"2"`）、`MemoryNodeEpochAllocator`（按 nodeID 分桶、首值 1）及包级共享实例；`allocateNodeIncarnation` 实现 §5.1 表格：Directory 可分配 → 用它；redis 后端不可分配 → error（文案含 `node_epoch` / `incarnation`）；memory/noop → 进程内计数器。
+- `cluster.go`：`normalize()` 删除 `uuid.NewString()`，空 ID 留给分配器；`NewCluster` 在替换默认依赖之后、派生 Repairer 之前分配 incarnation。
+- `pkg/redisbroker/cluster_directory.go`：`redisSessionDirectory.NextNodeEpoch` = `INCR ml:cluster:node_epoch:{nodeID}`（`ClusterPrefix + "node_epoch:" + nodeID`，不在 `ml:cluster:node:*` SCAN 前缀下）；补 `NodeEpochAllocator` 接口断言。
+- `cmd/server/main.go`：`normalizeClusterOptions` 不再生成 UUID；`setupCluster`（redis 后端）在接线 bus / query store / lease manager 之前 `NextNodeEpoch`，失败即拒启动，并打 `node_id` + `incarnation_id` + `node_epoch` 日志。
+- 测试：`cluster_epoch_test.go`（新，根包）、`pkg/redisbroker/cluster_epoch_test.go`（新，含「epoch 键不被节点租约 SCAN 收割」用例）；`cluster_test.go` 三个用例改走 memory 后端；`cluster_redis_integration_test.go` 的预接线 `NewCluster` 改为先建 SessionDirectory 再分配（两阶段接线语义不变）。
+- `docs/developer/04-cluster.md` §2.2：incarnation 发号改为 INCR 的描述。
+
+CAS 四字段谓词、HMAC 规范字节、命令总线 Pub/Sub 通道名、C1 sim 场景、StreamEpoch / OccupancyGen 均未动；未做 `ml2:` 换代；未 commit。

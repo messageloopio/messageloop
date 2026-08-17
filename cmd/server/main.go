@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/lynx-go/lynx"
 	"github.com/lynx-go/lynx/contrib/zap"
 	lynxhttp "github.com/lynx-go/lynx/server/http"
@@ -131,6 +130,9 @@ func main() {
 // config, mirroring messageloop.ClusterOptions.normalize() so the
 // control-plane dependencies can be wired before the single NewCluster
 // construction (the normalization result is passed back into NewCluster).
+// The IncarnationID is left empty here: setupCluster allocates the monotonic
+// node_epoch (KD-K27) before wiring the bus / lease manager, which need the
+// final ID.
 func normalizeClusterOptions(cfg *config.Config) (messageloop.ClusterOptions, error) {
 	if !cfg.Cluster.Enabled {
 		return messageloop.ClusterOptions{}, nil
@@ -144,10 +146,9 @@ func normalizeClusterOptions(cfg *config.Config) (messageloop.ClusterOptions, er
 		backend = "redis"
 	}
 	return messageloop.ClusterOptions{
-		Enabled:       true,
-		NodeID:        nodeID,
-		Backend:       backend,
-		IncarnationID: uuid.NewString(),
+		Enabled: true,
+		NodeID:  nodeID,
+		Backend: backend,
 	}, nil
 }
 
@@ -170,6 +171,21 @@ func setupCluster(cfg *config.Config, node *messageloop.Node, metrics *messagelo
 
 	deps := messageloop.ClusterDependencies{}
 	deps.SessionDirectory = redisbroker.NewSessionDirectory(cfg.Broker.Redis)
+
+	// Allocate this process's generation BEFORE wiring anything that carries
+	// the incarnation (bus channels, lease manager): the node_epoch INCR is
+	// the only production source of IncarnationID (KD-K27). If the INCR is
+	// impossible, startup is refused — never fall back to a random ID.
+	epochAllocator, ok := deps.SessionDirectory.(messageloop.NodeEpochAllocator)
+	if !ok {
+		return nil, errors.New("cluster node_epoch: redis session directory cannot allocate node epochs")
+	}
+	epoch, err := epochAllocator.NextNodeEpoch(context.Background(), opts.NodeID)
+	if err != nil {
+		return nil, fmt.Errorf("allocate cluster node_epoch: %w", err)
+	}
+	opts.IncarnationID = messageloop.FormatNodeEpoch(epoch)
+	slog.Info("allocated cluster node epoch", "node_id", opts.NodeID, "incarnation_id", opts.IncarnationID, "node_epoch", epoch)
 
 	// The command-bus HMAC key comes only from node configuration; a
 	// misconfigured or unreadable key must refuse startup rather than run an

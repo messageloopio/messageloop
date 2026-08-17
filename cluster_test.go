@@ -137,12 +137,17 @@ func TestNewCluster_EnabledRequiresNodeID(t *testing.T) {
 func TestNewCluster_EnabledGeneratesIncarnationID(t *testing.T) {
 	t.Parallel()
 
-	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-a", Backend: "redis"}, ClusterDependencies{})
+	// Empty IncarnationID is issued by the node epoch allocator (KD-K27):
+	// the memory backend uses the process-local counter. The redis backend
+	// without an allocating directory is an error (see cluster_epoch_test.go).
+	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-epoch-cluster-test", Backend: "memory"}, ClusterDependencies{})
 	assert.NoError(t, err)
 	assert.True(t, runtime.Enabled())
-	assert.Equal(t, "node-a", runtime.NodeID())
-	assert.Equal(t, "redis", runtime.Backend())
+	assert.Equal(t, "node-epoch-cluster-test", runtime.NodeID())
+	assert.Equal(t, "memory", runtime.Backend())
 	assert.NotEmpty(t, runtime.IncarnationID())
+	_, ok := ParseNodeEpoch(runtime.IncarnationID())
+	assert.True(t, ok, "allocated incarnation %q must be a decimal node epoch", runtime.IncarnationID())
 }
 
 func TestCluster_StartAndShutdownOnlyOnce(t *testing.T) {
@@ -154,7 +159,7 @@ func TestCluster_StartAndShutdownOnlyOnce(t *testing.T) {
 	nodeLeaseManager := &trackingClusterComponent{}
 	repairer := &trackingClusterComponent{}
 
-	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-a"}, ClusterDependencies{
+	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-a", Backend: "memory"}, ClusterDependencies{
 		SessionDirectory: sessionDirectory,
 		CommandBus:       commandBus,
 		QueryStore:       queryStore,
@@ -189,7 +194,7 @@ func TestCluster_StartPartialFailureRollsBackAndAllowsRetry(t *testing.T) {
 	nodeLeaseManager := &trackingClusterComponent{}
 	repairer := &trackingClusterComponent{}
 
-	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-a"}, ClusterDependencies{
+	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-a", Backend: "memory"}, ClusterDependencies{
 		SessionDirectory: sessionDirectory,
 		CommandBus:       commandBus,
 		QueryStore:       queryStore,

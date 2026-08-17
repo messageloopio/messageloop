@@ -51,7 +51,7 @@ MessageLoop 可以以两种形态运行：
 - `redis`：唯一在服务端二进制中接入实际实现的取值。启用时装配会话目录、命令总线、查询投影、节点租约与投影修复，并把 Presence 存储替换为 Redis 实现（`cmd/server/main.go:111-142`）。
 - `memory` / `noop`：no-op 组件，进程内 API 使用或测试用；控制面各接口退化为本地行为（例如命令总线返回 `ErrClusterCommandUnsupported`，见 `cluster_state.go`）。
 
-另外，`ClusterOptions` 中还有自动生成的 `IncarnationID`（进程实例标识）：每次进程启动生成一个随机 UUID，不来自配置。节点的完整身份是 `(NodeID, IncarnationID)` 二元组，旧进程重启后会得到新的 `IncarnationID`，从而与旧实例的租约区分开。
+另外，`ClusterOptions` 中还有自动分配的 `IncarnationID`（进程实例标识，KD-K27），不来自配置：启动时对该节点的 **node_epoch 计数器发号一次**，`IncarnationID` 就是 epoch 的十进制字符串（`"1"`、`"2"`……）。Redis 后端用 `INCR ml:cluster:node_epoch:<nodeID>`（`cluster_directory.go` 的 `NextNodeEpoch`；该键刻意不在 `ml:cluster:node:` 前缀下，不会被节点租约 SCAN 收割）；`memory` / `noop` 后端用进程内按 `node_id` 分桶的单调计数器（`MemoryNodeEpochAllocator`，首次为 1）。空 ID + redis 后端且会话目录不能分配时**拒绝启动**，绝不回落随机 ID。更大的 epoch 代表同一节点的更新世代（`NodeEpochNewer`）；测试与 C1 模拟显式传入的 `inc-a` / `inc-b` 不是 epoch（`ParseNodeEpoch` 返回 false），原样保留。节点的完整身份是 `(NodeID, IncarnationID)` 二元组，旧进程重启后会得到更大的 `IncarnationID`，从而与旧实例的租约区分开。
 
 ### 2.3 两节点配置示例
 

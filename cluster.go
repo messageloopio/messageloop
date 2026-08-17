@@ -7,8 +7,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // ClusterOptions configures the cluster control-plane runtime.
@@ -41,14 +39,15 @@ func (o ClusterOptions) normalize() (ClusterOptions, error) {
 	}
 
 	incarnationID := strings.TrimSpace(o.IncarnationID)
-	if incarnationID == "" {
-		incarnationID = uuid.NewString()
-	}
 
 	return ClusterOptions{
-		Enabled:       true,
-		NodeID:        nodeID,
-		Backend:       backend,
+		Enabled: true,
+		NodeID:  nodeID,
+		Backend: backend,
+		// An empty IncarnationID is left for the node epoch allocator in
+		// NewCluster (KD-K27): production generations come from a monotonic
+		// node_epoch (Redis INCR / process-local counter), never a random
+		// UUID. Callers that pass an explicit ID (tests, C1 sim) keep it.
 		IncarnationID: incarnationID,
 	}, nil
 }
@@ -266,6 +265,21 @@ func NewCluster(options ClusterOptions, deps ClusterDependencies) (*Cluster, err
 	if deps.NodeLeaseManager == nil {
 		deps.NodeLeaseManager = &noopClusterNodeLeaseManager{}
 	}
+
+	// An empty IncarnationID is issued by the node epoch allocator (KD-K27):
+	// INCR on Redis, the process-local counter on memory/noop. A redis
+	// backend whose directory cannot allocate is a startup error — never a
+	// silent random or non-monotonic ID. This must happen before the
+	// repairer derivation below, which copies the incarnation into its
+	// config.
+	if normalized.Enabled && normalized.IncarnationID == "" {
+		incarnationID, err := allocateNodeIncarnation(normalized, deps.SessionDirectory)
+		if err != nil {
+			return nil, err
+		}
+		normalized.IncarnationID = incarnationID
+	}
+
 	if deps.Repairer == nil {
 		deps.Repairer = NewClusterRepairer(nil, deps.SessionDirectory, nil, ClusterRepairerConfig{
 			NodeID:        normalized.NodeID,
@@ -295,7 +309,8 @@ func (r *Cluster) NodeID() string {
 	return r.options.NodeID
 }
 
-// IncarnationID returns the generated process incarnation identifier.
+// IncarnationID returns the process incarnation identifier: the decimal
+// node_epoch allocated at startup, or the caller-provided ID in tests.
 func (r *Cluster) IncarnationID() string {
 	if r == nil {
 		return ""
