@@ -368,7 +368,7 @@ StreamLog
 
 ### Gap 合同（可检测子集）
 
-`ts<<20|seq` **不是**稠密序号。第一实现 **不**承诺检测「中间被 XDEL 掉的单洞」。
+`ts<<20|seq` **不是**稠密序号；中洞检测依赖 Stream 条目旁存的每频道稠密 `seq`（`s` 字段，Lua 内 `INCR`+`XADD` 原子发号，C4 落地）。
 
 | `gap_reason` | 何时为真 |
 | --- | --- |
@@ -376,10 +376,11 @@ StreamLog
 | `head_trimmed` | `from` 已设置，且 `first_retained > from`（memory：环最旧 > from；Redis：适配器持久化的 `first_retained` / trim generation，在 MAXLEN 与 TTL 滑动时更新） |
 | `empty_expired` | `from` 已设置，流为空，且曾有过 `first_retained`（整段蒸发）。从未发布过的频道：`gap=false`，空批，unset 游标 |
 | `epoch_reset` | StreamEpoch 与 `from.stream_epoch` 不同 |
+| `middle` | 页内相邻两条保留条目的稠密 `seq` 均已知且不连续（中间有条目被 XDEL）。无 `seq` 的 legacy 条目断开证据链：跨「未知对」不断言，宁可漏报不可诬报 |
 
 禁止：`RecoverOK ∧ 空批 ∧ gap=none` 用在 `from` 已设置且适配器无法证明「保留区仍覆盖 from」的时候。证明不了就标 `head_trimmed` 或 `empty_expired`，宁可假阳性。
 
-后续可选：Stream 条目旁存稠密 `seq`，再承诺中洞。那是独立里程碑，不是第一刀。
+重连 catch-up 的中洞同样按稠密 `seq` 检测：现状为计数 + Warn，不下发客户端；client-facing live gap 信封仍是独立里程碑。
 
 ### LiveBus
 

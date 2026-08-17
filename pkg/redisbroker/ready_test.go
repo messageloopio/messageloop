@@ -40,14 +40,22 @@ func TestRedisBroker_Publish_PubSubFailureKeepsStream(t *testing.T) {
 	broker.client.AddHook(failPublishHook{})
 
 	ch := "publish-no-rollback"
-	offset, err := broker.Publish(ch, &messageloop.Publication{Payload: []byte("msg"), Kind: messageloop.PayloadKindBinary})
+	pub := &messageloop.Publication{Payload: []byte("msg"), Kind: messageloop.PayloadKindBinary}
+	offset, err := broker.Publish(ch, pub)
 	require.NoError(t, err, "a pub/sub delivery failure must not negate the publish")
 	require.NotZero(t, offset, "the assigned stream offset must be reported")
+	require.Equal(t, uint64(1), pub.Seq, "the dense seq must be backfilled onto the publication")
 
 	stream := broker.opts.StreamPrefix + ch
 	length, lerr := broker.client.XLen(context.Background(), stream).Result()
 	require.NoError(t, lerr)
 	require.Equal(t, int64(1), length, "the stream entry must be retained after a pubsub failure")
+
+	// The retained entry carries its dense seq field (C4).
+	msgs, rerr := broker.client.XRangeN(context.Background(), stream, "-", "+", 1).Result()
+	require.NoError(t, rerr)
+	require.Len(t, msgs, 1)
+	require.Equal(t, uint64(1), streamEntrySeq(msgs[0]), "the retained stream entry must carry its dense seq")
 
 	// The history page still serves the entry, and its retained marker was
 	// written with the entry's own offset.
@@ -55,6 +63,38 @@ func TestRedisBroker_Publish_PubSubFailureKeepsStream(t *testing.T) {
 	require.NoError(t, herr)
 	require.Len(t, page.Pubs(), 1)
 	require.Equal(t, offset, page.FirstRetained)
+}
+
+// TestRedisBroker_Publish_SeqKeyHygiene verifies C4 §7.8: Publish leaves both
+// the seq counter key and the stream with a TTL, and PublishTransient never
+// creates a seq key.
+func TestRedisBroker_Publish_SeqKeyHygiene(t *testing.T) {
+	redisCfg := requireCommandBusRedis(t)
+	broker := New(redisCfg).(*redisBroker)
+	t.Cleanup(func() { _ = broker.client.Close() })
+	ctx := context.Background()
+
+	ch := "seq-key-hygiene"
+	_, err := broker.Publish(ch, &messageloop.Publication{Payload: []byte("m"), Kind: messageloop.PayloadKindBinary})
+	require.NoError(t, err)
+
+	seqKey := broker.opts.StreamPrefix + "seq:" + ch
+	streamTTL, err := broker.client.TTL(ctx, broker.opts.StreamPrefix+ch).Result()
+	require.NoError(t, err)
+	require.Greater(t, streamTTL, time.Duration(0), "the stream must carry a TTL")
+	seqTTL, err := broker.client.TTL(ctx, seqKey).Result()
+	require.NoError(t, err)
+	require.Greater(t, seqTTL, time.Duration(0), "the seq counter key must carry a TTL")
+	val, err := broker.client.Get(ctx, seqKey).Result()
+	require.NoError(t, err)
+	require.Equal(t, "1", val, "the seq counter starts at 1")
+
+	transientCh := "seq-key-transient"
+	err = broker.PublishTransient(transientCh, &messageloop.Publication{Payload: []byte("t"), Kind: messageloop.PayloadKindBinary})
+	require.NoError(t, err)
+	exists, err := broker.client.Exists(ctx, broker.opts.StreamPrefix+"seq:"+transientCh).Result()
+	require.NoError(t, err)
+	require.Zero(t, exists, "PublishTransient must never create a seq key")
 }
 
 // requireCommandBusRedis lives in cluster_command_bus_test.go; this test file

@@ -393,6 +393,8 @@ func gapReasonV2(reason HistoryGapReason) sharedv2.GapReason {
 		return sharedv2.GapReason_GAP_REASON_HEAD_TRIMMED
 	case HistoryGapEmptyExpired:
 		return sharedv2.GapReason_GAP_REASON_EMPTY_EXPIRED
+	case HistoryGapMiddle:
+		return sharedv2.GapReason_GAP_REASON_MIDDLE
 	}
 	return sharedv2.GapReason_GAP_REASON_NONE
 }
@@ -409,6 +411,8 @@ func (n *Node) observeRecoveryGap(reason HistoryGapReason) {
 		label = "head_trimmed"
 	case HistoryGapEmptyExpired:
 		label = "empty_expired"
+	case HistoryGapMiddle:
+		label = "middle"
 	}
 	n.metrics.RecoveryGapTotal.WithLabelValues(label).Inc()
 }

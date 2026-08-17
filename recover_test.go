@@ -525,6 +525,40 @@ func TestSubscribe_RecoverEmptyBatchGapIsTruncated(t *testing.T) {
 		"messageloop_recovery_gap_total{reason=empty_expired} must increment")
 }
 
+// --- C4: a middle gap maps to GAP_REASON_MIDDLE on the wire + metric ---
+
+func TestSubscribe_RecoverMiddleGapMapsToProto(t *testing.T) {
+	ctx := context.Background()
+	reg := prometheus.NewRegistry()
+	metrics := NewMetrics(reg)
+	node := NewNode(nil)
+	node.SetMetrics(metrics)
+	node.SetBroker(&gapHistoryBroker{reason: HistoryGapMiddle})
+	require.NoError(t, node.Run(ctx))
+
+	transport := &capturingTransport{}
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
+	require.NoError(t, err)
+	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
+		Id:       "connect-1",
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: "client-1"}},
+	}))
+
+	_, msgs := subscribeAckMsgs(t, client, transport, "sub-1", []*clientpb.Subscription{
+		{Channel: "middle.ch", Recover: true, Cursor: cursorOf("v2", 5)},
+	})
+
+	completes := recoverCompletes(msgs)
+	require.Len(t, completes, 1)
+	rc := completes[0]
+	assert.Equal(t, "middle.ch", rc.GetChannel())
+	assert.True(t, rc.GetGap())
+	assert.Equal(t, sharedv2.GapReason_GAP_REASON_MIDDLE, rc.GetGapReason(),
+		"HistoryGapMiddle must map to GAP_REASON_MIDDLE on the wire")
+	assert.Equal(t, float64(1), testutil.ToFloat64(metrics.RecoveryGapTotal.WithLabelValues("middle")),
+		"messageloop_recovery_gap_total{reason=middle} must increment")
+}
+
 // --- §9.10: an empty successful batch echoes the cursor, not 0 ---
 
 func TestSubscribe_RecoverEmptyEchoesCursor(t *testing.T) {

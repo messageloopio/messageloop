@@ -25,6 +25,7 @@ func newTestRedisBroker() *redisBroker {
 		wcHandles:      make(map[string]*topics.Subscription),
 		matcher:        topics.NewCSTrieMatcher(),
 		lastOffsets:    make(map[string]uint64),
+		lastSeqs:       make(map[string]uint64),
 		liveOps:        make(chan liveOp, liveOpsBufferSize),
 		liveDesired:    make(map[string]struct{}),
 		liveActive:     make(map[string]struct{}),
@@ -716,4 +717,108 @@ func TestRedisBroker_Subscribe_RejectsUnroutable(t *testing.T) {
 	err := b.Subscribe("a..b")
 	require.ErrorIs(t, err, topics.ErrBadTopic)
 	require.Empty(t, liveActiveNames(b))
+}
+
+// TestRedisBroker_DeliverOnce_RecordsDenseSeqBaseline verifies C4: deliverOnce
+// advances lastSeqs in parallel with lastOffsets for sequenced publications,
+// legacy (Seq=0) publications leave the seq baseline untouched, and
+// Unsubscribe drops both baselines.
+func TestRedisBroker_DeliverOnce_RecordsDenseSeqBaseline(t *testing.T) {
+	b := newTestRedisBroker()
+	require.NoError(t, b.Subscribe("ch"))
+
+	b.deliverOnce("ch", &messageloop.Publication{Offset: 10, Seq: 3})
+	b.deliverOnce("ch", &messageloop.Publication{Offset: 11, Seq: 4})
+	// A legacy publication (no dense seq) advances only the offset baseline.
+	b.deliverOnce("ch", &messageloop.Publication{Offset: 12})
+	require.Equal(t, map[string]uint64{"ch": 12}, b.lastOffsets)
+	require.Equal(t, map[string]uint64{"ch": 4}, b.lastSeqs)
+
+	require.NoError(t, b.Unsubscribe("ch"))
+	require.NotContains(t, b.lastOffsets, "ch")
+	require.NotContains(t, b.lastSeqs, "ch", "Unsubscribe must drop the dense seq baseline too")
+}
+
+// TestRedisBroker_CatchUpMissed_MiddleGapCounted verifies C4 §7.6: with a
+// dense-seq delivery baseline recorded, an entry deleted (XDEL) from the
+// missed range is detected during catch-up via the seq discontinuity and
+// counted in catchUpGaps. The catch-up is invoked directly — no sleeps.
+func TestRedisBroker_CatchUpMissed_MiddleGapCounted(t *testing.T) {
+	redisCfg := requireCommandBusRedis(t)
+	broker := New(redisCfg).(*redisBroker)
+	t.Cleanup(func() { _ = broker.client.Close() })
+
+	ch := "catchup-middle-gap"
+	require.NoError(t, broker.Subscribe(ch))
+
+	// Four entries with dense seqs 1..4.
+	var firstPub *messageloop.Publication
+	for i := 0; i < 4; i++ {
+		pub := &messageloop.Publication{Payload: []byte{byte('a' + i)}, Kind: messageloop.PayloadKindBinary}
+		_, err := broker.Publish(ch, pub)
+		require.NoError(t, err)
+		if i == 0 {
+			firstPub = pub
+		}
+	}
+
+	// Delivery baseline: the first entry was delivered live (offset + seq 1).
+	var delivered []uint64
+	broker.handler = func(_ string, pub *messageloop.Publication) error {
+		delivered = append(delivered, pub.Seq)
+		return nil
+	}
+	broker.deliverOnce(ch, &messageloop.Publication{Channel: ch, Offset: firstPub.Offset, Seq: firstPub.Seq})
+	require.Equal(t, []uint64{1}, delivered)
+
+	// XDEL the seq=3 entry: the replay reads seq 2 and 4, a middle hole.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	msgs, err := broker.client.XRangeN(ctx, broker.opts.StreamPrefix+ch, "-", "+", 10).Result()
+	require.NoError(t, err)
+	require.Len(t, msgs, 4)
+	deleted, err := broker.client.XDel(ctx, broker.opts.StreamPrefix+ch, msgs[2].ID).Result()
+	require.NoError(t, err)
+	require.Equal(t, int64(1), deleted)
+
+	broker.catchUpMissed(context.Background())
+	require.Equal(t, []uint64{1, 2, 4}, delivered, "the surviving missed entries are replayed")
+	require.EqualValues(t, 1, broker.catchUpGaps.Load(), "the XDEL'd middle entry must be detected via the dense seq")
+}
+
+// TestRedisBroker_CatchUpMissed_LegacyBaselineNoFalsePositive verifies C4:
+// without a dense-seq baseline (legacy node / pre-C4 traffic), catch-up
+// skips the middle-gap check entirely — missing entries are not libeled.
+func TestRedisBroker_CatchUpMissed_LegacyBaselineNoFalsePositive(t *testing.T) {
+	redisCfg := requireCommandBusRedis(t)
+	broker := New(redisCfg).(*redisBroker)
+	t.Cleanup(func() { _ = broker.client.Close() })
+
+	ch := "catchup-legacy-baseline"
+	require.NoError(t, broker.Subscribe(ch))
+
+	var firstOffset uint64
+	for i := 0; i < 3; i++ {
+		offset, err := broker.Publish(ch, &messageloop.Publication{Payload: []byte{byte('a' + i)}, Kind: messageloop.PayloadKindBinary})
+		require.NoError(t, err)
+		if i == 0 {
+			firstOffset = offset
+		}
+	}
+
+	// Baseline with an offset only, no dense seq (legacy bookkeeping).
+	broker.deliverOnce(ch, &messageloop.Publication{Channel: ch, Offset: firstOffset})
+
+	// Delete the middle missed entry; without a seq baseline the hole is not
+	// detectable and must not be reported.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	msgs, err := broker.client.XRangeN(ctx, broker.opts.StreamPrefix+ch, "-", "+", 10).Result()
+	require.NoError(t, err)
+	require.Len(t, msgs, 3)
+	_, err = broker.client.XDel(ctx, broker.opts.StreamPrefix+ch, msgs[1].ID).Result()
+	require.NoError(t, err)
+
+	broker.catchUpMissed(context.Background())
+	require.EqualValues(t, 0, broker.catchUpGaps.Load(), "a legacy (seq-less) baseline must never produce a middle-gap report")
 }

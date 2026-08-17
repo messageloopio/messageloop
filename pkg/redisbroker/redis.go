@@ -51,6 +51,12 @@ type redisBroker struct {
 	// replayed delivery. Guarded by subMu.
 	lastOffsets map[string]uint64
 
+	// lastSeqs tracks the highest delivered dense per-channel seq per exact
+	// channel, in parallel with lastOffsets (C4). It is the baseline for the
+	// reconnect catch-up middle-gap check; only publications with Seq > 0
+	// advance it. Guarded by subMu.
+	lastSeqs map[string]uint64
+
 	// deliverMu serializes the check+record of each offset so live delivery
 	// and catch-up can never double-deliver, no matter the interleaving
 	// between the two paths. The handler runs on the worker pool outside
@@ -116,6 +122,7 @@ func New(cfg config.RedisConfig) messageloop.Broker {
 		matcher:        topics.NewCSTrieMatcher(),
 		readyCh:        make(chan struct{}),
 		lastOffsets:    make(map[string]uint64),
+		lastSeqs:       make(map[string]uint64),
 		liveOps:        make(chan liveOp, liveOpsBufferSize),
 		liveDesired:    make(map[string]struct{}),
 		liveActive:     make(map[string]struct{}),
@@ -245,6 +252,7 @@ func (b *redisBroker) Unsubscribe(ch string) error {
 				// subscription starts from its own baseline instead of
 				// replaying history the previous subscriber already consumed.
 				delete(b.lastOffsets, ch)
+				delete(b.lastSeqs, ch)
 				last = true
 			}
 		}
@@ -277,6 +285,30 @@ func (b *redisBroker) interested(channel string) bool {
 	return false
 }
 
+// publishScript atomically assigns the per-channel dense seq and appends the
+// history stream entry (C4). A two-step Go-side "INCR then XADD" is forbidden:
+// a crash between the steps would leave a "seq issued, no entry" phantom
+// middle gap. Numbering therefore happens inside the script together with the
+// XADD, so either both succeed or both fail. The TTL refresh of the seq
+// counter and the stream folds in here as an atomic side effect (previously
+// two standalone best-effort EXPIREs).
+// KEYS: 1 = seq counter key, 2 = stream key.
+// ARGV: 1 = maxLen, 2 = stream data, 3 = TTL milliseconds (PEXPIRE), 4 = "1"
+// for approximate MAXLEN trimming, anything else for exact trimming.
+// Returns {seq, streamID}.
+var publishScript = redis.NewScript(`
+local seq = redis.call('INCR', KEYS[1])
+local id
+if ARGV[4] == '1' then
+  id = redis.call('XADD', KEYS[2], 'MAXLEN', '~', ARGV[1], '*', 's', seq, 'data', ARGV[2])
+else
+  id = redis.call('XADD', KEYS[2], 'MAXLEN', ARGV[1], '*', 's', seq, 'data', ARGV[2])
+end
+redis.call('PEXPIRE', KEYS[1], ARGV[3])
+redis.call('PEXPIRE', KEYS[2], ARGV[3])
+return {seq, id}
+`)
+
 // Publish writes payload to the Redis Stream (for history) and broadcasts via
 // Pub/Sub (for real-time delivery). Returns the stream offset assigned.
 func (b *redisBroker) Publish(ch string, pub *messageloop.Publication) (uint64, error) {
@@ -301,7 +333,7 @@ func (b *redisBroker) Publish(ch string, pub *messageloop.Publication) (uint64, 
 		Epoch:       b.epochString(),
 	}
 
-	// First, write to stream to get the offset.
+	// First, write to stream to get the offset and the dense seq.
 	streamData, err := serializeMessage(msg)
 	if err != nil {
 		return 0, err
@@ -317,26 +349,38 @@ func (b *redisBroker) Publish(ch string, pub *messageloop.Publication) (uint64, 
 		ttl = pub.HistoryTTL
 	}
 	stream := b.opts.StreamPrefix + ch
-	id, err := b.client.XAdd(ctx, &redis.XAddArgs{
-		Stream: stream,
-		MaxLen: maxLen,
-		Approx: b.opts.StreamApproximate,
-		Values: map[string]interface{}{"data": streamData},
-	}).Result()
+	seqKey := b.opts.StreamPrefix + "seq:" + ch
+	approx := "0"
+	if b.opts.StreamApproximate {
+		approx = "1"
+	}
+	res, err := publishScript.Run(ctx, b.client, []string{seqKey, stream},
+		maxLen, streamData, ttl.Milliseconds(), approx).Result()
 	if err != nil {
 		return 0, err
 	}
-	if err := b.client.Expire(ctx, stream, ttl).Err(); err != nil {
-		log.WarnContext(ctx, "failed to set stream TTL", "stream", stream, "error", err)
+	values, ok := res.([]interface{})
+	if !ok || len(values) != 2 {
+		return 0, fmt.Errorf("redis broker: unexpected publish script result %T %v", res, res)
+	}
+	seq, ok := values[0].(int64)
+	if !ok {
+		return 0, fmt.Errorf("redis broker: unexpected seq type %T", values[0])
+	}
+	id, ok := values[1].(string)
+	if !ok {
+		return 0, fmt.Errorf("redis broker: unexpected stream id type %T", values[1])
 	}
 
 	offset := parseStreamOffset(id)
 	msg.Offset = offset
+	msg.Seq = uint64(seq)
 	msg.Time = time.Now().UnixMilli()
 	pub.Offset = offset
+	pub.Seq = uint64(seq)
 	pub.Time = msg.Time
 
-	// Serialize again with offset included for pub/sub delivery.
+	// Serialize again with offset and seq included for pub/sub delivery.
 	pubSubData, err := serializeMessage(msg)
 	if err != nil {
 		return 0, err

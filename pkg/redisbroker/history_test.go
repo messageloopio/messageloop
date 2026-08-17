@@ -2,10 +2,14 @@ package redisbroker
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/messageloopio/messageloop"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -260,4 +264,182 @@ func TestRedisBroker_Message_BackwardCompat(t *testing.T) {
 	require.Equal(t, "application/json", jsonMsg.ContentType)
 	require.Equal(t, "m-1", jsonMsg.Id)
 	require.Equal(t, int64(1700000000000), jsonMsg.Time)
+}
+
+// TestRedisBroker_Publish_AtomicDenseSeq verifies C4 §7.1: 50 concurrent
+// publishers on one channel produce stream entries whose dense seq ("s"
+// field) is exactly 1..50 with no duplicates, offsets stay monotonic, and
+// the data JSON envelope carries no "seq" key (the dense seq lives only in
+// the entry field and the live pub/sub payload).
+func TestRedisBroker_Publish_AtomicDenseSeq(t *testing.T) {
+	redisCfg := requireCommandBusRedis(t)
+	broker := New(redisCfg).(*redisBroker)
+	t.Cleanup(func() { _ = broker.client.Close() })
+
+	const n = 50
+	ch := "dense-seq-atomic"
+	seqs := make([]uint64, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			pub := &messageloop.Publication{Payload: []byte(fmt.Sprintf("m-%d", i)), Kind: messageloop.PayloadKindBinary}
+			offset, err := broker.Publish(ch, pub)
+			if err != nil {
+				t.Errorf("publish %d failed: %v", i, err)
+				return
+			}
+			if offset == 0 {
+				t.Errorf("publish %d returned zero offset", i)
+				return
+			}
+			if pub.Seq == 0 {
+				t.Errorf("publish %d did not backfill pub.Seq", i)
+				return
+			}
+			seqs[i] = pub.Seq
+		}(i)
+	}
+	wg.Wait()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	msgs, err := broker.client.XRangeN(ctx, broker.opts.StreamPrefix+ch, "-", "+", n).Result()
+	require.NoError(t, err)
+	require.Len(t, msgs, n)
+
+	// INCR and XADD commit in the same Lua script, so stream ID order is seq
+	// order: entries must carry exactly 1..n, and offsets stay monotonic.
+	var prevOffset uint64
+	for i, m := range msgs {
+		require.Equal(t, uint64(i+1), streamEntrySeq(m), "entry %d (id %s)", i, m.ID)
+		offset := parseStreamOffset(m.ID)
+		require.Greater(t, offset, prevOffset, "offsets must be monotonic (id %s)", m.ID)
+		prevOffset = offset
+
+		data, ok := m.Values["data"].(string)
+		require.True(t, ok, "entry %d must carry a data field", i)
+		var envelope map[string]any
+		require.NoError(t, json.Unmarshal([]byte(data), &envelope))
+		require.NotContains(t, envelope, "seq", "the stream data JSON must not carry the dense seq")
+		require.NotContains(t, envelope, "off", "the stream data JSON must not carry the offset")
+	}
+
+	// Every publisher observed a distinct seq in 1..n.
+	seen := make(map[uint64]bool, n)
+	for _, s := range seqs {
+		require.NotZero(t, s)
+		require.False(t, seen[s], "seq %d handed out twice", s)
+		seen[s] = true
+	}
+	require.Len(t, seen, n)
+}
+
+// TestRedisBroker_History_MiddleGapDetected verifies C4 §7.2: deleting one
+// entry from the middle of the retained range (XDEL) is detected via the
+// dense seq and reported as HistoryGapMiddle, while the surviving entries
+// are still returned.
+func TestRedisBroker_History_MiddleGapDetected(t *testing.T) {
+	redisCfg := requireCommandBusRedis(t)
+	broker := New(redisCfg).(*redisBroker)
+	t.Cleanup(func() { _ = broker.client.Close() })
+
+	ch := "history-middle-gap"
+	offsets := make([]uint64, 0, 5)
+	for i := 0; i < 5; i++ {
+		pub := &messageloop.Publication{Payload: []byte{byte('a' + i)}, Kind: messageloop.PayloadKindBinary}
+		offset, err := broker.Publish(ch, pub)
+		require.NoError(t, err)
+		require.Equal(t, uint64(i+1), pub.Seq)
+		offsets = append(offsets, offset)
+	}
+
+	// XDEL the third entry (seq 3).
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	msgs, err := broker.client.XRangeN(ctx, broker.opts.StreamPrefix+ch, "-", "+", 10).Result()
+	require.NoError(t, err)
+	require.Len(t, msgs, 5)
+	deleted, err := broker.client.XDel(ctx, broker.opts.StreamPrefix+ch, msgs[2].ID).Result()
+	require.NoError(t, err)
+	require.Equal(t, int64(1), deleted)
+
+	// Reading from the first entry's offset exposes the hole in the middle.
+	page, err := broker.History(ch, offsets[0], 0)
+	require.NoError(t, err)
+	require.Len(t, page.Pubs(), 4, "the surviving entries must still be returned")
+	require.True(t, page.Gap)
+	require.Equal(t, messageloop.HistoryGapMiddle, page.GapReason)
+
+	// A from-head read exposes the same hole.
+	head, err := broker.History(ch, 0, 0)
+	require.NoError(t, err)
+	require.True(t, head.Gap)
+	require.Equal(t, messageloop.HistoryGapMiddle, head.GapReason)
+
+	// A contiguous page (the first two entries) reports no gap.
+	page2, err := broker.History(ch, offsets[0], 2)
+	require.NoError(t, err)
+	require.Len(t, page2.Pubs(), 2)
+	require.False(t, page2.Gap, "a page with consecutive dense seqs is not a middle gap")
+}
+
+// TestRedisBroker_History_LegacyEntriesBreakChain verifies C4 §7.4: entries
+// without the dense seq field (written before C4) break the evidence chain —
+// a legacy entry sandwiched between sequenced entries, and an all-legacy
+// stream, must never be reported as HistoryGapMiddle.
+func TestRedisBroker_History_LegacyEntriesBreakChain(t *testing.T) {
+	redisCfg := requireCommandBusRedis(t)
+	broker := New(redisCfg).(*redisBroker)
+	t.Cleanup(func() { _ = broker.client.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	legacyData := func(ch, payload string) string {
+		data, err := serializeMessage(&redisMessage{
+			Type:    messageTypePublication,
+			Channel: ch,
+			Payload: []byte(payload),
+			Kind:    messageloop.PayloadKindBinary,
+			Time:    time.Now().UnixMilli(),
+		})
+		require.NoError(t, err)
+		return string(data)
+	}
+
+	// seq 1, then a legacy entry (no "s"), then seq 2: neither adjacent pair
+	// has both seqs known, so no middle gap may be asserted.
+	mixed := "history-legacy-mixed"
+	_, err := broker.Publish(mixed, &messageloop.Publication{Payload: []byte("s1"), Kind: messageloop.PayloadKindBinary})
+	require.NoError(t, err)
+	_, err = broker.client.XAdd(ctx, &redis.XAddArgs{
+		Stream: broker.opts.StreamPrefix + mixed,
+		Values: map[string]interface{}{"data": legacyData(mixed, "legacy")},
+	}).Result()
+	require.NoError(t, err)
+	_, err = broker.Publish(mixed, &messageloop.Publication{Payload: []byte("s2"), Kind: messageloop.PayloadKindBinary})
+	require.NoError(t, err)
+
+	page, err := broker.History(mixed, 0, 0)
+	require.NoError(t, err)
+	require.Len(t, page.Pubs(), 3)
+	require.False(t, page.Gap, "a legacy entry breaks the evidence chain; never libel a middle gap")
+	require.Equal(t, uint64(1), page.Pubs()[0].Seq)
+	require.Zero(t, page.Pubs()[1].Seq, "the legacy entry has no dense seq")
+	require.Equal(t, uint64(2), page.Pubs()[2].Seq)
+
+	// An all-legacy stream: no seqs at all, no gap.
+	legacy := "history-legacy-only"
+	for i := 0; i < 2; i++ {
+		_, err = broker.client.XAdd(ctx, &redis.XAddArgs{
+			Stream: broker.opts.StreamPrefix + legacy,
+			Values: map[string]interface{}{"data": legacyData(legacy, fmt.Sprintf("l%d", i))},
+		}).Result()
+		require.NoError(t, err)
+	}
+	page, err = broker.History(legacy, 0, 0)
+	require.NoError(t, err)
+	require.Len(t, page.Pubs(), 2)
+	require.False(t, page.Gap, "an all-legacy page must not report a middle gap")
 }

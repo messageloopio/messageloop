@@ -32,6 +32,11 @@ type Publication struct {
 	Id          string // publisher-provided message id, may be empty
 	Metadata    map[string]string
 	Offset      uint64
+	// Seq is the dense per-channel sequence number (1, 2, 3, ...) assigned
+	// atomically with the history stream append (Redis broker, C4). It is 0
+	// for transient publications, legacy entries written before C4, and the
+	// memory broker (whose Offset already is the dense seq).
+	Seq         uint64
 	Time        int64 // Unix milliseconds
 	Epoch       string
 	// HistorySize caps this publication's channel history ring/stream when
@@ -143,6 +148,12 @@ const (
 	// Prefer false positives: a client-supplied garbage offset gets this
 	// reason too.
 	HistoryGapEmptyExpired
+	// HistoryGapMiddle means two adjacent retained entries carry dense
+	// sequence numbers that are not consecutive: at least one entry was
+	// deleted from the middle of the retained range (e.g. XDEL). Entries
+	// without a dense seq (legacy) break the evidence chain and never
+	// trigger this reason.
+	HistoryGapMiddle
 )
 
 // HistoryPage is one page of channel history plus gap metadata.
@@ -219,5 +230,8 @@ type Broker interface {
 	// DefaultHistoryLimit as a safety cap. An empty page is not an error;
 	// error is reserved for transport/storage failures. Gap detection must
 	// never report HistoryGapNone for an empty batch with sinceOffset > 0.
+	// A retained range whose dense per-channel seqs (Publication.Seq) are
+	// not consecutive reports HistoryGapMiddle (C4); entries without a dense
+	// seq (legacy) never trigger it.
 	History(ch string, sinceOffset uint64, limit int) (*HistoryPage, error)
 }

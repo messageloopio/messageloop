@@ -337,9 +337,9 @@ hash 的字段是频道名、值是本节点在该频道的订阅者计数。增
 
 集群模式下历史由 Redis Streams 承载，是全集群**共享**的：
 
-- 发布路径（`redis.go` 的 `Publish`）：先 `XADD` 写入 `ml:stream:<channel>`（`StreamMaxLength` 默认 10000 条、`StreamApproximate` 默认 true，`HistoryTTL` 默认 24 小时），从 Stream ID 解析出 offset；再 `PUBLISH` 到 `ml:pubsub:<channel>` 做实时分发。任意节点发布，全部节点共享同一份历史。
+- 发布路径（`redis.go` 的 `Publish`）：Lua 脚本原子完成 `INCR ml:stream:seq:<channel>`（每频道稠密 seq，C4）+ `XADD` 写入 `ml:stream:<channel>`（条目带 `s` 字段；`StreamMaxLength` 默认 10000 条、`StreamApproximate` 默认 true，`HistoryTTL` 默认 24 小时，seq 键与 stream 同 TTL），从 Stream ID 解析出 offset；再 `PUBLISH` 到 `ml:pubsub:<channel>` 做实时分发。任意节点发布，全部节点共享同一份历史。
 - 消费路径（`pubsub.go`）：每个节点 `PSUBSCRIBE ml:pubsub:*` 模式订阅，只处理本节点登记过兴趣（`Subscribe`）的频道；断线以指数退避重连（1 秒起、上限 30 秒）。
-- **offset 语义**：offset 由 Stream ID 编码而来，`offset = ts<<20 | seq`（毫秒时间戳与序列号拼入 uint64，`history.go`）。历史查询 `History(ch, sinceOffset, limit)` 用**包含**起始 ID（`"ts-seq"`，`streamStartID`）——Redis broker 与内存 broker 的 `since_offset` 均为**包含**（inclusive）语义，返回 `offset >= since_offset`（契约见 `broker.go:105-108`）；`limit <= 0` 时上限为 `DefaultHistoryLimit`（1000 条）。
+- **offset 语义**：offset 由 Stream ID 编码而来，`offset = ts<<20 | seq`（毫秒时间戳与序列号拼入 uint64，`history.go`）。历史查询 `History(ch, sinceOffset, limit)` 用**包含**起始 ID（`"ts-seq"`，`streamStartID`）——Redis broker 与内存 broker 的 `since_offset` 均为**包含**（inclusive）语义，返回 `offset >= since_offset`（契约见 `broker.go:105-108`）；`limit <= 0` 时上限为 `DefaultHistoryLimit`（1000 条）。offset 编码**不是**稠密序号；中洞检测走条目旁的稠密 seq（`s` 字段，C4）：页内相邻条目 seq 不连续 → `HistoryGapMiddle`（线上 `GAP_REASON_MIDDLE`），无 `s` 的 legacy 条目断开证据链、不诬报。
 - 由于历史与 offset 都来自共享的 Redis Stream，跨节点查询历史得到的是同一份数据；跨节点**恢复**的 epoch 校验也因 Redis epoch 集群共享而可通过（见 4.4）。
 - 瞬时消息（`PublishTransient`，presence 事件等）不写 Stream，offset 恒为 0，永不进入历史。
 

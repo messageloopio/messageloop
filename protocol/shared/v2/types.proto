@@ -20,6 +20,8 @@ enum GapReason {
   GAP_REASON_HEAD_TRIMMED = 2;
   GAP_REASON_EMPTY_EXPIRED = 3;
   GAP_REASON_EPOCH_RESET = 4;
+  // 页内/保留区中间缺条目：相邻条目稠密 seq 不连续（C4）。
+  GAP_REASON_MIDDLE = 5;
 }
 
 // 统一的数据载荷类型

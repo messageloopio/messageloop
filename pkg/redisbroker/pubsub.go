@@ -495,11 +495,15 @@ func (b *redisBroker) catchUpMissed(ctx context.Context) {
 	b.subMu.RLock()
 	channels := make([]string, 0, len(b.subscribed))
 	offsets := make(map[string]uint64, len(b.subscribed))
+	seqs := make(map[string]uint64, len(b.subscribed))
 	for ch := range b.subscribed {
 		channels = append(channels, ch)
 	}
 	for ch, off := range b.lastOffsets {
 		offsets[ch] = off
+	}
+	for ch, s := range b.lastSeqs {
+		seqs[ch] = s
 	}
 	b.subMu.RUnlock()
 
@@ -523,9 +527,38 @@ func (b *redisBroker) catchUpMissed(ctx context.Context) {
 			if err != nil || redisMsg.Type != messageTypePublication {
 				continue
 			}
-			b.deliverOnce(ch, messageToPublication(ch, redisMsg, parseStreamOffset(m.ID)))
+			pub := messageToPublication(ch, redisMsg, parseStreamOffset(m.ID))
+			// The stream's data JSON carries no seq: the dense seq lives in
+			// the entry's "s" field.
+			pub.Seq = streamEntrySeq(m)
+			b.deliverOnce(ch, pub)
 		}
+		b.checkCatchUpSeqGap(ctx, ch, msgs, seqs[ch])
 		b.checkCatchUpGap(ctx, ch, msgs, last)
+	}
+}
+
+// checkCatchUpSeqGap detects middle holes inside the replayed catch-up range
+// using the dense per-channel seq (C4): the baseline is the last delivered
+// seq, and every consecutive known pair must differ by exactly one. Detected
+// holes are counted and logged, never pushed to clients (a client-facing live
+// gap envelope is future work). A legacy baseline or a legacy entry (seq 0)
+// breaks the evidence chain and skips the corresponding check — rather miss
+// than libel.
+func (b *redisBroker) checkCatchUpSeqGap(ctx context.Context, ch string, msgs []redis.XMessage, baseline uint64) {
+	prev := baseline
+	for _, m := range msgs {
+		seq := streamEntrySeq(m)
+		if seq == 0 {
+			prev = 0
+			continue
+		}
+		if prev > 0 && seq != prev+1 {
+			b.catchUpGaps.Add(1)
+			log.WarnContext(ctx, "catch-up middle gap detected: dense seq discontinuity in replayed range",
+				"channel", ch, "prev_seq", prev, "entry_seq", seq)
+		}
+		prev = seq
 	}
 }
 
@@ -534,11 +567,10 @@ func (b *redisBroker) catchUpMissed(ctx context.Context) {
 // StreamMaxLength entries, so a full XRangeN batch is not proof that the
 // newest entry was reached: when the newest stream offset is beyond the last
 // replayed one, the truncated tail cannot be replayed and the gap is
-// surfaced as a warning + counter instead of failing silently. (A trimmed
-// stream head is not detectable this way: offsets are millisecond-based, so
-// a normal pause between publications is indistinguishable from missing
-// entries.) A client-facing gap envelope is future work (see the Broker
-// contract in broker.go).
+// surfaced as a warning + counter instead of failing silently. Middle holes
+// inside the replayed range are detected separately via the dense
+// per-channel seq (checkCatchUpSeqGap, C4). A client-facing gap envelope is
+// future work (see the Broker contract in broker.go).
 func (b *redisBroker) checkCatchUpGap(ctx context.Context, ch string, msgs []redis.XMessage, last uint64) {
 	if len(msgs) < int(b.opts.StreamMaxLength) {
 		// The range was not truncated: nothing newer was missed.
@@ -577,9 +609,12 @@ func (b *redisBroker) newestStreamOffset(ctx context.Context, stream string) (ui
 // offset. The duplicate check and the lastOffset advance run inside one
 // critical section, so live delivery and reconnect catch-up can never
 // double-deliver the same offset: the second deliverer always observes the
-// offset as already recorded. The handler invocation itself runs outside the
-// critical section, on a per-channel worker (see dispatch), so a slow
-// handler cannot serialize delivery across all channels or stall catch-up.
+// offset as already recorded. The dense seq baseline (lastSeqs, C4) advances
+// in the same critical section, but only for publications with Seq > 0 —
+// legacy payloads leave it untouched. The handler invocation itself runs
+// outside the critical section, on a per-channel worker (see dispatch), so a
+// slow handler cannot serialize delivery across all channels or stall
+// catch-up.
 func (b *redisBroker) deliverOnce(channel string, pub *messageloop.Publication) {
 	if pub.Offset == 0 {
 		// Transient publications have no stream offset and cannot be
@@ -598,6 +633,9 @@ func (b *redisBroker) deliverOnce(channel string, pub *messageloop.Publication) 
 	}
 	b.subMu.Lock()
 	b.lastOffsets[channel] = pub.Offset
+	if pub.Seq > 0 {
+		b.lastSeqs[channel] = pub.Seq
+	}
 	b.subMu.Unlock()
 	b.deliverMu.Unlock()
 
@@ -648,11 +686,14 @@ func (b *redisBroker) deliverOccupancy(channel string, evt messageloop.Occupancy
 // messageToPublication converts a deserialized redisMessage into a
 // Publication for the given channel. The offset is passed explicitly because
 // live pub/sub payloads carry it inside the envelope while stream entries
-// (catch-up) must derive it from the stream ID instead.
+// (catch-up) must derive it from the stream ID instead. The dense seq comes
+// from the envelope (live) or is backfilled by the caller from the stream
+// entry's "s" field (catch-up).
 func messageToPublication(channelName string, redisMsg *redisMessage, offset uint64) *messageloop.Publication {
 	pub := &messageloop.Publication{
 		Channel:     channelName,
 		Offset:      offset,
+		Seq:         redisMsg.Seq,
 		Epoch:       redisMsg.Epoch,
 		Payload:     redisMsg.Payload,
 		Kind:        redisMsg.Kind,

@@ -605,9 +605,11 @@
         "GAP_REASON_NONE",
         "GAP_REASON_HEAD_TRIMMED",
         "GAP_REASON_EMPTY_EXPIRED",
-        "GAP_REASON_EPOCH_RESET"
+        "GAP_REASON_EPOCH_RESET",
+        "GAP_REASON_MIDDLE"
       ],
       "default": "GAP_REASON_UNSPECIFIED",
+      "description": "- GAP_REASON_MIDDLE: 页内/保留区中间缺条目：相邻条目稠密 seq 不连续（C4）。",
       "title": "恢复 / 历史读取时的缺口原因"
     },
     "v2Position": {

@@ -3,7 +3,7 @@
 | 字段 | 值 |
 | --- | --- |
 | 标题 | `broker: dense per-channel seq on history entries, true middle-gap detection` |
-| 状态 | **Ready** |
+| 状态 | **Accepted**（2026-08-17 主 agent 终验通过，尚未 commit） |
 | 依赖 | C3 已合（`d7b01d8`）。在 `v2` 分支上做 |
 | 设计来源 | [kernel-architecture.md](../kernel-architecture.md) StreamLog / Gap 合同、KD-K12、KD-K14、Q8 |
 | 验收人 | 主 agent |
@@ -156,4 +156,14 @@ PUBLISH serialize(msg)                  // 失败只 Warn 不 XDel（不变）
 
 ## 10. 实现备注（完成后填写）
 
-（空）
+实现于 `v2` 分支（基线 `918160d`，C3 tip `d7b01d8` 之上）。真实 Redis（127.0.0.1:6379，DB 14）全量实跑，无 skip。
+
+- **发号**：`Publish` 改为单个 Lua 脚本（`publishScript`，`pkg/redisbroker/redis.go`）原子完成 `INCR ml:stream:seq:<ch>` + `XADD ... s <seq> data <payload>` + 两键 `PEXPIRE`（毫秒精度，语义等同原两次 best-effort `Expire`；脚本内任何一步失败即整脚本失败，按 XADD 失败处理 `(0, err)`，无半状态）。Go 侧无「先 INCR 后 XADD」。`StreamApproximate` 经 ARGV 传入，精确/近似两种 MAXLEN 语义保留。`updateFirstRetained`、`first_retained` 机制、PUBLISH 失败只 Warn 不 XDel 的合同全部未动。
+- **字段/合同**：`redisMessage` 加 `Seq uint64 json:"seq,omitempty"`，只在 XADD 后回填进实时 PUBLISH 载荷（与 `Offset` 同模式，stream `data` JSON 不含 seq）；`Publication` 加 `Seq uint64`（0 = 未知/legacy/transient/memory）；`broker.go` 加 `HistoryGapMiddle`（iota 追加，现有值序不变）。
+- **History**：`history.go` 经 `streamEntrySeq` 解析条目 `s` 字段回填 `Publication.Seq`；既有空页/头裁优先级不变，其后追加页内中洞扫描（相邻两条 Seq 均 >0 且不连续 → `HistoryGapMiddle`），仅在未置 Gap 时运行；无 `s` 的 legacy 条目断开证据链（`prev=0`），单条目/全 legacy 页不报 Middle。
+- **catch-up**：`deliverOnce` 在与 `lastOffsets` 同一临界区维护 `lastSeqs[ch]`（仅 `pub.Seq>0`），`Unsubscribe` 同步清理；`catchUpMissed` 快照 `lastSeqs` 基线，回放条目从 `s` 字段回填 `pub.Seq`；新增 `checkCatchUpSeqGap`（基线检查 + 批内连续性，发现洞 `catchUpGaps.Add(1)` + Warn 带 channel 与 seq 区间），尾截检测 `checkCatchUpGap` 保留；不新增 client-facing 信封。
+- **proto/映射**：`GAP_REASON_MIDDLE = 5`；`task generate-protocol` 再生，保留 diff 仅 `shared/genproto/shared/v2/types.pb.go`、`client/v2/service.swagger.json`（枚举值）、`sdks/ts/src/proto/shared/v2/types_pb.ts`；openapiv2 插件对 `client/v1`、`proxy/v1`、`server/v1` 三个 swagger 产生了与本次改动无关的 definition 重命名 churn（插件版本差异），已 `git checkout` 回退以保持 diff 干净。`recover.go` `gapReasonV2` 加 Middle 映射，`observeRecoveryGap` label `middle`（动态 label，`metrics.go` 无需改）。
+- **测试**（全部实跑通过，无固定长 Sleep）：`history_test.go` 新增 `Publish_AtomicDenseSeq`（50 并发，`s` 恰好 1..50、offset 单调、`data` 无 `seq` 键）、`History_MiddleGapDetected`（XDEL 第 3 条 → Middle，幸存 4 条仍返回；连续页不报）、`History_LegacyEntriesBreakChain`；`ready_test.go` 扩展 `Publish_PubSubFailureKeepsStream`（条目带 `s`、`pub.Seq=1` 回填）+ 新增 `Publish_SeqKeyHygiene`（两键 TTL；transient 不建 seq 键）；`pubsub_test.go` 新增 `DeliverOnce_RecordsDenseSeqBaseline`、`CatchUpMissed_MiddleGapCounted`（直接调 `catchUpMissed`）、`CatchUpMissed_LegacyBaselineNoFalsePositive`；`recover_test.go` 新增 `Subscribe_RecoverMiddleGapMapsToProto`（线上 `GAP_REASON_MIDDLE` + `recovery_gap_total{reason="middle"}` +1）。
+- **文档**：`docs/developer/01-architecture.md`（Broker 表/Redis 实现段）、`docs/developer/04-cluster.md`（§8 发布路径与 offset 语义）、`docs/v2/kernel-architecture.md`（仅「Gap 合同」一节，加 `middle` 行）已同步。
+- **验证**：`go test -count=1 ./pkg/redisbroker` ok 67.3s；`go test -count=1 -run "TestSim_|TestClusterCommandBus" .` ok；`go test ./...` 全绿；`go test -race . ./pkg/redisbroker` ok（79.0s / 66.2s）；`cd sdks/go && go test ./...` ok。
+- **偏离**：一处实现细节——规格 §5.1 伪代码用 `EXPIRE ttlSeconds`，实现用 `PEXPIRE ttl毫秒`，精度更高且语义相同（保留亚秒 TTL 覆盖场景）。其余无偏离。

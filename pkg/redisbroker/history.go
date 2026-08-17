@@ -58,6 +58,7 @@ func (b *redisBroker) getHistory(ch string, sinceOffset uint64, limit int) (*mes
 		pubs = append(pubs, &messageloop.Publication{
 			Channel:     ch,
 			Offset:      parseStreamOffset(m.ID),
+			Seq:         streamEntrySeq(m),
 			Payload:     redisMsg.Payload,
 			Kind:        redisMsg.Kind,
 			ContentType: redisMsg.ContentType,
@@ -94,8 +95,38 @@ func (b *redisBroker) getHistory(ch string, sinceOffset uint64, limit int) (*mes
 			page.GapReason = messageloop.HistoryGapHeadTrimmed
 		}
 	}
+	if !page.Gap {
+		// True middle-gap detection (C4): adjacent entries whose dense seqs
+		// are both known and not consecutive prove at least one entry was
+		// deleted from the middle of the retained range. Entries without a
+		// dense seq (legacy) break the evidence chain — never assert across
+		// an unknown pair (rather miss than libel), so a single-entry or
+		// all-legacy page never reports Middle.
+		for i := 1; i < len(pubs); i++ {
+			prev, cur := pubs[i-1].Seq, pubs[i].Seq
+			if prev > 0 && cur > 0 && cur != prev+1 {
+				page.Gap = true
+				page.GapReason = messageloop.HistoryGapMiddle
+				break
+			}
+		}
+	}
 	page.Truncated = limit > 0 && len(pubs) == limit
 	return page, nil
+}
+
+// streamEntrySeq parses the dense per-channel seq ("s" field) of a history
+// stream entry (C4). 0 means the entry carries no seq (written before C4).
+func streamEntrySeq(m redis.XMessage) uint64 {
+	s, ok := m.Values["s"].(string)
+	if !ok {
+		return 0
+	}
+	seq, err := strconv.ParseUint(s, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return seq
 }
 
 // streamStartID builds the inclusive Redis Stream start ID ("ts-seq") for the

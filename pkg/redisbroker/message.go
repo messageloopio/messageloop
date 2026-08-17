@@ -20,6 +20,9 @@ const (
 // redisMessage is the envelope format for publication messages stored in Redis.
 // Kind mirrors messageloop.PayloadKind; older entries without a kind field
 // are inferred from IsText during deserialization (rolling-upgrade safe).
+// Seq mirrors Offset: both are backfilled after the stream append and only
+// travel in the live pub/sub payload — the stream's data JSON carries
+// neither (the dense seq lives in the entry's "s" field instead).
 type redisMessage struct {
 	Type        string            `json:"t"`
 	Channel     string            `json:"ch"`
@@ -31,6 +34,7 @@ type redisMessage struct {
 	Metadata    map[string]string `json:"md,omitempty"`
 	Time        int64             `json:"ts,omitempty"`
 	Offset      uint64            `json:"off,omitempty"`
+	Seq         uint64            `json:"seq,omitempty"`
 	Epoch       string            `json:"epoch,omitempty"`
 }
 
