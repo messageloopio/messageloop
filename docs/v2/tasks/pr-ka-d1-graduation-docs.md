@@ -3,7 +3,7 @@
 | 字段 | 值 |
 | --- | --- |
 | 标题 | `docs/code: align public docs with v2 behavior and drop dead sendQueue.enqueue` |
-| 状态 | **Ready**（待实现） |
+| 状态 | **Accepted**（2026-08-17 主 agent 终验通过，尚未 commit） |
 | 依赖 | C6 已合（`08e8a4c`）；转正评审（2026-08-17 四路）结论。在 `v2` 分支上做 |
 | 设计来源 | 转正评审报告（SHOULD-FIX 清单）；[kernel-architecture.md](../kernel-architecture.md) |
 | 验收人 | 主 agent |
@@ -111,4 +111,12 @@ grep -rn "\.enqueue(" --include="*.go" . | grep -v genproto  # 仅剩 client.go:
 
 ## 7. 实现备注（实现方填）
 
-（空）
+实现于 2026-08-17，`v2` 分支，基于 `879fa38`。
+
+- `session.go`：删除死方法 `sendQueue.enqueue`（doc 注释 3 行 + 方法体 21 行）连同其后 1 个空行，共 25 行，避免出现连续空行；`newSendQueue` / `notFull` / 两个深度常量全部保留（`tryEnqueue` / `dequeue` / `close` 仍在用）。删除前 `grep -rn "\.enqueue(" --include='*.go' .` 确认仅 `client.go:144`（走 `Session.enqueue`）。
+- `docs/protocol.md`：文首加版本定位段；OutboundMessage 表末追加 `gap_notice` 行（语义照 §3.1 与 `protocol/client/v2/service.proto:129-134`、`protocol/shared/v2/types.proto:17-28`）；Heartbeat 节去 "in v1.0"；Admin 节标注 `server.v1` 为 PR-KA-B3 明示保留。
+- `README.md`：:16 特性行与 :29 proxy 表行去 ACL 措辞；「Limits And Built-In ACL」整节（:142-165）换成 `server.authorizer` 示例 + §3.2 五条语义；集群示例补 `hmac_key_file` 占位与共享密钥要求（≥32 字节、二选一、缺省拒绝启动）。**一处规格外同类残留**：Configuration Overview 表 `server` 行 Key Fields 的 `acl.rules`（:135）一并改为 `authorizer.rules`（同属 A4 ACL 残留清理，文件在 §2 允许列表内）。proxy hooks 列表 :188-189 的 "subscribe ACL / publish ACL" 未动——`proxy/proxy.go:19-22` 的 SubscribeAcl/PublishAcl 钩子真实存在，措辞准确。
+- `docs/developer/02-configuration.md`：cluster 节 YAML 块与字段表补 `hmac_key` / `hmac_key_file` 两行；新增 enforcement 段（`ResolveHMACKey()` 启动硬门，明确不在 `Validate()`，附三个报错原文与共用密钥要求）；:45 校验清单第 6 条补 HMAC 硬门句；:46 断链 `#serverauthorizer-节` → `#server-节`（链接文字保留）。
+- `configs/cluster-example.yaml`：新增，风格对齐 `configs/test.yaml`；`hmac_key_file` 仅占位路径，注释含 ≥32 字节 / 尾单换行裁剪 / 两源互斥 / 全集群共密钥 / 生成命令示例；无真实密钥。
+- `docs/v2/kernel-architecture.md`：仅「三把时钟」表 :123-125 三个单元格 `ml:` → `ml2:` + Document History 追加一行；增量表与 `docs/v2/README.md` 未动（主 agent 负责）。
+- 验证：`go build ./...` 绿；`go test -count=1 .` 绿（75.9s）；§4 全部 grep 门禁通过；`git diff --numstat` 与 `git diff --ignore-all-space --ignore-cr-at-eol --numstat` 行数完全一致，无格式 churn。未跑全仓 `go test ./...`（规格注明不需要）。未做任何 git commit / tag / push。

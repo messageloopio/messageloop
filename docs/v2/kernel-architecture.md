@@ -120,9 +120,9 @@ MessageLoop 的产品判断成立：传输无关、通配订阅、恢复、sessi
 
 | 钟 | 发号 | 何时 +1 | 比较 |
 | --- | --- | --- | --- |
-| **StreamEpoch** | memory：进程启动 UUID；Redis：`ml:broker:epoch` SET NX | 日志世代失效时（memory 重启；Redis 删 key 后重建） | 字符串相等则同一世代 |
-| **OccupancyGen** | 每频道一个计数器。memory：进程内 `uint64`；Redis：`INCR ml:occ:gen:{ch}` | 每次 Join、Leave、合成 leave 各取一个新值 | 迟到事件 `gen <= last_applied[ch][session]` 丢弃 |
-| **Fencing.node_epoch** | **只准** Redis `INCR ml:cluster:node_epoch:{node_id}`（单节点 memory：进程内计数器）。禁止本地随机 UUID 当 epoch | 进程启动取一次 | 全序：更大的 epoch 更新 |
+| **StreamEpoch** | memory：进程启动 UUID；Redis：`ml2:broker:epoch` SET NX | 日志世代失效时（memory 重启；Redis 删 key 后重建） | 字符串相等则同一世代 |
+| **OccupancyGen** | 每频道一个计数器。memory：进程内 `uint64`；Redis：`INCR ml2:occ:gen:{ch}` | 每次 Join、Leave、合成 leave 各取一个新值 | 迟到事件 `gen <= last_applied[ch][session]` 丢弃 |
+| **Fencing.node_epoch** | **只准** Redis `INCR ml2:cluster:node_epoch:{node_id}`（单节点 memory：进程内计数器）。禁止本地随机 UUID 当 epoch | 进程启动取一次 | 全序：更大的 epoch 更新 |
 | **Fencing.version** | 会话本地 + Directory | **仅 Bind 抢权时 +1**。续约不变 | 与 node_id、node_epoch 一起比 |
 
 ### 四个问句，四份集合
@@ -758,3 +758,4 @@ A0–A4 可在仍叫 `*Client` 的代码上先改合同；B1 再改对象名。�
 | 2026-08-16 | **KD-K31**：独立版本、不向后兼容。去掉双合同 / 混部 / 齐步 / 旧 YAML / recover.v1 |
 | 2026-08-16 | A0 / A1 第三方规格与 prompt：`docs/v2/tasks/pr-ka-a0-*`、`pr-ka-a1-*` |
 | 2026-08-16 | 文档迁至 `docs/v2/` |
+| 2026-08-17 | A0–C6 全部落地（规格与实现见 tasks/）；三把时钟键形同步 ml2:（C5） |

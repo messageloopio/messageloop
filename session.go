@@ -205,31 +205,6 @@ func newSendQueue() *sendQueue {
 	return q
 }
 
-// enqueue appends a frame to its lane, blocking while the lane is full so a
-// burst of data never silently drops frames (the caller gives up on
-// ErrSendQueueFull via the non-blocking enqueue of Send).
-func (q *sendQueue) enqueue(frame *queuedFrame) error {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	for q.closed {
-		q.mu.Unlock()
-		return ErrSessionNotAttached
-	}
-	if frame.control {
-		if len(q.control) >= sendQueueControlDepth {
-			return ErrSendQueueFull
-		}
-		q.control = append(q.control, frame)
-	} else {
-		if len(q.data) >= sendQueueDataDepth {
-			return ErrSendQueueFull
-		}
-		q.data = append(q.data, frame)
-	}
-	q.notFull.Broadcast()
-	return nil
-}
-
 // tryEnqueue is the non-blocking variant used by Send: a full lane fails
 // fast with ErrSendQueueFull instead of blocking the caller.
 func (q *sendQueue) tryEnqueue(frame *queuedFrame) error {

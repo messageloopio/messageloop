@@ -42,8 +42,8 @@
    - 为 `redis` 时 `broker.redis.addr` 必填，否则报 `broker.redis.addr is required when broker.type is redis`；
    - `broker.redis.consumer_group` 非空 → 直接拒绝：`broker.redis.consumer_group is not implemented; remove it from the configuration`（该字段声明但从未被消费，见 [broker.redis 字段](#brokerredis-字段)）；
    - `broker.redis.stream_approximate` 非 true（含显式 false）→ 直接拒绝：`broker.redis.stream_approximate: false is not supported (only approximate trimming is implemented); remove the field or set it to true`（`config.go:222-231`）。
-6. **cluster 前置条件**：`cluster.enabled: true` 要求 `broker.type: redis`，否则报 `cluster requires broker.type=redis`。
-7. **授权表**（`server.authorizer`，见 [server.authorizer 节](#serverauthorizer-节)）：规则 `pattern` 非空且是订阅 key 语言（`*` 单段、`**` 仅末尾、字面前缀非空，`a.**.b` / `*.room` / 裸 `**` 非法）；`history_size` 设置时 `>= 0`；`history_ttl` / `max_survey_timeout` 非空时必须是合法 Go duration；`grpc_admin.capabilities` 必须在闭集内。**`server.acl` / `server.channels` 键出现即失败**（已删除，KD-K31）。
+6. **cluster 前置条件**：`cluster.enabled: true` 要求 `broker.type: redis`，否则报 `cluster requires broker.type=redis`。启用集群还要求恰好一个 HMAC 密钥源（`cluster.hmac_key` 或 `cluster.hmac_key_file`）且解析后密钥 ≥32 字节，启动解析失败即拒绝启动（该校验不在 `Validate()` 中，见 [cluster 节](#cluster-节)）。
+7. **授权表**（`server.authorizer`，见 [server.authorizer 节](#server-节)）：规则 `pattern` 非空且是订阅 key 语言（`*` 单段、`**` 仅末尾、字面前缀非空，`a.**.b` / `*.room` / 裸 `**` 非法）；`history_size` 设置时 `>= 0`；`history_ttl` / `max_survey_timeout` 非空时必须是合法 Go duration；`grpc_admin.capabilities` 必须在闭集内。**`server.acl` / `server.channels` 键出现即失败**（已删除，KD-K31）。
 
 `cluster.node_id` 是否必填不在 `Validate()` 中，而在 `ClusterOptions.normalize()`（`cluster.go:27-30`）检查：启用集群时 `node_id` 为空直接报错。
 
@@ -354,6 +354,7 @@ cluster:
   enabled: false       # 启用分布式控制面
   node_id: node-a      # 逻辑节点唯一 ID
   backend: redis       # 当前仅 redis 有实际实现
+  hmac_key_file: /path/to/cluster-hmac.key  # 命令总线 HMAC 密钥（与 hmac_key 二选一）
 ```
 
 | 字段 | 类型 | 默认值 | 说明 |
@@ -361,6 +362,16 @@ cluster:
 | `cluster.enabled` | bool | `false` | 启用 Redis 支撑的分布式控制面。启用时要求 `broker.type: redis`（`Validate()` 规则 5） |
 | `cluster.node_id` | string | 未设置 | 逻辑节点标识，集群内必须唯一；启用时必填（`cluster.go:27-30`） |
 | `cluster.backend` | string | `redis` | 控制面后端。为空时默认 `redis`；接受 `redis` / `memory` / `noop`，其他值报错（`cluster.go:32-41`）。仅 `redis` 在二进制中接入实际组件（会话目录、命令总线、查询投影、节点租约、投影修复，`cmd/server/main.go:111-142`） |
+| `cluster.hmac_key` | string | 未设置 | 内联 HMAC-SHA256 命令总线密钥，**至少 32 字节**；与 `hmac_key_file` 二选一 |
+| `cluster.hmac_key_file` | string | 未设置 | 密钥文件路径；文件尾**单个**换行（LF 或 CRLF）会被裁剪 |
+
+启用集群时必须恰好配置一个 HMAC 密钥源，且解析后的密钥至少 32 字节。该校验**不在 `Validate()` 中**，而在启动接线时由 `ClusterConfig.ResolveHMACKey()`（`config/config.go:64-85`，调用点 `cmd/server/main.go:193-196`）执行——**启动时解析失败即拒绝启动**。三个报错原文：
+
+- 两源同设：`only one of hmac_key or hmac_key_file may be set`
+- 均未设置：`cluster.hmac_key is required when cluster is enabled (or set cluster.hmac_key_file)`
+- 长度不足：`cluster hmac key must be at least 32 bytes`
+
+集群内所有节点必须共用同一密钥；密钥不会写入任何 Redis 键、日志或 metrics 标签。
 
 启用 Redis 集群时，控制面组件与 broker 共用同一个 `broker.redis` 配置（`cmd/server/main.go:116-131`），并使用 `ml2:cluster:` 前缀的键。另外集群模式下 `/health` 端点会附带 Redis 连通性探测（`cmd/server/main.go:57-59`）。
 

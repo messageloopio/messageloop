@@ -13,7 +13,7 @@ The project supports a simple single-node setup with in-memory components and ca
 - Presence tracking plus join/leave presence events
 - Message history via in-memory ring buffers or Redis Streams
 - Session resumption support for reconnecting clients
-- Built-in ACL rules plus proxy-backed auth and ACL checks
+- Built-in authorizer rules (`server.authorizer`) plus proxy-backed auth and ACL checks
 - Per-user and per-client limits
 - Prometheus metrics and health checks
 - Optional Redis-backed cluster control plane for multi-node operation
@@ -26,7 +26,7 @@ The project supports a simple single-node setup with in-memory components and ca
 | `Hub` | Sharded in-memory registry for sessions and subscriptions |
 | `Broker` | Pub/sub backend, implemented by in-memory broker or Redis broker |
 | `Transport` | Connection abstraction used by WebSocket, gRPC streaming, and QUIC servers |
-| `Proxy` | RPC/auth/ACL/lifecycle delegation to HTTP or gRPC backends |
+| `Proxy` | RPC/auth/lifecycle delegation to HTTP or gRPC backends |
 | `Cluster` | Optional Redis-backed control plane for multi-node session ownership and coordination |
 
 ## Quick Start
@@ -118,12 +118,14 @@ cluster:
   enabled: true
   node_id: node-a
   backend: redis
+  hmac_key_file: /path/to/cluster-hmac.key   # or inline hmac_key; see below
 ```
 
 Operational requirements:
 
 - Every process in the same cluster must share the same Redis namespace and broker settings.
 - `cluster.node_id` must be unique per logical node.
+- All nodes must share the same command-bus HMAC key: at least 32 bytes, configured via exactly one of `cluster.hmac_key` or `cluster.hmac_key_file` — startup is refused otherwise.
 - Session-targeted admin operations and cluster-wide survey only become cluster-aware when `cluster.enabled: true`.
 
 ## Configuration Overview
@@ -132,14 +134,14 @@ MessageLoop reads a single YAML file passed through `--config`.
 
 | Section | Purpose | Key Fields |
 | --- | --- | --- |
-| `server` | Admin-side listeners and core runtime behavior | `http.addr`, `grpc_admin.addr`, `grpc_admin.tls.*`, `heartbeat.idle_timeout`, `rpc_timeout`, `limits.*`, `acl.rules` |
+| `server` | Admin-side listeners and core runtime behavior | `http.addr`, `grpc_admin.addr`, `grpc_admin.tls.*`, `heartbeat.idle_timeout`, `rpc_timeout`, `limits.*`, `authorizer.rules` |
 | `transport.websocket` | WebSocket listener configuration | `addr`, `path`, `check_origin`, `compression`, `write_timeout`, `tls.*` |
 | `transport.grpc` | Client gRPC streaming listener configuration | `addr`, `write_timeout`, `tls.*` |
 | `broker` | Messaging backend selection | `type`, `redis.*` |
 | `cluster` | Optional distributed control plane | `enabled`, `node_id`, `backend` |
 | `proxy` | Backend routing rules for RPC and hooks | `name`, `endpoint`, `timeout`, `http`, `grpc`, `routes` |
 
-### Limits And Built-In ACL
+### Limits And Authorizer Rules
 
 ```yaml
 server:
@@ -147,21 +149,22 @@ server:
     max_connections_per_user: 3
     max_subscriptions_per_client: 100
     max_publishes_per_second: 50
-  acl:
+  authorizer:
     rules:
-      - channel_pattern: "chat.public.*"
+      - pattern: "chat.public.*"
         allow_subscribe: ["*"]
         allow_publish: ["alice", "bob"]
-      - channel_pattern: "chat.private.*"
+      - pattern: "chat.private.*"
         deny_all: true
 ```
 
 Behavior notes:
 
-- Built-in ACL rules are evaluated only when no proxy ACL route is configured for the same operation.
-- `allow_subscribe` and `allow_publish` are user-ID allow lists.
-- `"*"` means any authenticated user.
-- If no ACL rule matches a channel, access is allowed by default.
+- `server.authorizer` is the single authorization table: a `default` fallback ChannelPolicySpec plus `rules[]`, each rule carrying `pattern`, `deny_all`, `allow_subscribe` / `allow_publish` / `allow_survey`, and inline channel-policy fields.
+- Allow lists are user-ID lists: unset means the action is not constrained, an explicit empty list denies it, and `"*"` allows any authenticated user.
+- When no rule matches a channel, the default policy applies (subscribe and publish are allowed, survey is off).
+- Rules are evaluated in configuration order and later rules override earlier ones (not first-match); a deny cannot be punched through by a more specific allow.
+- The old `server.acl` block was removed: configuration that still contains it fails validation.
 
 ### Proxy Routing
 

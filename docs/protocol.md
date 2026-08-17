@@ -1,5 +1,7 @@
 # Client Protocol Reference
 
+This document describes the client protocol of the current standalone version (KD-K31); envelope definitions live in `protocol/client/v2`. The server-side admin gRPC API remains `server.v1` (an explicitly accepted decision, PR-KA-B3).
+
 MessageLoop uses a bidirectional message protocol over WebSocket, gRPC streaming, or QUIC. All messages are wrapped in `InboundMessage` (client → server) and `OutboundMessage` (server → client) envelopes.
 
 ## Transport Negotiation
@@ -90,6 +92,7 @@ Envelope types:
 | `survey_request` | SurveyRequest | Survey forwarded to a channel subscriber (server-generated `request_id`; the subscriber replies with `survey_reply`) |
 | `survey_reply` | SurveyReply | Survey response |
 | `survey_result` | SurveyResult | Aggregated survey answers (async reply to a client-initiated survey) |
+| `gap_notice` | GapNotice | Catch-up gap notification (`channel`, `position`, `gap_reason`); `gap_reason` is `GAP_REASON_MIDDLE` or `GAP_REASON_REPLAY_TRUNCATED`; `position` is the last known safe position (offset omitted when unknown); at most one per channel per catch-up |
 
 ## Connection Lifecycle
 
@@ -441,7 +444,7 @@ Rules (PR-07):
 
 ## Heartbeat
 
-Heartbeat is **bidirectional** in v1.0:
+Heartbeat is **bidirectional**:
 
 - **Client → Server**: clients send periodic `Ping` frames; the server replies with `Pong` (same `id`).
 - **Server → Client**: when `server.heartbeat.ping_interval > 0`, the server sends `Ping` frames on its own and expects any inbound frame within `ping_timeout` (a `Pong` with the same `id` is the conventional answer).
@@ -542,7 +545,7 @@ Presence state is also served via the admin `GetPresence` API (backed by the pre
 
 ## Server-Side Admin API
 
-The gRPC admin API (`messageloop.server.v1.APIService`) provides server-side management:
+The gRPC admin API (`messageloop.server.v1.APIService`) provides server-side management. The admin surface remains `server.v1` by explicit decision (PR-KA-B3), not by omission:
 
 | RPC | Description |
 | --- | --- |

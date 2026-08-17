@@ -1,0 +1,35 @@
+# Minimal cluster (distributed control plane) example.
+# Requires Redis: the control plane shares the broker.redis settings.
+
+server:
+  http:
+    addr: ":8080"
+  grpc_admin:
+    addr: "127.0.0.1:9091"
+    auth_token: "change-me"   # Required (or set allow_insecure: true for dev only)
+
+transport:
+  websocket:
+    addr: ":9080"
+    path: "/ws"
+
+broker:
+  type: redis
+  redis:
+    addr: "127.0.0.1:6379"
+
+cluster:
+  enabled: true
+  node_id: node-a        # Must be unique per logical node
+  backend: redis
+  # Command-bus HMAC key (HMAC-SHA256). Requirements:
+  # - All nodes in the cluster must share the SAME key.
+  # - The resolved key must be at least 32 bytes.
+  # - Set exactly one of hmac_key / hmac_key_file; resolving the key is a
+  #   startup hard gate (ClusterConfig.ResolveHMACKey) — startup is refused
+  #   when neither or both are set, or the key is too short.
+  # - When reading from a file, a single trailing newline (LF or CRLF) is
+  #   trimmed.
+  # - Never commit a real key. Generate one e.g. with:
+  #     head -c 32 /dev/urandom | base64 > cluster-hmac.key
+  hmac_key_file: /path/to/cluster-hmac.key
