@@ -25,6 +25,10 @@ import (
 
 const clusterRedisIntegrationDB = 15
 
+// testClusterHMACKey is the 32-byte HMAC key shared by the buses of the
+// cluster integration tests.
+var testClusterHMACKey = []byte("integration-test-hmac-key-0123456789")
+
 // integrationAuthProxy authenticates any token as a fixed user.
 type integrationAuthProxy struct {
 	userID string
@@ -501,13 +505,13 @@ func newClusterRedisTestNodeWithConfig(t *testing.T, parent context.Context, red
 
 	clusterDeps := messageloop.ClusterDependencies{}
 	clusterDeps.SessionDirectory = redisbroker.NewSessionDirectory(redisCfg)
-	clusterDeps.CommandBus = redisbroker.NewClusterCommandBus(redisCfg, cluster.NodeID(), cluster.IncarnationID())
+	clusterDeps.CommandBus = redisbroker.NewClusterCommandBus(redisCfg, cluster.NodeID(), cluster.IncarnationID(), testClusterHMACKey)
 	clusterDeps.QueryStore = redisbroker.NewClusterQueryStore(redisCfg, cluster.NodeID(), cluster.IncarnationID())
 	clusterDeps.NodeLeaseManager = messageloop.NewClusterNodeLeaseManager(clusterDeps.SessionDirectory, messageloop.ClusterNodeLeaseManagerConfig{
 		NodeID:        cluster.NodeID(),
 		IncarnationID: cluster.IncarnationID(),
 	})
-	clusterDeps.ProjectionRepairer = messageloop.NewClusterProjectionRepairer(node, clusterDeps.QueryStore, messageloop.ClusterProjectionRepairerConfig{Interval: 200 * time.Millisecond})
+	clusterDeps.Repairer = messageloop.NewClusterRepairer(node, clusterDeps.SessionDirectory, clusterDeps.QueryStore, messageloop.ClusterRepairerConfig{Interval: 200 * time.Millisecond, MembershipInterval: 200 * time.Millisecond})
 	clusterDeps.CommandBus.SetHandler(node.ClusterCommandHandler())
 
 	cluster, err = messageloop.NewCluster(messageloop.ClusterOptions{

@@ -105,10 +105,6 @@ func (noopSessionDirectory) GetNodeLease(context.Context, string, string) (*Clus
 	return nil, nil
 }
 
-func (noopSessionDirectory) PutSessionLease(context.Context, *ClusterSessionLease, time.Duration) error {
-	return nil
-}
-
 // CompareAndSwapSessionLease on the noop directory always succeeds: there is
 // no remote directory to conflict with, so the local sync must never be
 // fenced by a lease it cannot even read back.

@@ -33,10 +33,6 @@ func (c *trackingClusterComponent) GetNodeLease(context.Context, string, string)
 	return nil, nil
 }
 
-func (c *trackingClusterComponent) PutSessionLease(context.Context, *ClusterSessionLease, time.Duration) error {
-	return nil
-}
-
 func (c *trackingClusterComponent) CompareAndSwapSessionLease(context.Context, *ClusterSessionLease, *ClusterSessionLease, time.Duration) (bool, error) {
 	return true, nil
 }
@@ -156,14 +152,14 @@ func TestCluster_StartAndShutdownOnlyOnce(t *testing.T) {
 	commandBus := &trackingClusterComponent{}
 	queryStore := &trackingClusterComponent{}
 	nodeLeaseManager := &trackingClusterComponent{}
-	projectionRepairer := &trackingClusterComponent{}
+	repairer := &trackingClusterComponent{}
 
 	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-a"}, ClusterDependencies{
-		SessionDirectory:   sessionDirectory,
-		CommandBus:         commandBus,
-		QueryStore:         queryStore,
-		NodeLeaseManager:   nodeLeaseManager,
-		ProjectionRepairer: projectionRepairer,
+		SessionDirectory: sessionDirectory,
+		CommandBus:       commandBus,
+		QueryStore:       queryStore,
+		NodeLeaseManager: nodeLeaseManager,
+		Repairer:         repairer,
 	})
 	assert.NoError(t, err)
 
@@ -177,13 +173,13 @@ func TestCluster_StartAndShutdownOnlyOnce(t *testing.T) {
 	assert.Equal(t, 1, commandBus.startCount)
 	assert.Equal(t, 1, queryStore.startCount)
 	assert.Equal(t, 1, nodeLeaseManager.startCount)
-	assert.Equal(t, 1, projectionRepairer.startCount)
+	assert.Equal(t, 1, repairer.startCount)
 
 	assert.Equal(t, 1, sessionDirectory.shutdownCount)
 	assert.Equal(t, 1, commandBus.shutdownCount)
 	assert.Equal(t, 1, queryStore.shutdownCount)
 	assert.Equal(t, 1, nodeLeaseManager.shutdownCount)
-	assert.Equal(t, 1, projectionRepairer.shutdownCount)
+	assert.Equal(t, 1, repairer.shutdownCount)
 }
 
 func TestCluster_StartPartialFailureRollsBackAndAllowsRetry(t *testing.T) {
@@ -191,14 +187,14 @@ func TestCluster_StartPartialFailureRollsBackAndAllowsRetry(t *testing.T) {
 	commandBus := &trackingClusterComponent{}
 	queryStore := &failingClusterComponent{failOn: 1}
 	nodeLeaseManager := &trackingClusterComponent{}
-	projectionRepairer := &trackingClusterComponent{}
+	repairer := &trackingClusterComponent{}
 
 	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-a"}, ClusterDependencies{
-		SessionDirectory:   sessionDirectory,
-		CommandBus:         commandBus,
-		QueryStore:         queryStore,
-		NodeLeaseManager:   nodeLeaseManager,
-		ProjectionRepairer: projectionRepairer,
+		SessionDirectory: sessionDirectory,
+		CommandBus:       commandBus,
+		QueryStore:       queryStore,
+		NodeLeaseManager: nodeLeaseManager,
+		Repairer:         repairer,
 	})
 	require.NoError(t, err)
 
@@ -212,14 +208,14 @@ func TestCluster_StartPartialFailureRollsBackAndAllowsRetry(t *testing.T) {
 	assert.Equal(t, 1, commandBus.startCount)
 	assert.Equal(t, 1, queryStore.startCount)
 	assert.Equal(t, 0, nodeLeaseManager.startCount)
-	assert.Equal(t, 0, projectionRepairer.startCount)
+	assert.Equal(t, 0, repairer.startCount)
 
 	// Already-started components are shut down in reverse order.
 	assert.Equal(t, 1, sessionDirectory.shutdownCount)
 	assert.Equal(t, 1, commandBus.shutdownCount)
 	assert.Equal(t, 0, queryStore.shutdownCount)
 	assert.Equal(t, 0, nodeLeaseManager.shutdownCount)
-	assert.Equal(t, 0, projectionRepairer.shutdownCount)
+	assert.Equal(t, 0, repairer.shutdownCount)
 
 	// A failed start can be retried on the same instance.
 	require.NoError(t, runtime.Start(ctx))
@@ -227,12 +223,12 @@ func TestCluster_StartPartialFailureRollsBackAndAllowsRetry(t *testing.T) {
 	assert.Equal(t, 2, commandBus.startCount)
 	assert.Equal(t, 2, queryStore.startCount)
 	assert.Equal(t, 1, nodeLeaseManager.startCount)
-	assert.Equal(t, 1, projectionRepairer.startCount)
+	assert.Equal(t, 1, repairer.startCount)
 
 	require.NoError(t, runtime.Shutdown(ctx))
 	assert.Equal(t, 2, sessionDirectory.shutdownCount)
 	assert.Equal(t, 2, commandBus.shutdownCount)
 	assert.Equal(t, 1, queryStore.shutdownCount)
 	assert.Equal(t, 1, nodeLeaseManager.shutdownCount)
-	assert.Equal(t, 1, projectionRepairer.shutdownCount)
+	assert.Equal(t, 1, repairer.shutdownCount)
 }

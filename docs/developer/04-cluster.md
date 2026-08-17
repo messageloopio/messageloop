@@ -131,9 +131,9 @@ cluster:
 | 命令总线 | `ClusterCommandBus` | `pkg/redisbroker/cluster_command_bus.go` | 节点间命令投递（定向与广播）、结果回传、命令去重 |
 | 查询存储 | `ClusterQueryStore` | `pkg/redisbroker/cluster_query_store.go` | 每节点频道的订阅计数投影（hash）与全集群聚合 |
 | 节点租约管理 | `ClusterNodeLeaseManager` | 通用实现（`cluster_state.go`） | 周期性续租本节点存活记录 |
-| 投影修复 | `ClusterProjectionRepairer` | 通用实现（`cluster_projection_repair.go`） | 周期性从本地 hub 全量重建本节点投影 |
+| 修复器 | `ClusterRepairer` | 通用实现（`cluster_repair.go`） | 单一控制面循环：周期性从本地 hub 全量重建本节点投影、收割死节点投影、重建 user→sessions 索引，并由短周期节点租约 SCAN 驱动 membership `OnLeave` |
 
-`node.Run` 启动时先启动集群（`Cluster.Start`，`cluster.go:254-286`）：按 会话目录 → 命令总线 → 查询存储 → 节点租约 → 投影修复 的顺序启动；任一组件启动失败时，已启动的组件按逆序回滚关闭（回滚受 5 秒超时约束，`clusterStartRollbackTimeout`），实例保持可重试（后续 `Start` 会重新启动全部组件）。`Node.Shutdown` 关闭集群时按逆序关闭全部组件（`cluster.go:289-304`）。
+`node.Run` 启动时先启动集群（`Cluster.Start`，`cluster.go`）：按 会话目录 → 命令总线 → 查询存储 → 节点租约 → 修复器 的顺序启动；任一组件启动失败时，已启动的组件按逆序回滚关闭（回滚受 5 秒超时约束，`clusterStartRollbackTimeout`），实例保持可重试（后续 `Start` 会重新启动全部组件）。`Node.Shutdown` 关闭集群时按逆序关闭全部组件。
 
 `Cluster.Start` 对每个 Redis 组件先执行 `Ping` 预检：任何组件连不上 Redis，节点启动即失败——集群模式下 Redis 不可用是启动级故障。
 
@@ -144,7 +144,7 @@ cluster:
 - **键**：`ml:cluster:node:<nodeID>:<incarnationID>`（`cluster_directory.go` 的 `nodeLeaseKey`），值为租约 JSON。
 - **TTL**：90 秒（`defaultClusterNodeLeaseTTL`）。
 - **续租**：`ClusterNodeLeaseManager`（`cluster_state.go:347-418`）启动时立即写一次租约，之后每 30 秒（`defaultClusterNodeLeaseRenewInterval`）续租一次；续租失败只记警告日志，不中断节点运行（节点租约随后到期）。
-- **离开**：节点没有主动注销机制——进程退出后，其租约在 90 秒内自然过期消失（优雅关闭 `Cluster.Shutdown` 只是停止续租）。
+- **离开**：节点没有主动注销机制——进程退出后，其租约在 90 秒内自然过期消失（优雅关闭 `Cluster.Shutdown` 只是停止续租）。修复器的 membership 节拍（默认 5 秒 ±20% 抖动的节点租约 SCAN，见第 6 节）发现某 incarnation 从存活集合中消失（或租约已过期）即触发 `OnLeave`：立即删除该死 incarnation 名下的全部会话租约（作废其 fencing，同步清理 user 索引）并删除其 owner 投影，**不必等 600 秒会话 TTL**；宽限期 = 一次 SCAN 周期。节点自身的 incarnation 永远不会被自己 OnLeave。
 
 节点发现通过**扫描节点租约键**实现：命令总线的 `BroadcastCommand` 用 `SCAN ml:cluster:node:*` 枚举存活节点（`cluster_command_bus.go:274-339`），每个租约键对应一个可投递目标。租约过期即从广播目标中消失。节点身份是 `(NodeID, IncarnationID)`，同一 `node_id` 的旧实例（已重启产生新 `IncarnationID`）会与新实例并存一段时间，直到旧租约过期——期间广播可能向同一逻辑节点的两个实例各投递一份命令，但已死的旧实例不会应答，其命令以超时/失败结果呈现（见 3.3 的去重与超时语义），不产生实际副作用。
 
@@ -162,13 +162,15 @@ cluster:
 
 **发送流程（`SendCommand`）**：
 
-1. 生成 `CommandID`（未指定时），标记 `IssuedBy`（发送方 NodeID，仅审计用途，见下方信任边界）。
+1. 生成 `CommandID`（未指定时），标记 `IssuedBy`（发送方 NodeID，仅审计用途，见下方信任边界），打上 `IssuedAt`。
 2. 查询 `ml:cluster:cmd:state:<commandID>`：若已有终态结果，直接返回（去重命中）；若处于 `pending`，返回 `in_progress`。
-3. 创建随机应答通道并 `SUBSCRIBE`，把命令 JSON 发布到目标节点的 `req:` 通道。
-4. 在应答通道上等待 `CommandID` 匹配的结果；收到不匹配的应答记录警告并继续等待（防御性处理）。
-5. 等待受命令级超时约束：调用方上下文无 deadline 时默认 5 秒（`defaultCommandTimeout`）。超时后先查状态键——若已有终态结果则返回该结果；否则返回 `unknown_final_state` 并计入指标（见第 10 节）。
+3. 创建随机应答通道并 `SUBSCRIBE`，把通道名写入命令元数据（`reply_channel`）。
+4. **签名**：`SignCommand` 以节点配置的 HMAC 密钥对命令的规范字节（`internal/cluster/hmac`，逐字节固定的行式编码，不含 `IssuedBy`）计算 `hex(HMAC-SHA256)` 写入 `Signature`；签名失败则不发布。
+5. 把命令 JSON（含 `Signature`）发布到目标节点的 `req:` 通道。
+6. 在应答通道上等待 `CommandID` 匹配且**验签通过**的结果；伪造/未签名/偏斜的应答被记入指标并当作未收到继续等待；`CommandID` 不匹配的应答记录警告并继续等待（防御性处理）。
+7. 等待受命令级超时约束：调用方上下文无 deadline 时默认 5 秒（`defaultCommandTimeout`）。超时后先查状态键——若已有终态结果则返回该结果；否则返回 `unknown_final_state` 并计入指标（见第 10 节）。
 
-**接收与执行（`handleMessage`）**：每个节点实例消费自己的 `req:` 通道，处理并发上限为 128（`clusterCommandHandlerConcurrency`）——读者循环在信号量上阻塞后才派发，饱和时排队而不是丢命令。执行前先在状态键上 `SETNX` 抢占（claim），TTL 30 秒（`clusterCommandClaimLeaseTTL`），处理期间每 10 秒续租（`renewClaimLease`）；执行完成（或失败）后把终态写入状态键，TTL 10 分钟（`defaultCommandStateTTL`），停止续租，再把结果发布到 `reply_channel`。每个处理器执行受 10 秒 deadline 约束（`clusterCommandHandlerTimeout`），超时返回 `CLUSTER_COMMAND_TIMEOUT`，卡死的处理器不会把命令钉死在 `pending`。
+**接收与执行（`handleMessage`）**：每个节点实例消费自己的 `req:` 通道，处理并发上限为 128（`clusterCommandHandlerConcurrency`）——读者循环在信号量上阻塞后才派发，饱和时排队而不是丢命令。**HMAC 硬门在最前**：未签名（`missing`）、坏签（`bad`）、`IssuedAt` 超出 ±30 秒时钟窗（`skew`）或无 `CommandID`（`id`）的命令直接拒绝——不 claim、不执行 handler、不写去重状态键、不应答，只计入 `messageloop_cluster_command_hmac_reject_total{reason}` 并记警告日志。通过验签后才在状态键上 `SETNX` 抢占（claim），TTL 30 秒（`clusterCommandClaimLeaseTTL`），处理期间每 10 秒续租（`renewClaimLease`）；执行完成（或失败）后把终态写入状态键，TTL 10 分钟（`defaultCommandStateTTL`），停止续租，再把**签过名**（`SignResult`，带 `IssuedAt`）的结果发布到 `reply_channel`。每个处理器执行受 10 秒 deadline 约束（`clusterCommandHandlerTimeout`），超时返回 `CLUSTER_COMMAND_TIMEOUT`，卡死的处理器不会把命令钉死在 `pending`。
 
 **命令去重（command dedupe）**：同一 `CommandID` 的命令可能因重试、广播重复投递而多次到达，去重发生在两个环节：
 
@@ -177,7 +179,7 @@ cluster:
 
 去重命中与超时、`unknown_final_state` 均计入指标（见第 10 节）。注意去重的粒度是 `CommandID`，广播命令（`BroadcastCommand`）为每个目标节点复制命令并重新生成 `CommandID`（`cluster_command_bus.go:303-305`），因此广播不会误去重。
 
-**信任边界（trust boundary）**：集群命令经 Redis Pub/Sub 传输，**没有签名或发送者认证**——任何能写入该 Redis 实例的进程都可以注入 disconnect/takeover/publish 命令。`IssuedBy` 字段只用于日志审计追溯，不是安全边界。Redis 的网络隔离是集群部署的安全前提（详见 `cluster_command_bus.go` 包注释）。
+**信任边界（trust boundary，PR-KA-B4 起）**：集群命令与应答经 Redis Pub/Sub 传输，由 **HMAC-SHA256 硬门**保护（`internal/cluster/hmac`）：密钥只来自节点配置（`cluster.hmac_key` 或 `cluster.hmac_key_file`，至少 32 字节，`enabled` 时缺一即拒绝启动；bus 的 `Start` 再挡一层），**从不写入任何 Redis 键、PUBLISH 载荷、日志或指标标签**。能写 Redis 不再等于能签发集群命令：未签名/坏签/偏斜的命令在 claim 之前被拒，伪造的 `succeeded` 应答不会让 `SendCommand` 成功。`IssuedBy` 字段只用于日志审计追溯（可伪造，不在规范字节内），不是安全边界。Redis 的网络隔离仍是纵深防御手段，但不再是唯一边界。
 
 ### 3.4 节点间命令路由
 
@@ -206,7 +208,7 @@ cluster:
 **会话租约的写入只走 CAS，没有盲写（PR-KA-A1）**。`syncClusterSessionState`（`cluster_state.go`）是唯一的热路径写入方，它的三种情形：
 
 - **首次登记**：Directory 中无该 session 的租约 → `CompareAndSwapSessionLease(expected=nil)` 抢注（版本 1）。
-- **same-fence 续约**：租约仍指向本节点实例且版本与本地一致 → `CompareAndSwapSessionLease(expected=当前租约)` 刷新 TTL / `LastActivityAt` / `UserID` 等，**`LeaseVersion` 不递增**。任何分支都不再调用 `PutSessionLease`（无条件 `SET` 会把已被他节点 CAS 抢走的所有权写回去）。
+- **same-fence 续约**：租约仍指向本节点实例且版本与本地一致 → `CompareAndSwapSessionLease(expected=当前租约)` 刷新 TTL / `LastActivityAt` / `UserID` 等，**`LeaseVersion` 不递增**。无条件 `SET` 的 lease put 方法已从 `SessionDirectory` 接口与全部实现中删除（PR-KA-B4）：盲写会把已被他节点 CAS 抢走的所有权写回去，任何分支都不允许绕过 CAS。
 - **fencing 失效（`ErrSessionFenced`）**：Directory 上的租约已不属于本节点实例（被其他节点 CAS 抢走），或版本比本地更新（本附件已陈旧）→ 返回错误，**不写回**。ping/pong 刷新路径收到该错误即用 3502（`DisconnectStale`）断开本连接，且**不删除** Directory 里的租约（那会误删新 owner 的 fencing）。
 
 版本的唯一递增点在 `resumeRemoteSession` 的抢权 CAS（旧版本 +1 后原子写入）；本机接管（同节点 resume）把内存版本 +1 后经同节点的 CAS 写透，续约本身从不 `+1`。
@@ -258,15 +260,15 @@ cluster:
 | `ml:cluster:user:member:<userID>:<sessionID>` | string（值 `"1"`） | 与 session lease 相同（`sessionLeaseTTL()`） | 成员键：续期时随 lease 一起刷新 |
 | `ml:cluster:user:sessions:<userID>` | set | 无（成员过期靠 repair 修剪） | 用户→session 集合；展开时 `SMEMBERS` 后逐个 `GET` lease 校验 |
 
-**维护**：所有 lease 写入路径共用单一 helper `SyncUserIndex`（根包 `cluster_user_index.go`），由 Redis directory 在 lease 写（`CompareAndSwapSessionLease` 成功——热路径唯一写入方式；`PutSessionLease` 仅保留为适配器方法，生产热路径已不再调用）/ `DeleteSessionLease` 之后调用（Delete 先 `GET` lease 以得知 user 再 `SREM`）：
+**维护**：所有 lease 写入路径共用单一 helper `SyncUserIndex`（根包 `cluster_user_index.go`），由 Redis directory 在 lease 写（`CompareAndSwapSessionLease` 成功——唯一的写入方式）/ `DeleteSessionLease` 之后调用（Delete 先 `GET` lease 以得知 user 再 `SREM`）：
 
 - Delete（`newLease == nil`）：`RemoveUserSession(旧 user, session)`；
-- Put/CAS 成功：user 相同 → `AddUserSession`（刷新 TTL）；user 变了 → 先 `RemoveUserSession` 旧 user 再 `AddUserSession` 新 user（resume 后 re-auth 换 user 的场景，`PutSessionLease` 先读旧 lease 用于比对）；
+- CAS 成功：user 相同 → `AddUserSession`（刷新 TTL）；user 变了 → 先 `RemoveUserSession` 旧 user 再 `AddUserSession` 新 user（resume 后 re-auth 换 user 的场景，CAS 以旧 lease 为 `expected` 完成比对）；
 - 空 `UserID`：只 Remove，匿名 session 不进索引。
 
 索引写失败是 best-effort（记录警告，不影响 lease 本身）：索引是提示，陈旧条目靠 repair 与展开时的 lease 校验收敛。
 
-**修复**：独立周期任务 `clusterUserIndexRepairer`（根包 `cluster_user_index_repair.go`，默认 30 秒，`NewCluster` 自动装配——directory 实现 `ClusterSessionLeaseLister` 才生效，否则 no-op）。每轮 `SCAN ml:cluster:session:lease:*`（复用 `scanKeys`，`pkg/redisbroker/cluster_query_store.go`），读 lease JSON，对非空 `UserID` 以 lease 剩余 TTL `AddUserSession`。**不**并入频道投影修复循环，集群未启用时不运行。
+**修复**：user 索引重建并入统一修复器 `clusterRepairer`（根包 `cluster_repair.go`，PR-KA-B4，`NewCluster` 自动装配——directory 实现 `ClusterSessionLeaseLister` 才生效，否则跳过该项工作）。每 30 秒一轮：`SCAN ml:cluster:session:lease:*`（复用 `scanKeys`，`pkg/redisbroker/cluster_query_store.go`），读 lease JSON，对非空 `UserID` 以 lease 剩余 TTL `AddUserSession`。集群未启用时不运行。
 
 **禁止**：索引 miss 时做全集群 SCAN（热路径）。陈旧索引靠 repair 收敛；展开时 `GetSessionLease` 校验兜底（投毒/过期条目被跳过）。跨节点验证：`TestAdmin_DisconnectUsersAcrossNodes`、`TestClusterRedis_ResumeUserChangeMigratesIndex`（`cluster_redis_integration_test.go`）。
 
@@ -285,9 +287,9 @@ cluster:
 
 与单节点的差异可概括为：单节点只问本地订阅者；集群版先问本地、再问所有存活节点，远端失败以错误应答条目呈现而不是整体报错。
 
-## 6. 投影修复（projection repair）
+## 6. 修复器（repairer）与 membership OnLeave
 
-**解决的问题**：集群级的活跃频道列表（管理 API `GetChannels`、`Node.Channels`）来自共享查询投影。投影由每次订阅/退订的 ±1 增量维护（`AdjustChannelSubscriptions`）。若持有订阅的节点突然宕机，其增量（+N）永远无法回退，投影会出现「幽灵订阅者」——频道明明已无人订阅，计数却不为零。
+**解决的问题**：集群级的活跃频道列表（管理 API `GetChannels`、`Node.Channels`）来自共享查询投影。投影由每次订阅/退订的 ±1 增量维护（`AdjustChannelSubscriptions`）。若持有订阅的节点突然宕机，其增量（+N）永远无法回退，投影会出现「幽灵订阅者」——频道明明已无人订阅，计数却不为零。同理，user→sessions 索引与死节点的会话 fencing 也需要一个控制面循环来收敛。
 
 **数据结构**：投影按节点隔离（`cluster_query_store.go`）。每个节点实例拥有一个 Redis hash：
 
@@ -297,10 +299,12 @@ ml:cluster:channel:owner:<nodeID>:<incarnationID>
 
 hash 的字段是频道名、值是本节点在该频道的订阅者计数。增量调整用 Lua 脚本原子执行（`adjustChannelSubscriptionsScript`）：`HGET` 当前值 → 加/减 delta → 结果 ≤ 0 时 `HDEL` 该频道，hash 变空则 `DEL` 整个键；否则 `HSET` + 刷新 `EXPIRE`（TTL 10 分钟，`defaultClusterQueryProjectionTTL`）。`ListChannels` 用 `SCAN ml:cluster:channel:owner:*` 枚举所有 owner hash，`HGETALL` 后按频道聚合求和，按频道名排序。
 
-**修复流程**：`ClusterProjectionRepairer`（`cluster_projection_repair.go`）每 30 秒（`defaultClusterProjectionRepairInterval`）执行一轮 `repairOnce`：从本地 hub 取活跃频道及真实订阅者数（`GetActiveChannels`），用 `ReplaceNodeChannels` **全量重建**本节点的 owner hash（`DEL` + `HSET` + `EXPIRE`，事务管道内完成）。由此：
+**修复流程（PR-KA-B4 起）**：所有派生视图的修复收敛为**一个** `clusterRepairer`（根包 `cluster_repair.go`），`NewCluster` 只启动这一个修复组件。它由一条定时循环驱动两档节奏：
 
-- 本节点上的幽灵增量（因订阅 saga 部分失败、驱逐回滚遗漏等）每轮被纠正；
-- 节点宕机后，其 owner hash 在 10 分钟 TTL 内自然消失，全集群聚合计数随之回落——投影修复 + TTL 过期共同构成投影的最终一致（eventual consistency）。
+- **30 秒档**（`ClusterRepairerConfig.Interval`，默认 `defaultClusterRepairInterval`）每轮 `repairOnce`：从本地 hub 取活跃频道及真实订阅者数（`GetActiveChannels`），用 `ReplaceNodeChannels` **全量重建**本节点的 owner hash（`DEL` + `HSET` + `EXPIRE`，事务管道内完成）；随后收割节点租约已消失的死节点 owner 投影；最后 SCAN 会话租约重建 user→sessions 索引（见 4.5）。由此：
+  - 本节点上的幽灵增量（因订阅 saga 部分失败、驱逐回滚遗漏等）每轮被纠正；
+  - 节点宕机后，其 owner hash 在 10 分钟 TTL 内自然消失，全集群聚合计数随之回落——投影修复 + TTL 过期共同构成投影的最终一致（eventual consistency）。
+- **membership 档**（`ClusterRepairerConfig.MembershipInterval`，默认 5 秒、每拍 ±20% 抖动）每拍 `SCAN ml:cluster:node:*` 维护上一拍存活 incarnation 集合：上一拍有、本拍消失（或 `ExpiresAt` 已过）且非自身的 incarnation 触发 `OnLeave`——删除其名下全部会话租约（走 `DeleteSessionLease`，同步清理 user 索引；**不做** Evict，对方已死）并删除其 owner 投影，不必等 600 秒会话 TTL。第一拍只建集合不触发；自身 incarnation 永不触发。这是控制面循环，热路径（publish/subscribe/ping）不做任何 SCAN。
 
 集成测试 `TestClusterRedis_ProjectionRepairRestoresChannels` 验证了删除 owner 键后修复器自动重建投影。修复成功与失败分别计入 `ClusterProjectionRepairs` / `ClusterProjectionRepairFailures` 指标。
 
@@ -376,7 +380,8 @@ hash 的字段是频道名、值是本节点在该频道的订阅者计数。增
 | `messageloop_cluster_command_dedupe_hits_total` | Counter | 命令去重命中次数 | 发送方命中已存结果、接收方抢占失败（`recordDedupeHit`，阶段 `send` / `owner`） |
 | `messageloop_cluster_command_timeouts_total` | Counter | 命令应答等待超时次数 | 发送方在 deadline 内未收到终态应答（`recordCommandTimeout`） |
 | `messageloop_cluster_command_unknown_final_state_total` | Counter | 命令进入「终态未知」的次数 | 超时后状态键无终态、或结果未能持久化（`recordUnknownFinalState`） |
-| `messageloop_cluster_projection_repairs_total` | Counter | 投影修复成功轮次 | `repairOnce` 成功（`cluster_projection_repair.go:123-125`） |
+| `messageloop_cluster_command_hmac_reject_total{reason}` | CounterVec | HMAC 验签拒绝的信封数（reason ∈ `missing`/`bad`/`skew`/`id`） | 未签名/坏签/偏斜/无 id 的命令或伪造应答被拒（`recordHMACReject`） |
+| `messageloop_cluster_projection_repairs_total` | Counter | 投影修复成功轮次 | 修复器 `repairOnce` 的投影重建成功（`cluster_repair.go`） |
 | `messageloop_cluster_projection_repair_failures_total` | Counter | 投影修复失败轮次 | `ReplaceNodeChannels` 失败（同上） |
 
 指标解读提示：`dedupe_hits` 持续高位说明存在大量命令重试（可能源于广播重复投递或发送方重试）；`timeouts` 与 `unknown_final_state` 上升通常意味着目标节点不健康、Redis 网络抖动或命令处理超载（处理并发上限 128，见 3.3）。

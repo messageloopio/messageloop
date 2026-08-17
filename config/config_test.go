@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -125,9 +127,84 @@ func TestValidate_ValidRedisCluster(t *testing.T) {
 			Type:  "redis",
 			Redis: RedisConfig{Addr: "localhost:6379", StreamApproximate: true},
 		},
-		Cluster: ClusterConfig{Enabled: true, NodeID: "node-a", Backend: "redis"},
+		Cluster: ClusterConfig{Enabled: true, NodeID: "node-a", Backend: "redis", HMACKey: "0123456789abcdef0123456789abcdef"},
 	}
 	assert.NoError(t, cfg.Validate())
+}
+
+// PR-KA-B4: an enabled cluster must carry an HMAC key for the command bus.
+func TestValidate_ClusterHMACKey(t *testing.T) {
+	validBase := func() *Config {
+		return &Config{
+			Transport: validTransport(),
+			Broker: BrokerConfig{
+				Type:  "redis",
+				Redis: RedisConfig{Addr: "localhost:6379", StreamApproximate: true},
+			},
+			Cluster: ClusterConfig{Enabled: true, NodeID: "node-a", Backend: "redis"},
+		}
+	}
+
+	cfg := validBase()
+	assert.ErrorContains(t, cfg.Validate(), "cluster.hmac_key is required",
+		"enabled cluster without any key must fail validation")
+
+	cfg = validBase()
+	cfg.Cluster.HMACKey = "short"
+	assert.ErrorContains(t, cfg.Validate(), "at least 32 bytes")
+
+	cfg = validBase()
+	cfg.Cluster.HMACKey = "0123456789abcdef0123456789abcdef"
+	cfg.Cluster.HMACKeyFile = "/tmp/key"
+	assert.ErrorContains(t, cfg.Validate(), "only one of hmac_key or hmac_key_file")
+
+	cfg = validBase()
+	cfg.Cluster.HMACKeyFile = "/run/secrets/cluster-hmac-key"
+	assert.NoError(t, cfg.Validate(), "hmac_key_file alone is acceptable (the file is read at startup)")
+
+	// A disabled cluster needs no key.
+	disabled := &Config{Transport: validTransport()}
+	assert.NoError(t, disabled.Validate(), "enabled: false must not require a key")
+}
+
+func TestClusterConfig_ResolveHMACKey(t *testing.T) {
+	key32 := "0123456789abcdef0123456789abcdef"
+
+	key, err := ClusterConfig{HMACKey: key32}.ResolveHMACKey()
+	require.NoError(t, err)
+	require.Equal(t, []byte(key32), key)
+
+	_, err = ClusterConfig{}.ResolveHMACKey()
+	require.ErrorContains(t, err, "cluster.hmac_key is required")
+
+	_, err = ClusterConfig{HMACKey: "short"}.ResolveHMACKey()
+	require.ErrorContains(t, err, "at least 32 bytes")
+
+	// Key file: a single trailing newline (LF or CRLF) is trimmed.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "hmac-key")
+	require.NoError(t, os.WriteFile(path, []byte(key32+"\n"), 0o600))
+	key, err = ClusterConfig{HMACKeyFile: path}.ResolveHMACKey()
+	require.NoError(t, err)
+	require.Equal(t, []byte(key32), key)
+
+	require.NoError(t, os.WriteFile(path, []byte(key32+"\r\n"), 0o600))
+	key, err = ClusterConfig{HMACKeyFile: path}.ResolveHMACKey()
+	require.NoError(t, err)
+	require.Equal(t, []byte(key32), key)
+
+	// A too-short file content is rejected.
+	require.NoError(t, os.WriteFile(path, []byte("short\n"), 0o600))
+	_, err = ClusterConfig{HMACKeyFile: path}.ResolveHMACKey()
+	require.ErrorContains(t, err, "at least 32 bytes")
+
+	// An unreadable file fails startup wiring.
+	_, err = ClusterConfig{HMACKeyFile: filepath.Join(dir, "missing")}.ResolveHMACKey()
+	require.ErrorContains(t, err, "read cluster.hmac_key_file")
+
+	// Both set is rejected.
+	_, err = ClusterConfig{HMACKey: key32, HMACKeyFile: path}.ResolveHMACKey()
+	require.ErrorContains(t, err, "only one of hmac_key or hmac_key_file")
 }
 
 func TestValidate_AdminRequiresAuthToken(t *testing.T) {

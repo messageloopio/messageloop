@@ -3,7 +3,7 @@
 | 字段 | 值 |
 | --- | --- |
 | 标题 | `cluster: HMAC command bus; reject unsigned; one repairer; scoped internal/cluster` |
-| 状态 | **Ready** |
+| 状态 | **Accepted**（2026-08-17 主 agent 终验通过，尚未 commit） |
 | 依赖 | B3 已合（`782061b`）。在 `v2` 分支上做 |
 | 设计来源 | [kernel-architecture.md](../kernel-architecture.md) Cluster / NodeRPC、KD-K4、KD-K6、KD-K26、KD-K29、KD-K30、KD-K31 |
 | 验收人 | 主 agent |
@@ -278,4 +278,14 @@ publishCommandResult:
 
 ## 10. 实现备注（完成后填写）
 
-（实现者填写）
+实现完成（未 commit）。要点：
+
+- `internal/cluster/hmac`：`SignCommand`/`VerifyCommand`/`SignResult`/`VerifyResult`，规范字节为 §4.3 的行式编码（末行亦带 `\n`），`hmac.Equal` 常量时间比较，`VerifyError.Reason ∈ missing/bad/skew/id`。包测试不依赖 Redis。
+- bus（`pkg/redisbroker/cluster_command_bus.go`）：构造函数收 `hmacKey []byte`（防御性复制）；`Start` 在拨号前拒绝 < 32 字节密钥；`SendCommand` 在 PUBLISH 前签名；`handleMessage` 验签先于 claim（拒绝不写状态键、不回应答）；`publishCommandResult` 补 `IssuedAt` 并签名；`waitForReply` 对伪造应答记指标并继续等到 deadline（`unknown_final_state`）。新指标 `messageloop_cluster_command_hmac_reject_total{reason}`。
+- `PutSessionLease` 已从接口、`redisSessionDirectory`、`noopSessionDirectory` 与全部 fake 删除；生产 `.go` grep 为零。测试写入 lease 一律走 `CompareAndSwapSessionLease`。
+- 修复收敛为一个 `clusterRepairer`（新文件 `cluster_repair.go`，旧的两个 repairer 文件删除）：一条定时循环，30s 档跑投影重发/死投影收割/user 索引重建，5s±20% jitter 档 SCAN 节点租约驱动 `OnLeave`（首拍只建集合；自身 incarnation 永不 OnLeave；死 incarnation 的 session lease 走 `DeleteSessionLease` 同步 user 索引，投影同时删除）。`ClusterDependencies` 收成单个 `Repairer` 字段；`NewCluster` 在缺省时从 SessionDirectory 派生（无枚举能力则 noop）。新增 `ClusterNodeLeaseLister`（Redis directory 实现，`ListNodeLeases`）。
+- 配置：`cluster.hmac_key` / `cluster.hmac_key_file`；`enabled` 时 Validate 按 §4.1 表拒绝；`ClusterConfig.ResolveHMACKey` 读文件、trim 单一末尾换行、<32 字节拒绝；`cmd/server/main.go` 读密钥失败即拒启动。
+- 测试：§7 第 1–12 条全部落地（hmac 向量/篡改、未签名/坏签/偏斜/空 id 拒绝、合法往返、伪造应答、密钥不进 Redis（psubscribe spy + SCAN）、配置 Validate、无 PutSessionLease、单 repairer、OnLeave + CAS(nil)）。时钟用注入/相对时间，无固定长 Sleep。
+- 文档：`docs/developer/04-cluster.md`（§3.2 OnLeave、§3.3 信任边界与签名流程、§4.1/§4.5、§6 修复器、§10 指标）与 `docs/deployment.md`（HMAC 硬门 + ACL 分离建议一句）已更新。
+
+验证（本机有 Redis，集成测试真实执行）：`go test ./internal/cluster/hmac ./pkg/redisbroker` ✅；`go test ./...` ✅；`go test -race . ./pkg/redisbroker` ✅。

@@ -123,6 +123,13 @@ cluster:
   node_id: node-a      # Must be unique per logical node in the cluster.
   backend: redis       # Current distributed control-plane backend.
                        # In practice this should be paired with broker.type=redis.
+  # HMAC-SHA256 key for the cluster command bus. Required when enabled:
+  # exactly one of hmac_key / hmac_key_file must be set, and the key must be
+  # at least 32 bytes. Every node in the cluster must share the same key.
+  # Prefer the file variant so the key stays out of the YAML (and out of
+  # config dumps); a single trailing newline in the file is trimmed.
+  # hmac_key_file: /run/secrets/messageloop-cluster-hmac-key
+  # hmac_key: "change-me-to-a-random-key-of-at-least-32-bytes"
 
 proxy:
   - name: example-grpc

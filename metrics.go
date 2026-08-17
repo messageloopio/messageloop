@@ -31,6 +31,7 @@ type Metrics struct {
 	ClusterCommandDedupeHits        prometheus.Counter
 	ClusterCommandTimeouts          prometheus.Counter
 	ClusterCommandUnknownFinalState prometheus.Counter
+	ClusterCommandHMACRejects       *prometheus.CounterVec
 	ClusterProjectionRepairs        prometheus.Counter
 	ClusterProjectionRepairFailures prometheus.Counter
 	PresencePublishFailures         prometheus.Counter
@@ -105,6 +106,11 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name:      "cluster_command_unknown_final_state_total",
 			Help:      "Total number of cluster commands that ended in unknown_final_state.",
 		}),
+		ClusterCommandHMACRejects: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "messageloop",
+			Name:      "cluster_command_hmac_reject_total",
+			Help:      "Total number of cluster command envelopes rejected by HMAC verification, by reason (missing/bad/skew/id).",
+		}, []string{"reason"}),
 		ClusterProjectionRepairs: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: "messageloop",
 			Name:      "cluster_projection_repairs_total",
@@ -184,6 +190,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.ClusterCommandDedupeHits,
 		m.ClusterCommandTimeouts,
 		m.ClusterCommandUnknownFinalState,
+		m.ClusterCommandHMACRejects,
 		m.ClusterProjectionRepairs,
 		m.ClusterProjectionRepairFailures,
 		m.PresencePublishFailures,

@@ -146,8 +146,9 @@ All nodes in a cluster must:
 1. Share the same Redis instance and database.
 2. Use `broker.type: redis` with identical broker settings.
 3. Have unique `cluster.node_id` values.
+4. Share the same command-bus HMAC key (see below).
 
-**Security note (cluster command bus):** cluster commands (disconnect, takeover, publish, survey) travel over Redis Pub/Sub with **no signature or sender authentication** — any process that can write to the shared Redis instance can inject commands (see the package comment in `pkg/redisbroker/cluster_command_bus.go`). Commands carry an `IssuedBy` audit field (sender `node_id`) for tracing only. Redis network isolation is therefore the security prerequisite for a cluster deployment: run Redis on a private network or with authentication/firewalling so that only trusted nodes can reach it.
+**Security note (cluster command bus):** cluster commands (disconnect, takeover, publish, survey) and their replies travel over Redis Pub/Sub protected by an **HMAC-SHA256 hard gate** (PR-KA-B4, see `internal/cluster/hmac` and the package comment in `pkg/redisbroker/cluster_command_bus.go`). The key comes only from node configuration — `cluster.hmac_key` or `cluster.hmac_key_file` (at least 32 bytes; a key file's single trailing newline is trimmed). Startup is refused when the cluster is enabled without exactly one key source, and the bus itself rejects a short key. The key is never written to any Redis key, publish payload, log line, or metrics label. Unsigned, badly signed, or clock-skewed (±30s) commands are rejected before claiming or handling, and forged replies never count as success; rejections are counted in `messageloop_cluster_command_hmac_reject_total{reason}`. Commands still carry an `IssuedBy` audit field (sender `node_id`), which is forgeable and informational only. Redis network isolation remains recommended as defense in depth (private network, authentication/firewalling, and separate ACLs for the control-plane vs data-plane where available), but it is no longer the only boundary.
 
 ## Resource Limits
 

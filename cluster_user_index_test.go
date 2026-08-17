@@ -134,8 +134,8 @@ func (d *repairListerDirectory) ListSessionLeases(context.Context) ([]*ClusterSe
 	return d.leases, nil
 }
 
-// TestClusterUserIndexRepairer_RebuildsMemberships verifies the standalone
-// repair loop: it SCANs the lease prefix and re-adds memberships for
+// TestClusterUserIndexRepairer_RebuildsMemberships verifies the repairer's
+// user-index pass: it SCANs the lease prefix and re-adds memberships for
 // non-empty users, skipping anonymous and expired leases.
 func TestClusterUserIndexRepairer_RebuildsMemberships(t *testing.T) {
 	ctx := context.Background()
@@ -147,22 +147,11 @@ func TestClusterUserIndexRepairer_RebuildsMemberships(t *testing.T) {
 			{SessionID: "sess-expired", UserID: "U3", ExpiresAt: time.Now().Add(-time.Second)},
 		},
 	}
-	repairer := NewClusterUserIndexRepairer(directory, ClusterUserIndexRepairerConfig{})
-	require.IsType(t, &clusterUserIndexRepairer{}, repairer, "a lease-listing directory must not get the no-op repairer")
+	repairer := NewClusterRepairer(nil, directory, nil, ClusterRepairerConfig{})
+	require.IsType(t, &clusterRepairer{}, repairer, "a lease-listing directory must not get the no-op repairer")
 
-	repairCtx, cancel := context.WithCancel(context.Background())
-	require.NoError(t, repairer.Start(repairCtx))
-	defer func() {
-		cancel()
-		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer shutdownCancel()
-		require.NoError(t, repairer.Shutdown(shutdownCtx))
-	}()
-
-	require.Eventually(t, func() bool {
-		ids, _ := directory.ListUserSessions(ctx, "U1")
-		return len(ids) == 1
-	}, time.Second, 10*time.Millisecond)
+	// Drive the repair pass directly instead of waiting on the ticker.
+	require.NoError(t, repairer.(*clusterRepairer).repairOnce(ctx))
 
 	ids, err := directory.ListUserSessions(ctx, "U1")
 	require.NoError(t, err)
@@ -174,7 +163,8 @@ func TestClusterUserIndexRepairer_RebuildsMemberships(t *testing.T) {
 		assert.NotEqual(t, "sess-anon", entry.sessionID, "anonymous leases must never enter the index")
 	}
 
-	// A directory without lease enumeration gets a no-op repairer.
-	noop := NewClusterUserIndexRepairer(&fakeSessionDirectory{}, ClusterUserIndexRepairerConfig{})
-	require.IsType(t, &noopClusterUserIndexRepairer{}, noop)
+	// A directory without lease enumeration (and no node/store) gets a no-op
+	// repairer.
+	noop := NewClusterRepairer(nil, &fakeSessionDirectory{}, nil, ClusterRepairerConfig{})
+	require.IsType(t, &noopClusterRepairer{}, noop)
 }

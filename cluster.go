@@ -66,15 +66,13 @@ type ClusterLifecycle interface {
 //
 // Lease writes on production hot paths must go through
 // CompareAndSwapSessionLease (same-fence refresh, or CAS(nil) for first
-// registration): PutSessionLease is an unconditional SET that would write a
-// fenced owner's lease back over the new owner (KD-K4), so it must not be
-// called from syncClusterSessionState, the ping/pong refresh, or
-// resumeRemoteSession.
+// registration). The unconditional-SET lease put method was removed in
+// PR-KA-B4: a blind write would write a fenced owner's lease back over the
+// new owner (KD-K4), so no write path may bypass the CAS.
 type SessionDirectory interface {
 	ClusterLifecycle
 	PutNodeLease(ctx context.Context, lease *ClusterNodeLease, ttl time.Duration) error
 	GetNodeLease(ctx context.Context, nodeID, incarnationID string) (*ClusterNodeLease, error)
-	PutSessionLease(ctx context.Context, lease *ClusterSessionLease, ttl time.Duration) error
 	CompareAndSwapSessionLease(ctx context.Context, expected, desired *ClusterSessionLease, ttl time.Duration) (bool, error)
 	GetSessionLease(ctx context.Context, sessionID string) (*ClusterSessionLease, error)
 	DeleteSessionLease(ctx context.Context, sessionID string) error
@@ -123,23 +121,28 @@ type ClusterNodeLeaseManager interface {
 	ClusterLifecycle
 }
 
-// ClusterProjectionRepairer periodically repairs shared query projections.
-type ClusterProjectionRepairer interface {
-	ClusterLifecycle
-}
-
-// ClusterUserIndexRepairer periodically rebuilds the user→sessions index from
-// authoritative session leases. It runs standalone and is deliberately not
-// part of the channel projection repair loop.
-type ClusterUserIndexRepairer interface {
+// ClusterRepairer is the single cluster control-plane repair loop (PR-KA-B4):
+// it republishes this node's channel projections, reaps dead node
+// projections, rebuilds the user→sessions index, and drives membership
+// OnLeave from a short-period node-lease SCAN. NewCluster starts at most one
+// repairer.
+type ClusterRepairer interface {
 	ClusterLifecycle
 }
 
 // ClusterSessionLeaseLister enumerates every session lease stored in the
 // directory; only a lease-capable backend (e.g. Redis with SCAN) implements
-// it. The periodic user-index repair uses it to rebuild memberships.
+// it. The repairer uses it to rebuild user-index memberships and to
+// invalidate a dead incarnation's session fencing on OnLeave.
 type ClusterSessionLeaseLister interface {
 	ListSessionLeases(ctx context.Context) ([]*ClusterSessionLease, error)
+}
+
+// ClusterNodeLeaseLister enumerates every node lease stored in the directory;
+// only a lease-capable backend (e.g. Redis with SCAN) implements it. The
+// repairer uses it to detect node incarnations that left the cluster.
+type ClusterNodeLeaseLister interface {
+	ListNodeLeases(ctx context.Context) ([]*ClusterNodeLease, error)
 }
 
 // ClusterCommandType identifies a cluster control-plane command.
@@ -187,11 +190,15 @@ type ClusterCommand struct {
 	LeaseVersion        uint64
 	IssuedAt            time.Time
 	// IssuedBy is the NodeID of the command sender, recorded for audit
-	// purposes. It is not a security boundary: the command bus performs no
-	// signature or authentication of this field.
+	// purposes only: it is NOT part of the signed canonical bytes and is
+	// forgeable. The security boundary is Signature, not IssuedBy.
 	IssuedBy string
 	Payload  []byte
 	Metadata map[string]string
+	// Signature is hex(HMAC-SHA256(canonical(command))) — see
+	// internal/cluster/hmac. Commands without a valid signature are rejected
+	// by the receiving bus before claiming or handling.
+	Signature string
 }
 
 // ClusterCommandResult is the normalized result of a cluster command execution.
@@ -204,20 +211,26 @@ type ClusterCommandResult struct {
 	ErrorCode     string
 	ErrorMessage  string
 	Metadata      map[string]string
+	// IssuedAt is when the answering node emitted the result; verifiers
+	// reject results outside the ±30s clock-skew window.
+	IssuedAt time.Time
+	// Signature is hex(HMAC-SHA256(canonical(result))) — see
+	// internal/cluster/hmac. Forged results (unsigned or badly signed) are
+	// discarded by the waiting sender as if no reply had arrived.
+	Signature string
 }
 
 // ClusterDependencies groups the control-plane adapters used by a cluster-enabled node.
 type ClusterDependencies struct {
-	SessionDirectory   SessionDirectory
-	CommandBus         ClusterCommandBus
-	QueryStore         ClusterQueryStore
-	NodeLeaseManager   ClusterNodeLeaseManager
-	ProjectionRepairer ClusterProjectionRepairer
-	// UserIndexRepairer periodically rebuilds the user→sessions index from
-	// session leases. When nil, NewCluster derives one from the session
-	// directory if it can enumerate leases (ClusterSessionLeaseLister);
-	// otherwise a no-op repairer is used.
-	UserIndexRepairer ClusterUserIndexRepairer
+	SessionDirectory SessionDirectory
+	CommandBus       ClusterCommandBus
+	QueryStore       ClusterQueryStore
+	NodeLeaseManager ClusterNodeLeaseManager
+	// Repairer is the single control-plane repair loop (projection republish
+	// + dead-projection reaping + user-index rebuild + membership OnLeave).
+	// When nil, NewCluster derives one from the session directory; a
+	// directory without lease enumeration yields a no-op repairer.
+	Repairer ClusterRepairer
 }
 
 // Cluster owns lifecycle coordination for cluster control-plane adapters.
@@ -253,11 +266,11 @@ func NewCluster(options ClusterOptions, deps ClusterDependencies) (*Cluster, err
 	if deps.NodeLeaseManager == nil {
 		deps.NodeLeaseManager = &noopClusterNodeLeaseManager{}
 	}
-	if deps.ProjectionRepairer == nil {
-		deps.ProjectionRepairer = &noopClusterProjectionRepairer{}
-	}
-	if deps.UserIndexRepairer == nil {
-		deps.UserIndexRepairer = NewClusterUserIndexRepairer(deps.SessionDirectory, ClusterUserIndexRepairerConfig{})
+	if deps.Repairer == nil {
+		deps.Repairer = NewClusterRepairer(nil, deps.SessionDirectory, nil, ClusterRepairerConfig{
+			NodeID:        normalized.NodeID,
+			IncarnationID: normalized.IncarnationID,
+		})
 	}
 
 	return &Cluster{
@@ -360,8 +373,7 @@ func (r *Cluster) components() []ClusterLifecycle {
 		r.deps.CommandBus,
 		r.deps.QueryStore,
 		r.deps.NodeLeaseManager,
-		r.deps.ProjectionRepairer,
-		r.deps.UserIndexRepairer,
+		r.deps.Repairer,
 	}
 }
 
@@ -377,10 +389,8 @@ func clusterComponentName(component ClusterLifecycle) string {
 		return "query_store"
 	case ClusterNodeLeaseManager:
 		return "node_lease_manager"
-	case ClusterProjectionRepairer:
-		return "projection_repairer"
-	case ClusterUserIndexRepairer:
-		return "user_index_repairer"
+	case ClusterRepairer:
+		return "repairer"
 	default:
 		return fmt.Sprintf("%T", component)
 	}
@@ -395,5 +405,4 @@ type noopSessionDirectory struct{ noopClusterComponent }
 type noopClusterCommandBus struct{ noopClusterComponent }
 type noopClusterQueryStore struct{ noopClusterComponent }
 type noopClusterNodeLeaseManager struct{ noopClusterComponent }
-type noopClusterProjectionRepairer struct{ noopClusterComponent }
-type noopClusterUserIndexRepairer struct{ noopClusterComponent }
+type noopClusterRepairer struct{ noopClusterComponent }

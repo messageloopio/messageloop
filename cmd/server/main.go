@@ -170,7 +170,15 @@ func setupCluster(cfg *config.Config, node *messageloop.Node, metrics *messagelo
 
 	deps := messageloop.ClusterDependencies{}
 	deps.SessionDirectory = redisbroker.NewSessionDirectory(cfg.Broker.Redis)
-	deps.CommandBus = redisbroker.NewClusterCommandBus(cfg.Broker.Redis, opts.NodeID, opts.IncarnationID)
+
+	// The command-bus HMAC key comes only from node configuration; a
+	// misconfigured or unreadable key must refuse startup rather than run an
+	// unprotected bus.
+	hmacKey, err := cfg.Cluster.ResolveHMACKey()
+	if err != nil {
+		return nil, fmt.Errorf("invalid cluster config: %w", err)
+	}
+	deps.CommandBus = redisbroker.NewClusterCommandBus(cfg.Broker.Redis, opts.NodeID, opts.IncarnationID, hmacKey)
 	deps.QueryStore = redisbroker.NewClusterQueryStore(cfg.Broker.Redis, opts.NodeID, opts.IncarnationID)
 	deps.NodeLeaseManager = messageloop.NewClusterNodeLeaseManager(
 		deps.SessionDirectory,
@@ -179,7 +187,9 @@ func setupCluster(cfg *config.Config, node *messageloop.Node, metrics *messagelo
 			IncarnationID: opts.IncarnationID,
 		},
 	)
-	deps.ProjectionRepairer = messageloop.NewClusterProjectionRepairer(node, deps.QueryStore, messageloop.ClusterProjectionRepairerConfig{})
+	// One repairer drives projection republish, dead-projection reaping,
+	// user-index rebuild, and membership OnLeave (PR-KA-B4).
+	deps.Repairer = messageloop.NewClusterRepairer(node, deps.SessionDirectory, deps.QueryStore, messageloop.ClusterRepairerConfig{})
 	deps.CommandBus.SetHandler(node.ClusterCommandHandler())
 	if metricsAware, ok := deps.CommandBus.(interface{ SetMetrics(*messageloop.Metrics) }); ok {
 		metricsAware.SetMetrics(metrics)

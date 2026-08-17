@@ -30,9 +30,6 @@ type fakeSessionDirectory struct {
 	// casErr makes CompareAndSwapSessionLease fail with a store error.
 	casErr error
 
-	// putLeaseErr makes PutSessionLease fail (simulating a cluster sync error).
-	putLeaseErr error
-
 	// user index state: userSessions backs ListUserSessions and is mutated
 	// by Add/RemoveUserSession; the call slices record every call for
 	// assertions.
@@ -61,9 +58,6 @@ func (f *fakeSessionDirectory) GetNodeLease(_ context.Context, nodeID, incarnati
 		return f.nodeLeases[nodeID+":"+incarnationID], nil
 	}
 	return f.nodeLease, nil
-}
-func (f *fakeSessionDirectory) PutSessionLease(context.Context, *ClusterSessionLease, time.Duration) error {
-	return f.putLeaseErr
 }
 
 // CompareAndSwapSessionLease simulates version-based CAS semantics: the swap

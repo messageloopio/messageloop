@@ -81,26 +81,6 @@ func (d *redisSessionDirectory) GetNodeLease(ctx context.Context, nodeID, incarn
 	return lease, nil
 }
 
-func (d *redisSessionDirectory) PutSessionLease(ctx context.Context, lease *messageloop.ClusterSessionLease, ttl time.Duration) error {
-	if lease == nil || lease.SessionID == "" {
-		return nil
-	}
-	if lease.LeaseVersion == 0 {
-		lease.LeaseVersion = 1
-	}
-	// Read the previous lease so the user index can migrate a membership
-	// when the user changes (e.g. resume followed by re-authentication):
-	// the index is maintained by comparing old vs new leases.
-	oldLease, err := d.GetSessionLease(ctx, lease.SessionID)
-	if err != nil {
-		return err
-	}
-	if err := d.setJSON(ctx, d.sessionLeaseKey(lease.SessionID), lease, ttl); err != nil {
-		return err
-	}
-	return d.syncUserIndex(ctx, oldLease, lease, ttl)
-}
-
 func (d *redisSessionDirectory) CompareAndSwapSessionLease(ctx context.Context, expected, desired *messageloop.ClusterSessionLease, ttl time.Duration) (bool, error) {
 	if desired == nil || desired.SessionID == "" {
 		return false, nil
@@ -259,10 +239,48 @@ func (d *redisSessionDirectory) ListUserSessions(ctx context.Context, userID str
 }
 
 // ListSessionLeases enumerates every stored session lease (SCAN
-// ml:cluster:session:lease:*). It feeds the periodic user-index repair; a
-// lease that vanished between the scan and the read is skipped.
+// ml:cluster:session:lease:*). It feeds the periodic user-index repair and
+// the membership OnLeave invalidation; a lease that vanished between the
+// scan and the read is skipped.
 func (d *redisSessionDirectory) ListSessionLeases(ctx context.Context) ([]*messageloop.ClusterSessionLease, error) {
-	keys, err := scanKeys(ctx, d.client, d.opts.ClusterSessionLeasePrefix+"*")
+	blobs, err := d.listLeaseJSON(ctx, d.opts.ClusterSessionLeasePrefix)
+	if err != nil {
+		return nil, err
+	}
+	leases := make([]*messageloop.ClusterSessionLease, 0, len(blobs))
+	for _, raw := range blobs {
+		lease := &messageloop.ClusterSessionLease{}
+		if unmarshalErr := json.Unmarshal(raw, lease); unmarshalErr != nil {
+			continue
+		}
+		leases = append(leases, lease)
+	}
+	return leases, nil
+}
+
+// ListNodeLeases enumerates every stored node lease (SCAN
+// ml:cluster:node:*). It feeds the membership repair loop that drives
+// OnLeave; a lease that vanished between the scan and the read is skipped.
+func (d *redisSessionDirectory) ListNodeLeases(ctx context.Context) ([]*messageloop.ClusterNodeLease, error) {
+	blobs, err := d.listLeaseJSON(ctx, d.opts.ClusterNodePrefix)
+	if err != nil {
+		return nil, err
+	}
+	leases := make([]*messageloop.ClusterNodeLease, 0, len(blobs))
+	for _, raw := range blobs {
+		lease := &messageloop.ClusterNodeLease{}
+		if unmarshalErr := json.Unmarshal(raw, lease); unmarshalErr != nil {
+			continue
+		}
+		leases = append(leases, lease)
+	}
+	return leases, nil
+}
+
+// listLeaseJSON SCANs a lease prefix and pipeline-reads every key, returning
+// the raw JSON blobs of the keys that still exist.
+func (d *redisSessionDirectory) listLeaseJSON(ctx context.Context, prefix string) ([][]byte, error) {
+	keys, err := scanKeys(ctx, d.client, prefix+"*")
 	if err != nil {
 		return nil, err
 	}
@@ -280,7 +298,7 @@ func (d *redisSessionDirectory) ListSessionLeases(ctx context.Context) ([]*messa
 		return nil, err
 	}
 
-	leases := make([]*messageloop.ClusterSessionLease, 0, len(keys))
+	blobs := make([][]byte, 0, len(keys))
 	for _, key := range keys {
 		cmd, ok := cmds[key]
 		if !ok {
@@ -290,13 +308,9 @@ func (d *redisSessionDirectory) ListSessionLeases(ctx context.Context) ([]*messa
 		if cmdErr != nil {
 			continue
 		}
-		lease := &messageloop.ClusterSessionLease{}
-		if unmarshalErr := json.Unmarshal([]byte(raw), lease); unmarshalErr != nil {
-			continue
-		}
-		leases = append(leases, lease)
+		blobs = append(blobs, []byte(raw))
 	}
-	return leases, nil
+	return blobs, nil
 }
 
 // syncUserIndex maintains the user→sessions index for one lease write. The
@@ -332,3 +346,5 @@ func clusterSessionLeaseEqual(left, right *messageloop.ClusterSessionLease) bool
 }
 
 var _ messageloop.SessionDirectory = (*redisSessionDirectory)(nil)
+var _ messageloop.ClusterSessionLeaseLister = (*redisSessionDirectory)(nil)
+var _ messageloop.ClusterNodeLeaseLister = (*redisSessionDirectory)(nil)

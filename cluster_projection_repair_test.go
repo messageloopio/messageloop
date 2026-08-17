@@ -57,7 +57,7 @@ func TestClusterProjectionRepairer_RecordsSuccessfulRepairMetrics(t *testing.T) 
 	require.NoError(t, node.AddSubscription(context.Background(), "repair.channel", NewSubscriber(client, false)))
 
 	store := &repairTestQueryStore{}
-	repairer := NewClusterProjectionRepairer(node, store, ClusterProjectionRepairerConfig{}).(*clusterProjectionRepairer)
+	repairer := NewClusterRepairer(node, nil, store, ClusterRepairerConfig{}).(*clusterRepairer)
 	require.NoError(t, repairer.repairOnce(context.Background()))
 	require.Equal(t, int64(1), store.channels["repair.channel"])
 	require.Equal(t, float64(1), testutil.ToFloat64(node.metrics.ClusterProjectionRepairs))
@@ -69,7 +69,7 @@ func TestClusterProjectionRepairer_RecordsFailureMetrics(t *testing.T) {
 	registry := prometheus.NewRegistry()
 	node.SetMetrics(NewMetrics(registry))
 	store := &repairTestQueryStore{err: errors.New("repair failed")}
-	repairer := NewClusterProjectionRepairer(node, store, ClusterProjectionRepairerConfig{}).(*clusterProjectionRepairer)
+	repairer := NewClusterRepairer(node, nil, store, ClusterRepairerConfig{}).(*clusterRepairer)
 
 	err := repairer.repairOnce(context.Background())
 	require.EqualError(t, err, "repair failed")
@@ -98,7 +98,7 @@ func TestClusterProjectionRepairer_ReapsDeadOwnerProjections(t *testing.T) {
 		{NodeID: "node-dead", IncarnationID: "inc-dead"},
 		{NodeID: "node-self", IncarnationID: "inc-self"},
 	}}
-	repairer := NewClusterProjectionRepairer(node, store, ClusterProjectionRepairerConfig{}).(*clusterProjectionRepairer)
+	repairer := NewClusterRepairer(node, directory, store, ClusterRepairerConfig{}).(*clusterRepairer)
 
 	require.NoError(t, repairer.repairOnce(context.Background()))
 

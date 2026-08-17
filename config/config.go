@@ -1,8 +1,10 @@
 package config
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -40,6 +42,47 @@ type ClusterConfig struct {
 	Enabled bool   `yaml:"enabled" json:"enabled" mapstructure:"enabled"`
 	NodeID  string `yaml:"node_id" json:"node_id" mapstructure:"node_id"`
 	Backend string `yaml:"backend" json:"backend" mapstructure:"backend"`
+	// HMACKey is the inline HMAC-SHA256 key for the cluster command bus
+	// (at least 32 bytes). Exactly one of HMACKey / HMACKeyFile must be set
+	// when the cluster is enabled. The key never enters Redis, logs, or
+	// metrics labels.
+	HMACKey string `yaml:"hmac_key" json:"hmac_key" mapstructure:"hmac_key"`
+	// HMACKeyFile points to a file holding the HMAC key; a single trailing
+	// newline is trimmed when the file is read at startup.
+	HMACKeyFile string `yaml:"hmac_key_file" json:"hmac_key_file" mapstructure:"hmac_key_file"`
+}
+
+// minClusterHMACKeyBytes is the minimum accepted length of the cluster
+// command-bus HMAC key.
+const minClusterHMACKeyBytes = 32
+
+// ResolveHMACKey returns the cluster command-bus HMAC key bytes from
+// HMACKey or HMACKeyFile. A key file's single trailing newline (LF or CRLF)
+// is trimmed. It fails when no key is configured, the file cannot be read,
+// or the resolved key is shorter than 32 bytes — the process must refuse to
+// start rather than run an unprotected command bus.
+func (c ClusterConfig) ResolveHMACKey() ([]byte, error) {
+	if c.HMACKey != "" && c.HMACKeyFile != "" {
+		return nil, fmt.Errorf("only one of hmac_key or hmac_key_file may be set")
+	}
+	var key []byte
+	switch {
+	case c.HMACKey != "":
+		key = []byte(c.HMACKey)
+	case c.HMACKeyFile != "":
+		data, err := os.ReadFile(c.HMACKeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("read cluster.hmac_key_file: %w", err)
+		}
+		key = bytes.TrimSuffix(data, []byte("\n"))
+		key = bytes.TrimSuffix(key, []byte("\r"))
+	default:
+		return nil, fmt.Errorf("cluster.hmac_key is required when cluster is enabled (or set cluster.hmac_key_file)")
+	}
+	if len(key) < minClusterHMACKeyBytes {
+		return nil, fmt.Errorf("cluster hmac key must be at least 32 bytes")
+	}
+	return key, nil
 }
 
 type Server struct {
@@ -414,6 +457,20 @@ func (c *Config) Validate() error {
 	// Validate cluster requires redis broker.
 	if c.Cluster.Enabled && c.Broker.Type != "redis" {
 		return fmt.Errorf("cluster requires broker.type=redis")
+	}
+
+	// An enabled cluster must carry an HMAC key for the command bus: writing
+	// to Redis must not be enough to inject cluster commands (KD-K31).
+	if c.Cluster.Enabled {
+		key, keyFile := c.Cluster.HMACKey, c.Cluster.HMACKeyFile
+		switch {
+		case key == "" && keyFile == "":
+			return fmt.Errorf("cluster.hmac_key is required when cluster is enabled (or set cluster.hmac_key_file)")
+		case key != "" && keyFile != "":
+			return fmt.Errorf("only one of hmac_key or hmac_key_file may be set")
+		case key != "" && len([]byte(key)) < minClusterHMACKeyBytes:
+			return fmt.Errorf("cluster.hmac_key must be at least 32 bytes")
+		}
 	}
 
 	// Validate the admin capability names: the set is closed, unknown names

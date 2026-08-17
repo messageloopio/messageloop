@@ -1,13 +1,17 @@
 // Package redisbroker provides Redis-backed implementations of the broker,
 // presence store, and cluster control-plane adapters.
 //
-// Trust boundary: cluster commands travel over Redis Pub/Sub with no
-// signature or sender authentication — any process that can write to the
-// Redis instance can inject disconnect/takeover/publish commands. Redis
-// network isolation is therefore the security prerequisite for a cluster
-// deployment. Commands carry an IssuedBy audit field (sender NodeID) so
-// operators can trace command origin in logs, but the field is
-// informational only; sender signature verification is future work.
+// Trust boundary: cluster commands and command results travel over Redis
+// Pub/Sub signed with HMAC-SHA256 (PR-KA-B4, see internal/cluster/hmac). The
+// key comes from node configuration only (cluster.hmac_key or
+// cluster.hmac_key_file) and is never written to Redis. Being able to write
+// to the Redis instance is NOT enough to inject disconnect/takeover/publish
+// commands: unsigned, badly signed, or skewed (±30s) envelopes are rejected
+// before claiming or handling, and forged replies are discarded by the
+// waiting sender. Commands still carry an IssuedBy audit field (sender
+// NodeID); it is forgeable, sits outside the signed bytes, and is
+// informational only. Redis network isolation remains defense in depth, but
+// it is no longer the only boundary.
 package redisbroker
 
 import (
@@ -23,6 +27,7 @@ import (
 	"github.com/lynx-go/x/log"
 	"github.com/messageloopio/messageloop"
 	"github.com/messageloopio/messageloop/config"
+	clusterhmac "github.com/messageloopio/messageloop/internal/cluster/hmac"
 	"github.com/redis/go-redis/v9"
 	"sync/atomic"
 )
@@ -70,6 +75,12 @@ type redisClusterCommandBus struct {
 	opts          *Options
 	nodeID        string
 	incarnationID string
+	// hmacKey signs and verifies every command/result envelope. It is copied
+	// at construction and never written to Redis, logs, or metrics.
+	hmacKey []byte
+	// now is the clock used for IssuedAt stamping and skew checks; tests may
+	// replace it. Nil means time.Now.
+	now func() time.Time
 
 	mu        sync.RWMutex
 	handler   messageloop.ClusterCommandHandler
@@ -86,15 +97,32 @@ type redisClusterCommandBus struct {
 	disconnects atomic.Uint64
 }
 
+// minClusterCommandHMACKeyBytes is the minimum HMAC key length accepted by
+// the bus. config.Validate rejects shorter keys first; the bus re-checks so a
+// misconfigured process can never start an unprotected bus.
+const minClusterCommandHMACKeyBytes = 32
+
 // NewClusterCommandBus returns a Redis-backed request/reply ClusterCommandBus.
-func NewClusterCommandBus(cfg config.RedisConfig, nodeID, incarnationID string) messageloop.ClusterCommandBus {
+// hmacKey (at least 32 bytes) signs every outgoing envelope and gates every
+// incoming one; Start fails when it is missing or too short.
+func NewClusterCommandBus(cfg config.RedisConfig, nodeID, incarnationID string, hmacKey []byte) messageloop.ClusterCommandBus {
 	opts := NewOptions(cfg)
 	return &redisClusterCommandBus{
 		client:        newRedisClient(opts),
 		opts:          opts,
 		nodeID:        nodeID,
 		incarnationID: incarnationID,
+		hmacKey:       append([]byte(nil), hmacKey...),
+		now:           time.Now,
 	}
+}
+
+// nowTime returns the current time on the bus clock.
+func (b *redisClusterCommandBus) nowTime() time.Time {
+	if b.now != nil {
+		return b.now()
+	}
+	return time.Now()
 }
 
 func (b *redisClusterCommandBus) SetHandler(handler messageloop.ClusterCommandHandler) {
@@ -114,6 +142,10 @@ func (b *redisClusterCommandBus) Start(ctx context.Context) error {
 	if b.start {
 		b.mu.Unlock()
 		return nil
+	}
+	if len(b.hmacKey) < minClusterCommandHMACKeyBytes {
+		b.mu.Unlock()
+		return fmt.Errorf("cluster command bus requires an HMAC key of at least %d bytes", minClusterCommandHMACKeyBytes)
 	}
 	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	if err := b.client.Ping(pingCtx).Err(); err != nil {
@@ -338,7 +370,7 @@ func (b *redisClusterCommandBus) SendCommand(ctx context.Context, cmd *messagelo
 	if cmd.CommandID == "" {
 		cmd.CommandID = uuid.NewString()
 	}
-	cmd.IssuedAt = time.Now()
+	cmd.IssuedAt = b.nowTime()
 	if cmd.Metadata == nil {
 		cmd.Metadata = make(map[string]string)
 	}
@@ -375,6 +407,13 @@ func (b *redisClusterCommandBus) SendCommand(ctx context.Context, cmd *messagelo
 	defer func() { _ = pubsub.Close() }()
 	if _, err := pubsub.Receive(commandCtx); err != nil {
 		return nil, err
+	}
+
+	// Sign before publishing: an envelope that cannot be signed must never
+	// reach the wire, and the signature must cover the final CommandID and
+	// IssuedAt stamped above.
+	if err := clusterhmac.SignCommand(b.hmacKey, cmd); err != nil {
+		return nil, fmt.Errorf("sign cluster command: %w", err)
 	}
 
 	payload, err := json.Marshal(cmd)
@@ -432,6 +471,13 @@ func (b *redisClusterCommandBus) waitForReply(ctx context.Context, cmd *messagel
 			result := &messageloop.ClusterCommandResult{}
 			if err := json.Unmarshal([]byte(reply.Payload), result); err != nil {
 				return nil, err
+			}
+			// A forged or unsigned reply is not a reply: record the rejection
+			// and keep waiting until the command deadline (which resolves to
+			// unknown_final_state), never to a forged succeeded.
+			if err := clusterhmac.VerifyResult(b.hmacKey, result, b.nowTime()); err != nil {
+				b.recordHMACReject(ctx, "reply", result.CommandID, err)
+				continue
 			}
 			if result.CommandID == cmd.CommandID {
 				return result, nil
@@ -553,14 +599,18 @@ func (b *redisClusterCommandBus) handleMessage(ctx context.Context, payload stri
 	if err := json.Unmarshal([]byte(payload), command); err != nil {
 		return
 	}
-	if command.CommandID == "" {
-		command.CommandID = uuid.NewString()
+
+	// HMAC hard gate: unsigned, badly signed, skewed, or id-less commands are
+	// rejected BEFORE claiming — no handler run, no dedupe state write (an
+	// attacker must not poison a victim's command id), no reply.
+	if err := clusterhmac.VerifyCommand(b.hmacKey, command, b.nowTime()); err != nil {
+		b.recordHMACReject(ctx, "command", command.CommandID, err)
+		return
 	}
 
 	// Audit trail: record who issued the command. IssuedBy is filled by the
 	// sending bus and is informational only (see the package trust-boundary
-	// comment); an empty value means the sender was an older or direct
-	// caller that did not stamp it.
+	// comment); it is forgeable and not part of the signed bytes.
 	log.DebugContext(ctx, "cluster command received",
 		"command_id", command.CommandID,
 		"command_type", command.Type,
@@ -775,11 +825,38 @@ func (b *redisClusterCommandBus) publishCommandResult(ctx context.Context, comma
 	if replyChannel == "" {
 		return
 	}
+	if result.IssuedAt.IsZero() {
+		result.IssuedAt = b.nowTime()
+	}
+	if err := clusterhmac.SignResult(b.hmacKey, result); err != nil {
+		log.WarnContext(ctx, "failed to sign cluster command result", "command_id", command.CommandID, "error", err)
+		return
+	}
 	encodedResult, err := json.Marshal(result)
 	if err != nil {
 		return
 	}
 	_ = b.client.Publish(ctx, replyChannel, encodedResult).Err()
+}
+
+// recordHMACReject counts and logs a rejected envelope (command or reply).
+// The reason label comes from the verification error; the key is never
+// logged or labeled.
+func (b *redisClusterCommandBus) recordHMACReject(ctx context.Context, stage, commandID string, err error) {
+	reason := string(clusterhmac.RejectBad)
+	var verifyErr *clusterhmac.VerifyError
+	if errors.As(err, &verifyErr) {
+		reason = string(verifyErr.Reason)
+	}
+	if metrics := b.getMetrics(); metrics != nil {
+		metrics.ClusterCommandHMACRejects.WithLabelValues(reason).Inc()
+	}
+	log.WarnContext(ctx, "cluster envelope rejected by HMAC verification",
+		"stage", stage,
+		"reason", reason,
+		"command_id", commandID,
+		"node_id", b.nodeID,
+	)
 }
 
 func (b *redisClusterCommandBus) executeHandler(ctx context.Context, handler messageloop.ClusterCommandHandler, command *messageloop.ClusterCommand) (result *messageloop.ClusterCommandResult, err error) {
