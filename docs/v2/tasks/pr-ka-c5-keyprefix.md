@@ -3,7 +3,7 @@
 | 字段 | 值 |
 | --- | --- |
 | 标题 | `redisbroker: bump Redis key prefix generation to ml2:` |
-| 状态 | **Ready** |
+| 状态 | **Accepted**（2026-08-17 主 agent 终验通过，尚未 commit） |
 | 依赖 | C4 已合（`d99cd86`）。在 `v2` 分支上做 |
 | 设计来源 | [kernel-architecture.md](../kernel-architecture.md) 舰队 / KD-K31 |
 | 验收人 | 主 agent |
@@ -112,4 +112,12 @@ memory broker、C1 sim、HMAC、SDK、`_examples/`：无 `ml:` 键。`docs/desig
 
 ## 8. 实现备注（完成后填写）
 
-（空）
+实现于 `v2` 分支（基线为 C5 规格提交 `4ffa4d7`，C4 tip `d99cd86` 之上）。真实 Redis（127.0.0.1:6379，测试 DB 14）全量实跑，无 skip。
+
+- **常量换代**：`pkg/redisbroker/options.go` 9 个默认值常量（stream/pubsub/presence/cluster/node/session lease/session snapshot/channel/epoch）与 `pkg/redisbroker/cluster_command_bus.go` 3 个包级命令总线前缀常量（`cmd:stream:` / `cmd:reply:` / `cmd:state:`）全部由 `ml:` 改为 `ml2:`，仅改值；键结构、数据类型、TTL、SCAN 拼接方式、`node_epoch:` 避撞结构全部未动。命令总线前缀保持包级常量，未重构为派生自 `ClusterPrefix`。
+- **注释键形**：`cluster_command_bus.go`（包注释 inbox 键形、`streamKey` 注释）、`cluster_directory.go`（`nodeEpochKey` / `ListSessionLeases` / `ListNodeLeases` 注释）、根包 `cluster_epoch.go`（`NodeEpochAllocator` 注释）、`cluster_epoch_test.go`（避撞测试注释）中的键形同步改为 `ml2:`。
+- **测试字面量**：`cluster_command_bus_test.go` 4 处硬编码全部改为包级常量拼接——`CloneCommandMetadataIsIndependent` 用 `clusterCommandReplyPrefix+"test"`；`KeyNeverWrittenToRedis` / `SendCommandUsesStreamNotPublish` 的 `PSubscribe` 与 `NoRequestPubSubSubscription` 的 `PubSubChannels` 用 `clusterCommandReplyPrefix+"*"`（命令总线唯一的 Pub/Sub 通道族就是应答通道，覆盖等价且随常量自动跟随）。
+- **换代隔离测试**（新增 `pkg/redisbroker/keyprefix_test.go`，`TestKeyPrefixGeneration_Ml2IsolatedFromLegacyMl`）：真实 Redis 上以 UUID 标记的唯一频道/节点名驱动 broker `Publish`（stream + seq + first_retained）、presence `Add`（idx/member）、目录 `NextNodeEpoch`（node_epoch），断言 `SCAN ml:*` 无任何带本测试标记的键、6 个预期键全部以 `ml2:` 前缀存在、且能被 `SCAN ml2:*<marker>*` 找到。旧代 pattern 以 `"ml"+":*"` 拼接，避免在 Go 源码中出现引号包裹的退役前缀字面量（门禁要求）。无固定长 Sleep。
+- **文档**：`docs/developer/01-architecture.md`（3 行）、`02-configuration.md`（6 行）、`03-admin-api.md`（1 行）、`04-cluster.md`（27 行）、`docs/deployment.md`（2 行）中的键形全部换代（词边界替换，未误伤 `yaml:` 等）；`docs/v2/kernel-architecture.md` 仅「舰队」一节改为「Redis 键前缀已换代为 `ml2:`（PR-KA-C5）」。`docs/design`、`docs/review`、`docs/archive`、`docs/v2/tasks/` 既有规格保持原样。
+- **验证**：门禁 `grep -rn '"ml:' --include='*.go' .` 零命中；`go test -count=1 ./pkg/redisbroker` ok（61.6s，实跑含新测试 0.05s PASS）；`go test -count=1 -run "TestSim_|TestClusterCommandBus" .` ok（0.77s）；`go test ./...` 全部 ok；`go test -race . ./pkg/redisbroker` ok（77.1s / 66.4s）；`TestRedisSessionDirectory_NodeEpochKeyEscapesNodeLeaseScan`、`KeyNeverWrittenToRedis`、`SendCommandUsesStreamNotPublish`、`NoRequestPubSubSubscription` 单独点名复跑均 PASS。配置 schema（`config.RedisConfig`）未加字段；proto/SDK/memory broker/C1 sim/HMAC/`client.go`/`hub.go`/`session.go` 零改动（git status 仅含规格允许的文件）。
+- **偏离**：无。

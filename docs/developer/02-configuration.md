@@ -340,10 +340,10 @@ broker:
 
 Redis broker 使用以下键前缀（`pkg/redisbroker/options.go:10-17`），同一 Redis 实例内与业务数据共存时可按前缀隔离：
 
-- `ml:stream:` + 频道名 —— 历史 Stream（Redis Streams）
-- `ml:pubsub:` + 频道名 —— 实时投递（Redis Pub/Sub）
-- `ml:presence:` —— 在线状态
-- `ml:cluster:` 系列 —— 集群控制面（会话租约、快照、频道投影等）
+- `ml2:stream:` + 频道名 —— 历史 Stream（Redis Streams）
+- `ml2:pubsub:` + 频道名 —— 实时投递（Redis Pub/Sub）
+- `ml2:presence:` —— 在线状态
+- `ml2:cluster:` 系列 —— 集群控制面（会话租约、快照、频道投影等）
 
 发布路径：XADD（写历史并取 offset）→ EXPIRE（刷新 TTL）→ PUBLISH（实时投递），单次发布的操作超时均为 5s（`pkg/redisbroker/redis.go:73-111`）。
 
@@ -362,7 +362,7 @@ cluster:
 | `cluster.node_id` | string | 未设置 | 逻辑节点标识，集群内必须唯一；启用时必填（`cluster.go:27-30`） |
 | `cluster.backend` | string | `redis` | 控制面后端。为空时默认 `redis`；接受 `redis` / `memory` / `noop`，其他值报错（`cluster.go:32-41`）。仅 `redis` 在二进制中接入实际组件（会话目录、命令总线、查询投影、节点租约、投影修复，`cmd/server/main.go:111-142`） |
 
-启用 Redis 集群时，控制面组件与 broker 共用同一个 `broker.redis` 配置（`cmd/server/main.go:116-131`），并使用 `ml:cluster:` 前缀的键。另外集群模式下 `/health` 端点会附带 Redis 连通性探测（`cmd/server/main.go:57-59`）。
+启用 Redis 集群时，控制面组件与 broker 共用同一个 `broker.redis` 配置（`cmd/server/main.go:116-131`），并使用 `ml2:cluster:` 前缀的键。另外集群模式下 `/health` 端点会附带 Redis 连通性探测（`cmd/server/main.go:57-59`）。
 
 拓扑、会话迁移与故障转移语义见[《分布式集群指南》](04-cluster.md)。
 
@@ -541,7 +541,7 @@ proxy:
 
 部署多个节点时（如 `config-node1.yaml` / `config-node2.yaml`，二者已按此约定编写）：
 
-- **共享同一套 Redis 设置**：集群控制面与 broker 共用 `broker.redis` 段（`addr` / `password` / `db`，`cmd/server/main.go:116-131`），各节点必须指向同一 Redis 实例与数据库，才能共享会话目录、命令总线与查询投影。键空间通过 `ml:` 前缀隔离，无需额外配置；
+- **共享同一套 Redis 设置**：集群控制面与 broker 共用 `broker.redis` 段（`addr` / `password` / `db`，`cmd/server/main.go:116-131`），各节点必须指向同一 Redis 实例与数据库，才能共享会话目录、命令总线与查询投影。键空间通过 `ml2:` 前缀隔离，无需额外配置；
 - **`cluster.node_id` 必须全局唯一**：它是节点租约、命令路由与会话所有权的标识（`cluster.go:27-30`），重复的 `node_id` 会导致租约冲突与命令投递错乱；
 - 各节点面向客户端的监听地址（`transport.websocket.addr` / `transport.grpc.addr`）与 `server.http.addr` / `server.grpc_admin.addr` 应各不相同（负载均衡器对外暴露，节点间不直接互连）；
 - 管理面与客户端面的端口分离语义见[《架构指南》](01-architecture.md)；完整的集群拓扑、会话迁移与故障恢复说明见[《分布式集群指南》](04-cluster.md)。

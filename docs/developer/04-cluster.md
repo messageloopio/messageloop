@@ -33,7 +33,7 @@ MessageLoop 可以以两种形态运行：
 ### 2.1 前提
 
 1. `broker.type: redis` 且 `broker.redis.addr` 已配置。集群控制面与 broker 共用同一个 `broker.redis` 配置段（`addr` / `password` / `db` 等，见 `cmd/server/main.go` 的 `setupCluster`），不单独配置 Redis 连接。
-2. 集群内所有节点的 `broker.redis` 必须指向**同一个 Redis 实例与同一个 DB**，共享同一命名空间（所有键以 `ml:` 前缀隔离，见第 3 节）。指向不同实例或 DB 的节点彼此不可见。
+2. 集群内所有节点的 `broker.redis` 必须指向**同一个 Redis 实例与同一个 DB**，共享同一命名空间（所有键以 `ml2:` 前缀隔离，见第 3 节）。指向不同实例或 DB 的节点彼此不可见。
 3. 每个节点必须有全局唯一的 `cluster.node_id`。
 
 ### 2.2 cluster 配置段
@@ -51,7 +51,7 @@ MessageLoop 可以以两种形态运行：
 - `redis`：唯一在服务端二进制中接入实际实现的取值。启用时装配会话目录、命令总线、查询投影、节点租约与投影修复，并把 Presence 存储替换为 Redis 实现（`cmd/server/main.go:111-142`）。
 - `memory` / `noop`：no-op 组件，进程内 API 使用或测试用；控制面各接口退化为本地行为（例如命令总线返回 `ErrClusterCommandUnsupported`，见 `cluster_state.go`）。
 
-另外，`ClusterOptions` 中还有自动分配的 `IncarnationID`（进程实例标识，KD-K27），不来自配置：启动时对该节点的 **node_epoch 计数器发号一次**，`IncarnationID` 就是 epoch 的十进制字符串（`"1"`、`"2"`……）。Redis 后端用 `INCR ml:cluster:node_epoch:<nodeID>`（`cluster_directory.go` 的 `NextNodeEpoch`；该键刻意不在 `ml:cluster:node:` 前缀下，不会被节点租约 SCAN 收割）；`memory` / `noop` 后端用进程内按 `node_id` 分桶的单调计数器（`MemoryNodeEpochAllocator`，首次为 1）。空 ID + redis 后端且会话目录不能分配时**拒绝启动**，绝不回落随机 ID。更大的 epoch 代表同一节点的更新世代（`NodeEpochNewer`）；测试与 C1 模拟显式传入的 `inc-a` / `inc-b` 不是 epoch（`ParseNodeEpoch` 返回 false），原样保留。节点的完整身份是 `(NodeID, IncarnationID)` 二元组，旧进程重启后会得到更大的 `IncarnationID`，从而与旧实例的租约区分开。
+另外，`ClusterOptions` 中还有自动分配的 `IncarnationID`（进程实例标识，KD-K27），不来自配置：启动时对该节点的 **node_epoch 计数器发号一次**，`IncarnationID` 就是 epoch 的十进制字符串（`"1"`、`"2"`……）。Redis 后端用 `INCR ml2:cluster:node_epoch:<nodeID>`（`cluster_directory.go` 的 `NextNodeEpoch`；该键刻意不在 `ml2:cluster:node:` 前缀下，不会被节点租约 SCAN 收割）；`memory` / `noop` 后端用进程内按 `node_id` 分桶的单调计数器（`MemoryNodeEpochAllocator`，首次为 1）。空 ID + redis 后端且会话目录不能分配时**拒绝启动**，绝不回落随机 ID。更大的 epoch 代表同一节点的更新世代（`NodeEpochNewer`）；测试与 C1 模拟显式传入的 `inc-a` / `inc-b` 不是 epoch（`ParseNodeEpoch` 返回 false），原样保留。节点的完整身份是 `(NodeID, IncarnationID)` 二元组，旧进程重启后会得到更大的 `IncarnationID`，从而与旧实例的租约区分开。
 
 ### 2.3 两节点配置示例
 
@@ -141,12 +141,12 @@ cluster:
 
 每个节点的存在性由一个**节点租约（node lease）**记录表达（`ClusterNodeLease`：`NodeID`、`IncarnationID`、`StartedAt`、`ExpiresAt`）：
 
-- **键**：`ml:cluster:node:<nodeID>:<incarnationID>`（`cluster_directory.go` 的 `nodeLeaseKey`），值为租约 JSON。
+- **键**：`ml2:cluster:node:<nodeID>:<incarnationID>`（`cluster_directory.go` 的 `nodeLeaseKey`），值为租约 JSON。
 - **TTL**：90 秒（`defaultClusterNodeLeaseTTL`）。
 - **续租**：`ClusterNodeLeaseManager`（`cluster_state.go:347-418`）启动时立即写一次租约，之后每 30 秒（`defaultClusterNodeLeaseRenewInterval`）续租一次；续租失败只记警告日志，不中断节点运行（节点租约随后到期）。
 - **离开**：节点没有主动注销机制——进程退出后，其租约在 90 秒内自然过期消失（优雅关闭 `Cluster.Shutdown` 只是停止续租）。修复器的 membership 节拍（默认 5 秒 ±20% 抖动的节点租约 SCAN，见第 6 节）发现某 incarnation 从存活集合中消失（或租约已过期）即触发 `OnLeave`：立即删除该死 incarnation 名下的全部会话租约（作废其 fencing，同步清理 user 索引）并删除其 owner 投影，**不必等 600 秒会话 TTL**；宽限期 = 一次 SCAN 周期。节点自身的 incarnation 永远不会被自己 OnLeave。
 
-节点发现通过**扫描节点租约键**实现：命令总线的 `BroadcastCommand` 用 `SCAN ml:cluster:node:*` 枚举存活节点（`cluster_command_bus.go:274-339`），每个租约键对应一个可投递目标。租约过期即从广播目标中消失。节点身份是 `(NodeID, IncarnationID)`，同一 `node_id` 的旧实例（已重启产生新 `IncarnationID`）会与新实例并存一段时间，直到旧租约过期——期间广播可能向同一逻辑节点的两个实例各投递一份命令，但已死的旧实例不会应答，其命令以超时/失败结果呈现（见 3.3 的去重与超时语义），不产生实际副作用。
+节点发现通过**扫描节点租约键**实现：命令总线的 `BroadcastCommand` 用 `SCAN ml2:cluster:node:*` 枚举存活节点（`cluster_command_bus.go:274-339`），每个租约键对应一个可投递目标。租约过期即从广播目标中消失。节点身份是 `(NodeID, IncarnationID)`，同一 `node_id` 的旧实例（已重启产生新 `IncarnationID`）会与新实例并存一段时间，直到旧租约过期——期间广播可能向同一逻辑节点的两个实例各投递一份命令，但已死的旧实例不会应答，其命令以超时/失败结果呈现（见 3.3 的去重与超时语义），不产生实际副作用。
 
 ### 3.3 命令总线
 
@@ -156,14 +156,14 @@ cluster:
 
 | 键 | 用途 |
 | --- | --- |
-| `ml:cluster:cmd:stream:<nodeID>:<incarnationID>` | 请求 inbox 流：发给指定节点实例的命令 `XADD` 到该流（近似 `MAXLEN ~ 10000` 截断）；每条流带一个固定名为 `inbox` 的 consumer group，消费者名即本进程 incarnationID；节点实例启动时 `XGROUP CREATE ... MKSTREAM`（已存在则忽略 BUSYGROUP），用 `XREADGROUP ... >` 读新消息，并周期 `XAUTOCLAIM`（idle ≥ 30 秒 claim 租约）认领崩溃消费者留下的 pending 条目，处理完一律 `XACK` |
-| `ml:cluster:cmd:reply:<commandID>` | 应答通道：每个命令生成一个随机 UUID 应答通道，命令入流前把通道名写入命令元数据（`reply_channel`）；应答仍是 Pub/Sub |
-| `ml:cluster:cmd:state:<commandID>` | 命令状态键：持久化命令的终态结果，也是命令去重（dedupe）的依据 |
+| `ml2:cluster:cmd:stream:<nodeID>:<incarnationID>` | 请求 inbox 流：发给指定节点实例的命令 `XADD` 到该流（近似 `MAXLEN ~ 10000` 截断）；每条流带一个固定名为 `inbox` 的 consumer group，消费者名即本进程 incarnationID；节点实例启动时 `XGROUP CREATE ... MKSTREAM`（已存在则忽略 BUSYGROUP），用 `XREADGROUP ... >` 读新消息，并周期 `XAUTOCLAIM`（idle ≥ 30 秒 claim 租约）认领崩溃消费者留下的 pending 条目，处理完一律 `XACK` |
+| `ml2:cluster:cmd:reply:<commandID>` | 应答通道：每个命令生成一个随机 UUID 应答通道，命令入流前把通道名写入命令元数据（`reply_channel`）；应答仍是 Pub/Sub |
+| `ml2:cluster:cmd:state:<commandID>` | 命令状态键：持久化命令的终态结果，也是命令去重（dedupe）的依据 |
 
 **发送流程（`SendCommand`）**：
 
 1. 生成 `CommandID`（未指定时），标记 `IssuedBy`（发送方 NodeID，仅审计用途，见下方信任边界），打上 `IssuedAt`。
-2. 查询 `ml:cluster:cmd:state:<commandID>`：若已有终态结果，直接返回（去重命中）；若处于 `pending`，返回 `in_progress`。
+2. 查询 `ml2:cluster:cmd:state:<commandID>`：若已有终态结果，直接返回（去重命中）；若处于 `pending`，返回 `in_progress`。
 3. 创建随机应答通道并 `SUBSCRIBE`，把通道名写入命令元数据（`reply_channel`）。
 4. **签名**：`SignCommand` 以节点配置的 HMAC 密钥对命令的规范字节（`internal/cluster/hmac`，逐字节固定的行式编码，不含 `IssuedBy`）计算 `hex(HMAC-SHA256)` 写入 `Signature`；签名失败则不入流。
 5. 把命令 JSON（含 `Signature`）作为单一 `payload` 字段 `XADD` 到目标节点的 inbox 流（近似 `MAXLEN` 截断）。
@@ -200,8 +200,8 @@ cluster:
 
 | 数据 | 键 | TTL | 内容要点 |
 | --- | --- | --- | --- |
-| 会话租约 | `ml:cluster:session:lease:<sessionID>` | 默认 600 秒；按心跳配置缩短（`sessionLeaseTTL` = `max(30s, 2×idle_timeout, 3×ping_interval, idle_timeout+10s+10s)`，须覆盖心跳周期并留出续约抖动余量；心跳禁用时保持 600s） | `SessionID`、`NodeID`、`IncarnationID`、`UserID`、`ClientID`、`LeaseVersion`、`Authenticated`、`ConnectedAt`、`LastActivityAt`、`ExpiresAt` |
-| 会话快照 | `ml:cluster:session:snapshot:<sessionID>` | 24 小时（`defaultClusterSessionSnapshotTTL`） | 会话身份（user/client/protocol）、订阅列表（`Subscriptions`）、`AuthContext`；另含逐频道 `ChannelOffsets`（上次成功投递的历史 offset）与 `BrokerEpoch`（快照时刻的 broker 世代），供精确跨节点恢复（见 4.4） |
+| 会话租约 | `ml2:cluster:session:lease:<sessionID>` | 默认 600 秒；按心跳配置缩短（`sessionLeaseTTL` = `max(30s, 2×idle_timeout, 3×ping_interval, idle_timeout+10s+10s)`，须覆盖心跳周期并留出续约抖动余量；心跳禁用时保持 600s） | `SessionID`、`NodeID`、`IncarnationID`、`UserID`、`ClientID`、`LeaseVersion`、`Authenticated`、`ConnectedAt`、`LastActivityAt`、`ExpiresAt` |
+| 会话快照 | `ml2:cluster:session:snapshot:<sessionID>` | 24 小时（`defaultClusterSessionSnapshotTTL`） | 会话身份（user/client/protocol）、订阅列表（`Subscriptions`）、`AuthContext`；另含逐频道 `ChannelOffsets`（上次成功投递的历史 offset）与 `BrokerEpoch`（快照时刻的 broker 世代），供精确跨节点恢复（见 4.4） |
 
 会话所有权 = 「会话租约指向的节点实例正在服务该会话」。`LeaseVersion` 是所有权代际计数：新连接从 1 起，每次 resume/takeover 递增（`client.go`、`cluster_resume.go`）。它被用于接管时的版本校验，防止旧代际的接管命令误伤新代际的会话。
 
@@ -243,7 +243,7 @@ cluster:
 
 ### 4.4 跨节点恢复与 epoch 校验
 
-跨节点恢复中，**历史消息的续读**走客户端协议原有的 epoch 校验逻辑（`client.go:600-689`）：Redis broker 的 epoch 存于固定键 **`ml:broker:epoch`**（`defaultEpochKey`，`options.go:18`），首个启动的节点经 `SETNX` 写入随机 UUID（`redis.go` 的 `initEpoch`），之后所有节点读取同一值——**集群共享、跨节点一致、跨重启持久**（`epoch_test.go` 的 `SharedAcrossNodes` / `PersistedAcrossRestart` 两测试为证）。订阅者请求恢复（`sub.Recover`）时，携带的 `sub.Epoch` 与当前节点的 broker epoch 不一致（包括未携带 epoch）即视为 offset 无效，从历史开头（offset 0）恢复；epoch 匹配则从 `sub.Offset+1` 续读。
+跨节点恢复中，**历史消息的续读**走客户端协议原有的 epoch 校验逻辑（`client.go:600-689`）：Redis broker 的 epoch 存于固定键 **`ml2:broker:epoch`**（`defaultEpochKey`，`options.go:18`），首个启动的节点经 `SETNX` 写入随机 UUID（`redis.go` 的 `initEpoch`），之后所有节点读取同一值——**集群共享、跨节点一致、跨重启持久**（`epoch_test.go` 的 `SharedAcrossNodes` / `PersistedAcrossRestart` 两测试为证）。订阅者请求恢复（`sub.Recover`）时，携带的 `sub.Epoch` 与当前节点的 broker epoch 不一致（包括未携带 epoch）即视为 offset 无效，从历史开头（offset 0）恢复；epoch 匹配则从 `sub.Offset+1` 续读。
 
 集群部署下的推论：由于 epoch 是集群共享的，客户端在节点 A 建立订阅时拿到的 epoch 在节点 B 依然有效——跨节点恢复时**epoch 校验可以通过**，续读位置由服务端快照中的逐频道 `ChannelOffsets` 决定（`client.go`、`recover.go`）：`ChannelOffsets` 记录本节点对该会话逐频道**最后一次成功投递**的历史 offset（由 hub 广播路径的 `DeliveredOffset` 填充，`hub.go`），跨节点恢复时从 `ChannelOffsets[ch]+1` 续读，**服务端记录优先于客户端携带的 offset**；快照缺失该频道的 offset（从未投递过历史或纯瞬时消息）则跳过恢复。快照同时携带 `BrokerEpoch`（快照时刻的 broker 世代），世代与当前不一致时强制全量恢复。全量恢复仅发生在客户端未携带 epoch（旧 SDK）、携带陈旧 epoch（epoch 键被清理/重建）或快照世代不匹配时。
 
@@ -257,8 +257,8 @@ cluster:
 
 | 键 | 类型 | TTL | 说明 |
 | --- | --- | --- | --- |
-| `ml:cluster:user:member:<userID>:<sessionID>` | string（值 `"1"`） | 与 session lease 相同（`sessionLeaseTTL()`） | 成员键：续期时随 lease 一起刷新 |
-| `ml:cluster:user:sessions:<userID>` | set | 无（成员过期靠 repair 修剪） | 用户→session 集合；展开时 `SMEMBERS` 后逐个 `GET` lease 校验 |
+| `ml2:cluster:user:member:<userID>:<sessionID>` | string（值 `"1"`） | 与 session lease 相同（`sessionLeaseTTL()`） | 成员键：续期时随 lease 一起刷新 |
+| `ml2:cluster:user:sessions:<userID>` | set | 无（成员过期靠 repair 修剪） | 用户→session 集合；展开时 `SMEMBERS` 后逐个 `GET` lease 校验 |
 
 **维护**：所有 lease 写入路径共用单一 helper `SyncUserIndex`（根包 `cluster_user_index.go`），由 Redis directory 在 lease 写（`CompareAndSwapSessionLease` 成功——唯一的写入方式）/ `DeleteSessionLease` 之后调用（Delete 先 `GET` lease 以得知 user 再 `SREM`）：
 
@@ -268,7 +268,7 @@ cluster:
 
 索引写失败是 best-effort（记录警告，不影响 lease 本身）：索引是提示，陈旧条目靠 repair 与展开时的 lease 校验收敛。
 
-**修复**：user 索引重建并入统一修复器 `clusterRepairer`（根包 `cluster_repair.go`，PR-KA-B4，`NewCluster` 自动装配——directory 实现 `ClusterSessionLeaseLister` 才生效，否则跳过该项工作）。每 30 秒一轮：`SCAN ml:cluster:session:lease:*`（复用 `scanKeys`，`pkg/redisbroker/cluster_query_store.go`），读 lease JSON，对非空 `UserID` 以 lease 剩余 TTL `AddUserSession`。集群未启用时不运行。
+**修复**：user 索引重建并入统一修复器 `clusterRepairer`（根包 `cluster_repair.go`，PR-KA-B4，`NewCluster` 自动装配——directory 实现 `ClusterSessionLeaseLister` 才生效，否则跳过该项工作）。每 30 秒一轮：`SCAN ml2:cluster:session:lease:*`（复用 `scanKeys`，`pkg/redisbroker/cluster_query_store.go`），读 lease JSON，对非空 `UserID` 以 lease 剩余 TTL `AddUserSession`。集群未启用时不运行。
 
 **禁止**：索引 miss 时做全集群 SCAN（热路径）。陈旧索引靠 repair 收敛；展开时 `GetSessionLease` 校验兜底（投毒/过期条目被跳过）。跨节点验证：`TestAdmin_DisconnectUsersAcrossNodes`、`TestClusterRedis_ResumeUserChangeMigratesIndex`（`cluster_redis_integration_test.go`）。
 
@@ -294,17 +294,17 @@ cluster:
 **数据结构**：投影按节点隔离（`cluster_query_store.go`）。每个节点实例拥有一个 Redis hash：
 
 ```
-ml:cluster:channel:owner:<nodeID>:<incarnationID>
+ml2:cluster:channel:owner:<nodeID>:<incarnationID>
 ```
 
-hash 的字段是频道名、值是本节点在该频道的订阅者计数。增量调整用 Lua 脚本原子执行（`adjustChannelSubscriptionsScript`）：`HGET` 当前值 → 加/减 delta → 结果 ≤ 0 时 `HDEL` 该频道，hash 变空则 `DEL` 整个键；否则 `HSET` + 刷新 `EXPIRE`（TTL 10 分钟，`defaultClusterQueryProjectionTTL`）。`ListChannels` 用 `SCAN ml:cluster:channel:owner:*` 枚举所有 owner hash，`HGETALL` 后按频道聚合求和，按频道名排序。
+hash 的字段是频道名、值是本节点在该频道的订阅者计数。增量调整用 Lua 脚本原子执行（`adjustChannelSubscriptionsScript`）：`HGET` 当前值 → 加/减 delta → 结果 ≤ 0 时 `HDEL` 该频道，hash 变空则 `DEL` 整个键；否则 `HSET` + 刷新 `EXPIRE`（TTL 10 分钟，`defaultClusterQueryProjectionTTL`）。`ListChannels` 用 `SCAN ml2:cluster:channel:owner:*` 枚举所有 owner hash，`HGETALL` 后按频道聚合求和，按频道名排序。
 
 **修复流程（PR-KA-B4 起）**：所有派生视图的修复收敛为**一个** `clusterRepairer`（根包 `cluster_repair.go`），`NewCluster` 只启动这一个修复组件。它由一条定时循环驱动两档节奏：
 
 - **30 秒档**（`ClusterRepairerConfig.Interval`，默认 `defaultClusterRepairInterval`）每轮 `repairOnce`：从本地 hub 取活跃频道及真实订阅者数（`GetActiveChannels`），用 `ReplaceNodeChannels` **全量重建**本节点的 owner hash（`DEL` + `HSET` + `EXPIRE`，事务管道内完成）；随后收割节点租约已消失的死节点 owner 投影；最后 SCAN 会话租约重建 user→sessions 索引（见 4.5）。由此：
   - 本节点上的幽灵增量（因订阅 saga 部分失败、驱逐回滚遗漏等）每轮被纠正；
   - 节点宕机后，其 owner hash 在 10 分钟 TTL 内自然消失，全集群聚合计数随之回落——投影修复 + TTL 过期共同构成投影的最终一致（eventual consistency）。
-- **membership 档**（`ClusterRepairerConfig.MembershipInterval`，默认 5 秒、每拍 ±20% 抖动）每拍 `SCAN ml:cluster:node:*` 维护上一拍存活 incarnation 集合：上一拍有、本拍消失（或 `ExpiresAt` 已过）且非自身的 incarnation 触发 `OnLeave`——删除其名下全部会话租约（走 `DeleteSessionLease`，同步清理 user 索引；**不做** Evict，对方已死）并删除其 owner 投影，不必等 600 秒会话 TTL。第一拍只建集合不触发；自身 incarnation 永不触发。这是控制面循环，热路径（publish/subscribe/ping）不做任何 SCAN。
+- **membership 档**（`ClusterRepairerConfig.MembershipInterval`，默认 5 秒、每拍 ±20% 抖动）每拍 `SCAN ml2:cluster:node:*` 维护上一拍存活 incarnation 集合：上一拍有、本拍消失（或 `ExpiresAt` 已过）且非自身的 incarnation 触发 `OnLeave`——删除其名下全部会话租约（走 `DeleteSessionLease`，同步清理 user 索引；**不做** Evict，对方已死）并删除其 owner 投影，不必等 600 秒会话 TTL。第一拍只建集合不触发；自身 incarnation 永不触发。这是控制面循环，热路径（publish/subscribe/ping）不做任何 SCAN。
 
 集成测试 `TestClusterRedis_ProjectionRepairRestoresChannels` 验证了删除 owner 键后修复器自动重建投影。修复成功与失败分别计入 `ClusterProjectionRepairs` / `ClusterProjectionRepairFailures` 指标。
 
@@ -314,15 +314,15 @@ hash 的字段是频道名、值是本节点在该频道的订阅者计数。增
 
 | 键 | 类型 | TTL | 内容 |
 | --- | --- | --- | --- |
-| `ml:presence:member:<channel>:<clientID>` | string | 60 秒（`PresenceTTL`） | `PresenceInfo` JSON（`ClientID`、`UserID`、`ConnectedAt`） |
-| `ml:presence:idx:<channel>` | set | 60 秒（`PresenceTTL`，与成员键同 TTL） | 频道内在线客户端 ID 集合索引 |
-| `ml:presence:occ:gen:<channel>` | string（计数器） | 无 TTL | OccupancyGen：每次 `INCR`（B2 §4） |
+| `ml2:presence:member:<channel>:<clientID>` | string | 60 秒（`PresenceTTL`） | `PresenceInfo` JSON（`ClientID`、`UserID`、`ConnectedAt`） |
+| `ml2:presence:idx:<channel>` | set | 60 秒（`PresenceTTL`，与成员键同 TTL） | 频道内在线客户端 ID 集合索引 |
+| `ml2:presence:occ:gen:<channel>` | string（计数器） | 无 TTL | OccupancyGen：每次 `INCR`（B2 §4） |
 
 `Add`（订阅登记/心跳刷新）在一条流水线内完成 `SET` 成员 + `SADD` 索引 + `EXPIRE` 索引；`Remove`（退订/断开）`DEL` 成员 + `SREM` 索引；`Get`（查询）先 `SMEMBERS` 索引，再流水线 `GET` 每个成员并反序列化，读取时发现成员键已过期缺失则顺手 `SREM` 清理索引中的残留，并对每个被清理的幽灵成员合成一条 leave 事件（取新 OccupancyGen，经 LiveBus `PublishOccupancy`，B2 §5.3；`presence_redis.go`）。
 
 聚合原理：所有节点把 presence 写入**同一个 Redis 命名空间**，因此任何节点调用 `Get` 拿到的都是全集群的在线集合——Presence 天然按频道聚合，无需额外协议。成员 TTL 由订阅侧通过 `Add` 刷新（客户端 ping 触发的刷新经节流，见 4.1），异常退出的会话会在 TTL 内自然消失。
 
-**加入/离开事件（Occupancy）**：每次 Join/Leave 取单调 OccupancyGen（Redis：`INCR ml:presence:occ:gen:<ch>`），存完 store 后**只** `PublishOccupancy(ch, evt)` 走 live bus 精确频道（`ml:pubsub:<ch>`，payload `t:"occupancy"`，**不是** `pub`）。跨节点投递只依赖 LiveBus 的 Interest：内存 broker 同步进 handler，Redis 把 PUBLISH 扇回给所有订阅该精确/编译频道的节点（含本进程自身），每个节点 `runPubSub` 在 `interested()` 之后按类型分支——`pub` 进 `deliverOnce`，`occupancy` 直接进 occupancy handler（**无 stream offset，不走 deliverOnce，不进 Publication handler**）。接收端 `gen <= last_applied[ch][session]` 弃迟到。`server.presence.cluster_emit` 已删除（写进 YAML 会被 `Validate` 拒绝），不再有 `ml.type=presence` 帧改写。只有频道策略 `legacy_presence_channel: true` 时，精确频道才会额外把旧 JSON 瞬时发到伴生频道。事件不进历史，不会混入恢复流。远端订阅（经命令总线，见 3.4）同样走 `shouldTrackPresence` 门闩。
+**加入/离开事件（Occupancy）**：每次 Join/Leave 取单调 OccupancyGen（Redis：`INCR ml2:presence:occ:gen:<ch>`），存完 store 后**只** `PublishOccupancy(ch, evt)` 走 live bus 精确频道（`ml2:pubsub:<ch>`，payload `t:"occupancy"`，**不是** `pub`）。跨节点投递只依赖 LiveBus 的 Interest：内存 broker 同步进 handler，Redis 把 PUBLISH 扇回给所有订阅该精确/编译频道的节点（含本进程自身），每个节点 `runPubSub` 在 `interested()` 之后按类型分支——`pub` 进 `deliverOnce`，`occupancy` 直接进 occupancy handler（**无 stream offset，不走 deliverOnce，不进 Publication handler**）。接收端 `gen <= last_applied[ch][session]` 弃迟到。`server.presence.cluster_emit` 已删除（写进 YAML 会被 `Validate` 拒绝），不再有 `ml.type=presence` 帧改写。只有频道策略 `legacy_presence_channel: true` 时，精确频道才会额外把旧 JSON 瞬时发到伴生频道。事件不进历史，不会混入恢复流。远端订阅（经命令总线，见 3.4）同样走 `shouldTrackPresence` 门闩。
 
 ### 7.1 Presence 跨节点（LiveBus + OccupancyGen，B2）
 
@@ -337,8 +337,8 @@ hash 的字段是频道名、值是本节点在该频道的订阅者计数。增
 
 集群模式下历史由 Redis Streams 承载，是全集群**共享**的：
 
-- 发布路径（`redis.go` 的 `Publish`）：Lua 脚本原子完成 `INCR ml:stream:seq:<channel>`（每频道稠密 seq，C4）+ `XADD` 写入 `ml:stream:<channel>`（条目带 `s` 字段；`StreamMaxLength` 默认 10000 条、`StreamApproximate` 默认 true，`HistoryTTL` 默认 24 小时，seq 键与 stream 同 TTL），从 Stream ID 解析出 offset；再 `PUBLISH` 到 `ml:pubsub:<channel>` 做实时分发。任意节点发布，全部节点共享同一份历史。
-- 消费路径（`pubsub.go`）：每个节点 `PSUBSCRIBE ml:pubsub:*` 模式订阅，只处理本节点登记过兴趣（`Subscribe`）的频道；断线以指数退避重连（1 秒起、上限 30 秒）。
+- 发布路径（`redis.go` 的 `Publish`）：Lua 脚本原子完成 `INCR ml2:stream:seq:<channel>`（每频道稠密 seq，C4）+ `XADD` 写入 `ml2:stream:<channel>`（条目带 `s` 字段；`StreamMaxLength` 默认 10000 条、`StreamApproximate` 默认 true，`HistoryTTL` 默认 24 小时，seq 键与 stream 同 TTL），从 Stream ID 解析出 offset；再 `PUBLISH` 到 `ml2:pubsub:<channel>` 做实时分发。任意节点发布，全部节点共享同一份历史。
+- 消费路径（`pubsub.go`）：每个节点 `PSUBSCRIBE ml2:pubsub:*` 模式订阅，只处理本节点登记过兴趣（`Subscribe`）的频道；断线以指数退避重连（1 秒起、上限 30 秒）。
 - **offset 语义**：offset 由 Stream ID 编码而来，`offset = ts<<20 | seq`（毫秒时间戳与序列号拼入 uint64，`history.go`）。历史查询 `History(ch, sinceOffset, limit)` 用**包含**起始 ID（`"ts-seq"`，`streamStartID`）——Redis broker 与内存 broker 的 `since_offset` 均为**包含**（inclusive）语义，返回 `offset >= since_offset`（契约见 `broker.go:105-108`）；`limit <= 0` 时上限为 `DefaultHistoryLimit`（1000 条）。offset 编码**不是**稠密序号；中洞检测走条目旁的稠密 seq（`s` 字段，C4）：页内相邻条目 seq 不连续 → `HistoryGapMiddle`（线上 `GAP_REASON_MIDDLE`），无 `s` 的 legacy 条目断开证据链、不诬报。
 - 由于历史与 offset 都来自共享的 Redis Stream，跨节点查询历史得到的是同一份数据；跨节点**恢复**的 epoch 校验也因 Redis epoch 集群共享而可通过（见 4.4）。
 - 瞬时消息（`PublishTransient`，presence 事件等）不写 Stream，offset 恒为 0，永不进入历史。
@@ -351,10 +351,10 @@ hash 的字段是频道名、值是本节点在该频道的订阅者计数。增
 
 | 数据 | TTL | 宕机后的行为 |
 | --- | --- | --- |
-| 节点租约 `ml:cluster:node:*` | 90 秒 | 过期后该节点从广播目标（Survey 等）中消失 |
-| 会话租约 `ml:cluster:session:lease:*` | 600 秒 | 过期后会话不再被识别为属于任何存活节点；期间携带该 `SessionId` 的新连接会尝试 takeover 并向已死节点发送命令，命令超时后经节点租约检查降级继续恢复（见 4.3） |
-| 会话快照 `ml:cluster:session:snapshot:*` | 24 小时 | 保留足够久，客户端重连到任意存活节点都能拿到订阅列表等恢复信息 |
-| 节点投影 `ml:cluster:channel:owner:*` | 10 分钟 | 过期后全集群频道列表自动收敛（见第 6 节） |
+| 节点租约 `ml2:cluster:node:*` | 90 秒 | 过期后该节点从广播目标（Survey 等）中消失 |
+| 会话租约 `ml2:cluster:session:lease:*` | 600 秒 | 过期后会话不再被识别为属于任何存活节点；期间携带该 `SessionId` 的新连接会尝试 takeover 并向已死节点发送命令，命令超时后经节点租约检查降级继续恢复（见 4.3） |
+| 会话快照 `ml2:cluster:session:snapshot:*` | 24 小时 | 保留足够久，客户端重连到任意存活节点都能拿到订阅列表等恢复信息 |
+| 节点投影 `ml2:cluster:channel:owner:*` | 10 分钟 | 过期后全集群频道列表自动收敛（见第 6 节） |
 | presence 成员 | 60 秒 | 过期后在线状态自动收敛（见第 7 节） |
 
 宕机节点承载的连接会被客户端感知为断线；客户端携带 `SessionId` 重连任意存活节点即走 resume 路径（本地命中则本地接管，否则远端接管 + 快照恢复订阅）。**未开启 resume 的连接**（客户端不带 `SessionId` 重连）自然是全新会话，不受影响。

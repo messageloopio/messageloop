@@ -253,10 +253,10 @@ func TestClusterCommandBus_CloneCommandMetadataIsIndependent(t *testing.T) {
 	source := map[string]string{"exclude_self": "true", "k": "v"}
 	clone := cloneCommandMetadata(source)
 
-	clone["reply_channel"] = "ml:cluster:cmd:reply:test"
+	clone["reply_channel"] = clusterCommandReplyPrefix + "test"
 	require.Len(t, source, 2)
 	require.NotContains(t, source, "reply_channel")
-	require.Equal(t, "ml:cluster:cmd:reply:test", clone["reply_channel"])
+	require.Equal(t, clusterCommandReplyPrefix+"test", clone["reply_channel"])
 	require.Nil(t, cloneCommandMetadata(nil))
 }
 
@@ -969,7 +969,7 @@ func TestClusterCommandBus_KeyNeverWrittenToRedis(t *testing.T) {
 
 	spy := newRedisClient(NewOptions(redisCfg))
 	defer func() { _ = spy.Close() }()
-	pubsub := spy.PSubscribe(ctx, "ml:cluster:cmd:*")
+	pubsub := spy.PSubscribe(ctx, clusterCommandReplyPrefix+"*")
 	defer func() { _ = pubsub.Close() }()
 	_, err := pubsub.Receive(ctx)
 	require.NoError(t, err)
@@ -1043,7 +1043,7 @@ func TestClusterCommandBus_SendCommandUsesStreamNotPublish(t *testing.T) {
 
 	spy := newRedisClient(NewOptions(redisCfg))
 	defer func() { _ = spy.Close() }()
-	pubsub := spy.PSubscribe(ctx, "ml:cluster:cmd:*")
+	pubsub := spy.PSubscribe(ctx, clusterCommandReplyPrefix+"*")
 	defer func() { _ = pubsub.Close() }()
 	_, err := pubsub.Receive(ctx)
 	require.NoError(t, err)
@@ -1247,7 +1247,7 @@ func TestClusterCommandBus_NoRequestPubSubSubscription(t *testing.T) {
 	receiver := newTestClusterCommandBus(t, redisCfg, "node-a", "inc-a")
 	receiver.start(t, ctx)
 
-	channels, err := receiver.client.PubSubChannels(ctx, "ml:cluster:cmd:*").Result()
+	channels, err := receiver.client.PubSubChannels(ctx, clusterCommandReplyPrefix+"*").Result()
 	require.NoError(t, err)
 	require.Empty(t, channels,
 		"a started bus must not hold any cluster command Pub/Sub subscription")

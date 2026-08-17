@@ -37,8 +37,8 @@ func TestRedisSessionDirectory_NextNodeEpoch(t *testing.T) {
 }
 
 // TestRedisSessionDirectory_NodeEpochKeyEscapesNodeLeaseScan pins the key
-// shape: ml:cluster:node_epoch:{nodeID} must NOT match the
-// ml:cluster:node:* SCAN used by ListNodeLeases, or the membership repair
+// shape: ml2:cluster:node_epoch:{nodeID} must NOT match the
+// ml2:cluster:node:* SCAN used by ListNodeLeases, or the membership repair
 // loop would try to parse the counter as a node lease.
 func TestRedisSessionDirectory_NodeEpochKeyEscapesNodeLeaseScan(t *testing.T) {
 	redisCfg := requireCommandBusRedis(t)

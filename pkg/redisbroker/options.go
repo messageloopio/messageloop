@@ -7,15 +7,15 @@ import (
 )
 
 const (
-	defaultStreamPrefix                 = "ml:stream:"
-	defaultPubSubPrefix                 = "ml:pubsub:"
-	defaultPresencePrefix               = "ml:presence:"
-	defaultClusterPrefix                = "ml:cluster:"
-	defaultClusterNodePrefix            = "ml:cluster:node:"
-	defaultClusterSessionLeasePrefix    = "ml:cluster:session:lease:"
-	defaultClusterSessionSnapshotPrefix = "ml:cluster:session:snapshot:"
-	defaultClusterChannelPrefix         = "ml:cluster:channel:"
-	defaultEpochKey                     = "ml:broker:epoch"
+	defaultStreamPrefix                 = "ml2:stream:"
+	defaultPubSubPrefix                 = "ml2:pubsub:"
+	defaultPresencePrefix               = "ml2:presence:"
+	defaultClusterPrefix                = "ml2:cluster:"
+	defaultClusterNodePrefix            = "ml2:cluster:node:"
+	defaultClusterSessionLeasePrefix    = "ml2:cluster:session:lease:"
+	defaultClusterSessionSnapshotPrefix = "ml2:cluster:session:snapshot:"
+	defaultClusterChannelPrefix         = "ml2:cluster:channel:"
+	defaultEpochKey                     = "ml2:broker:epoch"
 	defaultStreamMaxLength              = 10000
 	defaultHistoryTTL                   = 24 * time.Hour
 	defaultPresenceTTL                  = 60 * time.Second

@@ -119,8 +119,8 @@ Redis requirements:
 
 Broker epoch note:
 
-- The broker keeps a cluster-wide epoch in the key `ml:broker:epoch` (first node to start creates it). Client recovery offsets are only trusted when the client's epoch matches this value, so the epoch must remain stable across node restarts.
-- **If you flush/clear the streams, also delete the `ml:broker:epoch` key**; otherwise clients that carry stale offsets would silently skip messages instead of recovering from the beginning.
+- The broker keeps a cluster-wide epoch in the key `ml2:broker:epoch` (first node to start creates it). Client recovery offsets are only trusted when the client's epoch matches this value, so the epoch must remain stable across node restarts.
+- **If you flush/clear the streams, also delete the `ml2:broker:epoch` key**; otherwise clients that carry stale offsets would silently skip messages instead of recovering from the beginning.
 
 ## Multi-Node Cluster
 

@@ -571,7 +571,7 @@ grpcurl \
 | --- | --- |
 | `Publish`（会话投递） | 通过会话租约（session lease）解析会话所在节点；会话由远端节点持有时，投递请求经 Redis 命令总线（command bus）路由到该节点执行 |
 | `Disconnect`、`Subscribe`、`Unsubscribe` | 与 `Publish` 会话投递相同：先解析会话租约，远端会话的操作经命令总线下发到持有该会话的节点执行；会话不存在时对应条目返回 `false` |
-| 按 user 展开（`Publish.users`、`Disconnect.users`、`Subscribe/Unsubscribe.user_id`） | 本地 hub 的 user 索引（`Hub.SessionsByUser`）并上 Redis user→sessions 索引（`ml:cluster:user:sessions:<user_id>` 集合 + `ml:cluster:user:member:<user_id>:<session_id>` 成员键，TTL 与 session lease 相同）；展开时对每个 session 校验 lease 的 `UserID`，不匹配或缺失则跳过；索引 miss 不做全集群 SCAN，靠周期 repair 收敛 |
+| 按 user 展开（`Publish.users`、`Disconnect.users`、`Subscribe/Unsubscribe.user_id`） | 本地 hub 的 user 索引（`Hub.SessionsByUser`）并上 Redis user→sessions 索引（`ml2:cluster:user:sessions:<user_id>` 集合 + `ml2:cluster:user:member:<user_id>:<session_id>` 成员键，TTL 与 session lease 相同）；展开时对每个 session 校验 lease 的 `UserID`，不匹配或缺失则跳过；索引 miss 不做全集群 SCAN，靠周期 repair 收敛 |
 | `Survey` | 除本地调查外，还会通过命令总线向集群内所有其他节点广播调查请求（排除自身，`exclude_self`），聚合各节点的应答后统一排序返回；每个 `SurveyResult` 会附带 `node_id` 与 `incarnation_id` 元数据，标识应答来源节点；集群中某个节点执行调查失败时，该节点会以一条带 `error` 的 `SurveyResult` 表示（`code` 为 `SURVEY_FAILED`） |
 | `GetChannels` | 不再查询本地 hub，而是读取集群共享的频道投影（query store），返回全集群的活跃频道与订阅者数量 |
 | `GetPresence` | 在线状态存储在集群模式下替换为 Redis 支撑的存储，查询返回全集群的在线客户端 |

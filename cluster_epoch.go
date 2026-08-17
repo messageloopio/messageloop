@@ -12,7 +12,7 @@ import (
 // strictly monotonic, and rendered as the decimal IncarnationID string via
 // FormatNodeEpoch. A larger epoch is a newer generation of the same node.
 //
-// Redis: INCR ml:cluster:node_epoch:{nodeID} (see pkg/redisbroker). Memory:
+// Redis: INCR ml2:cluster:node_epoch:{nodeID} (see pkg/redisbroker). Memory:
 // per-nodeID process-local counter. Allocation is a startup-only operation,
 // never a hot-path one.
 type NodeEpochAllocator interface {

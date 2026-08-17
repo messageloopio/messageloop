@@ -573,7 +573,7 @@ Survey / 长调用：意图与应答分开；发送方等待 ≥ handler 超时�
 
 ### 舰队
 
-本版本节点之间、节点与客户端之间 **同一协议世代**。不支持与 v0.2/v1.0 二进制或旧 SDK 组网。Redis 键前缀建议换代（例如 `ml2:`），避免和旧树共用一个 DB 时互相覆盖。Membership 发现到无法识别的 incarnation schema 则拒绝与之 Bind / RPC。
+本版本节点之间、节点与客户端之间 **同一协议世代**。不支持与 v0.2/v1.0 二进制或旧 SDK 组网。Redis 键前缀已换代为 `ml2:`（PR-KA-C5），避免和旧树共用一个 DB 时互相覆盖。Membership 发现到无法识别的 incarnation schema 则拒绝与之 Bind / RPC。
 
 ### 观测
 

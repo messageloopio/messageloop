@@ -2,7 +2,7 @@
 // presence store, and cluster control-plane adapters.
 //
 // Delivery: cluster command requests travel to the target incarnation's
-// Redis Stream inbox (ml:cluster:cmd:stream:{nodeID}:{incarnationID}) and are
+// Redis Stream inbox (ml2:cluster:cmd:stream:{nodeID}:{incarnationID}) and are
 // consumed through a per-stream consumer group (XREADGROUP + XAUTOCLAIM +
 // XACK), giving at-least-once delivery with command-id dedupe (PR-KA-C3).
 // Command results still travel over Redis Pub/Sub reply channels. Both
@@ -39,9 +39,9 @@ import (
 )
 
 const (
-	clusterCommandStreamPrefix = "ml:cluster:cmd:stream:"
-	clusterCommandReplyPrefix  = "ml:cluster:cmd:reply:"
-	clusterCommandStatePrefix  = "ml:cluster:cmd:state:"
+	clusterCommandStreamPrefix = "ml2:cluster:cmd:stream:"
+	clusterCommandReplyPrefix  = "ml2:cluster:cmd:reply:"
+	clusterCommandStatePrefix  = "ml2:cluster:cmd:state:"
 	clusterCommandReplyKey     = "reply_channel"
 	// clusterCommandGroupName is the fixed consumer group each inbox stream
 	// carries; the consumer name is the incarnation ID (one live consumer per
@@ -665,7 +665,7 @@ func (b *redisClusterCommandBus) BroadcastCommand(ctx context.Context, cmd *mess
 }
 
 // streamKey returns the per-incarnation inbox stream for cluster command
-// requests. Note it deliberately lives outside the ml:cluster:node: prefix so
+// requests. Note it deliberately lives outside the ml2:cluster:node: prefix so
 // the C2 node-lease SCAN never touches it.
 func (b *redisClusterCommandBus) streamKey(nodeID, incarnationID string) string {
 	return clusterCommandStreamPrefix + nodeID + ":" + incarnationID

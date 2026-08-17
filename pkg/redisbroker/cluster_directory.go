@@ -42,8 +42,8 @@ func (d *redisSessionDirectory) nodeLeaseKey(nodeID, incarnationID string) strin
 }
 
 // nodeEpochKey is the monotone counter key for a node's process generations
-// (KD-K27). It deliberately sits at ml:cluster:node_epoch:{nodeID}, NOT
-// under the ml:cluster:node: prefix, so the ListNodeLeases SCAN never picks
+// (KD-K27). It deliberately sits at ml2:cluster:node_epoch:{nodeID}, NOT
+// under the ml2:cluster:node: prefix, so the ListNodeLeases SCAN never picks
 // it up.
 func (d *redisSessionDirectory) nodeEpochKey(nodeID string) string {
 	return d.opts.ClusterPrefix + "node_epoch:" + nodeID
@@ -261,7 +261,7 @@ func (d *redisSessionDirectory) ListUserSessions(ctx context.Context, userID str
 }
 
 // ListSessionLeases enumerates every stored session lease (SCAN
-// ml:cluster:session:lease:*). It feeds the periodic user-index repair and
+// ml2:cluster:session:lease:*). It feeds the periodic user-index repair and
 // the membership OnLeave invalidation; a lease that vanished between the
 // scan and the read is skipped.
 func (d *redisSessionDirectory) ListSessionLeases(ctx context.Context) ([]*messageloop.ClusterSessionLease, error) {
@@ -281,7 +281,7 @@ func (d *redisSessionDirectory) ListSessionLeases(ctx context.Context) ([]*messa
 }
 
 // ListNodeLeases enumerates every stored node lease (SCAN
-// ml:cluster:node:*). It feeds the membership repair loop that drives
+// ml2:cluster:node:*). It feeds the membership repair loop that drives
 // OnLeave; a lease that vanished between the scan and the read is skipped.
 func (d *redisSessionDirectory) ListNodeLeases(ctx context.Context) ([]*messageloop.ClusterNodeLease, error) {
 	blobs, err := d.listLeaseJSON(ctx, d.opts.ClusterNodePrefix)
