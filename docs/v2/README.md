@@ -20,5 +20,6 @@
 | [PR-KA-C3 实现规格](tasks/pr-ka-c3-stream.md) | Accepted | NodeRPC 请求改 Redis Stream + consumer group；[prompt](tasks/pr-ka-c3-prompt.md) |
 | [PR-KA-C4 实现规格](tasks/pr-ka-c4-dense-seq.md) | Accepted | History 稠密 seq、真中洞检测（Q8）；[prompt](tasks/pr-ka-c4-prompt.md) |
 | [PR-KA-C5 实现规格](tasks/pr-ka-c5-keyprefix.md) | Accepted | Redis 键前缀换代 `ml:` → `ml2:`（KD-K31）；[prompt](tasks/pr-ka-c5-prompt.md) |
+| [PR-KA-C6 实现规格](tasks/pr-ka-c6-gap-notice.md) | Ready | catch-up 洞的 client-facing GapNotice；[prompt](tasks/pr-ka-c6-prompt.md) |
 
 第三方实现：复制对应 `tasks/pr-ka-*-prompt.md` 围栏全文；规格与靶心冲突时以该步规格为准。
