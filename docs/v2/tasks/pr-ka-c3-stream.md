@@ -3,7 +3,7 @@
 | 字段 | 值 |
 | --- | --- |
 | 标题 | `cluster: deliver NodeRPC requests on Redis Stream + consumer group` |
-| 状态 | **Ready** |
+| 状态 | **Accepted**（2026-08-17 主 agent 终验通过，尚未 commit） |
 | 依赖 | C2 已合（`698040a`）。HMAC 已在（B4）。在 `v2` 分支上做 |
 | 设计来源 | [kernel-architecture.md](../kernel-architecture.md) NodeRPC、KD-K6、KD-K29、KD-K31 |
 | 验收人 | 主 agent |
@@ -133,4 +133,12 @@ HMAC 失败 **仍 XACK**。否则毒消息会每 30s 重投打爆指标。仍 **
 
 ## 10. 实现备注（完成后填写）
 
-（实现者填写）
+实现于 `v2` 分支（基线 `7337c77`）。
+
+- 请求路径：`SendCommand` 改为 `XADD ml:cluster:cmd:stream:{node}:{inc}`（单 field `payload`，近似 `MAXLEN ~ 10000`，可调变量 `clusterCommandStreamMaxLen`）；删除 `clusterCommandRequestPrefix` / `requestChannel` 与请求侧 `PUBLISH`/`SUBSCRIBE`。签名仍在入流之前。
+- 接收路径：`Start` 先 `XGROUP CREATE MKSTREAM inbox`（起点 `0`，BUSYGROUP 忽略）；读循环 `XREADGROUP ... >`（`COUNT 32`，`BLOCK 2s`，可调）+ 每轮空闲时 `XAUTOCLAIM`（`MinIdle = clusterCommandClaimLeaseTTL`）认领崩溃 pending；`dispatchStreamMessage` 在 `handleMessage` 返回后一律 `XACK`（含 HMAC 拒绝、无 handler、payload 被截断的墓碑条目）。重试循环在重建组后恢复消费，`disconnects` 计数保留。128 并发信号量、handler 10s deadline、claim 租约/续租语义不变。
+- 应答路径完全未动：仍是带 `SignResult` 签名的 Pub/Sub `reply_channel`；去重键 `ml:cluster:cmd:state:` 未动。
+- 构造函数 `NewClusterCommandBus(cfg, nodeID, inc, hmacKey)` 签名不变；`cmd/server`、C1 sim、HMAC 包均未改。
+- 测试：`publishRawCommand` 改为 `addRawCommand`（XADD 注入）；原 Pub/Sub 重连测试改写为 `TestClusterCommandBus_RecoversAfterConsumerGroupLoss`（`XGroupDestroy` 模拟组丢失）；新增 `SendCommandUsesStreamNotPublish`（XADD 正断言 + 无 `cmd:req:` 发布 + 应答仍 Pub/Sub）、`AcksProcessedCommands`、`HMACRejectStillAcks`、`RedeliversPendingAfterCrash`（缩短 claim TTL 作 XAUTOCLAIM min-idle，无固定长 Sleep）、`NoRequestPubSubSubscription`。密钥卫生测试扩到 stream 条目。拒绝类指标断言改为 `Eventually`（Stream 派发为异步 goroutine）。
+- 验证（真实 Redis，DB 14）：`go test -count=1 ./pkg/redisbroker`、`go test -count=1 -run "TestSim_|TestClusterCommandBus" .`、`go test ./...`、`go test -race . ./pkg/redisbroker` 全部通过。
+- 偏离：无。

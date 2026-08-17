@@ -1,8 +1,13 @@
 // Package redisbroker provides Redis-backed implementations of the broker,
 // presence store, and cluster control-plane adapters.
 //
-// Trust boundary: cluster commands and command results travel over Redis
-// Pub/Sub signed with HMAC-SHA256 (PR-KA-B4, see internal/cluster/hmac). The
+// Delivery: cluster command requests travel to the target incarnation's
+// Redis Stream inbox (ml:cluster:cmd:stream:{nodeID}:{incarnationID}) and are
+// consumed through a per-stream consumer group (XREADGROUP + XAUTOCLAIM +
+// XACK), giving at-least-once delivery with command-id dedupe (PR-KA-C3).
+// Command results still travel over Redis Pub/Sub reply channels. Both
+// directions are signed with HMAC-SHA256 (PR-KA-B4, see
+// internal/cluster/hmac). The
 // key comes from node configuration only (cluster.hmac_key or
 // cluster.hmac_key_file) and is never written to Redis. Being able to write
 // to the Redis instance is NOT enough to inject disconnect/takeover/publish
@@ -20,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,12 +39,19 @@ import (
 )
 
 const (
-	clusterCommandRequestPrefix = "ml:cluster:cmd:req:"
-	clusterCommandReplyPrefix   = "ml:cluster:cmd:reply:"
-	clusterCommandStatePrefix   = "ml:cluster:cmd:state:"
-	clusterCommandReplyKey      = "reply_channel"
-	defaultCommandTimeout       = 5 * time.Second
-	defaultCommandStateTTL      = 10 * time.Minute
+	clusterCommandStreamPrefix = "ml:cluster:cmd:stream:"
+	clusterCommandReplyPrefix  = "ml:cluster:cmd:reply:"
+	clusterCommandStatePrefix  = "ml:cluster:cmd:state:"
+	clusterCommandReplyKey     = "reply_channel"
+	// clusterCommandGroupName is the fixed consumer group each inbox stream
+	// carries; the consumer name is the incarnation ID (one live consumer per
+	// incarnation).
+	clusterCommandGroupName = "inbox"
+	// clusterCommandStreamPayloadField is the single stream entry field
+	// holding the command envelope JSON (including its Signature).
+	clusterCommandStreamPayloadField = "payload"
+	defaultCommandTimeout            = 5 * time.Second
+	defaultCommandStateTTL           = 10 * time.Minute
 )
 
 // Command bus tunables are variables (not constants) so tests can shorten
@@ -68,6 +81,18 @@ var (
 	// first cluster command bus reconnection attempt. Variable so tests can
 	// shorten it.
 	clusterCommandReconnectBaseBackoff = 1 * time.Second
+	// clusterCommandStreamMaxLen bounds each per-incarnation inbox stream via
+	// approximate MAXLEN trimming on XADD, so an inbox cannot grow without
+	// bound. Variable so tests can tune it.
+	clusterCommandStreamMaxLen int64 = 10000
+	// clusterCommandReadBlockTimeout is the XREADGROUP block timeout. When it
+	// elapses with no new entries the reader runs an XAUTOCLAIM pass for
+	// crash redelivery, so this also bounds the redelivery cadence. Variable
+	// so tests can shorten it.
+	clusterCommandReadBlockTimeout = 2 * time.Second
+	// clusterCommandReadCount bounds the entries fetched per XREADGROUP or
+	// XAUTOCLAIM call.
+	clusterCommandReadCount int64 = 32
 )
 
 type redisClusterCommandBus struct {
@@ -84,7 +109,6 @@ type redisClusterCommandBus struct {
 
 	mu        sync.RWMutex
 	handler   messageloop.ClusterCommandHandler
-	pubsub    *redis.PubSub
 	cancel    context.CancelFunc
 	readerWG  sync.WaitGroup
 	handlerWG sync.WaitGroup
@@ -92,8 +116,8 @@ type redisClusterCommandBus struct {
 	start     bool
 	stop      bool
 
-	// disconnects counts unexpected pub/sub disconnects of the request
-	// channel (reconnect attempts); exposed for tests and operators.
+	// disconnects counts unexpected stream-reader failures (reconnect
+	// attempts); exposed for tests and operators.
 	disconnects atomic.Uint64
 }
 
@@ -169,15 +193,16 @@ func (b *redisClusterCommandBus) Start(ctx context.Context) error {
 	b.readerWG.Add(1)
 	go func() {
 		defer b.readerWG.Done()
-		// runCommandReaderWithRetry reports the first-subscription outcome on
-		// confirmed itself; later outcomes are absorbed by the retry loop.
+		// runCommandReaderWithRetry reports the first consumer-group creation
+		// outcome on confirmed itself; later outcomes are absorbed by the
+		// retry loop.
 		b.runCommandReaderWithRetry(busCtx, sem, confirmed)
 	}()
 
-	// The reader reports the outcome of the first subscription attempt so
-	// Start can surface subscribe failures synchronously (cluster startup
-	// rolls back on component start errors); later disconnects are absorbed
-	// by the retry loop.
+	// The reader reports the outcome of the first consumer-group creation so
+	// Start can surface setup failures synchronously (cluster startup rolls
+	// back on component start errors); later failures are absorbed by the
+	// retry loop.
 	select {
 	case err := <-confirmed:
 		if err != nil {
@@ -196,51 +221,40 @@ func (b *redisClusterCommandBus) Start(ctx context.Context) error {
 	return nil
 }
 
-// runCommandReaderWithRetry keeps the request-channel subscription alive,
-// reconnecting with exponential backoff after unexpected disconnects. The
-// outcome of the first subscription attempt is reported on confirmed (nil
-// once the subscription is live, or an error when the first attempt fails)
-// so Start can fail synchronously. It returns nil once the bus is stopped.
+// runCommandReaderWithRetry keeps the inbox stream reader alive, re-creating
+// the consumer group and reconnecting with exponential backoff after
+// unexpected failures. The outcome of the first consumer-group creation is
+// reported on confirmed (nil once the group is live, or an error when the
+// first attempt fails) so Start can fail synchronously. It returns nil once
+// the bus is stopped.
 func (b *redisClusterCommandBus) runCommandReaderWithRetry(ctx context.Context, sem chan struct{}, confirmed chan<- error) error {
 	backoff := clusterCommandReconnectBaseBackoff
 	const maxBackoff = 30 * time.Second
 	first := true
 	for {
-		pubsub := b.client.Subscribe(ctx, b.requestChannel(b.nodeID, b.incarnationID))
-		if _, err := pubsub.Receive(ctx); err != nil {
-			_ = pubsub.Close()
-			if ctx.Err() != nil || b.stopped() {
-				return nil
-			}
+		err := b.ensureConsumerGroup(ctx)
+		if err == nil {
+			// The first successful group creation unblocks Start; later
+			// reconnects must not touch the confirmed channel again (Start
+			// has returned and nobody drains it).
 			if first {
 				first = false
-				confirmed <- err
-				return err
+				confirmed <- nil
 			}
-			log.WarnContext(ctx, "cluster command bus subscribe failed, retrying",
-				"error", err, "backoff", backoff, "node_id", b.nodeID)
-			b.recordCommandBusDisconnect()
-			if !b.waitReconnectBackoff(ctx, &backoff, maxBackoff) {
+			err = b.runCommandReader(ctx, sem)
+			if err == nil {
+				// runCommandReader returns nil only on intentional shutdown.
 				return nil
 			}
-			continue
-		}
-		// The first successful subscribe unblocks Start; later reconnects
-		// must not touch the confirmed channel again (Start has returned and
-		// nobody drains it).
-		if first {
+		} else if first {
 			first = false
-			confirmed <- nil
-		}
-		err := b.runCommandReader(ctx, sem, pubsub)
-		if err == nil {
-			// runCommandReader returns nil only on intentional shutdown.
-			return nil
+			confirmed <- err
+			return err
 		}
 		if ctx.Err() != nil || b.stopped() {
 			return nil
 		}
-		log.WarnContext(ctx, "cluster command bus disconnected, retrying",
+		log.WarnContext(ctx, "cluster command stream reader failed, retrying",
 			"error", err, "backoff", backoff, "node_id", b.nodeID)
 		b.recordCommandBusDisconnect()
 		if !b.waitReconnectBackoff(ctx, &backoff, maxBackoff) {
@@ -249,41 +263,105 @@ func (b *redisClusterCommandBus) runCommandReaderWithRetry(ctx context.Context, 
 	}
 }
 
-// runCommandReader drains the request channel and dispatches each command to
-// a bounded handler goroutine. It returns nil when ctx is cancelled (the bus
-// is shutting down) and an error when the subscription dies unexpectedly, so
-// the caller can reconnect.
-func (b *redisClusterCommandBus) runCommandReader(ctx context.Context, sem chan struct{}, pubsub *redis.PubSub) error {
-	b.mu.Lock()
-	b.pubsub = pubsub
-	b.mu.Unlock()
-	defer func() {
-		b.mu.Lock()
-		if b.pubsub == pubsub {
-			b.pubsub = nil
-		}
-		b.mu.Unlock()
-		_ = pubsub.Close()
-	}()
+// ensureConsumerGroup creates the inbox stream's consumer group (and the
+// stream itself via MKSTREAM) starting at the beginning of the stream, so
+// entries XADDed before the group existed are still delivered. An existing
+// group (BUSYGROUP) is not an error.
+func (b *redisClusterCommandBus) ensureConsumerGroup(ctx context.Context) error {
+	err := b.client.XGroupCreateMkStream(ctx, b.streamKey(b.nodeID, b.incarnationID), clusterCommandGroupName, "0").Err()
+	if err != nil && !strings.Contains(err.Error(), "BUSYGROUP") {
+		return err
+	}
+	return nil
+}
 
-	ch := pubsub.Channel()
+// runCommandReader drains the inbox stream and dispatches each command to a
+// bounded handler goroutine, XACKing the entry once handling returns. It
+// returns nil when ctx is cancelled (the bus is shutting down) and an error
+// when the stream read fails unexpectedly, so the caller can reconnect.
+func (b *redisClusterCommandBus) runCommandReader(ctx context.Context, sem chan struct{}) error {
+	streamKey := b.streamKey(b.nodeID, b.incarnationID)
+	consumer := b.consumerName()
 	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case message, ok := <-ch:
-			if !ok {
-				return fmt.Errorf("cluster command pubsub channel closed")
+		// Crash redelivery: pull entries pending longer than the claim lease
+		// TTL back to this consumer and run them through the same handling
+		// path; command-id dedupe bounds side effects to one execution.
+		if err := b.autoClaimPending(ctx, sem, streamKey, consumer); err != nil {
+			if ctx.Err() != nil {
+				return nil
 			}
-			sem <- struct{}{}
-			b.handlerWG.Add(1)
-			go func(payload string) {
-				defer b.handlerWG.Done()
-				defer func() { <-sem }()
-				b.handleMessage(ctx, payload)
-			}(message.Payload)
+			return err
+		}
+		streams, err := b.client.XReadGroup(ctx, &redis.XReadGroupArgs{
+			Group:    clusterCommandGroupName,
+			Consumer: consumer,
+			Streams:  []string{streamKey, ">"},
+			Count:    clusterCommandReadCount,
+			Block:    clusterCommandReadBlockTimeout,
+		}).Result()
+		if err != nil {
+			if errors.Is(err, redis.Nil) {
+				continue
+			}
+			if ctx.Err() != nil {
+				return nil
+			}
+			return err
+		}
+		for _, stream := range streams {
+			for _, message := range stream.Messages {
+				b.dispatchStreamMessage(ctx, sem, streamKey, message)
+			}
 		}
 	}
+}
+
+// autoClaimPending transfers entries idle in the pending list for at least
+// clusterCommandClaimLeaseTTL to this consumer and dispatches them.
+func (b *redisClusterCommandBus) autoClaimPending(ctx context.Context, sem chan struct{}, streamKey, consumer string) error {
+	start := "0-0"
+	for {
+		messages, next, err := b.client.XAutoClaim(ctx, &redis.XAutoClaimArgs{
+			Stream:   streamKey,
+			Group:    clusterCommandGroupName,
+			Consumer: consumer,
+			MinIdle:  clusterCommandClaimLeaseTTL,
+			Start:    start,
+			Count:    clusterCommandReadCount,
+		}).Result()
+		if err != nil {
+			return err
+		}
+		for _, message := range messages {
+			b.dispatchStreamMessage(ctx, sem, streamKey, message)
+		}
+		if next == "0" || next == "0-0" {
+			return nil
+		}
+		start = next
+	}
+}
+
+// dispatchStreamMessage runs one stream entry through handleMessage on a
+// bounded handler goroutine and XACKs it afterwards. The ACK happens for
+// every outcome — success, handler failure, missing handler, and HMAC
+// rejection alike — so a poison message is not redelivered forever; entries
+// whose payload was trimmed by the approximate MAXLEN are ACKed without
+// handling.
+func (b *redisClusterCommandBus) dispatchStreamMessage(ctx context.Context, sem chan struct{}, streamKey string, message redis.XMessage) {
+	sem <- struct{}{}
+	b.handlerWG.Add(1)
+	go func() {
+		defer b.handlerWG.Done()
+		defer func() { <-sem }()
+		if payload, ok := message.Values[clusterCommandStreamPayloadField].(string); ok {
+			b.handleMessage(ctx, payload)
+		}
+		if err := b.client.XAck(ctx, streamKey, clusterCommandGroupName, message.ID).Err(); err != nil && ctx.Err() == nil {
+			log.WarnContext(ctx, "failed to ack cluster command stream entry",
+				"stream", streamKey, "entry_id", message.ID, "error", err)
+		}
+	}()
 }
 
 // recordCommandBusDisconnect counts an unexpected bus disconnect (the Warn
@@ -326,12 +404,8 @@ func (b *redisClusterCommandBus) Shutdown(ctx context.Context) error {
 	if b.cancel != nil {
 		b.cancel()
 	}
-	pubsub := b.pubsub
 	b.mu.Unlock()
 
-	if pubsub != nil {
-		_ = pubsub.Close()
-	}
 	readerDone := make(chan struct{})
 	go func() {
 		defer close(readerDone)
@@ -409,7 +483,7 @@ func (b *redisClusterCommandBus) SendCommand(ctx context.Context, cmd *messagelo
 		return nil, err
 	}
 
-	// Sign before publishing: an envelope that cannot be signed must never
+	// Sign before enqueueing: an envelope that cannot be signed must never
 	// reach the wire, and the signature must cover the final CommandID and
 	// IssuedAt stamped above.
 	if err := clusterhmac.SignCommand(b.hmacKey, cmd); err != nil {
@@ -420,7 +494,15 @@ func (b *redisClusterCommandBus) SendCommand(ctx context.Context, cmd *messagelo
 	if err != nil {
 		return nil, err
 	}
-	if err := b.client.Publish(commandCtx, b.requestChannel(cmd.TargetNodeID, cmd.TargetIncarnationID), payload).Err(); err != nil {
+	// Requests are appended to the target incarnation's inbox stream (never
+	// published): the stream plus its consumer group gives at-least-once
+	// delivery, and command-id dedupe bounds side effects to one execution.
+	if err := b.client.XAdd(commandCtx, &redis.XAddArgs{
+		Stream: b.streamKey(cmd.TargetNodeID, cmd.TargetIncarnationID),
+		MaxLen: clusterCommandStreamMaxLen,
+		Approx: true,
+		Values: map[string]any{clusterCommandStreamPayloadField: string(payload)},
+	}).Err(); err != nil {
 		return nil, err
 	}
 
@@ -582,8 +664,20 @@ func (b *redisClusterCommandBus) BroadcastCommand(ctx context.Context, cmd *mess
 	return results, nil
 }
 
-func (b *redisClusterCommandBus) requestChannel(nodeID, incarnationID string) string {
-	return clusterCommandRequestPrefix + nodeID + ":" + incarnationID
+// streamKey returns the per-incarnation inbox stream for cluster command
+// requests. Note it deliberately lives outside the ml:cluster:node: prefix so
+// the C2 node-lease SCAN never touches it.
+func (b *redisClusterCommandBus) streamKey(nodeID, incarnationID string) string {
+	return clusterCommandStreamPrefix + nodeID + ":" + incarnationID
+}
+
+// consumerName returns this process's consumer name inside the inbox group:
+// the incarnation ID, so only one live consumer exists per incarnation.
+func (b *redisClusterCommandBus) consumerName() string {
+	if b.incarnationID != "" {
+		return b.incarnationID
+	}
+	return clusterCommandGroupName
 }
 
 func (b *redisClusterCommandBus) replyChannel(commandID string) string {

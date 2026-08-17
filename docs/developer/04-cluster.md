@@ -150,14 +150,14 @@ cluster:
 
 ### 3.3 命令总线
 
-命令总线（`pkg/redisbroker/cluster_command_bus.go`）是集群控制面的神经系统，基于 Redis Pub/Sub 实现请求/应答式的节点间命令投递。
+命令总线（`pkg/redisbroker/cluster_command_bus.go`）是集群控制面的神经系统：请求经 Redis Stream + consumer group 投递（PR-KA-C3，至少一次），应答经 Redis Pub/Sub 返回，构成请求/应答式的节点间命令投递。
 
 **Redis 键**：
 
 | 键 | 用途 |
 | --- | --- |
-| `ml:cluster:cmd:req:<nodeID>:<incarnationID>` | 请求通道：发给指定节点实例的命令发布到该通道；每个节点实例在启动时 `SUBSCRIBE` 自己的通道 |
-| `ml:cluster:cmd:reply:<commandID>` | 应答通道：每个命令生成一个随机 UUID 应答通道，命令发布前把通道名写入命令元数据（`reply_channel`） |
+| `ml:cluster:cmd:stream:<nodeID>:<incarnationID>` | 请求 inbox 流：发给指定节点实例的命令 `XADD` 到该流（近似 `MAXLEN ~ 10000` 截断）；每条流带一个固定名为 `inbox` 的 consumer group，消费者名即本进程 incarnationID；节点实例启动时 `XGROUP CREATE ... MKSTREAM`（已存在则忽略 BUSYGROUP），用 `XREADGROUP ... >` 读新消息，并周期 `XAUTOCLAIM`（idle ≥ 30 秒 claim 租约）认领崩溃消费者留下的 pending 条目，处理完一律 `XACK` |
+| `ml:cluster:cmd:reply:<commandID>` | 应答通道：每个命令生成一个随机 UUID 应答通道，命令入流前把通道名写入命令元数据（`reply_channel`）；应答仍是 Pub/Sub |
 | `ml:cluster:cmd:state:<commandID>` | 命令状态键：持久化命令的终态结果，也是命令去重（dedupe）的依据 |
 
 **发送流程（`SendCommand`）**：
@@ -165,21 +165,21 @@ cluster:
 1. 生成 `CommandID`（未指定时），标记 `IssuedBy`（发送方 NodeID，仅审计用途，见下方信任边界），打上 `IssuedAt`。
 2. 查询 `ml:cluster:cmd:state:<commandID>`：若已有终态结果，直接返回（去重命中）；若处于 `pending`，返回 `in_progress`。
 3. 创建随机应答通道并 `SUBSCRIBE`，把通道名写入命令元数据（`reply_channel`）。
-4. **签名**：`SignCommand` 以节点配置的 HMAC 密钥对命令的规范字节（`internal/cluster/hmac`，逐字节固定的行式编码，不含 `IssuedBy`）计算 `hex(HMAC-SHA256)` 写入 `Signature`；签名失败则不发布。
-5. 把命令 JSON（含 `Signature`）发布到目标节点的 `req:` 通道。
+4. **签名**：`SignCommand` 以节点配置的 HMAC 密钥对命令的规范字节（`internal/cluster/hmac`，逐字节固定的行式编码，不含 `IssuedBy`）计算 `hex(HMAC-SHA256)` 写入 `Signature`；签名失败则不入流。
+5. 把命令 JSON（含 `Signature`）作为单一 `payload` 字段 `XADD` 到目标节点的 inbox 流（近似 `MAXLEN` 截断）。
 6. 在应答通道上等待 `CommandID` 匹配且**验签通过**的结果；伪造/未签名/偏斜的应答被记入指标并当作未收到继续等待；`CommandID` 不匹配的应答记录警告并继续等待（防御性处理）。
 7. 等待受命令级超时约束：调用方上下文无 deadline 时默认 5 秒（`defaultCommandTimeout`）。超时后先查状态键——若已有终态结果则返回该结果；否则返回 `unknown_final_state` 并计入指标（见第 10 节）。
 
-**接收与执行（`handleMessage`）**：每个节点实例消费自己的 `req:` 通道，处理并发上限为 128（`clusterCommandHandlerConcurrency`）——读者循环在信号量上阻塞后才派发，饱和时排队而不是丢命令。**HMAC 硬门在最前**：未签名（`missing`）、坏签（`bad`）、`IssuedAt` 超出 ±30 秒时钟窗（`skew`）或无 `CommandID`（`id`）的命令直接拒绝——不 claim、不执行 handler、不写去重状态键、不应答，只计入 `messageloop_cluster_command_hmac_reject_total{reason}` 并记警告日志。通过验签后才在状态键上 `SETNX` 抢占（claim），TTL 30 秒（`clusterCommandClaimLeaseTTL`），处理期间每 10 秒续租（`renewClaimLease`）；执行完成（或失败）后把终态写入状态键，TTL 10 分钟（`defaultCommandStateTTL`），停止续租，再把**签过名**（`SignResult`，带 `IssuedAt`）的结果发布到 `reply_channel`。每个处理器执行受 10 秒 deadline 约束（`clusterCommandHandlerTimeout`），超时返回 `CLUSTER_COMMAND_TIMEOUT`，卡死的处理器不会把命令钉死在 `pending`。
+**接收与执行（`handleMessage`）**：每个节点实例消费自己的 inbox 流，处理并发上限为 128（`clusterCommandHandlerConcurrency`）——读者循环在信号量上阻塞后才派发，饱和时排队而不是丢命令。读循环为 `XREADGROUP GROUP inbox <incarnationID> ... >`（阻塞读新消息）加周期 `XAUTOCLAIM`（认领 idle ≥ `clusterCommandClaimLeaseTTL` 的 pending 条目，即崩溃消费者未完成的消息）；每个条目在 `handleMessage` 返回后一律 `XACK`——成功、handler 失败、无 handler、HMAC 拒绝都 ACK，毒消息不会每 30 秒重投。**HMAC 硬门在最前**：未签名（`missing`）、坏签（`bad`）、`IssuedAt` 超出 ±30 秒时钟窗（`skew`）或无 `CommandID`（`id`）的命令直接拒绝——不 claim、不执行 handler、不写去重状态键、不应答（但仍 ACK），只计入 `messageloop_cluster_command_hmac_reject_total{reason}` 并记警告日志。通过验签后才在状态键上 `SETNX` 抢占（claim），TTL 30 秒（`clusterCommandClaimLeaseTTL`），处理期间每 10 秒续租（`renewClaimLease`）；执行完成（或失败）后把终态写入状态键，TTL 10 分钟（`defaultCommandStateTTL`），停止续租，再把**签过名**（`SignResult`，带 `IssuedAt`）的结果发布到 `reply_channel`。每个处理器执行受 10 秒 deadline 约束（`clusterCommandHandlerTimeout`），超时返回 `CLUSTER_COMMAND_TIMEOUT`，卡死的处理器不会把命令钉死在 `pending`。
 
-**命令去重（command dedupe）**：同一 `CommandID` 的命令可能因重试、广播重复投递而多次到达，去重发生在两个环节：
+**命令去重（command dedupe）**：同一 `CommandID` 的命令可能因重试、广播重复投递、崩溃后 `XAUTOCLAIM` 重投而多次到达（Stream 保证至少一次，幂等靠去重），去重发生在两个环节：
 
-- 发送方：重发同一 `CommandID` 时，`resolveExistingCommand` 直接返回状态键中已存储的终态结果（或 `in_progress`），不再发布（`cluster_command_bus.go:483-499`）。
-- 接收方：`claimCommandExecution` 用 `SETNX` 抢占状态键。抢占失败说明另一实例正在处理，向应答通道回 `in_progress`（`COMMAND_IN_PROGRESS`）而不重复执行（`cluster_command_bus.go:501-542`）。若旧执行者崩溃，claim 租约 30 秒后过期，后续到达的命令可以重新抢占，而不是被钉在 `pending` 直到 10 分钟终态 TTL。
+- 发送方：重发同一 `CommandID` 时，`resolveExistingCommand` 直接返回状态键中已存储的终态结果（或 `in_progress`），不再入流。
+- 接收方：`claimCommandExecution` 用 `SETNX` 抢占状态键。抢占失败说明另一实例正在处理或已有终态，向应答通道回 `in_progress`（`COMMAND_IN_PROGRESS`）或终态结果而不重复执行。若旧执行者崩溃，claim 租约 30 秒后过期，后续到达（或被 `XAUTOCLAIM` 重投）的命令可以重新抢占，而不是被钉在 `pending` 直到 10 分钟终态 TTL。
 
-去重命中与超时、`unknown_final_state` 均计入指标（见第 10 节）。注意去重的粒度是 `CommandID`，广播命令（`BroadcastCommand`）为每个目标节点复制命令并重新生成 `CommandID`（`cluster_command_bus.go:303-305`），因此广播不会误去重。
+去重命中与超时、`unknown_final_state` 均计入指标（见第 10 节）。注意去重的粒度是 `CommandID`，广播命令（`BroadcastCommand`）为每个目标节点复制命令并重新生成 `CommandID`，因此广播不会误去重。
 
-**信任边界（trust boundary，PR-KA-B4 起）**：集群命令与应答经 Redis Pub/Sub 传输，由 **HMAC-SHA256 硬门**保护（`internal/cluster/hmac`）：密钥只来自节点配置（`cluster.hmac_key` 或 `cluster.hmac_key_file`，至少 32 字节，`enabled` 时缺一即拒绝启动；bus 的 `Start` 再挡一层），**从不写入任何 Redis 键、PUBLISH 载荷、日志或指标标签**。能写 Redis 不再等于能签发集群命令：未签名/坏签/偏斜的命令在 claim 之前被拒，伪造的 `succeeded` 应答不会让 `SendCommand` 成功。`IssuedBy` 字段只用于日志审计追溯（可伪造，不在规范字节内），不是安全边界。Redis 的网络隔离仍是纵深防御手段，但不再是唯一边界。
+**信任边界（trust boundary，PR-KA-B4 起）**：集群命令经 Redis Stream 传输、应答经 Redis Pub/Sub 传输，两者都由 **HMAC-SHA256 硬门**保护（`internal/cluster/hmac`）：密钥只来自节点配置（`cluster.hmac_key` 或 `cluster.hmac_key_file`，至少 32 字节，`enabled` 时缺一即拒绝启动；bus 的 `Start` 再挡一层），**从不写入任何 Redis 键、流条目、PUBLISH 载荷、日志或指标标签**。能写 Redis 不再等于能签发集群命令：未签名/坏签/偏斜的命令在 claim 之前被拒，伪造的 `succeeded` 应答不会让 `SendCommand` 成功。`IssuedBy` 字段只用于日志审计追溯（可伪造，不在规范字节内），不是安全边界。Redis 的网络隔离仍是纵深防御手段，但不再是唯一边界。
 
 ### 3.4 节点间命令路由
 
