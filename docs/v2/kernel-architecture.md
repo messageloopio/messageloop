@@ -656,6 +656,7 @@ Session 与 Stream 同区域。**跨区域 Directory Bind 直接禁止。** 只�
 | **C4** | History 稠密 seq，真中洞检测（Q8）。规格：[pr-ka-c4-dense-seq.md](tasks/pr-ka-c4-dense-seq.md) | 页内中洞报 `middle`；发号与 XADD 原子，无假洞 |
 | **C5** | Redis 键前缀换代 `ml:` → `ml2:`。规格：[pr-ka-c5-keyprefix.md](tasks/pr-ka-c5-keyprefix.md) | 生产代码零 `ml:` 字面量；键结构/语义不变 |
 | **C6** | catch-up 洞的 client-facing `GapNotice`。规格：[pr-ka-c6-gap-notice.md](tasks/pr-ka-c6-gap-notice.md) | 中洞/尾截通知本地订阅者；TS SDK 不再报 Unknown message type |
+| **D1** | 转正收口：公共文档对齐 v2（protocol.md / README / 配置文档 / 集群示例 / 键形残留）+ 删死代码。规格：[pr-ka-d1-graduation-docs.md](tasks/pr-ka-d1-graduation-docs.md) | 文档与 v2 行为一致；无死代码、无格式 churn |
 
 A0–A4 可在仍叫 `*Client` 的代码上先改合同；B1 再改对象名。不必等「旧 RC」。
 
