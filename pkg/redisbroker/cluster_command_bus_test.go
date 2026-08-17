@@ -431,9 +431,19 @@ func TestClusterCommandBus_ReclaimsAfterClaimLeaseExpiry(t *testing.T) {
 	require.Equal(t, messageloop.ClusterCommandStatusUnknownFinalState, firstResult.Status,
 		"sender must observe the pending command timing out")
 
-	// Wait for the claim lease to expire (no renewal, so the pending state
-	// vanishes instead of persisting for the 10-minute terminal TTL).
-	time.Sleep(500 * time.Millisecond)
+	// The first claim must be held (handler blocked) before we wait it out.
+	require.Eventually(t, func() bool { return handledCount.Load() == 1 },
+		2*time.Second, 20*time.Millisecond, "the first delivery must reach the handler")
+
+	// Wait for the claim lease to actually expire (no renewal, so the pending
+	// state vanishes instead of persisting for the 10-minute terminal TTL).
+	// Poll the state key instead of sleeping a fixed duration: sub-second
+	// lease TTLs go through Redis expiry paths whose granularity the test
+	// must not assume.
+	require.Eventually(t, func() bool {
+		n, err := receiver.client.Exists(ctx, receiver.commandStateKey("lease-reclaim")).Result()
+		return err == nil && n == 0
+	}, 5*time.Second, 50*time.Millisecond, "the claim lease must expire before re-sending")
 
 	secondResultCh := make(chan *messageloop.ClusterCommandResult, 1)
 	secondErrCh := make(chan error, 1)
