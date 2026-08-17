@@ -1467,7 +1467,7 @@ function buildClientOptions(setters: ClientOption[]): ClientOptions {
     clientId: crypto.randomUUID(),
     clientType: "sdk",
     token: "",
-    version: "1.0.0",
+    version: "2.0.0",
     autoSubscribe: [],
     pingInterval: 30000,
     pingTimeout: 10000,

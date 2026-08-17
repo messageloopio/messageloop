@@ -65,7 +65,7 @@ func TestWebSocket_ConnectAndPublish(t *testing.T) {
 	conn1 := dialWS(t, server)
 	sendJSON(t, conn1, map[string]any{
 		"id":      "1",
-		"connect": map[string]any{"client_id": "sub-client"},
+		"connect": map[string]any{"client_id": "sub-client", "version": "2.0.0"},
 	})
 	resp1 := readJSON(t, conn1, 2*time.Second)
 	require.NotNil(t, resp1["connected"])
@@ -82,7 +82,7 @@ func TestWebSocket_ConnectAndPublish(t *testing.T) {
 	conn2 := dialWS(t, server)
 	sendJSON(t, conn2, map[string]any{
 		"id":      "1",
-		"connect": map[string]any{"client_id": "pub-client"},
+		"connect": map[string]any{"client_id": "pub-client", "version": "2.0.0"},
 	})
 	_ = readJSON(t, conn2, 2*time.Second) // Connected
 
@@ -112,7 +112,7 @@ func TestWebSocket_RateLimiting(t *testing.T) {
 	// Connect
 	sendJSON(t, conn, map[string]any{
 		"id":      "1",
-		"connect": map[string]any{"client_id": "rate-test"},
+		"connect": map[string]any{"client_id": "rate-test", "version": "2.0.0"},
 	})
 	_ = readJSON(t, conn, 2*time.Second)
 
@@ -193,7 +193,7 @@ func jsonRoundTrip(t *testing.T, conn *websocket.Conn) {
 	t.Helper()
 	sendJSON(t, conn, map[string]any{
 		"id":      "conn",
-		"connect": map[string]any{"client_id": "negotiation-json"},
+		"connect": map[string]any{"client_id": "negotiation-json", "version": "2.0.0"},
 	})
 	resp := readJSON(t, conn, 2*time.Second)
 	require.NotNil(t, resp["connected"], "expected JSON Connected response, got: %v", resp)
@@ -208,7 +208,7 @@ func protoRoundTrip(t *testing.T, conn *websocket.Conn) {
 	msg := &clientpb.InboundMessage{
 		Id: "conn",
 		Envelope: &clientpb.InboundMessage_Connect{
-			Connect: &clientpb.Connect{ClientId: "negotiation-proto"},
+			Connect: &clientpb.Connect{Version: "2.0.0", ClientId: "negotiation-proto"},
 		},
 	}
 	data, err := protoMarshaler.Marshal(msg)

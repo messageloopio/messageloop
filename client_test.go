@@ -292,7 +292,7 @@ func TestClientSession_HandleMessage_Connect(t *testing.T) {
 	msg := &clientpb.InboundMessage{
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_Connect{
-			Connect: &clientpb.Connect{},
+			Connect: &clientpb.Connect{Version: testProtocolVersion},
 		},
 	}
 
@@ -325,7 +325,7 @@ func TestClientSession_HandleMessage_Connect_Twice(t *testing.T) {
 	msg := &clientpb.InboundMessage{
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_Connect{
-			Connect: &clientpb.Connect{},
+			Connect: &clientpb.Connect{Version: testProtocolVersion},
 		},
 	}
 
@@ -370,7 +370,7 @@ func TestClientSession_HandleMessage_Ping(t *testing.T) {
 	connectMsg := &clientpb.InboundMessage{
 		Id: "msg-0",
 		Envelope: &clientpb.InboundMessage_Connect{
-			Connect: &clientpb.Connect{},
+			Connect: &clientpb.Connect{Version: testProtocolVersion},
 		},
 	}
 	err = client.HandleMessage(ctx, connectMsg)
@@ -453,7 +453,7 @@ func TestClientSession_HandleMessage_Publish_AfterAuth(t *testing.T) {
 	connectMsg := &clientpb.InboundMessage{
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_Connect{
-			Connect: &clientpb.Connect{},
+			Connect: &clientpb.Connect{Version: testProtocolVersion},
 		},
 	}
 	err = client.HandleMessage(ctx, connectMsg)
@@ -503,7 +503,7 @@ func TestClientSession_HandleMessage_Publish_Transient(t *testing.T) {
 	connectMsg := &clientpb.InboundMessage{
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_Connect{
-			Connect: &clientpb.Connect{},
+			Connect: &clientpb.Connect{Version: testProtocolVersion},
 		},
 	}
 	require.NoError(t, client.HandleMessage(ctx, connectMsg))
@@ -585,7 +585,7 @@ func TestClientSession_HandleMessage_Subscribe(t *testing.T) {
 	connectMsg := &clientpb.InboundMessage{
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_Connect{
-			Connect: &clientpb.Connect{},
+			Connect: &clientpb.Connect{Version: testProtocolVersion},
 		},
 	}
 	err = client.HandleMessage(ctx, connectMsg)
@@ -644,7 +644,7 @@ func TestClientSession_HandleMessage_RpcRequest_NoProxy(t *testing.T) {
 	connectMsg := &clientpb.InboundMessage{
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_Connect{
-			Connect: &clientpb.Connect{},
+			Connect: &clientpb.Connect{Version: testProtocolVersion},
 		},
 	}
 	err = client.HandleMessage(ctx, connectMsg)
@@ -915,7 +915,7 @@ func TestClientSession_HandleMessage_Unsupported(t *testing.T) {
 	connectMsg := &clientpb.InboundMessage{
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_Connect{
-			Connect: &clientpb.Connect{},
+			Connect: &clientpb.Connect{Version: testProtocolVersion},
 		},
 	}
 	err = client.HandleMessage(ctx, connectMsg)
@@ -963,7 +963,7 @@ func TestClientSession_HandleMessage_SubRefresh(t *testing.T) {
 	connectMsg := &clientpb.InboundMessage{
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_Connect{
-			Connect: &clientpb.Connect{},
+			Connect: &clientpb.Connect{Version: testProtocolVersion},
 		},
 	}
 	err = client.HandleMessage(ctx, connectMsg)
@@ -1007,7 +1007,7 @@ func TestClientSession_ConcurrentMessages(t *testing.T) {
 	connectMsg := &clientpb.InboundMessage{
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_Connect{
-			Connect: &clientpb.Connect{},
+			Connect: &clientpb.Connect{Version: testProtocolVersion},
 		},
 	}
 	err = client.HandleMessage(ctx, connectMsg)
@@ -1095,7 +1095,7 @@ func TestClientSession_Publish_WithChannelFromEvent(t *testing.T) {
 	connectMsg := &clientpb.InboundMessage{
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_Connect{
-			Connect: &clientpb.Connect{},
+			Connect: &clientpb.Connect{Version: testProtocolVersion},
 		},
 	}
 	err = client.HandleMessage(ctx, connectMsg)
@@ -1216,7 +1216,7 @@ func TestClientSession_HandleMessage_WithBinaryData(t *testing.T) {
 	connectMsg := &clientpb.InboundMessage{
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_Connect{
-			Connect: &clientpb.Connect{},
+			Connect: &clientpb.Connect{Version: testProtocolVersion},
 		},
 	}
 	err = client.HandleMessage(ctx, connectMsg)
@@ -1310,7 +1310,7 @@ func TestNode_Connect_RecoveryIDsMatchRealtime(t *testing.T) {
 
 	connectMsg := &clientpb.InboundMessage{
 		Id:       "msg-1",
-		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: "client-1"}},
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{Version: testProtocolVersion, ClientId: "client-1"}},
 	}
 	require.NoError(t, client1.HandleMessage(ctx, connectMsg))
 
@@ -1362,6 +1362,7 @@ func TestNode_Connect_RecoveryIDsMatchRealtime(t *testing.T) {
 		Id: "msg-3",
 		Envelope: &clientpb.InboundMessage_Connect{
 			Connect: &clientpb.Connect{
+				Version: testProtocolVersion,
 				ClientId: "client-2",
 				Subscriptions: []*clientpb.Subscription{
 					{Channel: "recovery.ch", Recover: true, Cursor: cursorOf(epoch, 1)},
@@ -1413,6 +1414,7 @@ func TestNode_Connect_RecoveryCap(t *testing.T) {
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_Connect{
 			Connect: &clientpb.Connect{
+				Version: testProtocolVersion,
 				ClientId: "client-1",
 				Subscriptions: []*clientpb.Subscription{
 					{Channel: "cap-ch", Recover: true, Cursor: cursorOf("", 1)},
@@ -1457,7 +1459,7 @@ func TestClientSession_PublishAck_Offset(t *testing.T) {
 
 	connectMsg := &clientpb.InboundMessage{
 		Id:       "msg-1",
-		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{}},
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{Version: testProtocolVersion}},
 	}
 	require.NoError(t, client.HandleMessage(ctx, connectMsg))
 
@@ -1522,7 +1524,7 @@ func BenchmarkClientSession_HandleMessage_Ping(b *testing.B) {
 	connectMsg := &clientpb.InboundMessage{
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_Connect{
-			Connect: &clientpb.Connect{},
+			Connect: &clientpb.Connect{Version: testProtocolVersion},
 		},
 	}
 	_ = client.HandleMessage(ctx, connectMsg)

@@ -50,7 +50,7 @@ const defaultOptions: Partial<ClientOptions> = {
   encoding: "json",
   clientId: "",
   clientType: "sdk",
-  version: "1.0.0",
+  version: "2.0.0",
   autoSubscribe: [],
   pingInterval: 30000,
   pingTimeout: 10000,

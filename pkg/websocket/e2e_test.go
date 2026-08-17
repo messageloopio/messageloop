@@ -30,7 +30,7 @@ func TestWebSocket_MultiClientBroadcast(t *testing.T) {
 		conns[i] = c
 		sendJSON(t, c, map[string]any{
 			"id":      "conn",
-			"connect": map[string]any{"client_id": "sub-" + strings.Repeat("x", i)},
+			"connect": map[string]any{"client_id": "sub-" + strings.Repeat("x", i), "version": "2.0.0"},
 		})
 		resp := readJSON(t, c, 2*time.Second)
 		require.NotNil(t, resp["connected"])
@@ -47,7 +47,7 @@ func TestWebSocket_MultiClientBroadcast(t *testing.T) {
 	pub := dialWS(t, server)
 	sendJSON(t, pub, map[string]any{
 		"id":      "conn",
-		"connect": map[string]any{"client_id": "publisher"},
+		"connect": map[string]any{"client_id": "publisher", "version": "2.0.0"},
 	})
 	_ = readJSON(t, pub, 2*time.Second)
 
@@ -103,7 +103,7 @@ func TestWebSocket_DisconnectCleansUpSubscriptions(t *testing.T) {
 	conn := dialWS(t, server)
 	sendJSON(t, conn, map[string]any{
 		"id":      "conn",
-		"connect": map[string]any{"client_id": "cleanup-client"},
+		"connect": map[string]any{"client_id": "cleanup-client", "version": "2.0.0"},
 	})
 	resp := readJSON(t, conn, 2*time.Second)
 	require.NotNil(t, resp["connected"])
@@ -145,7 +145,7 @@ func TestWebSocket_ACL_SubscribeDenied(t *testing.T) {
 
 	sendJSON(t, conn, map[string]any{
 		"id":      "conn",
-		"connect": map[string]any{"client_id": "non-admin"},
+		"connect": map[string]any{"client_id": "non-admin", "version": "2.0.0"},
 	})
 	resp := readJSON(t, conn, 2*time.Second)
 	require.NotNil(t, resp["connected"])
@@ -202,7 +202,7 @@ func TestWebSocket_ACL_PublishDenied(t *testing.T) {
 
 	sendJSON(t, conn, map[string]any{
 		"id":      "conn",
-		"connect": map[string]any{"client_id": "regular-user"},
+		"connect": map[string]any{"client_id": "regular-user", "version": "2.0.0"},
 	})
 	resp := readJSON(t, conn, 2*time.Second)
 	require.NotNil(t, resp["connected"])
@@ -239,7 +239,7 @@ func TestWebSocket_UnsubscribeStopsDelivery(t *testing.T) {
 	sub := dialWS(t, server)
 	sendJSON(t, sub, map[string]any{
 		"id":      "conn",
-		"connect": map[string]any{"client_id": "unsub-test"},
+		"connect": map[string]any{"client_id": "unsub-test", "version": "2.0.0"},
 	})
 	_ = readJSON(t, sub, 2*time.Second)
 
@@ -266,7 +266,7 @@ func TestWebSocket_UnsubscribeStopsDelivery(t *testing.T) {
 	pub := dialWS(t, server)
 	sendJSON(t, pub, map[string]any{
 		"id":      "conn",
-		"connect": map[string]any{"client_id": "pub-after-unsub"},
+		"connect": map[string]any{"client_id": "pub-after-unsub", "version": "2.0.0"},
 	})
 	_ = readJSON(t, pub, 2*time.Second)
 	sendJSON(t, pub, map[string]any{

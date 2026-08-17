@@ -378,6 +378,7 @@ func TestClient_RemoteResume_RestoreFailureRollsBackSession(t *testing.T) {
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_Connect{
 			Connect: &clientpb.Connect{
+				Version: testProtocolVersion,
 				ClientId:  "client-1",
 				Token:     "ok-token",
 				SessionId: "sess-remote",

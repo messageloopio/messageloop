@@ -121,7 +121,7 @@ func connectSession(t *testing.T, stream *quic.Stream, clientID string) *clientp
 	sendInbound(t, stream, &clientpb.InboundMessage{
 		Id: "conn",
 		Envelope: &clientpb.InboundMessage_Connect{
-			Connect: &clientpb.Connect{ClientId: clientID},
+			Connect: &clientpb.Connect{Version: "2.0.0", ClientId: clientID},
 		},
 	})
 	out := recvUntil(t, stream, 3*time.Second, func(m *clientpb.OutboundMessage) bool {
@@ -191,7 +191,7 @@ func TestQUIC_ProtobufALPN(t *testing.T) {
 	data, err := shared.ProtobufMarshaler{}.Marshal(&clientpb.InboundMessage{
 		Id: "conn",
 		Envelope: &clientpb.InboundMessage_Connect{
-			Connect: &clientpb.Connect{ClientId: "proto-client"},
+			Connect: &clientpb.Connect{Version: "2.0.0", ClientId: "proto-client"},
 		},
 	})
 	require.NoError(t, err)

@@ -134,6 +134,21 @@ Fields:
 | `token` | No | Authentication token (passed to proxy if configured) |
 | `subscriptions` | No | Channels to subscribe immediately on connect |
 | `session_id` | No | Previous session ID to attempt resumption |
+| `version` | Yes | Client protocol version; see the version gate below |
+
+### Version Gate
+
+The server validates `connect.version` before anything else in the connect
+path (before the session ID is staged and before authentication): the decimal
+integer before the first `.` is the protocol generation, and only generation
+**2** is accepted (`"2"`, `"2.0.0"`, `"2.1.3"` are all valid). The gate is
+fail-closed: an empty, unparseable or non-2 version — including a v1 client
+whose envelope field numbers no longer line up — is answered with an
+`Error{ code: "VERSION_UNSUPPORTED", type: "version_error" }` frame, then the
+connection is closed with disconnect code **3514** (`unsupported version`).
+The client must not reconnect in place: upgrade the SDK to a generation-2
+protocol before dialing again. Both official SDKs default `version` to
+`"2.0.0"`.
 
 ### Session Resumption
 
@@ -491,6 +506,7 @@ Common error codes:
 | `RPC_TIMEOUT` | `timeout` | RPC forwarded to a proxy timed out |
 | `PROXY_ERROR` | `proxy_error` | Proxy call failed |
 | `AUTH_REQUIRED` | `auth_error` | Authentication required but no token (or no auth proxy) |
+| `VERSION_UNSUPPORTED` | `version_error` | Connect `version` generation is not supported (only generation 2 is accepted); followed by disconnect 3514 |
 | `INTERNAL_ERROR` | `server_error` | Internal server error while handling the request |
 | `BAD_REQUEST` | `client_error` | Frame could not be decoded |
 | `DISCONNECT_ERROR` | `transport_error` | Connection being terminated |
@@ -518,6 +534,7 @@ When the server closes a connection, it sends a disconnect with a numeric code. 
 | 3511 | IdleTimeout | Yes | No activity within the heartbeat idle timeout, or an unanswered server ping within `ping_timeout` |
 | 3512 | SlowConsumer | Yes | Client cannot consume messages fast enough |
 | 3513 | Internal | Yes | Connect path internal error (e.g. cluster state sync failed), connection forced closed (`disconnectOnConnectError`, `client.go`) |
+| 3514 | UnsupportedVersion | No | Connect `version` generation not supported by this server (only generation 2 is accepted); upgrade the SDK before reconnecting |
 
 ## Channel Naming
 

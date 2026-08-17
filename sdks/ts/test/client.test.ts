@@ -159,7 +159,7 @@ describe("Client Options", () => {
 
       expect(options.encoding).toEqual("json");
       expect(options.clientType).toEqual("sdk");
-      expect(options.version).toEqual("1.0.0");
+      expect(options.version).toEqual("2.0.0");
       expect(options.autoSubscribe).toEqual([]);
       expect(options.pingInterval).toEqual(30000);
       expect(options.pingTimeout).toEqual(10000);

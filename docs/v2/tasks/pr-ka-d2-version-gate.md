@@ -3,7 +3,7 @@
 | 字段 | 值 |
 | --- | --- |
 | 标题 | `server: gate Connect on protocol generation; SDKs default Version 2.0.0` |
-| 状态 | **Ready**（待实现） |
+| 状态 | **Accepted**（2026-08-17 主 agent 终验通过，尚未 commit） |
 | 依赖 | D1 已合（`11bfa04`）。在 `v2` 分支上做 |
 | 设计来源 | 转正评审协议/SDK 路结论（版本门未实现且危险）；[kernel-architecture.md](../kernel-architecture.md) KD-K31 |
 | 验收人 | 主 agent |
@@ -104,4 +104,10 @@ git diff --stat -- protocol/ shared/genproto/    # 只允许 errors.proto 注释
 
 ## 8. 实现备注（实现方填）
 
-（空）
+- 版本门实现：`version.go`（新增）放 `const protocolGeneration = 2` 与 `protocolGenerationOK(version string) bool`（`strings.Cut` 取首段 + `strconv.Atoi`，fail-closed）；`client.go` `handleConnect` 在 authenticated 检查之后、`originalSessionID` staging 之前插入门，拒绝路径照 AUTH_REQUIRED 范式先 `Send` `Error{VERSION_UNSUPPORTED, version_error}` 再 `return DisconnectUnsupportedVersion`。
+- 断开码：`disconnect.go` 在 `DisconnectInternal` 之后新增 `DisconnectUnsupportedVersion`（3514，`unsupported version`），doc 注释明确客户端不应原地重连。
+- 测试字面量：根包内部测试（`package messageloop`，9 个文件）统一引用 `testhelpers_test.go` 新增的 `const testProtocolVersion = "2.0.0"`；外部测试包（`cluster_redis_integration_test.go`、`cluster_v1_e2e_test.go`）与 `pkg/grpcstream`、`pkg/quicstream`、`pkg/websocket` 用 `"2.0.0"` 字面量。除 §3.3 列出的 `clientpb.Connect{` 字面量外，`pkg/websocket` 的 `integration_test.go`/`e2e_test.go` 还有 11 处原始 JSON `connect` 帧（不经 proto 字面量），同样补了 `"version": "2.0.0"`——这是首轮测试红掉后补的，规格书分布清单未覆盖这一类。
+- 新增测试 `version_test.go`：`TestVersionGate_RejectsUnsupportedVersions`（`""`/`"1.0.0"`/`"3.0.0"`/`"abc"`/`"2x"`，断言 Error 码/型、3514 关闭、未认证、session ID 未 staging、无 Connected 帧）、`TestVersionGate_AcceptsGeneration2`（`"2"`/`"2.0.0"`/`"2.1.3"`）、`TestProtocolGenerationOK`（解析规则单测）。
+- buf 生成物取舍：`task generate-protocol`（buf 本机可用，远程插件可达）后，well-known 码注释实际生成到 `shared/genproto/shared/v2/errors.pb.go`（不是规格书预期的 `types.pb.go`——Error 消息定义在 errors.proto，buf 按 proto 文件出 `.pb.go`）以及 `sdks/ts/src/proto/shared/v2/errors_pb.ts`、两个 v2 swagger json 的 description 字段，均为同一注释的同步，已保留；`client/v1`、`proxy/v1`、`server/v1` 三个 swagger json 为纯排序 churn，已 `git checkout --` 还原；`client/v2/service.pb.go`、`shared/v2/types.pb.go` 为无内容 diff 的行尾噪声，同样还原。
+- 行尾约定：仓库 `.gitattributes` 为 `*.go text eol=crlf`（工作区 CRLF），批量 sed 改动后已把受触的 .go 文件转回 CRLF，并修复了 3 个原本无 EOF 换行的文件（`node_test.go`、`cluster_resume_test.go`、`testhelpers_test.go`）被误加的末尾 `\r`；`sdks/ts/test/client.test.ts` 仓库内为 LF（`-text`），已保持 LF。终验 `git diff --numstat` 与 `--ignore-all-space --ignore-cr-at-eol` 输出完全一致。
+- SDK：双 SDK 默认 Version 升 `"2.0.0"`；`sdks/go/client.go` 三处 Connect 构造走 `c.opts.Version` 自动生效，未动。已知遗留：`sdks/ts/README.md:75` 的默认值表仍写 `"1.0.0"`，不在 §2 允许改动清单内，未改，建议主 agent 后续跟进。

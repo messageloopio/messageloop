@@ -110,4 +110,12 @@ var (
 		Code:   3513,
 		Reason: "internal error",
 	}
+	// DisconnectUnsupportedVersion is issued when the client's Connect carries a
+	// protocol version whose generation the server does not support. The client
+	// must not reconnect in place: upgrade the SDK to a supported protocol
+	// generation before dialing again.
+	DisconnectUnsupportedVersion = Disconnect{
+		Code:   3514,
+		Reason: "unsupported version",
+	}
 )

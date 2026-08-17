@@ -72,7 +72,7 @@ await client.close();
 | `setClientId(string)` | auto-generated UUID | Set logical client ID |
 | `setClientType(string)` | `"sdk"` | Set client type metadata |
 | `setToken(string)` | `""` | Authentication token passed in `Connect` |
-| `setVersion(string)` | `"1.0.0"` | Client version metadata |
+| `setVersion(string)` | `"2.0.0"` | Client version metadata (protocol generation; server rejects non-2) |
 | `setAutoSubscribe(...channels)` | `[]` | Subscribe automatically on connect |
 | `setPingInterval(number)` | `30000` | Ping interval in milliseconds |
 | `setPingTimeout(number)` | `10000` | Pong timeout in milliseconds |

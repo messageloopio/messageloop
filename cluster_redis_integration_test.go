@@ -238,7 +238,7 @@ func TestClusterRedis_RemoteResumeTakeover(t *testing.T) {
 	connectMsg := &clientpb.InboundMessage{
 		Id: "connect-old",
 		Envelope: &clientpb.InboundMessage_Connect{
-			Connect: &clientpb.Connect{ClientId: "client-old", Token: "token"},
+			Connect: &clientpb.Connect{Version: "2.0.0", ClientId: "client-old", Token: "token"},
 		},
 	}
 	require.NoError(t, oldClient.HandleMessage(ctx, connectMsg))
@@ -260,7 +260,7 @@ func TestClusterRedis_RemoteResumeTakeover(t *testing.T) {
 	resumeMsg := &clientpb.InboundMessage{
 		Id: "connect-new",
 		Envelope: &clientpb.InboundMessage_Connect{
-			Connect: &clientpb.Connect{ClientId: "client-new", Token: "token", SessionId: oldSessionID},
+			Connect: &clientpb.Connect{Version: "2.0.0", ClientId: "client-new", Token: "token", SessionId: oldSessionID},
 		},
 	}
 	require.NoError(t, newClient.HandleMessage(ctx, resumeMsg))
@@ -651,7 +651,7 @@ func TestPresence_OccupancyAcrossRedisExactlyOne(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
 			Id:       "connect-" + clientID,
-			Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: clientID}},
+			Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{Version: "2.0.0", ClientId: clientID}},
 		}))
 		require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
 			Id: "subscribe-" + clientID,
@@ -780,7 +780,7 @@ func TestClusterRedis_ResumeUserChangeMigratesIndex(t *testing.T) {
 	connectMsg := &clientpb.InboundMessage{
 		Id: "connect-old",
 		Envelope: &clientpb.InboundMessage_Connect{
-			Connect: &clientpb.Connect{ClientId: "client-old", Token: "token"},
+			Connect: &clientpb.Connect{Version: "2.0.0", ClientId: "client-old", Token: "token"},
 		},
 	}
 	require.NoError(t, oldClient.HandleMessage(ctx, connectMsg))
@@ -804,7 +804,7 @@ func TestClusterRedis_ResumeUserChangeMigratesIndex(t *testing.T) {
 	resumeMsg := &clientpb.InboundMessage{
 		Id: "connect-new",
 		Envelope: &clientpb.InboundMessage_Connect{
-			Connect: &clientpb.Connect{ClientId: "client-new", Token: "token", SessionId: oldSessionID},
+			Connect: &clientpb.Connect{Version: "2.0.0", ClientId: "client-new", Token: "token", SessionId: oldSessionID},
 		},
 	}
 	require.NoError(t, newClient.HandleMessage(ctx, resumeMsg))

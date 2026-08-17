@@ -152,7 +152,7 @@ func subscribeAck(t *testing.T, node *Node, subscriptions []*clientpb.Subscripti
 	require.NoError(t, err)
 	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
 		Id:       "connect-1",
-		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: "client-1"}},
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{Version: testProtocolVersion, ClientId: "client-1"}},
 	}))
 	ack, _ := subscribeAckMsgs(t, client, transport, "sub-1", subscriptions)
 	return ack
@@ -179,7 +179,7 @@ func TestSubscribe_RecoverFromOffset(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
 		Id:       "connect-1",
-		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: "client-1"}},
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{Version: testProtocolVersion, ClientId: "client-1"}},
 	}))
 
 	ack, msgs := subscribeAckMsgs(t, client, transport, "sub-1", []*clientpb.Subscription{
@@ -231,7 +231,7 @@ func TestSubscribe_RecoverHistoryError(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
 		Id:       "connect-1",
-		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: "client-1"}},
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{Version: testProtocolVersion, ClientId: "client-1"}},
 	}))
 
 	ack, msgs := subscribeAckMsgs(t, client, transport, "sub-1", []*clientpb.Subscription{
@@ -267,6 +267,7 @@ func TestConnect_RecoverTruncated(t *testing.T) {
 	require.NoError(t, node.Run(ctx))
 
 	msgs := connectOn(t, node, &capturingTransport{}, &clientpb.Connect{
+		Version: testProtocolVersion,
 		ClientId: "client-1",
 		Subscriptions: []*clientpb.Subscription{
 			{Channel: "trunc.ch", Recover: true, Fresh: true},
@@ -311,7 +312,7 @@ func TestSubscribe_RecoverFalse(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
 		Id:       "connect-1",
-		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: "client-1"}},
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{Version: testProtocolVersion, ClientId: "client-1"}},
 	}))
 
 	ack, msgs := subscribeAckMsgs(t, client, transport, "sub-1", []*clientpb.Subscription{{Channel: "plain.ch"}})
@@ -336,7 +337,7 @@ func TestSubscribe_RecoverWildcardSkipped(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
 		Id:       "connect-1",
-		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: "client-1"}},
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{Version: testProtocolVersion, ClientId: "client-1"}},
 	}))
 
 	ack, msgs := subscribeAckMsgs(t, client, transport, "sub-1", []*clientpb.Subscription{
@@ -377,7 +378,7 @@ func TestSubscribe_RecoverPolicySkipped(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
 		Id:       "connect-1",
-		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: "client-1"}},
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{Version: testProtocolVersion, ClientId: "client-1"}},
 	}))
 
 	ack, msgs := subscribeAckMsgs(t, client, transport, "sub-1", []*clientpb.Subscription{
@@ -406,6 +407,7 @@ func TestConnect_ResumeMissingOffsetSkipped(t *testing.T) {
 	node := remoteResumeTestNode(t, snapshot, recoveryPubs("miss.ch", 1, 10), "v2")
 
 	msgs := connectOn(t, node, &capturingTransport{}, &clientpb.Connect{
+		Version: testProtocolVersion,
 		ClientId:  "client-1",
 		Token:     "t",
 		SessionId: "sess-off-resume",
@@ -441,6 +443,7 @@ func TestConnect_ResumeSnapshotChannelNotInConnect(t *testing.T) {
 	// The Connect request does not list off.news: the snapshot union must
 	// still recover it from offset 6.
 	msgs := connectOn(t, node, &capturingTransport{}, &clientpb.Connect{
+		Version: testProtocolVersion,
 		ClientId:  "client-1",
 		Token:     "t",
 		SessionId: "sess-off-resume",
@@ -470,7 +473,7 @@ func TestSubscribe_ResubscribeCatchUp(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
 		Id:       "connect-1",
-		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: "client-1"}},
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{Version: testProtocolVersion, ClientId: "client-1"}},
 	}))
 
 	first, msgs1 := subscribeAckMsgs(t, client, transport, "sub-1", []*clientpb.Subscription{{Channel: "resub.ch"}})
@@ -507,7 +510,7 @@ func TestSubscribe_RecoverEmptyBatchGapIsTruncated(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
 		Id:       "connect-1",
-		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: "client-1"}},
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{Version: testProtocolVersion, ClientId: "client-1"}},
 	}))
 
 	_, msgs := subscribeAckMsgs(t, client, transport, "sub-1", []*clientpb.Subscription{
@@ -543,7 +546,7 @@ func TestSubscribe_RecoverMiddleGapMapsToProto(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
 		Id:       "connect-1",
-		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: "client-1"}},
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{Version: testProtocolVersion, ClientId: "client-1"}},
 	}))
 
 	_, msgs := subscribeAckMsgs(t, client, transport, "sub-1", []*clientpb.Subscription{
@@ -574,7 +577,7 @@ func TestSubscribe_RecoverEmptyEchoesCursor(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
 		Id:       "connect-1",
-		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: "client-1"}},
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{Version: testProtocolVersion, ClientId: "client-1"}},
 	}))
 
 	_, msgs := subscribeAckMsgs(t, client, transport, "sub-1", []*clientpb.Subscription{
@@ -604,7 +607,7 @@ func TestSubscribe_AckThenReplayThenCompleteOrder(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
 		Id:       "connect-1",
-		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: "client-1"}},
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{Version: testProtocolVersion, ClientId: "client-1"}},
 	}))
 
 	_, msgs := subscribeAckMsgs(t, client, transport, "sub-1", []*clientpb.Subscription{
@@ -635,7 +638,7 @@ func TestSubscribe_FreshReplaysFromStart(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
 		Id:       "connect-1",
-		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: "client-1"}},
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{Version: testProtocolVersion, ClientId: "client-1"}},
 	}))
 
 	_, msgs := subscribeAckMsgs(t, client, transport, "sub-1", []*clientpb.Subscription{
@@ -665,7 +668,7 @@ func TestSubscribe_OffsetZeroFreshFalseIsNotFromStart(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
 		Id:       "connect-1",
-		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: "client-1"}},
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{Version: testProtocolVersion, ClientId: "client-1"}},
 	}))
 
 	// cursor.offset is explicitly 0: a resume-from-offset-1, NOT a fresh
@@ -695,7 +698,7 @@ func TestSubscribe_NoCursorNoDeliveredOffsetSkips(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
 		Id:       "connect-1",
-		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: "client-1"}},
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{Version: testProtocolVersion, ClientId: "client-1"}},
 	}))
 
 	_, msgs := subscribeAckMsgs(t, client, transport, "sub-1", []*clientpb.Subscription{
@@ -723,7 +726,7 @@ func TestSubscribe_NoCursorResumesFromDeliveredOffset(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
 		Id:       "connect-1",
-		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: "client-1"}},
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{Version: testProtocolVersion, ClientId: "client-1"}},
 	}))
 	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
 		Id: "sub-1",
@@ -764,7 +767,7 @@ func TestSession_OutboundFrameHonorsMaxMessageSize(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
 		Id:       "connect-1",
-		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: "client-1"}},
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{Version: testProtocolVersion, ClientId: "client-1"}},
 	}))
 
 	big := make([]byte, 2048)

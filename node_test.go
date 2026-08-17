@@ -235,7 +235,7 @@ func TestNode_PublishPresenceJoin_DistinctMessageIDs(t *testing.T) {
 	connectMsg := &clientpb.InboundMessage{
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_Connect{
-			Connect: &clientpb.Connect{ClientId: "client-1"},
+			Connect: &clientpb.Connect{Version: testProtocolVersion, ClientId: "client-1"},
 		},
 	}
 	require.NoError(t, client.HandleMessage(ctx, connectMsg))

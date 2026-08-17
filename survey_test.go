@@ -189,7 +189,7 @@ func TestNode_Survey_Basic(t *testing.T) {
 		connectMsg := &clientpb.InboundMessage{
 			Id: "msg-connect-" + string(rune('0'+i)),
 			Envelope: &clientpb.InboundMessage_Connect{
-				Connect: &clientpb.Connect{ClientId: "client-" + string(rune('0'+i))},
+				Connect: &clientpb.Connect{Version: testProtocolVersion, ClientId: "client-" + string(rune('0'+i))},
 			},
 		}
 		err = clients[i].HandleMessage(ctx, connectMsg)
@@ -319,7 +319,7 @@ func TestNode_Survey_AllClientsRespond(t *testing.T) {
 		connectMsg := &clientpb.InboundMessage{
 			Id: "msg-connect-" + string(rune('0'+i)),
 			Envelope: &clientpb.InboundMessage_Connect{
-				Connect: &clientpb.Connect{ClientId: "client-" + string(rune('0'+i))},
+				Connect: &clientpb.Connect{Version: testProtocolVersion, ClientId: "client-" + string(rune('0'+i))},
 			},
 		}
 		err = clients[i].HandleMessage(ctx, connectMsg)
@@ -479,7 +479,7 @@ func TestNode_Survey_ConcurrentClients(t *testing.T) {
 			connectMsg := &clientpb.InboundMessage{
 				Id: "msg-connect-" + string(rune('0'+i)),
 				Envelope: &clientpb.InboundMessage_Connect{
-					Connect: &clientpb.Connect{ClientId: "client-" + string(rune('0'+i))},
+					Connect: &clientpb.Connect{Version: testProtocolVersion, ClientId: "client-" + string(rune('0'+i))},
 				},
 			}
 			err = clients[i].HandleMessage(ctx, connectMsg)
@@ -619,7 +619,7 @@ func TestNode_Survey_ForgedResponseFromNonSubscriberDropped(t *testing.T) {
 	require.NoError(t, err)
 	connectMsg := &clientpb.InboundMessage{
 		Id:       "msg-1",
-		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: "client-1"}},
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{Version: testProtocolVersion, ClientId: "client-1"}},
 	}
 	require.NoError(t, subscriber.HandleMessage(ctx, connectMsg))
 	transport.messages = nil
@@ -638,7 +638,7 @@ func TestNode_Survey_ForgedResponseFromNonSubscriberDropped(t *testing.T) {
 	require.NoError(t, err)
 	attackerConnect := &clientpb.InboundMessage{
 		Id:       "msg-a1",
-		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: "attacker"}},
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{Version: testProtocolVersion, ClientId: "attacker"}},
 	}
 	require.NoError(t, attacker.HandleMessage(ctx, attackerConnect))
 
@@ -806,7 +806,7 @@ func TestNode_Survey_BlockedWriteTimesOutInsteadOfHanging(t *testing.T) {
 
 	connectMsg := &clientpb.InboundMessage{
 		Id:       "connect-blocked",
-		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: "blocked-client"}},
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{Version: testProtocolVersion, ClientId: "blocked-client"}},
 	}
 	require.NoError(t, client.HandleMessage(ctx, connectMsg))
 	subMsg := &clientpb.InboundMessage{
@@ -980,7 +980,7 @@ func newSurveyTestClient(t *testing.T, node *Node, channel string) (*Client, *ca
 	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
 		Id: "connect-" + uuid.NewString(),
 		Envelope: &clientpb.InboundMessage_Connect{
-			Connect: &clientpb.Connect{ClientId: "client-" + uuid.NewString()},
+			Connect: &clientpb.Connect{Version: testProtocolVersion, ClientId: "client-" + uuid.NewString()},
 		},
 	}))
 	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
@@ -1150,7 +1150,7 @@ func TestClientSurvey_TooManyLocal(t *testing.T) {
 		require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
 			Id: "connect-" + strconv.Itoa(i),
 			Envelope: &clientpb.InboundMessage_Connect{
-				Connect: &clientpb.Connect{ClientId: "c-" + strconv.Itoa(i)},
+				Connect: &clientpb.Connect{Version: testProtocolVersion, ClientId: "c-" + strconv.Itoa(i)},
 			},
 		}))
 		require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
@@ -1254,7 +1254,7 @@ func TestClientSurvey_WildcardCoverExact(t *testing.T) {
 	require.NoError(t, clientA.HandleMessage(ctx, &clientpb.InboundMessage{
 		Id: "connect-1",
 		Envelope: &clientpb.InboundMessage_Connect{
-			Connect: &clientpb.Connect{ClientId: "wildcard-client"},
+			Connect: &clientpb.Connect{Version: testProtocolVersion, ClientId: "wildcard-client"},
 		},
 	}))
 	require.NoError(t, clientA.HandleMessage(ctx, &clientpb.InboundMessage{

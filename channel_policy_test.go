@@ -254,7 +254,7 @@ func TestHandlePublish_PolicyForcesTransient(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, publisher.HandleMessage(ctx, &clientpb.InboundMessage{
 		Id:       "connect-1",
-		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{}},
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{Version: testProtocolVersion}},
 	}))
 	pubTransport.messages = nil
 
@@ -321,7 +321,7 @@ func TestHandlePublish_PolicyForcedNoMetricForDeclaredTransient(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, publisher.HandleMessage(ctx, &clientpb.InboundMessage{
 		Id:       "connect-1",
-		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{}},
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{Version: testProtocolVersion}},
 	}))
 
 	require.NoError(t, publisher.HandleMessage(ctx, &clientpb.InboundMessage{

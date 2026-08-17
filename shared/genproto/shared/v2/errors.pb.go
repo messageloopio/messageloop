@@ -29,7 +29,8 @@ type Error struct {
 	// Well-known string codes (not an enum): AUTH_REQUIRED, AUTH_ERROR,
 	// RATE_LIMITED, RPC_TIMEOUT, PROXY_ERROR, NO_PROXY, BAD_REQUEST,
 	// PERMISSION_DENIED, POLICY_DENIED, RECOVER_FAILED, RECOVER_SKIPPED,
-	// SURVEY_DISABLED, SURVEY_TOO_MANY_SUBSCRIBERS, PATTERN_NOT_ROUTABLE.
+	// SURVEY_DISABLED, SURVEY_TOO_MANY_SUBSCRIBERS, PATTERN_NOT_ROUTABLE,
+	// VERSION_UNSUPPORTED.
 	Code          string           `protobuf:"bytes,1,opt,name=code,proto3" json:"code,omitempty"`
 	Type          string           `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
 	Message       string           `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`

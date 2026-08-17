@@ -258,6 +258,7 @@ func connectOffsets(t *testing.T, node *Node, transport *capturingTransport, cli
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_Connect{
 			Connect: &clientpb.Connect{
+				Version: testProtocolVersion,
 				ClientId:  "client-1",
 				Token:     "t",
 				SessionId: "sess-off-resume",

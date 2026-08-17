@@ -137,6 +137,10 @@ OnUnsubscribed(ctx context.Context, sessionID, channel, username string) error
 
 `Connect()` 每次调用（包括失败后的重试）都会推进连接 generation 并换上全新的 transport，旧连接的产物（如过期的 Connected 响应、残留的接收循环）会被识别并丢弃。若你的代码缓存了 `Connect` 返回后的 session 状态，请注意重连后 session ID 可能变化。
 
+### 默认 Version 升至 "2.0.0"
+
+`Options.Version` 默认值从 `"1.0.0"` 改为 `"2.0.0"`（服务端握手版本门只接受 generation 2；`WithVersion` 仍可显式覆盖，但非 2 世代会被服务端以 `VERSION_UNSUPPORTED` Error + 断开码 3514 拒绝）。
+
 ## 结论
 
 如果你看到任何 `CloudEvent`、`NewCloudEvent` 或 `cloudevents.Event` 的 Go SDK 示例，请把它们视为历史文档。当前 SDK 的权威参考是：

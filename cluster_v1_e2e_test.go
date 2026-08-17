@@ -57,7 +57,7 @@ func TestPresence_OccupancyWildcardAcrossNodes(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
 			Id:       "connect-" + clientID,
-			Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: clientID}},
+			Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{Version: "2.0.0", ClientId: clientID}},
 		}))
 		require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
 			Id: "subscribe-" + clientID,

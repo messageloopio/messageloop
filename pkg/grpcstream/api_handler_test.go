@@ -477,7 +477,7 @@ func TestAPIServiceHandler_PublishSessionWithAddHistoryStaysSession(t *testing.T
 	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
 		Id: "connect-1",
 		Envelope: &clientpb.InboundMessage_Connect{
-			Connect: &clientpb.Connect{},
+			Connect: &clientpb.Connect{Version: "2.0.0"},
 		},
 	}))
 	sessionID := client.SessionID()
@@ -823,7 +823,7 @@ func TestAdmin_GetPresenceFillsNewFields(t *testing.T) {
 	connect := &clientpb.InboundMessage{
 		Id: "admin-connect",
 		Envelope: &clientpb.InboundMessage_Connect{
-			Connect: &clientpb.Connect{ClientId: "device-42"},
+			Connect: &clientpb.Connect{Version: "2.0.0", ClientId: "device-42"},
 		},
 	}
 	require.NoError(t, client.HandleMessage(ctx, connect))

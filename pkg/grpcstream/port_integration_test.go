@@ -65,7 +65,7 @@ func connectClientStream(t *testing.T, conn *grpc.ClientConn, clientID string) (
 	err = stream.Send(&clientpb.InboundMessage{
 		Id: "connect-1",
 		Envelope: &clientpb.InboundMessage_Connect{
-			Connect: &clientpb.Connect{ClientId: clientID},
+			Connect: &clientpb.Connect{Version: "2.0.0", ClientId: clientID},
 		},
 	})
 	require.NoError(t, err)
@@ -160,7 +160,7 @@ func TestGRPC_AdminPort_DoesNotExposeMessageLoopStream(t *testing.T) {
 		err = stream.Send(&clientpb.InboundMessage{
 			Id: "connect-1",
 			Envelope: &clientpb.InboundMessage_Connect{
-				Connect: &clientpb.Connect{ClientId: "wrong-port"},
+				Connect: &clientpb.Connect{Version: "2.0.0", ClientId: "wrong-port"},
 			},
 		})
 	}

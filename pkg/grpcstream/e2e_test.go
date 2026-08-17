@@ -209,7 +209,7 @@ func TestGRPC_ClientStream_DisconnectCleansUp(t *testing.T) {
 	// Connect
 	err = stream.Send(&clientpb.InboundMessage{
 		Id:       "conn",
-		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: "cleanup-grpc"}},
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{Version: "2.0.0", ClientId: "cleanup-grpc"}},
 	})
 	require.NoError(t, err)
 	out, err := stream.Recv()

@@ -255,6 +255,23 @@ func (c *Session) handleConnect(ctx context.Context, in *clientpb.InboundMessage
 		return DisconnectBadRequest
 	}
 
+	// Version gate (fail-closed): reject any Connect whose version is not
+	// generation 2 before staging the client-supplied session ID or touching
+	// the authentication path. The Error goes out first so the client sees
+	// why it was disconnected, then the transport is closed with 3514.
+	if !protocolGenerationOK(connect.GetVersion()) {
+		_ = c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+			out.Envelope = &clientpb.OutboundMessage_Error{
+				Error: &sharedv2.Error{
+					Code:    "VERSION_UNSUPPORTED",
+					Type:    "version_error",
+					Message: "unsupported protocol version: only generation 2 is accepted",
+				},
+			}
+		}))
+		return DisconnectUnsupportedVersion
+	}
+
 	// The requested session ID is staged before authentication so that the
 	// takeover and state inheritance below can adopt it, but it is only kept
 	// once authentication succeeds: an unauthenticated connect must not be

@@ -94,7 +94,7 @@ func defaultOptions() *Options {
 		ClientID:               "",
 		ClientType:             "sdk",
 		Token:                  "",
-		Version:                "1.0.0",
+		Version:                "2.0.0",
 		AutoSubscribe:          nil,
 		PingInterval:           30 * time.Second,
 		PingTimeout:            10 * time.Second,

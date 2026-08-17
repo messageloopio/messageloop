@@ -8,6 +8,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// testProtocolVersion is the Connect version every test uses: the server-side
+// version gate (PR-KA-D2) only accepts protocol generation 2.
+const testProtocolVersion = "2.0.0"
+
 // publishPub builds a Publication from the legacy (payload, isText) tuple so
 // tests keep their intent after the Publication model extension (Task 12).
 func publishPub(payload []byte, isText bool) *Publication {

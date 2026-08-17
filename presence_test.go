@@ -29,7 +29,7 @@ func connectAndSubscribe(t *testing.T, node *Node, clientID string, chs ...*clie
 	require.NoError(t, err)
 	connectMsg := &clientpb.InboundMessage{
 		Id:       "connect-" + clientID,
-		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{ClientId: clientID}},
+		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{Version: testProtocolVersion, ClientId: clientID}},
 	}
 	require.NoError(t, client.HandleMessage(ctx, connectMsg))
 	if len(chs) > 0 {
@@ -318,6 +318,7 @@ func TestPresence_ConnectedSnapshotFilled(t *testing.T) {
 		Id: "connect-with-subs",
 		Envelope: &clientpb.InboundMessage_Connect{
 			Connect: &clientpb.Connect{
+				Version: testProtocolVersion,
 				ClientId:      "client-c",
 				Subscriptions: []*clientpb.Subscription{{Channel: ch}},
 			},
