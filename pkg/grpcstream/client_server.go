@@ -2,7 +2,7 @@ package grpcstream
 
 import (
 	"github.com/messageloopio/messageloop"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	"google.golang.org/grpc"
 )
 

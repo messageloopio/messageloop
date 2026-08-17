@@ -13,6 +13,7 @@ import (
 	messageloopgo "github.com/messageloopio/messageloop/sdks/go"
 	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v1"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -63,7 +64,7 @@ func (h *MyRPCHandler) HandleRPC(ctx context.Context, req *messageloopgo.RPCRequ
 			}, nil
 		}
 		return &messageloopgo.RPCResponse{
-			Error: &sharedpb.Error{
+			Error: &sharedv2.Error{
 				Code:    "INVALID_INPUT",
 				Type:    "validation_error",
 				Message: "Expected format: a,b (e.g., 10,20)",
@@ -72,7 +73,7 @@ func (h *MyRPCHandler) HandleRPC(ctx context.Context, req *messageloopgo.RPCRequ
 
 	default:
 		return &messageloopgo.RPCResponse{
-			Error: &sharedpb.Error{
+			Error: &sharedv2.Error{
 				Code:    "UNKNOWN_METHOD",
 				Type:    "rpc_error",
 				Message: "Unknown method: " + req.Method,
@@ -128,7 +129,7 @@ func recoveryMiddleware(next messageloopgo.RPCHandlerFunc) messageloopgo.RPCHand
 			if r := recover(); r != nil {
 				log.Printf("[RPC] PANIC: method=%s recovered=%v", req.Method, r)
 				resp = &messageloopgo.RPCResponse{
-					Error: &sharedpb.Error{
+					Error: &sharedv2.Error{
 						Code:    "INTERNAL_ERROR",
 						Type:    "server_error",
 						Message: fmt.Sprintf("Internal server error: %v", r),
@@ -169,7 +170,7 @@ func handleSum(ctx context.Context, req *messageloopgo.RPCRequest) (*messageloop
 	var a, b int
 	if _, err := fmt.Sscanf(data, "%d,%d", &a, &b); err != nil {
 		return &messageloopgo.RPCResponse{
-			Error: &sharedpb.Error{
+			Error: &sharedv2.Error{
 				Code:    "INVALID_INPUT",
 				Type:    "validation_error",
 				Message: "Expected format: a,b (e.g., 10,20)",
@@ -193,7 +194,7 @@ func (h *MyAuthHandler) Authenticate(ctx context.Context, req *messageloopgo.Aut
 	// Simple authentication: accept any non-empty client_id/token
 	if req.ClientID == "" || req.Token == "" {
 		return &messageloopgo.AuthenticateResponse{
-			Error: &sharedpb.Error{
+			Error: &sharedv2.Error{
 				Code:    "INVALID_CREDENTIALS",
 				Type:    "auth_error",
 				Message: "Client ID and token are required",
@@ -276,10 +277,11 @@ type MyProxyService struct {
 func (s *MyProxyService) RPC(ctx context.Context, req *proxypb.RPCRequest) (*proxypb.RPCResponse, error) {
 	log.Printf("[RPC Request] id=%s channel=%s method=%s", req.Id, req.Channel, req.Method)
 
-	// Convert Payload to Message
+	// Convert Payload to Message (proxy wire is shared.v1; the SDK data types
+	// are shared.v2).
 	var payload *messageloopgo.Message
 	if pbPayload := req.GetPayload(); pbPayload != nil {
-		payload = messageloopgo.PayloadToMessage(pbPayload, "")
+		payload = messageloopgo.PayloadToMessage(examplePayloadV1toV2(pbPayload), "")
 	}
 
 	rpcReq := &messageloopgo.RPCRequest{
@@ -311,7 +313,7 @@ func (s *MyProxyService) RPC(ctx context.Context, req *proxypb.RPCRequest) (*pro
 	var respPayload *sharedpb.Payload
 	if resp.Payload != nil {
 		if p, err := resp.Payload.ToPayload(); err == nil {
-			respPayload = p
+			respPayload = examplePayloadV2toV1(p)
 		}
 	}
 
@@ -323,7 +325,7 @@ func (s *MyProxyService) RPC(ctx context.Context, req *proxypb.RPCRequest) (*pro
 
 	return &proxypb.RPCResponse{
 		Id:      req.Id,
-		Error:   resp.Error,
+		Error:   exampleErrorV2toV1(resp.Error),
 		Payload: respPayload,
 	}, nil
 }
@@ -364,7 +366,7 @@ func (s *MyProxyService) Authenticate(ctx context.Context, req *proxypb.Authenti
 	}
 
 	return &proxypb.AuthenticateResponse{
-		Error:    resp.Error,
+		Error:    exampleErrorV2toV1(resp.Error),
 		UserInfo: resp.UserInfo.ToProto(),
 	}, nil
 }
@@ -451,6 +453,55 @@ func (s *MyProxyService) OnDisconnected(ctx context.Context, req *proxypb.OnDisc
 
 func hasPrefix(s, prefix string) bool {
 	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
+}
+
+// examplePayloadV1toV2 bridges a proxy-wire shared.v1 payload into the SDK's
+// shared.v2 payload type.
+func examplePayloadV1toV2(p *sharedpb.Payload) *sharedv2.Payload {
+	if p == nil {
+		return nil
+	}
+	out := &sharedv2.Payload{ContentType: p.GetContentType()}
+	switch d := p.Data.(type) {
+	case *sharedpb.Payload_Json:
+		out.Data = &sharedv2.Payload_Json{Json: d.Json}
+	case *sharedpb.Payload_Binary:
+		out.Data = &sharedv2.Payload_Binary{Binary: d.Binary}
+	case *sharedpb.Payload_Text:
+		out.Data = &sharedv2.Payload_Text{Text: d.Text}
+	}
+	return out
+}
+
+// examplePayloadV2toV1 bridges an SDK shared.v2 payload back into the
+// shared.v1 payload the proxy wire carries.
+func examplePayloadV2toV1(p *sharedv2.Payload) *sharedpb.Payload {
+	if p == nil {
+		return nil
+	}
+	out := &sharedpb.Payload{ContentType: p.GetContentType()}
+	switch d := p.Data.(type) {
+	case *sharedv2.Payload_Json:
+		out.Data = &sharedpb.Payload_Json{Json: d.Json}
+	case *sharedv2.Payload_Binary:
+		out.Data = &sharedpb.Payload_Binary{Binary: d.Binary}
+	case *sharedv2.Payload_Text:
+		out.Data = &sharedpb.Payload_Text{Text: d.Text}
+	}
+	return out
+}
+
+// exampleErrorV2toV1 bridges an SDK shared.v2 error into the shared.v1 error
+// the proxy wire carries.
+func exampleErrorV2toV1(e *sharedv2.Error) *sharedpb.Error {
+	if e == nil {
+		return nil
+	}
+	return &sharedpb.Error{
+		Code:    e.GetCode(),
+		Type:    e.GetType(),
+		Message: e.GetMessage(),
+	}
 }
 
 func main() {

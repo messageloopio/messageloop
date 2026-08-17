@@ -3,7 +3,7 @@ package messageloopgo
 import (
 	"fmt"
 
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -35,7 +35,7 @@ func (e *DisconnectError) Error() string {
 // encodes the numeric disconnect code as the structpb Number value
 // "disconnect_code" (pkg/grpcstream/transport.go). It reports false when the
 // metadata is missing or malformed so the caller keeps its existing behavior.
-func disconnectFromError(e *sharedpb.Error) (*DisconnectError, bool) {
+func disconnectFromError(e *sharedv2.Error) (*DisconnectError, bool) {
 	if e == nil || e.GetMetadata() == nil {
 		return nil, false
 	}

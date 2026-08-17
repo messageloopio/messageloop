@@ -9,8 +9,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/messageloopio/messageloop/config"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

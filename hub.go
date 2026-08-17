@@ -11,8 +11,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
 	"github.com/messageloopio/messageloop/pkg/topics"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
 const (
@@ -353,19 +353,20 @@ func (h *Hub) broadcastPublication(ch string, pub *Publication) error {
 	ctx := context.Background()
 
 	// Create Payload from publication data, preserving the original
-	// oneof variant (Binary/Text/JSON).
-	payload := pub.PayloadProto()
+	// oneof variant (Binary/Text/JSON). The message position carries the
+	// broker StreamEpoch plus the channel offset.
+	payload := pub.PayloadProtoV2()
 
 	msg := &clientpb.Message{
-		Channel: ch,
-		Id:      publicationMessageID(ch, pub.Offset),
-		Offset:  pub.Offset,
-		Payload: payload,
-		Metadata: func() *sharedpb.Metadata {
+		Channel:  ch,
+		Id:       publicationMessageID(ch, pub.Offset),
+		Position: positionFrom(pub.Epoch, pub.Offset, true),
+		Payload:  payload,
+		Metadata: func() *sharedv2.Metadata {
 			if len(pub.Metadata) == 0 {
 				return nil
 			}
-			return &sharedpb.Metadata{Entries: pub.Metadata}
+			return &sharedv2.Metadata{Entries: pub.Metadata}
 		}(),
 	}
 

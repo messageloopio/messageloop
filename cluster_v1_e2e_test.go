@@ -9,8 +9,8 @@ import (
 	"github.com/messageloopio/messageloop"
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/pkg/redisbroker"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"github.com/stretchr/testify/require"
 )
 
@@ -157,41 +157,37 @@ func TestSubscribe_RecoverRedisHistory(t *testing.T) {
 			Subscribe: &clientpb.Subscribe{Subscriptions: []*clientpb.Subscription{{
 				Channel: channel,
 				Recover: true,
-				Offset:  first,
-				Epoch:   epocher.Epoch(),
+				Cursor:  &sharedpb.Position{StreamEpoch: epocher.Epoch(), Offset: &first},
 			}}},
 		},
 	}))
 
-	var ack *clientpb.SubscribeAck
+	// The replay streams after the bare SubscribeAck: wait until the
+	// per-channel RecoverComplete lands, then read the whole stream.
 	require.Eventually(t, func() bool {
-		msg := transport.getLastMessage()
-		if len(msg) == 0 {
-			return false
-		}
-		out := &clientpb.OutboundMessage{}
-		if err := (messageloop.JSONMarshaler{}).Unmarshal(msg, out); err != nil {
-			return false
-		}
-		ack = out.GetSubscribeAck()
-		return ack != nil
+		return integrationRecoverCompleteFor(t, transport, channel) != nil
 	}, 5*time.Second, 25*time.Millisecond)
 
-	var payloads []string
-	for _, pub := range ack.GetPublications() {
+	var replayPayloads []string
+	for _, pub := range integrationReplaysOf(t, transport) {
 		for _, m := range pub.GetMessages() {
-			payloads = append(payloads, m.GetPayload().GetText())
+			require.True(t, m.GetReplay(), "recovered messages must carry replay=true")
+			replayPayloads = append(replayPayloads, m.GetPayload().GetText())
 		}
 	}
-	require.Equal(t, []string{"m2", "m3"}, payloads,
-		"recovered publications must be the messages after the requested offset")
+	require.Equal(t, []string{"m2", "m3"}, replayPayloads,
+		"recovered publications must be the messages after the requested cursor")
 
-	require.Len(t, ack.GetRecoverResults(), 1)
-	res := ack.GetRecoverResults()[0]
-	require.True(t, res.GetRecovered())
-	require.False(t, res.GetTruncated())
-	require.Equal(t, third, res.GetOffset(), "offset must be the last recovered publication")
-	require.Equal(t, epocher.Epoch(), res.GetEpoch())
+	rc := integrationRecoverCompleteFor(t, transport, channel)
+	require.NotNil(t, rc)
+	require.False(t, rc.GetTruncated())
+	require.False(t, rc.GetGap())
+	require.Nil(t, rc.GetError())
+	pos := rc.GetPosition()
+	require.NotNil(t, pos)
+	require.NotNil(t, pos.Offset, "the authoritative position must carry the last delivered offset")
+	require.Equal(t, third, pos.GetOffset())
+	require.Equal(t, epocher.Epoch(), pos.GetStreamEpoch())
 }
 
 // TestClientSurvey_AggregatesAcrossRedisNodes proves the PR-07 client
@@ -330,4 +326,49 @@ func answerPayloadOf(answer *clientpb.SurveyAnswer) []byte {
 		return nil
 	}
 	return answer.GetPayload().GetBinary()
+}
+
+// integrationReplaysOf decodes every captured frame and returns the replay
+// Publications (every message carries replay=true) in write order.
+func integrationReplaysOf(t *testing.T, transport *integrationCapturingTransport) []*clientpb.Publication {
+	t.Helper()
+	var replays []*clientpb.Publication
+	transport.mu.Lock()
+	frames := append([][]byte(nil), transport.messages...)
+	transport.mu.Unlock()
+	for _, data := range frames {
+		out := &clientpb.OutboundMessage{}
+		require.NoError(t, (messageloop.JSONMarshaler{}).Unmarshal(data, out))
+		pub := out.GetPublication()
+		if pub == nil {
+			continue
+		}
+		replay := true
+		for _, m := range pub.GetMessages() {
+			if m == nil || !m.GetReplay() {
+				replay = false
+			}
+		}
+		if replay {
+			replays = append(replays, pub)
+		}
+	}
+	return replays
+}
+
+// integrationRecoverCompleteFor returns the RecoverComplete for channel, or
+// nil when no captured frame carries one yet.
+func integrationRecoverCompleteFor(t *testing.T, transport *integrationCapturingTransport, channel string) *clientpb.RecoverComplete {
+	t.Helper()
+	transport.mu.Lock()
+	frames := append([][]byte(nil), transport.messages...)
+	transport.mu.Unlock()
+	for _, data := range frames {
+		out := &clientpb.OutboundMessage{}
+		require.NoError(t, (messageloop.JSONMarshaler{}).Unmarshal(data, out))
+		if rc := out.GetRecoverComplete(); rc != nil && rc.GetChannel() == channel {
+			return rc
+		}
+	}
+	return nil
 }

@@ -16,9 +16,9 @@ import (
 	"github.com/messageloopio/messageloop/pkg/grpcstream"
 	"github.com/messageloopio/messageloop/pkg/redisbroker"
 	"github.com/messageloopio/messageloop/proxy"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	serverpb "github.com/messageloopio/messageloop/shared/genproto/server/v1"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )
@@ -127,6 +127,17 @@ func (c *integrationCapturingTransport) clearMessages() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.messages = nil
+}
+
+// messagesSnapshot returns a deep copy of every captured frame.
+func (c *integrationCapturingTransport) messagesSnapshot() [][]byte {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([][]byte, 0, len(c.messages))
+	for _, data := range c.messages {
+		out = append(out, append([]byte(nil), data...))
+	}
+	return out
 }
 
 func TestClusterRedis_RemoteSessionAdminAndQueries(t *testing.T) {
@@ -278,12 +289,23 @@ func TestClusterRedis_RemoteResumeTakeover(t *testing.T) {
 		return false
 	}, 5*time.Second, 50*time.Millisecond)
 
-	connected := &clientpb.OutboundMessage{}
-	require.NoError(t, messageloop.JSONMarshaler{}.Unmarshal(newTransport.getLastMessage(), connected))
-	require.NotNil(t, connected.GetConnected())
-	require.True(t, connected.GetConnected().Resumed)
-	require.Equal(t, oldSessionID, connected.GetConnected().SessionId)
-	channels := connected.GetConnected().Subscriptions
+	// The resumed session sends a bare Connected first; presence snapshots and
+	// the per-channel recovery stream (RecoverComplete) land in later frames,
+	// so the Connected envelope is located by scanning rather than assuming it
+	// is the last frame.
+	var connected *clientpb.Connected
+	for _, data := range newTransport.messagesSnapshot() {
+		var msg clientpb.OutboundMessage
+		require.NoError(t, messageloop.JSONMarshaler{}.Unmarshal(data, &msg))
+		if got := msg.GetConnected(); got != nil {
+			connected = got
+			break
+		}
+	}
+	require.NotNil(t, connected, "the resume must send a Connected envelope")
+	require.True(t, connected.Resumed)
+	require.Equal(t, oldSessionID, connected.SessionId)
+	channels := connected.Subscriptions
 	require.Len(t, channels, 1)
 	require.Equal(t, channel, channels[0].Channel)
 }

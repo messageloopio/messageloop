@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
 // waitSent polls the fake transport until a message matching pred is sent and
@@ -26,7 +26,8 @@ func waitSent(t *testing.T, trans *fakeTransport, pred func(*clientpb.InboundMes
 }
 
 // TestSDK_SubscribeWithRecover verifies WithRecover encodes recover=true plus
-// the requested offset/epoch into the Subscription.
+// the optional v2 Position cursor, and that WithFresh marks an explicit
+// from-the-start replay. No API form treats "offset 0" as from the start.
 func TestSDK_SubscribeWithRecover(t *testing.T) {
 	trans := newFakeTransport()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -35,7 +36,7 @@ func TestSDK_SubscribeWithRecover(t *testing.T) {
 	c := newClient(ctx, cancel, trans, defaultOptions())
 	c.connected.Store(true)
 
-	if err := c.SubscribeWith("chat.recover", WithRecover(7, "ep")); err != nil {
+	if err := c.SubscribeWith("chat.recover", WithRecover(Position("ep", 7))); err != nil {
 		t.Fatalf("SubscribeWith failed: %v", err)
 	}
 	sub := trans.lastSent().GetSubscribe()
@@ -46,65 +47,111 @@ func TestSDK_SubscribeWithRecover(t *testing.T) {
 	if !s.GetRecover() {
 		t.Fatal("recover flag not set")
 	}
-	if s.GetOffset() != 7 {
-		t.Fatalf("offset = %d, want 7", s.GetOffset())
-	}
-	if s.GetEpoch() != "ep" {
-		t.Fatalf("epoch = %q, want ep", s.GetEpoch())
+	if s.GetCursor() == nil || s.GetCursor().GetStreamEpoch() != "ep" || s.GetCursor().GetOffset() != 7 {
+		t.Fatalf("cursor = %v, want epoch ep offset 7", s.GetCursor())
 	}
 
-	// A fresh recover request (offset 0 / empty epoch) must still send
-	// recover=true.
-	if err := c.SubscribeWith("chat.fresh", WithRecover(0, "")); err != nil {
+	// A no-hint recover (nil cursor) still sends recover=true without a
+	// cursor and never claims fresh.
+	if err := c.SubscribeWith("chat.nohint", WithRecover(nil)); err != nil {
 		t.Fatalf("SubscribeWith failed: %v", err)
 	}
 	s = trans.lastSent().GetSubscribe().GetSubscriptions()[0]
 	if !s.GetRecover() {
-		t.Fatal("recover flag not set for fresh subscription")
+		t.Fatal("recover flag not set for no-hint recover")
+	}
+	if s.GetFresh() {
+		t.Fatal("no-hint recover must not set fresh")
+	}
+
+	// WithFresh forces an explicit from-the-start replay.
+	if err := c.SubscribeWith("chat.fresh", WithFresh()); err != nil {
+		t.Fatalf("SubscribeWith failed: %v", err)
+	}
+	s = trans.lastSent().GetSubscribe().GetSubscriptions()[0]
+	if !s.GetRecover() || !s.GetFresh() {
+		t.Fatal("fresh subscription must set recover=true and fresh=true")
 	}
 }
 
-// TestSDK_SubscribeAckPublications verifies SubscribeAck publications flow
-// into OnMessage and update channelOffsets.
-func TestSDK_SubscribeAckPublications(t *testing.T) {
+// TestSDK_RecoverySinglePath verifies §5: replay and live publications both
+// reach the same OnMessage handler, the cursor advances only from
+// RecoverComplete.position (replay) and live Message.position (never from the
+// ack or from replay batches), and recoverResults are never read.
+func TestSDK_RecoverySinglePath(t *testing.T) {
 	trans := newFakeTransport()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	c := newClient(ctx, cancel, trans, defaultOptions())
 
-	got := make(chan []*Message, 1)
+	got := make(chan []*Message, 4)
 	c.OnMessage(func(msgs []*Message) { got <- msgs })
 
-	c.handleSubscribeAck(&clientpb.SubscribeAck{
-		Subscriptions: []*clientpb.Subscription{{Channel: "chat.recover"}},
-		Publications: []*clientpb.Publication{{Messages: []*clientpb.Message{
-			{Id: "m1", Channel: "chat.recover", Offset: 42, Payload: newTestTextPayload(t, "recovered")},
-		}}},
-		RecoverResults: []*clientpb.RecoverResult{{Channel: "chat.empty", Offset: 99}},
-	})
+	// A replay publication (replay=true) is delivered to the very same
+	// OnMessage handler as a live one, but must not advance the cursor
+	// mid-replay: only the RecoverComplete position is authoritative.
+	c.handleMessage(&clientpb.OutboundMessage{
+		Envelope: &clientpb.OutboundMessage_Publication{
+			Publication: &clientpb.Publication{Messages: []*clientpb.Message{
+				{Id: "m1", Channel: "chat.recover", Replay: true, Position: Position("ep", 42), Payload: newTestTextPayload(t, "replayed")},
+			}},
+		},
+	}, 0)
 
 	select {
 	case msgs := <-got:
-		if len(msgs) != 1 {
-			t.Fatalf("OnMessage got %d messages, want 1", len(msgs))
-		}
-		if msgs[0].String() != "recovered" {
-			t.Fatalf("message payload = %q, want recovered", msgs[0].String())
+		if len(msgs) != 1 || msgs[0].String() != "replayed" {
+			t.Fatalf("OnMessage got %v, want the replayed message", msgs)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("OnMessage was not called for SubscribeAck publications")
+		t.Fatal("OnMessage was not called for the replay publication")
 	}
 
 	c.offsetMu.RLock()
+	_, advanced := c.channelOffsets["chat.recover"]
+	c.offsetMu.RUnlock()
+	if advanced {
+		t.Fatal("replay publication advanced the cursor before RecoverComplete")
+	}
+
+	// RecoverComplete echoes the authoritative position.
+	c.handleMessage(&clientpb.OutboundMessage{
+		Envelope: &clientpb.OutboundMessage_RecoverComplete{
+			RecoverComplete: &clientpb.RecoverComplete{Channel: "chat.recover", Position: Position("ep", 42)},
+		},
+	}, 0)
+	c.offsetMu.RLock()
 	off := c.channelOffsets["chat.recover"]
-	emptyOff := c.channelOffsets["chat.empty"]
 	c.offsetMu.RUnlock()
 	if off != 42 {
 		t.Fatalf("channel offset = %d, want 42", off)
 	}
-	if emptyOff != 99 {
-		t.Fatalf("recover-result offset = %d, want 99", emptyOff)
+
+	// A live publication (replay=false) hits the same handler and advances
+	// the cursor from Message.position.
+	c.handleMessage(&clientpb.OutboundMessage{
+		Envelope: &clientpb.OutboundMessage_Publication{
+			Publication: &clientpb.Publication{Messages: []*clientpb.Message{
+				{Id: "m2", Channel: "chat.recover", Position: Position("ep", 43), Payload: newTestTextPayload(t, "live")},
+			}},
+		},
+	}, 0)
+
+	select {
+	case msgs := <-got:
+		if len(msgs) != 1 || msgs[0].String() != "live" {
+			t.Fatalf("OnMessage got %v, want the live message", msgs)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("OnMessage was not called for the live publication")
+	}
+
+	c.offsetMu.RLock()
+	off = c.channelOffsets["chat.recover"]
+	c.offsetMu.RUnlock()
+	if off != 43 {
+		t.Fatalf("live message must advance the cursor: %d, want 43", off)
 	}
 }
 
@@ -148,9 +195,11 @@ func TestSDK_PresenceEvent(t *testing.T) {
 	}
 }
 
-// TestSDK_PresenceSnapshotOnConnected verifies Connected.presence snapshots
-// dispatch one OnPresenceSnapshot per entry.
-func TestSDK_PresenceSnapshotOnConnected(t *testing.T) {
+// TestSDK_PresenceSnapshotPushedAfterConnected verifies presence snapshots are
+// delivered as separate Presence envelopes (v2 has no presence list on
+// Connected), and that a RecoverComplete with an unset position never creates
+// or wipes a per-channel cursor.
+func TestSDK_PresenceSnapshotPushedAfterConnected(t *testing.T) {
 	trans := newFakeTransport()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -160,17 +209,18 @@ func TestSDK_PresenceSnapshotOnConnected(t *testing.T) {
 	got := make(chan PresenceSnapshot, 1)
 	c.OnPresenceSnapshot(func(snap PresenceSnapshot) { got <- snap })
 
-	c.handleConnected(&clientpb.Connected{
-		SessionId: "s1",
-		Presence: []*clientpb.PresenceSnapshot{{
-			Channel:   "room.x",
-			Occupancy: 3,
-			Truncated: true,
-			Clients: []*clientpb.PresenceInfo{
-				{SessionId: "s1", UserId: "u1"},
-				{SessionId: "s2", UserId: "u2"},
+	c.handleMessage(&clientpb.OutboundMessage{
+		Envelope: &clientpb.OutboundMessage_Presence{
+			Presence: &clientpb.PresenceSnapshot{
+				Channel:   "room.x",
+				Occupancy: 3,
+				Truncated: true,
+				Clients: []*clientpb.PresenceInfo{
+					{SessionId: "s1", UserId: "u1"},
+					{SessionId: "s2", UserId: "u2"},
+				},
 			},
-		}},
+		},
 	}, 0)
 
 	select {
@@ -185,24 +235,32 @@ func TestSDK_PresenceSnapshotOnConnected(t *testing.T) {
 		t.Fatal("OnPresenceSnapshot was not called")
 	}
 
-	// Connected.recover_results must write back a non-zero cursor even when
-	// the corresponding publications list is empty.
-	c.handleConnected(&clientpb.Connected{
-		SessionId: "s1",
-		RecoverResults: []*clientpb.RecoverResult{
-			{Channel: "chat.empty", Offset: 77},
-			{Channel: "chat.zero", Offset: 0},
+	// A RecoverComplete echoing an unset position must not create or wipe a
+	// cursor: an unset position is never "0 means from the start".
+	c.handleMessage(&clientpb.OutboundMessage{
+		Envelope: &clientpb.OutboundMessage_RecoverComplete{
+			RecoverComplete: &clientpb.RecoverComplete{Channel: "chat.unset", Position: &sharedpb.Position{}},
+		},
+	}, 0)
+	c.offsetMu.RLock()
+	_, unsetKept := c.channelOffsets["chat.unset"]
+	c.offsetMu.RUnlock()
+	if unsetKept {
+		t.Fatal("unset RecoverComplete position must not create a cursor")
+	}
+
+	// A set RecoverComplete position is authoritative even when the replay
+	// batch was empty.
+	c.handleMessage(&clientpb.OutboundMessage{
+		Envelope: &clientpb.OutboundMessage_RecoverComplete{
+			RecoverComplete: &clientpb.RecoverComplete{Channel: "chat.empty", Position: Position("ep", 77)},
 		},
 	}, 0)
 	c.offsetMu.RLock()
 	emptyOff := c.channelOffsets["chat.empty"]
-	_, zeroKept := c.channelOffsets["chat.zero"]
 	c.offsetMu.RUnlock()
 	if emptyOff != 77 {
-		t.Fatalf("connected recover-result offset = %d, want 77", emptyOff)
-	}
-	if zeroKept {
-		t.Fatal("offset 0 recover-result must not create or wipe a cursor")
+		t.Fatalf("RecoverComplete position offset = %d, want 77", emptyOff)
 	}
 }
 

@@ -8,8 +8,8 @@ import (
 
 	"github.com/messageloopio/messageloop"
 	"github.com/messageloopio/messageloop/shared"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"github.com/quic-go/quic-go"
 	"google.golang.org/protobuf/types/known/structpb"
 )

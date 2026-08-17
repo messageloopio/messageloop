@@ -11,8 +11,8 @@ import (
 	"github.com/messageloopio/messageloop"
 	"github.com/messageloopio/messageloop/pkg/quicstream"
 	"github.com/messageloopio/messageloop/shared"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"github.com/quic-go/quic-go"
 	"github.com/stretchr/testify/require"
 )
@@ -161,7 +161,7 @@ func TestQUIC_ConnectSubscribePublish(t *testing.T) {
 		Envelope: &clientpb.InboundMessage_Publish{
 			Publish: &clientpb.Publish{
 				Channel: "quic-ch",
-				Payload: &sharedpb.Payload{Data: &sharedpb.Payload_Text{Text: "hello quic"}},
+				Payload: &sharedv2.Payload{Data: &sharedv2.Payload_Text{Text: "hello quic"}},
 			},
 		},
 	})

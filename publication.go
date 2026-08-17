@@ -1,6 +1,9 @@
 package messageloop
 
-import sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+import (
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
+)
 
 // PublicationFromPayload converts a shared payload envelope into a
 // Publication, preserving the original oneof variant (Binary/Text/JSON).
@@ -27,6 +30,34 @@ func PublicationFromPayload(id string, md map[string]string, p *sharedpb.Payload
 		pub.Payload = data.Binary
 		pub.Kind = PayloadKindBinary
 	case *sharedpb.Payload_Text:
+		pub.Payload = []byte(data.Text)
+		pub.Kind = PayloadKindText
+	}
+	return pub, nil
+}
+
+// PublicationFromPayloadV2 is the client-v2 twin of PublicationFromPayload:
+// it converts a client-v2 shared Payload envelope into a Publication,
+// preserving the original oneof variant (Binary/Text/JSON). A nil payload
+// yields an empty Publication and no error.
+func PublicationFromPayloadV2(id string, md map[string]string, p *sharedv2.Payload) (*Publication, error) {
+	pub := &Publication{Id: id, Metadata: md}
+	if p == nil {
+		return pub, nil
+	}
+	pub.ContentType = p.ContentType
+	switch data := p.Data.(type) {
+	case *sharedv2.Payload_Json:
+		payload, err := MarshalJSONStruct(data.Json)
+		if err != nil {
+			return nil, err
+		}
+		pub.Payload = payload
+		pub.Kind = PayloadKindJSON
+	case *sharedv2.Payload_Binary:
+		pub.Payload = data.Binary
+		pub.Kind = PayloadKindBinary
+	case *sharedv2.Payload_Text:
 		pub.Payload = []byte(data.Text)
 		pub.Kind = PayloadKindText
 	}

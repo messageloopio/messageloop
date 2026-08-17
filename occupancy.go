@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 )
 
 // OccupancyEvent is the LiveBus payload for join/leave. Gen is node-to-node
-// ordering (KD-K8). It is NOT added to the v1 client PresenceEvent (A0 froze
-// v1; v2 already has gen for a later runtime switch).
+// ordering (KD-K8). The Event is the client-v2 PresenceEvent so the emitted
+// frame can carry the occupancy generation when a node without its own
+// gen-capable adapter relays it (B2 §4).
 type OccupancyEvent struct {
 	Event *clientpb.PresenceEvent // channel, action, info
 	Gen   uint64

@@ -5,7 +5,7 @@ import (
 	"math/rand"
 	"time"
 
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 )
 
 // HeartbeatConfig contains parsed heartbeat configuration durations.

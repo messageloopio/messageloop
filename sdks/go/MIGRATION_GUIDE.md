@@ -72,7 +72,7 @@ client.OnMessage(func(messages []*messageloopgo.Message) {
 
 ### v1.0：Recover / Presence / Survey / 服务端 Ping
 
-- `SubscribeWith(channel, WithRecover(offset, epoch))`：按 offset 恢复订阅，恢复消息走 `OnMessage`。
+- `SubscribeWith(channel, WithRecover(cursor *Position))`：按 cursor 恢复订阅。`cursor` 用 `Position(epoch, offset)` 构造；`nil` 表示无提示（服务端从自身记录继续，无记录则 skip）。恢复消息走流式 `Replay=true` `Publication`（与 live 相同 `OnMessage` 路径），随后 `RecoverComplete` 回显权威游标。从头恢复请用 `WithFresh()`（`fresh=true`）；没有「offset 0 = 从头」。
 - `OnPresence(fn func(PresenceEvent))` / `OnPresenceSnapshot(fn func(PresenceSnapshot))` / `Presence(ctx, channel) (*PresenceSnapshot, error)`。
 - `Survey(ctx, channel, payload, timeout) ([]SurveyAnswer, error)`：发起频道级调查；`OnSurveyRequest(fn func(requestID, channel string, req *Message) (*Message, error))` 带频道的应答 handler。
 - **`OnSurvey` 签名不变**，旧 handler 与默认 echo 行为照旧；`OnSurveyRequest` 设置时优先于 `OnSurvey`。

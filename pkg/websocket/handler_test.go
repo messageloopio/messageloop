@@ -8,8 +8,8 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/lynx-go/x/encoding/json"
 	"github.com/messageloopio/messageloop"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -123,11 +123,11 @@ func TestHandler_marshaler(t *testing.T) {
 		Envelope: &clientpb.OutboundMessage_Publication{
 			Publication: &clientpb.Publication{Messages: []*clientpb.Message{
 				{
-					Id:      uuid.NewString(),
-					Channel: "/topic/test",
-					Offset:  0,
-					Payload: &sharedpb.Payload{
-						Data: &sharedpb.Payload_Json{
+					Id:       uuid.NewString(),
+					Channel:  "/topic/test",
+					Position: &sharedv2.Position{},
+					Payload: &sharedv2.Payload{
+						Data: &sharedv2.Payload_Json{
 							Json: s,
 						},
 					},

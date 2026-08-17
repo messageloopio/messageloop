@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
 // transport is the interface for sending/receiving messages.
@@ -438,9 +438,13 @@ func (c *client) buildConnectMessage(resume bool) *clientpb.InboundMessage {
 }
 
 // resumeSubscriptions builds the subscription list for a re-connecting client,
-// carrying per-channel ephemeral flags, recovery offsets and the broker epoch.
+// carrying per-channel ephemeral flags and recovery cursors. The cursor is a
+// v2 Position tagged with the broker stream epoch; a channel with no recorded
+// offset resumes with a nil cursor (no hint), so the server falls back to its
+// own recorded delivered position without flooding full history (§4.1).
 func (c *client) resumeSubscriptions(epoch string) []*clientpb.Subscription {
 	c.subMu.RLock()
+	defer c.subMu.RUnlock()
 	subs := make([]*clientpb.Subscription, 0, len(c.subscriptions))
 	for ch, state := range c.subscriptions {
 		sub := &clientpb.Subscription{
@@ -448,16 +452,14 @@ func (c *client) resumeSubscriptions(epoch string) []*clientpb.Subscription {
 			Ephemeral: state.ephemeral,
 			Token:     state.token,
 			Recover:   true,
-			Epoch:     epoch,
 		}
 		c.offsetMu.RLock()
 		if offset, ok := c.channelOffsets[ch]; ok {
-			sub.Offset = offset
+			sub.Cursor = Position(epoch, offset)
 		}
 		c.offsetMu.RUnlock()
 		subs = append(subs, sub)
 	}
-	c.subMu.RUnlock()
 	return subs
 }
 
@@ -557,8 +559,16 @@ func (c *client) handleMessage(msg *clientpb.OutboundMessage, gen uint64) {
 		c.handlePresenceEvent(env.PresenceEvent)
 
 	case *clientpb.OutboundMessage_Presence:
-		// Snapshot reply to our PresenceQuery, matched by the inbound id.
-		c.deliverPresence(msg)
+		// Snapshot reply to our PresenceQuery, matched by the inbound id, or
+		// an unsolicited snapshot pushed after Connected / on a dynamic
+		// subscribe: dispatch it to OnPresenceSnapshot when it does not match
+		// a pending query.
+		if !c.deliverPresence(msg) {
+			c.notifyPresenceSnapshot(env.Presence)
+		}
+
+	case *clientpb.OutboundMessage_RecoverComplete:
+		c.handleRecoverComplete(env.RecoverComplete)
 
 	case *clientpb.OutboundMessage_SurveyResult:
 		c.handleSurveyResult(env.SurveyResult)
@@ -591,7 +601,7 @@ func (c *client) handleConnected(connected *clientpb.Connected, gen uint64) {
 	}
 
 	c.sessionID = connected.GetSessionId()
-	c.epoch = connected.GetEpoch()
+	c.epoch = connected.GetStreamEpoch()
 
 	// Signal that the connection is established. Closing the channel under
 	// the same lock as Close() serializes the two: Close() closes and nils
@@ -639,16 +649,10 @@ func (c *client) handleConnected(connected *clientpb.Connected, gen uint64) {
 	}
 	c.subMu.Unlock()
 
-	// Handle initial publications (recovery messages) and presence snapshots
-	// delivered with the connection. Snapshots are dispatched after the
-	// authoritative subscription write-back above.
-	c.handlePublications(connected.GetPublications())
-	c.applyRecoverResults(connected.GetRecoverResults())
-	for _, snap := range connected.GetPresence() {
-		c.notifyPresenceSnapshot(snap)
-	}
-
-	// Start ping loop
+	// The server pushes presence snapshots as separate Presence envelopes
+	// right after Connected (v2 has no presence list on Connected), and any
+	// recovery replay follows the bare Connected frame as streamed
+	// publications, so nothing else is dispatched here.
 	c.startPingLoop()
 
 	if wasReconnecting {
@@ -668,9 +672,9 @@ func (c *client) handleConnected(connected *clientpb.Connected, gen uint64) {
 }
 
 // handleSubscribeAck handles the SubscribeAck message: it writes back the
-// authoritative subscription state, delivers recovered publications through
-// the same path as Connected publications, records recover-result cursors and
-// dispatches presence snapshots.
+// authoritative subscription state and dispatches the presence snapshots that
+// ride the ack. Recovery replays arrive as streamed Publication envelopes
+// followed by one RecoverComplete per channel (§4.2), never inside the ack.
 func (c *client) handleSubscribeAck(ack *clientpb.SubscribeAck) {
 	for _, sub := range ack.GetSubscriptions() {
 		state := c.subscriptions[sub.GetChannel()]
@@ -688,15 +692,6 @@ func (c *client) handleSubscribeAck(ack *clientpb.SubscribeAck) {
 		c.subMu.Unlock()
 	}
 
-	// Recovered messages take the same delivery path as Connected
-	// publications: OnMessage plus per-message offset tracking.
-	c.handlePublications(ack.GetPublications())
-
-	// Recover results echo the per-channel cursor: keep it so a reconnect
-	// resumes from the server-confirmed position. An empty batch (offset 0)
-	// must not wipe a known position.
-	c.applyRecoverResults(ack.GetRecoverResults())
-
 	// Presence snapshots ride the subscribe ack; dispatch after the
 	// subscription state write-back above.
 	for _, snap := range ack.GetPresence() {
@@ -704,40 +699,53 @@ func (c *client) handleSubscribeAck(ack *clientpb.SubscribeAck) {
 	}
 }
 
-// applyRecoverResults writes back server-echoed recovery cursors. An empty
-// batch (offset 0) must not wipe a known position.
-func (c *client) applyRecoverResults(results []*clientpb.RecoverResult) {
-	for _, rr := range results {
-		if rr != nil && rr.GetOffset() > 0 {
-			c.offsetMu.Lock()
-			c.channelOffsets[rr.GetChannel()] = rr.GetOffset()
-			c.offsetMu.Unlock()
-		}
+// handleRecoverComplete writes back the authoritative per-channel position the
+// server echoes after replaying a channel's recovery, so the next reconnect
+// resumes from the server-confirmed cursor. An unset position (fresh start
+// with an empty batch, or a skipped/failed channel) leaves the cursor
+// untouched: it is never treated as "0 means from the start".
+func (c *client) handleRecoverComplete(complete *clientpb.RecoverComplete) {
+	if complete == nil || complete.GetChannel() == "" {
+		return
+	}
+	if off, set := posOffset(complete.GetPosition()); set {
+		c.offsetMu.Lock()
+		c.channelOffsets[complete.GetChannel()] = off
+		c.offsetMu.Unlock()
 	}
 }
 
-// handlePublications updates per-channel offsets and delivers each batch to
-// the OnMessage handler. It is shared by Connected, SubscribeAck and live
-// Publication messages so every delivery path behaves identically.
-func (c *client) handlePublications(pubs []*clientpb.Publication) {
-	for _, pub := range pubs {
-		// Update per-channel offsets for session resumption
-		for _, env := range pub.GetMessages() {
-			if env != nil && env.GetOffset() > 0 {
+// handlePublication delivers one Publication envelop to the OnMessage
+// handler. Replay and live publications share this single consumer path (§5).
+// Only live (non-replay) messages advance the per-channel cursor: a replayed
+// run waits for the RecoverComplete position so a reconnect resumes from the
+// server-confirmed point instead of a mid-replay one.
+func (c *client) handlePublication(pub *clientpb.Publication) {
+	if pub == nil {
+		return
+	}
+	msgs := make([]*Message, 0, len(pub.GetMessages()))
+	for _, env := range pub.GetMessages() {
+		if env == nil {
+			continue
+		}
+		if !env.GetReplay() {
+			if off, set := posOffset(env.GetPosition()); set {
 				c.offsetMu.Lock()
-				c.channelOffsets[env.GetChannel()] = env.GetOffset()
+				c.channelOffsets[env.GetChannel()] = off
 				c.offsetMu.Unlock()
 			}
 		}
-		msgs := wrapPublicationToMessages(pub)
-		if len(msgs) > 0 {
-			c.handlerMu.RLock()
-			handler := c.msgHandler
-			c.handlerMu.RUnlock()
-			if handler != nil {
-				handler(msgs)
-			}
-		}
+		msgs = append(msgs, messageFromEnv(env))
+	}
+	if len(msgs) == 0 {
+		return
+	}
+	c.handlerMu.RLock()
+	handler := c.msgHandler
+	c.handlerMu.RUnlock()
+	if handler != nil {
+		handler(msgs)
 	}
 }
 
@@ -768,11 +776,6 @@ func (c *client) handleUnsubscribeAck(ack *clientpb.UnsubscribeAck) {
 		delete(c.channelOffsets, sub.GetChannel())
 		c.offsetMu.Unlock()
 	}
-}
-
-// handlePublication handles the Publication message.
-func (c *client) handlePublication(pub *clientpb.Publication) {
-	c.handlePublications([]*clientpb.Publication{pub})
 }
 
 // handleRPCReply handles the RPC reply message.
@@ -830,7 +833,8 @@ func (c *client) handlePublishAck(ack *clientpb.PublishAck, msg *clientpb.Outbou
 	}
 	c.pendingAckMu.Unlock()
 	if ok {
-		ap.resolve(ack.GetOffset())
+		off, _ := posOffset(ack.GetPosition())
+		ap.resolve(off)
 	}
 }
 
@@ -865,7 +869,7 @@ func (c *client) rejectPendingPresence(err error) {
 		select {
 		case rp.ch <- &clientpb.OutboundMessage{
 			Envelope: &clientpb.OutboundMessage_Error{
-				Error: &sharedpb.Error{
+				Error: &sharedv2.Error{
 					Code:    "INTERNAL_ERROR",
 					Type:    "server_error",
 					Message: "connection lost before presence snapshot: " + err.Error(),
@@ -935,15 +939,27 @@ func WithSubscriptionToken(token string) SubscribeOption {
 }
 
 // WithRecover enables history recovery for the subscription: the server
-// replays messages published after the given offset (interpreted in the given
-// broker epoch) through SubscribeAck publications, delivered via OnMessage.
-// Pass offset 0 / empty epoch for a fresh subscription that recovers from the
-// start, subject to server policy; the recover flag is always sent.
-func WithRecover(offset uint64, epoch string) SubscribeOption {
+// streams the channel's history as replay publications (same OnMessage path
+// as live messages) followed by a RecoverComplete echoing the authoritative
+// cursor. The optional cursor is the resume hint — typically
+// WithRecover(Position(epoch, lastOffset)); a nil cursor means "no hint" and
+// the server resumes from its own recorded delivered position (or skips when
+// it has none) instead of flooding full history. There is no "offset 0 means
+// from the start": use WithFresh for an explicit from-the-start replay.
+func WithRecover(cursor *sharedv2.Position) SubscribeOption {
 	return func(s *clientpb.Subscription) {
 		s.Recover = true
-		s.Offset = offset
-		s.Epoch = epoch
+		s.Cursor = cursor
+	}
+}
+
+// WithFresh marks the subscription for an explicit from-the-start recovery:
+// the server replays the whole history regardless of any cursor or
+// server-recorded position. It implies recover=true.
+func WithFresh() SubscribeOption {
+	return func(s *clientpb.Subscription) {
+		s.Recover = true
+		s.Fresh = true
 	}
 }
 
@@ -1487,7 +1503,7 @@ func (c *client) SendSurveyReply(ctx context.Context, requestID string, reply *M
 		return fmt.Errorf("not connected")
 	}
 
-	var payload *sharedpb.Payload
+	var payload *sharedv2.Payload
 	if reply != nil {
 		p, err := reply.ToPayload()
 		if err != nil {
@@ -1496,9 +1512,9 @@ func (c *client) SendSurveyReply(ctx context.Context, requestID string, reply *M
 		payload = p
 	}
 
-	var pbErr *sharedpb.Error
+	var pbErr *sharedv2.Error
 	if replyErr != nil {
-		pbErr = &sharedpb.Error{
+		pbErr = &sharedv2.Error{
 			Code:    "SURVEY_REPLY_ERROR",
 			Type:    "survey_error",
 			Message: replyErr.Error(),
@@ -1587,7 +1603,7 @@ func (c *client) Survey(ctx context.Context, channel string, payload *Message, t
 		return nil, fmt.Errorf("not connected")
 	}
 
-	var pbPayload *sharedpb.Payload
+	var pbPayload *sharedv2.Payload
 	if payload != nil {
 		p, err := payload.ToPayload()
 		if err != nil {
@@ -2084,7 +2100,7 @@ func BuildRPCMessage(channel, method string, msg *Message) *clientpb.InboundMess
 func BuildErrorMessage(code, msgType, message string) *clientpb.OutboundMessage {
 	return &clientpb.OutboundMessage{
 		Envelope: &clientpb.OutboundMessage_Error{
-			Error: &sharedpb.Error{
+			Error: &sharedv2.Error{
 				Code:    code,
 				Type:    msgType,
 				Message: message,

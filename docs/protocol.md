@@ -79,8 +79,9 @@ Envelope types:
 | `connected` | Connected | Session established |
 | `subscribe_ack` | SubscribeAck | Subscriptions confirmed |
 | `unsubscribe_ack` | UnsubscribeAck | Unsubscriptions confirmed |
-| `publish_ack` | PublishAck | Publish confirmed with offset |
-| `publication` | Publication | Messages delivered to subscriber |
+| `publish_ack` | PublishAck | Publish confirmed with position (offset set, or omitted for transient / no-history) |
+| `publication` | Publication | Messages delivered to subscriber (replay=true marks a recovery replay) |
+| `recover_complete` | RecoverComplete | Per-channel end of a streamed recovery (position / truncated / gap / error) |
 | `rpc_reply` | RpcReply | RPC response from backend |
 | `sub_refresh_ack` | SubRefreshAck | SubRefresh acknowledged (subscriptions re-validated) |
 | `pong` | Pong | Keepalive response |
@@ -114,7 +115,10 @@ Response:
   "id": "1",
   "connected": {
     "session_id": "abc-123",
-    "epoch": "broker-epoch-id"
+    "stream_epoch": "broker-epoch-id",
+    "subscriptions": [
+      {"channel": "chat.general"}
+    ]
   }
 }
 ```
@@ -145,14 +149,16 @@ To resume a previous session, include `session_id` in the Connect message:
 If resumption succeeds, the response includes `resumed: true`. Connect
 uses the same recovery helper as Subscribe: the recovery set is the
 ordered union of ACL-passed `connect.subscriptions` plus any snapshot-only
-channels from the resumed session. Each channel appears in
-`connected.recover_results`.
+channels from the resumed session. Every recovered channel streams its
+replay publications and ends with exactly one `recover_complete` (see
+[Recovery](#recovery) below).
 
-On a **fresh** (non-resumed) Connect, `recover=true` + `offset=0` replays
-from the beginning of history. During session resume the server trusts its
-own recorded per-channel offset; a channel without one is skipped
-(`RECOVER_SKIPPED`) and history is never replayed from scratch. Subscribe
-is never a session resume — those offset rules apply only here.
+Only two conditions replay from the beginning of history: `fresh=true`, or
+a resume whose snapshot epoch differs from the broker epoch (both known).
+An offset of 0 — or an absent cursor — never means "from the start".
+During session resume the server trusts its own recorded per-channel
+offset; a channel without one is skipped (`RECOVER_SKIPPED`) and history
+is never replayed from scratch.
 
 ## Pub/Sub
 
@@ -191,37 +197,58 @@ Subscription options:
 | `channel` | — | Channel name to subscribe to |
 | `ephemeral` | `false` | If true, subscription is not tracked for presence |
 | `token` | — | Per-channel auth token (passed to proxy ACL) |
-| `offset` | `0` | Resume from this offset (0 = latest) |
-| `recover` | `false` | Request missed messages since offset |
-| `epoch` | — | Broker epoch for offset validation |
+| `recover` | `false` | Request streamed recovery of missed messages |
+| `cursor` | — | Resume hint: `{ stream_epoch, offset? }` (see Recovery) |
+| `fresh` | `false` | Explicit from-the-start replay (see Recovery) |
 
-Recovery (PR-03): when `recover=true`, the `subscribe_ack` additionally
-carries `publications` (the missed messages, with the same stable
-`channel-offset` IDs as realtime delivery) and `recover_results`, one entry
-per subscribed channel:
+### Recovery
 
-- `recovered=true` — History was read successfully (an empty batch means the
-  client is caught up; `offset` echoes the requested cursor).
+When `recover=true`, the server **streams** the channel's history instead
+of embedding it in the ack:
+
+```
+SubscribeAck                      // bare ack: no publications, no recover_results
+Publication { messages[].replay=true, position }   // 0..N frames, one message each
+RecoverComplete { channel, position, truncated, gap, gap_reason, error? }
+```
+
+Every recover=true channel ends with exactly one `RecoverComplete`:
+
+- `position` echoes the authoritative cursor: the last delivered
+  publication's position on success, or the requested cursor for skipped /
+  failed / empty batches (offset omitted when deliberately unset).
 - `truncated=true` — the batch hit the request-level cap
   (`MaxRecoveredPublications`, shared across all channels of the request or
-  the policy `recover_limit`); `offset` is the last delivered message and the
-  client may issue another `recover` from there.
+  the policy `recover_limit`); the client may issue another `recover` from
+  `position`.
+- `gap=true` + `gap_reason` — History reported a gap
+  (`HEAD_TRIMMED` / `EMPTY_EXPIRED` / `EPOCH_RESET`): the client cannot
+  prove it is caught up, so the recovery is reported truncated, never OK.
 - `error.code=RECOVER_FAILED` — the broker history read failed. The
   subscription **stays active**: a history hiccup never disconnects the
   client or revokes the subscription.
 - `error.code=RECOVER_SKIPPED` — the client asked for recovery
-  (`recover=true`) but History was not called: a wildcard channel, or
-  channel policy denies history / recovery (`history=false` or
-  `transient_only`).
+  (`recover=true`) but History was not called: a wildcard channel, channel
+  policy denies history / recovery (`history=false` or `transient_only`),
+  or no cursor and no server-recorded delivered position.
 
-Without `recover`, the ack still carries a `recover_results` entry per
-channel (`recovered=false`, **no** error). Old clients that ignore the new
-fields keep working: the subscription succeeds either way.
+`SubscribeAck.recover` summarizes the batch: `NONE` (no recover requested),
+`PENDING` (at least one channel will stream), or `SKIPPED` (every recover
+request was skippable before History).
 
-`offset=0` with `recover=true` on Subscribe replays from the beginning of
-history (Subscribe is never a session resume). Resume offset rules — server
-recorded offset wins, missing offset is skipped — apply only to Connect;
-see [Session Resumption](#session-resumption).
+Recovery start point:
+
+- `fresh=true` — replay from the beginning, ignoring any cursor.
+- resume with a snapshot epoch that differs from the broker epoch (both
+  known) — offsets were invalidated, replay from the beginning.
+- non-resume with `cursor.offset` set — replay from `offset+1`.
+- non-resume with `recover=true` and no cursor — "no hint": resume from the
+  server-recorded delivered position (if any), otherwise skip. **Never**
+  replay the full history because the cursor was absent or 0.
+
+Without `recover`, the bare ack succeeds with no recovery stream. Old
+clients that ignore the new fields keep working: the subscription succeeds
+either way.
 
 ### Unsubscribe
 
@@ -257,14 +284,21 @@ Response:
   "id": "4",
   "publish_ack": {
     "id": "4",
-    "offset": 42
+    "position": {
+      "stream_epoch": "broker-epoch-id",
+      "offset": 42
+    }
   }
 }
 ```
 
+Transient / no-history publishes ack with an unset position (no `offset`
+field), never `0`-means-offset.
+
 ### Publication (Server → Client)
 
-When a message is published to a channel a client is subscribed to:
+When a message is published to a channel a client is subscribed to — or
+replayed as part of a streamed recovery:
 
 ```json
 {
@@ -273,7 +307,11 @@ When a message is published to a channel a client is subscribed to:
       {
         "id": "msg-uuid",
         "channel": "chat.general",
-        "offset": 42,
+        "position": {
+          "stream_epoch": "broker-epoch-id",
+          "offset": 42
+        },
+        "replay": false,
         "payload": {
           "text": "hello world"
         }
@@ -282,6 +320,9 @@ When a message is published to a channel a client is subscribed to:
   }
 }
 ```
+
+`replay: true` marks a recovery replay; `position` is the authoritative
+message position in both cases.
 
 ## Payload Types
 
@@ -305,7 +346,7 @@ Optional `content_type` field can specify the MIME type (e.g., `application/json
 
 The server preserves the original `Payload` oneof variant end to end: a
 message published as `json` (or `text`/`binary`) is delivered to subscribers
-in real time, replayed during connect-time recovery, and returned by the
+in real time, replayed during streamed recovery, and returned by the
 admin `GetHistory` API in the same variant. Before this guarantee existed,
 `json` payloads were collapsed to `text` on the wire.
 

@@ -11,8 +11,9 @@ import (
 
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/proxy"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
@@ -123,7 +124,7 @@ func TestClientSession_HandleMessage_Publish_JSONPayload(t *testing.T) {
 		Envelope: &clientpb.InboundMessage_Publish{
 			Publish: &clientpb.Publish{
 				Channel: "json-ch",
-				Payload: &sharedpb.Payload{Data: &sharedpb.Payload_Json{Json: payloadStruct}},
+				Payload: &sharedv2.Payload{Data: &sharedv2.Payload_Json{Json: payloadStruct}},
 			},
 		},
 	}
@@ -181,9 +182,10 @@ func TestClientSession_HandleMessage_Connect_ACLDeniedSubscription(t *testing.T)
 	assert.Equal(t, 1, node.Hub().NumSubscribers("public.room"))
 
 	// The connection stays up: a per-channel ACL_DENIED error followed by the
-	// Connected envelope.
+	// Connected envelope, then a separate presence snapshot for the allowed
+	// channel (v2 Presence is its own envelope).
 	require.False(t, transport.isClosed())
-	require.Equal(t, 2, transport.getMessageCount())
+	require.Equal(t, 3, transport.getMessageCount())
 
 	var first clientpb.OutboundMessage
 	require.NoError(t, JSONMarshaler{}.Unmarshal(transport.getMessage(0), &first))
@@ -191,12 +193,18 @@ func TestClientSession_HandleMessage_Connect_ACLDeniedSubscription(t *testing.T)
 	require.NotNil(t, errEnv, "first message should be the ACL error")
 	assert.Equal(t, "ACL_DENIED", errEnv.Code)
 
-	var last clientpb.OutboundMessage
-	require.NoError(t, JSONMarshaler{}.Unmarshal(transport.getLastMessage(), &last))
-	connected := last.GetConnected()
-	require.NotNil(t, connected, "last message should be Connected")
+	var connectedMsg clientpb.OutboundMessage
+	require.NoError(t, JSONMarshaler{}.Unmarshal(transport.getMessage(1), &connectedMsg))
+	connected := connectedMsg.GetConnected()
+	require.NotNil(t, connected, "second message should be Connected")
 	assert.Len(t, connected.GetSubscriptions(), 1)
 	assert.Equal(t, "public.room", connected.GetSubscriptions()[0].Channel)
+
+	var presenceMsg clientpb.OutboundMessage
+	require.NoError(t, JSONMarshaler{}.Unmarshal(transport.getMessage(2), &presenceMsg))
+	presence := presenceMsg.GetPresence()
+	require.NotNil(t, presence, "third message should be the presence snapshot for the allowed channel")
+	assert.Equal(t, "public.room", presence.GetChannel())
 }
 
 // --- PR-KA-A4 §9.7: proxy approval must not bypass static deny ---
@@ -801,7 +809,7 @@ func TestClient_Close_NoGaugeDriftOnAuthFailure(t *testing.T) {
 		Envelope: &clientpb.InboundMessage_Publish{
 			Publish: &clientpb.Publish{
 				Channel: "test-channel",
-				Payload: &sharedpb.Payload{Data: &sharedpb.Payload_Binary{Binary: []byte("test payload")}},
+				Payload: &sharedv2.Payload{Data: &sharedv2.Payload_Binary{Binary: []byte("test payload")}},
 			},
 		},
 	}
@@ -1050,10 +1058,9 @@ func (f *fakeEpochHistoryBroker) History(ch string, sinceOffset uint64, limit in
 	return &HistoryPage{Publications: result}, nil
 }
 
-func TestClient_Connect_RecoveryFromZeroWhenClientEpochMissing(t *testing.T) {
+func TestClient_Connect_RecoveryFreshFromStart(t *testing.T) {
 	ctx := context.Background()
 	node := NewNode(nil)
-	// Broker restarted: it has an epoch, and its history holds offsets 1..3.
 	node.SetBroker(&fakeEpochHistoryBroker{
 		epoch: "v2",
 		pubs: []*Publication{
@@ -1068,35 +1075,25 @@ func TestClient_Connect_RecoveryFromZeroWhenClientEpochMissing(t *testing.T) {
 	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	require.NoError(t, err)
 
-	// The client carries a stale offset (2) but no epoch: an older SDK cannot
-	// prove the offset belongs to the current broker generation, so recovery
-	// must fall back to the beginning instead of silently skipping m1.
+	// fresh=true replays from the beginning, ignoring any cursor hint: a
+	// client that wants the full history says so explicitly (KD-K22), never
+	// by omitting an epoch or sending offset 0.
 	msg := &clientpb.InboundMessage{
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_Connect{
 			Connect: &clientpb.Connect{
 				ClientId: "client-1",
 				Subscriptions: []*clientpb.Subscription{
-					{Channel: "epoch-ch", Recover: true, Offset: 2, Epoch: ""},
+					{Channel: "epoch-ch", Recover: true, Fresh: true},
 				},
 			},
 		},
 	}
 	require.NoError(t, client.HandleMessage(ctx, msg))
 
-	var out clientpb.OutboundMessage
-	require.NoError(t, JSONMarshaler{}.Unmarshal(transport.getLastMessage(), &out))
-	connected := out.GetConnected()
-	require.NotNil(t, connected)
-	require.Len(t, connected.GetPublications(), 3)
-	var offsets []uint64
-	for _, pub := range connected.GetPublications() {
-		for _, m := range pub.GetMessages() {
-			offsets = append(offsets, m.GetOffset())
-		}
-	}
-	assert.Equal(t, []uint64{1, 2, 3}, offsets,
-		"a client without an epoch must recover from the beginning")
+	replays := replayPublications(outboundMessages(t, transport))
+	assert.Equal(t, []uint64{1, 2, 3}, publicationOffsets(replays),
+		"fresh=true must recover from the beginning")
 }
 
 func TestClient_Connect_RecoveryFromOffsetWhenEpochMatches(t *testing.T) {
@@ -1116,29 +1113,23 @@ func TestClient_Connect_RecoveryFromOffsetWhenEpochMatches(t *testing.T) {
 	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	require.NoError(t, err)
 
-	// A client whose epoch matches the broker keeps incremental recovery:
-	// offset 2 was already seen, so only offset 3 is replayed.
+	// A client cursor is a hint: offset 2 was already seen, so only offset 3
+	// is replayed. The cursor's stream epoch tags the generation it refers to.
 	msg := &clientpb.InboundMessage{
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_Connect{
 			Connect: &clientpb.Connect{
 				ClientId: "client-1",
 				Subscriptions: []*clientpb.Subscription{
-					{Channel: "epoch-ch", Recover: true, Offset: 2, Epoch: "v2"},
+					{Channel: "epoch-ch", Recover: true, Cursor: cursorOf("v2", 2)},
 				},
 			},
 		},
 	}
 	require.NoError(t, client.HandleMessage(ctx, msg))
 
-	var out clientpb.OutboundMessage
-	require.NoError(t, JSONMarshaler{}.Unmarshal(transport.getLastMessage(), &out))
-	connected := out.GetConnected()
-	require.NotNil(t, connected)
-	require.Len(t, connected.GetPublications(), 1)
-	msgs := connected.GetPublications()[0].GetMessages()
-	require.Len(t, msgs, 1)
-	assert.Equal(t, uint64(3), msgs[0].GetOffset())
+	replays := replayPublications(outboundMessages(t, transport))
+	assert.Equal(t, []uint64{3}, publicationOffsets(replays), "an epoch-tagged cursor continues incrementally")
 }
 
 // Task 9: anonymous mode must not be able to take over a session by guessing
@@ -1250,23 +1241,21 @@ func TestClient_Recovery_PreservesPayloadType(t *testing.T) {
 			Connect: &clientpb.Connect{
 				ClientId: "client-1",
 				Subscriptions: []*clientpb.Subscription{
-					{Channel: "recovery.types", Recover: true, Offset: first, Epoch: epocher.Epoch()},
+					{Channel: "recovery.types", Recover: true, Cursor: cursorOf(epocher.Epoch(), first)},
 				},
 			},
 		},
 	}
 	require.NoError(t, client.HandleMessage(ctx, msg))
 
-	var out clientpb.OutboundMessage
-	require.NoError(t, JSONMarshaler{}.Unmarshal(transport.getLastMessage(), &out))
-	connected := out.GetConnected()
-	require.NotNil(t, connected)
-	require.Len(t, connected.GetPublications(), 1)
-	msgs := connected.GetPublications()[0].GetMessages()
+	replays := replayPublications(outboundMessages(t, transport))
+	require.Len(t, replays, 1)
+	msgs := replays[0].GetMessages()
 	require.Len(t, msgs, 1)
 	payload := msgs[0].GetPayload()
 	require.NotNil(t, payload)
-	require.IsType(t, &sharedpb.Payload_Text{}, payload.Data, "recovered payload must keep the text variant")
+	require.True(t, msgs[0].GetReplay(), "recovered messages must carry replay=true")
+	require.IsType(t, &sharedv2.Payload_Text{}, payload.Data, "recovered payload must keep the text variant")
 	require.Equal(t, "m2", payload.GetText())
 }
 
@@ -2012,7 +2001,7 @@ func TestClient_SurveyReply_WithoutRequestID_Dropped(t *testing.T) {
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_SurveyReply{
 			SurveyReply: &clientpb.SurveyReply{
-				Payload: &sharedpb.Payload{Data: &sharedpb.Payload_Binary{Binary: []byte("pong")}},
+				Payload: &sharedv2.Payload{Data: &sharedv2.Payload_Binary{Binary: []byte("pong")}},
 			},
 		},
 	}
@@ -2025,7 +2014,7 @@ func TestClient_SurveyReply_WithoutRequestID_Dropped(t *testing.T) {
 		Envelope: &clientpb.InboundMessage_SurveyReply{
 			SurveyReply: &clientpb.SurveyReply{
 				RequestId: "survey-1",
-				Payload:   &sharedpb.Payload{Data: &sharedpb.Payload_Binary{Binary: []byte("pong")}},
+				Payload:   &sharedv2.Payload{Data: &sharedv2.Payload_Binary{Binary: []byte("pong")}},
 			},
 		},
 	}
@@ -2124,7 +2113,7 @@ func TestClient_ConnectWithUnroutableSubscription_SoftFail(t *testing.T) {
 	require.False(t, transport.isClosed())
 
 	msgs := transport.snapshotMessages()
-	require.Len(t, msgs, 2, "one error envelope for the unroutable channel, one Connected")
+	require.Len(t, msgs, 3, "one error envelope for the unroutable channel, one Connected, one presence snapshot")
 
 	var out clientpb.OutboundMessage
 	require.NoError(t, (JSONMarshaler{}).Unmarshal(msgs[0], &out))
@@ -2143,4 +2132,9 @@ func TestClient_ConnectWithUnroutableSubscription_SoftFail(t *testing.T) {
 	require.NotContains(t, channels, "*.room")
 	require.False(t, client.hasSubscription("*.room"))
 	require.True(t, client.hasSubscription("good.ch"))
+
+	require.NoError(t, (JSONMarshaler{}).Unmarshal(msgs[2], &out))
+	presence := out.GetPresence()
+	require.NotNil(t, presence, "third envelope must be the presence snapshot for the routable channel")
+	require.Equal(t, "good.ch", presence.GetChannel())
 }

@@ -3,7 +3,7 @@ package messageloopgo
 import (
 	"fmt"
 
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 )
 
 // SurveyAnswer is one answered result of a client-initiated Survey.

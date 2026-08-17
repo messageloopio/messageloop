@@ -1,5 +1,5 @@
 import { create, toBinary } from "@bufbuild/protobuf";
-import { OutboundMessageSchema } from "../src/proto/client/v1/service_pb";
+import { OutboundMessageSchema } from "../src/proto/client/v2/service_pb";
 import { MessageLoopClient } from "../src/client/client";
 import { buildClientOptions } from "../src/client/options";
 import { WebSocketTransport } from "../src/transport/websocket";
@@ -160,8 +160,8 @@ describe("P0-3: error envelope routes to pending RPC without reconnecting", () =
   });
 });
 
-describe("P0-4: Connected.publications recovery messages are delivered", () => {
-  it("delivers recovery messages and updates channel offsets", () => {
+describe("P0-4: streamed recovery publications are delivered", () => {
+  it("delivers replay publications via the same handler and writes the cursor from RecoverComplete", () => {
     const client = makeClient();
     const handler = jest.fn();
     client.onMessage(handler);
@@ -171,39 +171,62 @@ describe("P0-4: Connected.publications recovery messages are delivered", () => {
         case: "connected",
         value: {
           sessionId: "s1",
-          epoch: "e1",
+          streamEpoch: "e1",
           resumed: true,
           subscriptions: [{ channel: "ch1" }],
-          publications: [
-            {
-              messages: [
-                {
-                  id: "m1",
-                  channel: "ch1",
-                  offset: 42n,
-                  payload: {
-                    contentType: "text/plain",
-                    data: { case: "text", value: "hello" },
-                  },
-                },
-              ],
-            },
-          ],
         },
       },
     });
 
     (client as any).handleMessage(connected);
     (client as any).stopPingLoop();
+    expect(handler).not.toHaveBeenCalled();
+    expect(client.getSubscribedChannels()).toEqual(["ch1"]);
+    expect(client.getSessionId()).toBe("s1");
+    expect((client as any).epoch).toBe("e1");
+
+    // The replay stream: a Publication with replay=true followed by the
+    // per-channel RecoverComplete.
+    const replay = create(OutboundMessageSchema, {
+      envelope: {
+        case: "publication",
+        value: {
+          messages: [
+            {
+              id: "m1",
+              channel: "ch1",
+              replay: true,
+              position: { streamEpoch: "e1", offset: 42n },
+              payload: {
+                contentType: "text/plain",
+                data: { case: "text", value: "hello" },
+              },
+            },
+          ],
+        },
+      },
+    });
+    (client as any).handleMessage(replay);
 
     expect(handler).toHaveBeenCalledTimes(1);
     expect(handler.mock.calls[0][0]).toEqual([
       expect.objectContaining({ id: "m1", channel: "ch1", offset: 42n }),
     ]);
+    // A replay publication alone must not advance the cursor: only
+    // RecoverComplete.position is authoritative.
+    expect((client as any).channelOffsets.has("ch1")).toBe(false);
+
+    const complete = create(OutboundMessageSchema, {
+      envelope: {
+        case: "recoverComplete",
+        value: {
+          channel: "ch1",
+          position: { streamEpoch: "e1", offset: 42n },
+        },
+      },
+    });
+    (client as any).handleMessage(complete);
     expect((client as any).channelOffsets.get("ch1")).toBe(42n);
-    expect(client.getSubscribedChannels()).toEqual(["ch1"]);
-    expect(client.getSessionId()).toBe("s1");
-    expect((client as any).epoch).toBe("e1");
   });
 });
 
@@ -307,7 +330,7 @@ describe("P2-1: Connected.subscriptions is authoritative on reconnect", () => {
         case: "connected",
         value: {
           sessionId: "s2",
-          epoch: "e2",
+          streamEpoch: "e2",
           resumed: false,
           subscriptions: [{ channel: "keep" }],
         },
@@ -340,7 +363,7 @@ describe("P2-1: Connected.subscriptions is authoritative on reconnect", () => {
         case: "connected",
         value: {
           sessionId: "s3",
-          epoch: "e3",
+          streamEpoch: "e3",
           resumed: false,
           subscriptions: [],
         },

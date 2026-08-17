@@ -14,8 +14,9 @@ import (
 	"github.com/lynx-go/x/log"
 	"github.com/messageloopio/messageloop/pkg/topics"
 	"github.com/messageloopio/messageloop/proxy"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"github.com/samber/lo"
 	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
@@ -181,7 +182,7 @@ func (c *Session) HandleMessage(ctx context.Context, in *clientpb.InboundMessage
 		}
 		_ = s.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 			out.Envelope = &clientpb.OutboundMessage_Error{
-				Error: &sharedpb.Error{
+				Error: &sharedv2.Error{
 					Code:    "INTERNAL_ERROR",
 					Type:    "server_error",
 					Message: err.Error(),
@@ -279,7 +280,7 @@ func (c *Session) handleConnect(ctx context.Context, in *clientpb.InboundMessage
 				"session", c.session)
 			_ = c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 				out.Envelope = &clientpb.OutboundMessage_Error{
-					Error: &sharedpb.Error{
+					Error: &sharedv2.Error{
 						Code:    "AUTH_REQUIRED",
 						Type:    "auth_error",
 						Message: "authentication token is required",
@@ -291,7 +292,7 @@ func (c *Session) handleConnect(ctx context.Context, in *clientpb.InboundMessage
 	} else if c.node.requireAuth {
 		_ = c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 			out.Envelope = &clientpb.OutboundMessage_Error{
-				Error: &sharedpb.Error{
+				Error: &sharedv2.Error{
 					Code:    "AUTH_REQUIRED",
 					Type:    "auth_error",
 					Message: "authentication token is required",
@@ -327,7 +328,7 @@ func (c *Session) handleConnect(ctx context.Context, in *clientpb.InboundMessage
 			log.WarnContext(ctx, "proxy authentication failed", "error", err)
 			_ = c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 				out.Envelope = &clientpb.OutboundMessage_Error{
-					Error: &sharedpb.Error{
+					Error: &sharedv2.Error{
 						Code:    "AUTH_ERROR",
 						Type:    "auth_error",
 						Message: err.Error(),
@@ -340,7 +341,7 @@ func (c *Session) handleConnect(ctx context.Context, in *clientpb.InboundMessage
 			log.WarnContext(ctx, "proxy authentication returned error", "error", authResp.Error)
 			_ = c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 				out.Envelope = &clientpb.OutboundMessage_Error{
-					Error: authResp.Error,
+					Error: sharedErrorV2(authResp.Error),
 				}
 			}))
 			return DisconnectInvalidToken
@@ -527,17 +528,14 @@ func (c *Session) finishConnect(ctx context.Context, in *clientpb.InboundMessage
 		_, _ = p.OnConnected(ctx, connectedReq) // Ignore error for notification
 	}
 
-	// Process subscriptions and handle recovery
+	// Process subscriptions and streamed recovery: every recover=true channel
+	// is replayed through the shared Replayer after the bare Connected frame.
 	subs := connect.Subscriptions
-	var pubs []*clientpb.Publication
 	addedChannels := make([]string, 0, len(subs))
 	addedPresence := make([]string, 0, len(subs))
 
-	// Get current broker epoch for recovery validation
-	var currentEpoch string
-	if epocher, ok := c.node.broker.(interface{ Epoch() string }); ok {
-		currentEpoch = epocher.Epoch()
-	}
+	// Get current broker epoch for recovery validation and Connected.
+	currentEpoch := c.node.streamEpoch()
 
 	// Ordered recovery union (PR-03): ACL-passed request subscriptions first,
 	// then snapshot-only channels from a resumed session. Snapshot-only
@@ -631,47 +629,39 @@ func (c *Session) finishConnect(ctx context.Context, in *clientpb.InboundMessage
 			recoverySubs = append(recoverySubs, &clientpb.Subscription{
 				Channel: snap.Channel,
 				Recover: true,
-				Offset:  0,
 			})
 		}
 	}
 
-	// Recover every channel in the union through the shared helper: one
-	// quota per Connect request, publications appended in union order
-	// (request channels first, then snapshot-only channels).
-	quota := newRecoverQuota()
-	var results []*clientpb.RecoverResult
-	recoveredAny := false
-	truncatedAny := false
-	for _, rs := range recoverySubs {
-		rec := c.node.recoverSubscription(ctx, rs, resumeSnapshot, quota, "connect")
-		pubs = append(pubs, rec.Publications...)
-		results = append(results, rec.RecoverResult())
-		if rec.Status == RecoverOK || rec.Status == RecoverTruncated || rec.Status == RecoverEpochReset {
-			recoveredAny = true
+	// Send the bare Connected first (no publications, no recover results),
+	// then the per-channel replay stream (§4.2). Presence snapshots travel as
+	// individual presence envelopes right after the Connected frame (v2 has no
+	// presence list on Connected).
+	if err := c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+		out.Envelope = &clientpb.OutboundMessage_Connected{
+			Connected: &clientpb.Connected{
+				SessionId:     c.SessionID(),
+				Resumed:       resumed,
+				StreamEpoch:   currentEpoch,
+				Subscriptions: c.subscriptionList(),
+				AcceptedCaps:  connect.Caps,
+			},
 		}
-		if rec.Status == RecoverTruncated {
-			truncatedAny = true
+	})); err != nil {
+		return err
+	}
+	for _, snap := range c.presenceSnapshots(ctx) {
+		if err := c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+			out.Envelope = &clientpb.OutboundMessage_Presence{Presence: snap}
+		})); err != nil {
+			return err
 		}
 	}
 
-	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
-		out.Envelope = &clientpb.OutboundMessage_Connected{
-			Connected: &clientpb.Connected{
-				SessionId:      c.SessionID(),
-				Resumed:        resumed,
-				Epoch:          currentEpoch,
-				Publications:   pubs,
-				Subscriptions:  c.subscriptionList(),
-				Recovered:      recoveredAny,
-				Truncated:      truncatedAny,
-				RecoverResults: results,
-				// One snapshot per currently subscribed tracked channel,
-				// including channels restored from a resumed session.
-				Presence: c.presenceSnapshots(ctx),
-			},
-		}
-	}))
+	// One quota per Connect request shared by every channel in the union,
+	// streamed in union order (request channels first, then snapshot-only).
+	c.node.streamRecoveries(ctx, c, in, recoverySubs, resumeSnapshot, "connect")
+	return nil
 }
 
 // presenceSnapshots builds the presence snapshots for every channel this
@@ -720,7 +710,7 @@ func (c *Session) sendSubscribeRequestError(ctx context.Context, in *clientpb.In
 	}
 	_ = c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_Error{
-			Error: &sharedpb.Error{
+			Error: &sharedv2.Error{
 				Code:    code,
 				Type:    "request_error",
 				Message: fmt.Sprintf("cannot subscribe to channel %q: %v", channel, err),
@@ -733,7 +723,7 @@ func (c *Session) sendSubscribeRequestError(ctx context.Context, in *clientpb.In
 // proxy (PR-KA-A4 §8.1) and returns the error envelope to send to the client,
 // or nil when the subscription is allowed. Order: routability, static Decide,
 // then the proxy — a proxy approval must never bypass a static deny.
-func (c *Session) checkSubscribeACL(ctx context.Context, in *clientpb.InboundMessage, ch *clientpb.Subscription) *sharedpb.Error {
+func (c *Session) checkSubscribeACL(ctx context.Context, in *clientpb.InboundMessage, ch *clientpb.Subscription) *sharedv2.Error {
 	// 1. Routability before authorization: the subscription key must compile
 	// on the live bus (A3). The same code pair as A3: PATTERN_NOT_ROUTABLE /
 	// BAD_REQUEST, and the connection stays up.
@@ -742,7 +732,7 @@ func (c *Session) checkSubscribeACL(ctx context.Context, in *clientpb.InboundMes
 		if errors.Is(err, ErrPatternNotRoutable) {
 			code = "PATTERN_NOT_ROUTABLE"
 		}
-		return &sharedpb.Error{
+		return &sharedv2.Error{
 			Code:    code,
 			Type:    "request_error",
 			Message: fmt.Sprintf("cannot subscribe to channel %q: %v", ch.Channel, err),
@@ -754,7 +744,7 @@ func (c *Session) checkSubscribeACL(ctx context.Context, in *clientpb.InboundMes
 	// punch a hole in a static deny.
 	if dec := c.node.authorizer.Decide(c.node.userPrincipal(c.user), ActionSubscribePattern, ch.Channel); !dec.Allow {
 		log.WarnContext(ctx, "ACL denied subscribe", "channel", ch.Channel, "user", c.user, "reason", dec.Reason)
-		return &sharedpb.Error{
+		return &sharedv2.Error{
 			Code:    "ACL_DENIED",
 			Type:    "acl_error",
 			Message: "subscribe denied by ACL rule",
@@ -775,7 +765,7 @@ func (c *Session) checkSubscribeACL(ctx context.Context, in *clientpb.InboundMes
 		aclResp, err := p.SubscribeAcl(ctx, aclReq)
 		if err != nil {
 			log.WarnContext(ctx, "proxy subscribe ACL check failed", "channel", ch.Channel, "error", err)
-			return &sharedpb.Error{
+			return &sharedv2.Error{
 				Code:    "ACL_ERROR",
 				Type:    "acl_error",
 				Message: err.Error(),
@@ -783,7 +773,7 @@ func (c *Session) checkSubscribeACL(ctx context.Context, in *clientpb.InboundMes
 		}
 		if aclResp.Error != nil {
 			log.WarnContext(ctx, "proxy subscribe ACL returned error", "channel", ch.Channel, "error", aclResp.Error)
-			return aclResp.Error
+			return sharedErrorV2(aclResp.Error)
 		}
 	}
 	return nil
@@ -803,6 +793,56 @@ func MakeOutboundMessage(in *clientpb.InboundMessage, bodyFunc func(out *clientp
 		}
 	}
 	bodyFunc(out)
+	return out
+}
+
+// sharedErrorV2 converts a shared.v1 error (auth/ACL proxies still speak
+// protocol/proxy/v1) into the client-v2 wire error the runtime now emits.
+func sharedErrorV2(e *sharedpb.Error) *sharedv2.Error {
+	if e == nil {
+		return nil
+	}
+	return &sharedv2.Error{
+		Code:    e.GetCode(),
+		Type:    e.GetType(),
+		Message: e.GetMessage(),
+	}
+}
+
+// payloadV2toV1 converts a client-v2 payload into the shared.v1 payload the
+// proxy RPC path still consumes. The shapes are identical except for the
+// package path.
+func payloadV2toV1(p *sharedv2.Payload) *sharedpb.Payload {
+	if p == nil {
+		return nil
+	}
+	out := &sharedpb.Payload{ContentType: p.GetContentType()}
+	switch d := p.Data.(type) {
+	case *sharedv2.Payload_Json:
+		out.Data = &sharedpb.Payload_Json{Json: d.Json}
+	case *sharedv2.Payload_Binary:
+		out.Data = &sharedpb.Payload_Binary{Binary: d.Binary}
+	case *sharedv2.Payload_Text:
+		out.Data = &sharedpb.Payload_Text{Text: d.Text}
+	}
+	return out
+}
+
+// payloadV1toV2 converts a shared.v1 payload (proxy / admin responses) into
+// the client-v2 payload the runtime now emits.
+func payloadV1toV2(p *sharedpb.Payload) *sharedv2.Payload {
+	if p == nil {
+		return nil
+	}
+	out := &sharedv2.Payload{ContentType: p.GetContentType()}
+	switch d := p.Data.(type) {
+	case *sharedpb.Payload_Json:
+		out.Data = &sharedv2.Payload_Json{Json: d.Json}
+	case *sharedpb.Payload_Binary:
+		out.Data = &sharedv2.Payload_Binary{Binary: d.Binary}
+	case *sharedpb.Payload_Text:
+		out.Data = &sharedv2.Payload_Text{Text: d.Text}
+	}
 	return out
 }
 
@@ -862,7 +902,9 @@ func (c *Session) handleRPC(ctx context.Context, in *clientpb.InboundMessage, rp
 		UserID:    c.user,
 		Channel:   channel,
 		Method:    method,
-		Payload:   rpcReq.Payload,
+		// The proxy protocol (protocol/proxy/v1) still speaks shared.v1, so
+		// the client-v2 request payload is bridged before invoking it.
+		Payload:   payloadV2toV1(rpcReq.Payload),
 		Meta:      meta,
 	}
 
@@ -885,7 +927,7 @@ func (c *Session) handleRPC(ctx context.Context, in *clientpb.InboundMessage, rp
 			)
 			return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 				out.Envelope = &clientpb.OutboundMessage_Error{
-					Error: &sharedpb.Error{
+					Error: &sharedv2.Error{
 						Code:    "RPC_TIMEOUT",
 						Type:    "timeout",
 						Message: fmt.Sprintf("RPC request timeout after %v", duration),
@@ -899,7 +941,7 @@ func (c *Session) handleRPC(ctx context.Context, in *clientpb.InboundMessage, rp
 		if errors.Is(err, proxy.ErrNoProxyFound) {
 			return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 				out.Envelope = &clientpb.OutboundMessage_Error{
-					Error: &sharedpb.Error{
+					Error: &sharedv2.Error{
 						Code:    "NO_PROXY",
 						Type:    "request_error",
 						Message: "no proxy configured for channel/method",
@@ -917,7 +959,7 @@ func (c *Session) handleRPC(ctx context.Context, in *clientpb.InboundMessage, rp
 		)
 		return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 			out.Envelope = &clientpb.OutboundMessage_Error{
-				Error: &sharedpb.Error{
+				Error: &sharedv2.Error{
 					Code:    "PROXY_ERROR",
 					Type:    "proxy_error",
 					Message: err.Error(),
@@ -936,14 +978,14 @@ func (c *Session) handleRPC(ctx context.Context, in *clientpb.InboundMessage, rp
 	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 		if proxyResp.Error != nil {
 			out.Envelope = &clientpb.OutboundMessage_Error{
-				Error: proxyResp.Error,
+				Error: sharedErrorV2(proxyResp.Error),
 			}
 		} else {
 			out.Envelope = &clientpb.OutboundMessage_RpcReply{
 				RpcReply: &clientpb.RpcReply{
 					RequestId: in.Id,
-					Payload:   proxyResp.Payload,
-					Metadata:  &sharedpb.Metadata{Entries: proxyResp.Meta},
+					Payload:   payloadV1toV2(proxyResp.Payload),
+					Metadata:  &sharedv2.Metadata{Entries: proxyResp.Meta},
 				},
 			}
 		}
@@ -960,7 +1002,7 @@ func (c *Session) handlePublish(ctx context.Context, in *clientpb.InboundMessage
 	if c.publishLimiter != nil && !c.publishLimiter.Allow() {
 		return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 			out.Envelope = &clientpb.OutboundMessage_Error{
-				Error: &sharedpb.Error{
+				Error: &sharedv2.Error{
 					Code:    "RATE_LIMITED",
 					Type:    "rate_limit",
 					Message: "publish rate limit exceeded",
@@ -980,7 +1022,7 @@ func (c *Session) handlePublish(ctx context.Context, in *clientpb.InboundMessage
 		log.WarnContext(ctx, "ACL denied publish", "channel", channel, "user", c.user, "reason", dec.Reason)
 		return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 			out.Envelope = &clientpb.OutboundMessage_Error{
-				Error: &sharedpb.Error{
+				Error: &sharedv2.Error{
 					Code:    "ACL_DENIED",
 					Type:    "acl_error",
 					Message: "publish denied by ACL rule",
@@ -1005,7 +1047,7 @@ func (c *Session) handlePublish(ctx context.Context, in *clientpb.InboundMessage
 			log.WarnContext(ctx, "proxy publish ACL check failed", "channel", channel, "error", err)
 			return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 				out.Envelope = &clientpb.OutboundMessage_Error{
-					Error: &sharedpb.Error{
+					Error: &sharedv2.Error{
 						Code:    "ACL_ERROR",
 						Type:    "acl_error",
 						Message: err.Error(),
@@ -1017,14 +1059,14 @@ func (c *Session) handlePublish(ctx context.Context, in *clientpb.InboundMessage
 			log.WarnContext(ctx, "proxy publish ACL returned error", "channel", channel, "error", aclResp.Error)
 			return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 				out.Envelope = &clientpb.OutboundMessage_Error{
-					Error: aclResp.Error,
+					Error: sharedErrorV2(aclResp.Error),
 				}
 			}))
 		}
 	}
 
 	// Extract data from Payload, preserving the original oneof variant.
-	pub, err := PublicationFromPayload(in.Id, nil, publish.Payload)
+	pub, err := PublicationFromPayloadV2(in.Id, nil, publish.Payload)
 	if err != nil {
 		return err
 	}
@@ -1048,8 +1090,10 @@ func (c *Session) handlePublish(ctx context.Context, in *clientpb.InboundMessage
 		return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 			out.Envelope = &clientpb.OutboundMessage_PublishAck{
 				PublishAck: &clientpb.PublishAck{
-					Id:     in.Id,
-					Offset: 0,
+					Id: in.Id,
+					// Transient / no-history: the position offset stays unset
+					// (KD-K11), never 0-means-offset.
+					Position: positionFrom(c.node.streamEpoch(), 0, false),
 				},
 			}
 		}))
@@ -1062,8 +1106,8 @@ func (c *Session) handlePublish(ctx context.Context, in *clientpb.InboundMessage
 	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_PublishAck{
 			PublishAck: &clientpb.PublishAck{
-				Id:     in.Id,
-				Offset: offset,
+				Id:       in.Id,
+				Position: positionFrom(c.node.streamEpoch(), offset, true),
 			},
 		}
 	}))
@@ -1074,15 +1118,8 @@ func (c *Session) handleSubscribe(ctx context.Context, in *clientpb.InboundMessa
 	addedChannels := make([]string, 0, len(sub.Subscriptions))
 	addedPresence := make([]string, 0, len(sub.Subscriptions))
 
-	// Get current broker epoch for recovery validation.
-	var currentEpoch string
-	if epocher, ok := c.node.broker.(interface{ Epoch() string }); ok {
-		currentEpoch = epocher.Epoch()
-	}
-	// One quota shared by every channel in this Subscribe request.
-	quota := newRecoverQuota()
-	var pubs []*clientpb.Publication
-	var results []*clientpb.RecoverResult
+	// Get current broker epoch for the SubscribeAck.
+	currentEpoch := c.node.streamEpoch()
 
 	for _, ch := range sub.Subscriptions {
 		alreadySubscribed := c.hasSubscription(ch.Channel)
@@ -1149,28 +1186,27 @@ func (c *Session) handleSubscribe(ctx context.Context, in *clientpb.InboundMessa
 			}
 			_, _ = p.OnSubscribed(ctx, subscribedReq) // Ignore error for notification
 		}
-
-		// Recover through the shared helper (PR-03): every ACL-passed,
-		// successfully subscribed channel gets a result; a re-subscribe with
-		// recover=true is a legitimate catch-up. The subscription stays even
-		// when recovery fails.
-		rec := c.node.recoverSubscription(ctx, ch, nil, quota, "subscribe")
-		pubs = append(pubs, rec.Publications...)
-		results = append(results, rec.RecoverResult())
 	}
-	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
-		out.Envelope = &clientpb.OutboundMessage_SubscribeAck{
-			SubscribeAck: &clientpb.SubscribeAck{
-				Subscriptions:  subs,
-				Publications:   pubs,
-				RecoverResults: results,
-				Epoch:          currentEpoch,
-				// Catch-up snapshot for every channel in this request that
-				// is tracked for presence, including re-subscribes.
-				Presence: c.snapshotForChannels(ctx, subs),
-			},
+
+	// Send the bare SubscribeAck (no publications), then stream every
+	// recover=true channel of this request through the shared Replayer: one
+	// quota per Subscribe request (§4.2). A re-subscribe with recover=true is
+	// a legitimate catch-up; the subscription stays even when recovery fails.
+	if err := c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+		ack := &clientpb.SubscribeAck{
+			Subscriptions: subs,
+			Recover:       c.node.recoverState(c, subs, nil),
+			StreamEpoch:   currentEpoch,
+			// Catch-up snapshot for every channel in this request that
+			// is tracked for presence, including re-subscribes.
+			Presence: c.snapshotForChannels(ctx, subs),
 		}
-	}))
+		out.Envelope = &clientpb.OutboundMessage_SubscribeAck{SubscribeAck: ack}
+	})); err != nil {
+		return err
+	}
+	c.node.streamRecoveries(ctx, c, in, subs, nil, "subscribe")
+	return nil
 }
 
 // snapshotForChannels builds presence snapshots for the requested channels,
@@ -1388,7 +1424,7 @@ func (c *Session) handleSurvey(ctx context.Context, in *clientpb.InboundMessage,
 
 	var payload []byte
 	if req.Payload != nil {
-		pub, err := PublicationFromPayload("", nil, req.Payload)
+		pub, err := PublicationFromPayloadV2("", nil, req.Payload)
 		if err != nil {
 			c.surveyInFlight.Store(false)
 			return err
@@ -1440,7 +1476,7 @@ func (c *Session) sendSurveyError(ctx context.Context, in *clientpb.InboundMessa
 	}
 	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_Error{
-			Error: &sharedpb.Error{Code: code, Type: errType, Message: message},
+			Error: &sharedv2.Error{Code: code, Type: errType, Message: message},
 		}
 	}))
 }
@@ -1453,7 +1489,7 @@ func (c *Session) sendSurveyTopError(code, errType, message string) {
 	}
 	_ = c.Send(c.ctx, MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_Error{
-			Error: &sharedpb.Error{Code: code, Type: errType, Message: message},
+			Error: &sharedv2.Error{Code: code, Type: errType, Message: message},
 		}
 	}))
 }
@@ -1508,7 +1544,7 @@ func (c *Session) handleSurveyReply(ctx context.Context, in *clientpb.InboundMes
 		err = fmt.Errorf("%s: %s", reply.Error.Code, reply.Error.Message)
 	}
 	if reply.Payload != nil {
-		pub, convErr := PublicationFromPayload("", nil, reply.Payload)
+		pub, convErr := PublicationFromPayloadV2("", nil, reply.Payload)
 		if convErr != nil {
 			return convErr
 		}
@@ -1616,7 +1652,7 @@ func (c *Session) handlePresenceQuery(ctx context.Context, in *clientpb.InboundM
 	if ch == "" || isWildcard(ch) {
 		return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 			out.Envelope = &clientpb.OutboundMessage_Error{
-				Error: &sharedpb.Error{
+				Error: &sharedv2.Error{
 					Code:    "BAD_REQUEST",
 					Type:    "request_error",
 					Message: "presence query channel must be an exact channel",
@@ -1627,7 +1663,7 @@ func (c *Session) handlePresenceQuery(ctx context.Context, in *clientpb.InboundM
 	if !c.sessionCoversChannel(ch) {
 		return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 			out.Envelope = &clientpb.OutboundMessage_Error{
-				Error: &sharedpb.Error{
+				Error: &sharedv2.Error{
 					Code:    "PERMISSION_DENIED",
 					Type:    "acl_error",
 					Message: "presence query denied: channel not covered by session",
@@ -1640,7 +1676,7 @@ func (c *Session) handlePresenceQuery(ctx context.Context, in *clientpb.InboundM
 		if !dec.Effects.Presence {
 			return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 				out.Envelope = &clientpb.OutboundMessage_Error{
-					Error: &sharedpb.Error{
+					Error: &sharedv2.Error{
 						Code:    "POLICY_DENIED",
 						Type:    "policy_error",
 						Message: "presence query denied by channel policy",
@@ -1650,7 +1686,7 @@ func (c *Session) handlePresenceQuery(ctx context.Context, in *clientpb.InboundM
 		}
 		return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 			out.Envelope = &clientpb.OutboundMessage_Error{
-				Error: &sharedpb.Error{
+				Error: &sharedv2.Error{
 					Code:    "PERMISSION_DENIED",
 					Type:    "acl_error",
 					Message: "presence query denied by ACL rule",

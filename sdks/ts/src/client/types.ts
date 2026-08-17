@@ -18,7 +18,7 @@ export interface ConnectionStateChangeEvent {
 /**
  * Per-channel subscription spec: a plain channel name or a channel with an
  * optional subscription token (used for subscription-level authorization)
- * and optional recovery parameters (recover history after the given offset).
+ * and optional recovery parameters.
  */
 export interface SubscriptionSpec {
   /** Channel name */
@@ -26,17 +26,28 @@ export interface SubscriptionSpec {
   /** Optional subscription token */
   token?: string;
   /**
-   * When true, the server replays messages published after `offset`
-   * (interpreted in `epoch`) through the SubscribeAck publications, delivered
-   * via onMessage/addMessageHandler. offset 0 / empty epoch still sends
-   * recover=true (a fresh subscription recovering from the start, subject to
-   * server policy). The default is false (no recovery).
+   * When true, the server replays the channel history as streamed
+   * `Publication` envelopes with `replay=true` delivered through the same
+   * onMessage/addMessageHandler path as live messages, followed by a
+   * RecoverComplete echoing the authoritative position. The default is
+   * false (no recovery).
    */
   recover?: boolean;
-  /** Offset to recover from (bigint to match the proto uint64). */
-  offset?: bigint;
-  /** Broker epoch the offset is interpreted in. */
-  epoch?: string;
+  /**
+   * Recovery resume hint (a shared.v2 Position). When set, the server
+   * replays messages after `cursor.offset`. When omitted with recover=true,
+   * the server resumes from its own recorded delivered position (or skips
+   * when it has none) instead of flooding full history. There is no
+   * "offset 0 means from the start": use `fresh: true` for an explicit
+   * from-the-start replay.
+   */
+  cursor?: { streamEpoch: string; offset?: bigint };
+  /**
+   * Explicit from-the-start replay: the server replays the whole history
+   * regardless of any cursor or server-recorded position. Implies
+   * recover=true.
+   */
+  fresh?: boolean;
 }
 
 /**

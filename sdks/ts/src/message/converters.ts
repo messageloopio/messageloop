@@ -15,10 +15,10 @@ import {
   SurveyReplySchema,
   SurveyRequestSchema,
   PresenceQuerySchema,
-} from "../proto/client/v1/service_pb";
+} from "../proto/client/v2/service_pb";
 
-import { PayloadSchema, MetadataSchema } from "../proto/shared/v1/types_pb";
-import { ErrorSchema } from "../proto/shared/v1/errors_pb";
+import { PayloadSchema, MetadataSchema } from "../proto/shared/v2/types_pb";
+import { ErrorSchema } from "../proto/shared/v2/errors_pb";
 
 import type {
   InboundMessage,
@@ -32,8 +32,9 @@ import type {
   PresenceSnapshot as PresenceSnapshotPB,
   PresenceInfo as PresenceInfoPB,
   SurveyAnswer as SurveyAnswerPB,
-} from "../proto/client/v1/service_pb";
-import type { Payload, Metadata } from "../proto/shared/v1/types_pb";
+  Subscription,
+} from "../proto/client/v2/service_pb";
+import type { Payload, Metadata } from "../proto/shared/v2/types_pb";
 
 import type {
   SubscriptionSpec,
@@ -83,6 +84,33 @@ export function generateMessageId(): string {
 }
 
 /**
+ * Wire-level recovery hint for a subscription: a shared.v2 Position. The
+ * offset is optional; an unset offset is a deliberate "no hint", never
+ * "0 means from the start".
+ */
+export interface WireCursor {
+  /** Broker stream epoch the offset is interpreted in. */
+  streamEpoch: string;
+  /** Optional offset to resume after. */
+  offset?: bigint;
+}
+
+/**
+ * Input shape for building a wire Subscription: channel plus optional token,
+ * ephemeral, recover flag, recovery cursor and explicit fresh flag.
+ */
+export interface WireSubscriptionSpec {
+  channel: string;
+  ephemeral: boolean;
+  token: string;
+  recover?: boolean;
+  /** Recovery resume hint. Omit for a no-hint recover. */
+  cursor?: WireCursor;
+  /** Explicit from-the-start replay. */
+  fresh?: boolean;
+}
+
+/**
  * Create an InboundMessage with Connect envelope.
  */
 export function createConnectMessage(
@@ -90,7 +118,7 @@ export function createConnectMessage(
   clientType: string,
   token: string,
   version: string,
-  autoSubscribe: { channel: string; ephemeral: boolean; token: string; recover?: boolean; offset?: bigint; epoch?: string }[],
+  autoSubscribe: WireSubscriptionSpec[],
   sessionId?: string
 ): InboundMessage {
   const connect = create(ConnectSchema, {
@@ -100,20 +128,32 @@ export function createConnectMessage(
     version,
     sessionId: sessionId || "",
     subscriptions: autoSubscribe.map((sub) =>
-      create(SubscriptionSchema, {
-        channel: sub.channel,
-        ephemeral: sub.ephemeral,
-        token: sub.token,
-        recover: sub.recover || false,
-        offset: sub.offset || BigInt(0),
-        epoch: sub.epoch || "",
-      })
+      buildWireSubscription(sub)
     ),
   });
 
   return create(InboundMessageSchema, {
     id: generateMessageId(),
     envelope: { case: "connect", value: connect },
+  });
+}
+
+/**
+ * Build one client-v2 wire Subscription from a spec.
+ */
+function buildWireSubscription(spec: WireSubscriptionSpec): Subscription {
+  return create(SubscriptionSchema, {
+    channel: spec.channel,
+    ephemeral: spec.ephemeral,
+    token: spec.token || "",
+    recover: spec.recover === true,
+    cursor: spec.cursor
+      ? {
+          streamEpoch: spec.cursor.streamEpoch || "",
+          offset: spec.cursor.offset,
+        }
+      : undefined,
+    fresh: spec.fresh === true,
   });
 }
 
@@ -143,13 +183,18 @@ export function createSubscribeMessage(
   const subscribe = create(SubscribeSchema, {
     subscriptions: channels.map((ch) => {
       const spec = typeof ch === "string" ? { channel: ch } : ch;
-      return create(SubscriptionSchema, {
+      return buildWireSubscription({
         channel: spec.channel,
         ephemeral,
         token: spec.token || "",
         recover: spec.recover === true,
-        offset: spec.offset || BigInt(0),
-        epoch: spec.epoch || "",
+        cursor: spec.cursor
+          ? {
+              streamEpoch: spec.cursor.streamEpoch || "",
+              offset: spec.cursor.offset,
+            }
+          : undefined,
+        fresh: spec.fresh === true,
       });
     }),
   });
@@ -344,7 +389,9 @@ export function messageToReceived(msg: ProtoMessage): ReceivedMessage {
   return {
     id: msg.id,
     channel: msg.channel,
-    offset: msg.offset,
+    offset: msg.position?.offset ?? 0n,
+    offsetSet: msg.position?.offset !== undefined,
+    replay: msg.replay || false,
     message: payloadToMessage(msg.payload ?? emptyPayload, msg.id),
   };
 }
@@ -355,7 +402,7 @@ export function messageToReceived(msg: ProtoMessage): ReceivedMessage {
 export function parseOutboundMessage(
   msg: OutboundMessage
 ): {
-  type: "connected" | "error" | "subscribeAck" | "unsubscribeAck" | "publishAck" | "publication" | "rpcReply" | "pong" | "subRefreshAck" | "surveyRequest" | "surveyReply" | "presence" | "presenceEvent" | "ping" | "surveyResult";
+  type: "connected" | "error" | "subscribeAck" | "unsubscribeAck" | "publishAck" | "publication" | "rpcReply" | "pong" | "subRefreshAck" | "surveyRequest" | "surveyReply" | "presence" | "presenceEvent" | "ping" | "surveyResult" | "recoverComplete";
   data: any;
   id: string;
 } {
@@ -392,6 +439,8 @@ export function parseOutboundMessage(
     return { type: "ping", data: envelope.value, id };
   } else if (envelope.case === "surveyResult") {
     return { type: "surveyResult", data: envelope.value, id };
+  } else if (envelope.case === "recoverComplete") {
+    return { type: "recoverComplete", data: envelope.value, id };
   }
 
   return { type: "error", data: new Error("Unknown message type"), id };
@@ -471,5 +520,5 @@ export function extractRpcReply(reply: RpcReply): {
 
 // Re-export types that might be needed
 export { create };
-export type { InboundMessage, OutboundMessage, Message as ProtoMessage, Publication, Publish, RpcRequest, RpcReply } from "../proto/client/v1/service_pb";
-export type { Payload, Metadata } from "../proto/shared/v1/types_pb";
+export type { InboundMessage, OutboundMessage, Message as ProtoMessage, Publication, Publish, RpcRequest, RpcReply, Subscription } from "../proto/client/v2/service_pb";
+export type { Payload, Metadata } from "../proto/shared/v2/types_pb";

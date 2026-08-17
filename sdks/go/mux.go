@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
 // RPCHandlerFunc is the function signature for RPC handlers.
@@ -49,7 +49,7 @@ func (m *RPCMux) HandleRPC(ctx context.Context, req *RPCRequest) (*RPCResponse, 
 	handler, ok := m.handlers[req.Method]
 	if !ok {
 		return &RPCResponse{
-			Error: &sharedpb.Error{
+			Error: &sharedv2.Error{
 				Code:    "UNKNOWN_METHOD",
 				Type:    "rpc_error",
 				Message: fmt.Sprintf("Unknown method: %s", req.Method),

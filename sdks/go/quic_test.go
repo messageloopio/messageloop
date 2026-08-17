@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/messageloopio/messageloop/shared"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	"github.com/quic-go/quic-go"
 )
 

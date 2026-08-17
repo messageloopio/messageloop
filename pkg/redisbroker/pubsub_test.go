@@ -10,7 +10,7 @@ import (
 	"github.com/messageloopio/messageloop"
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/pkg/topics"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	"github.com/stretchr/testify/require"
 )
 

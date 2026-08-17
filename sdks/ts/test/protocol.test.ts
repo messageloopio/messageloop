@@ -1,5 +1,5 @@
 import { create } from "@bufbuild/protobuf";
-import { OutboundMessageSchema } from "../src/proto/client/v1/service_pb";
+import { OutboundMessageSchema } from "../src/proto/client/v2/service_pb";
 import { MessageLoopClient } from "../src/client/client";
 import { buildClientOptions } from "../src/client/options";
 import { createTextMessage } from "../src/message";
@@ -97,7 +97,7 @@ describe("B3-TS: subscription-level token", () => {
         case: "connected",
         value: {
           sessionId: "s",
-          epoch: "e",
+          streamEpoch: "e",
           resumed: false,
           subscriptions: [{ channel: "ch1" }],
         },
@@ -131,7 +131,7 @@ describe("B3-TS: publishWithAck", () => {
 
     const ack = create(OutboundMessageSchema, {
       id: sentId,
-      envelope: { case: "publishAck", value: { id: sentId, offset: 42n } },
+      envelope: { case: "publishAck", value: { id: sentId, position: { streamEpoch: "", offset: 42n } } },
     });
     (client as any).handleMessage(ack);
 
@@ -158,7 +158,7 @@ describe("B3-TS: publishWithAck", () => {
     expect(sent[0].envelope.value.transient).toBe(true);
     const ack = create(OutboundMessageSchema, {
       id: sent[0].id,
-      envelope: { case: "publishAck", value: { id: sent[0].id, offset: 1n } },
+      envelope: { case: "publishAck", value: { id: sent[0].id, position: { streamEpoch: "", offset: 1n } } },
     });
     (client as any).handleMessage(ack);
     await expect(p).resolves.toEqual({ id: sent[0].id, offset: 1n });

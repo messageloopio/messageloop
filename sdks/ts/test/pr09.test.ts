@@ -1,19 +1,22 @@
 // PR-09 TS SDK: recover, presence, client survey, and pong for server ping.
 //
-// Go/TS comparison table (PR-09 spec §3):
-// | 能力           | Go（PR-08）                              | TS（本 PR）                                            |
-// | 恢复订阅       | SubscribeWith(ch, WithRecover(off, epoch)) | subscribe({ channel, recover: true, offset, epoch }) |
-// | 恢复投递       | SubscribeAck.publications → OnMessage      | 同上 → onMessage / addMessageHandler                  |
-// | Presence 事件  | OnPresence                                | onPresence                                            |
-// | Presence 快照  | OnPresenceSnapshot                        | onPresenceSnapshot                                    |
-// | Presence 查询  | Presence(ctx, ch)                         | presence(ch): Promise<PresenceSnapshot>               |
-// | 发起 Survey    | Survey(ctx, ch, payload, timeout)         | survey(ch, payload, timeoutMs?): Promise<SurveyAnswer[]> |
-// | 应答 Survey    | OnSurvey / OnSurveyRequest                | onSurvey / onSurveyRequest                            |
-// | 服务端 Ping    | 同 id Inbound Pong + lastPong             | 同 id Pong + 清 pingTimeoutTimer                      |
-// | user_id        | metadata.entries["user_id"]               | 同                                                    |
+// Go/TS comparison table (PR-09 spec §3, updated for the v2 streamed
+// recovery contract):
+// | 能力           | Go（PR-08）                                   | TS（本 PR）                                                    |
+// | 恢复订阅       | SubscribeWith(ch, WithRecover(Position(ep,off))) | subscribe({ channel, recover: true, cursor: { streamEpoch, offset } }) |
+// | 从头恢复       | WithFresh()                                  | subscribe({ channel, recover: true, fresh: true })             |
+// | 恢复投递       | 流式 Publication(replay=true) + RecoverComplete | 同上 → onMessage / addMessageHandler                          |
+// | 游标          | RecoverComplete.position / live Message.position | 同上                                                          |
+// | Presence 事件  | OnPresence                                  | onPresence                                                    |
+// | Presence 快照  | OnPresenceSnapshot                          | onPresenceSnapshot (独立 Presence 信封)                        |
+// | Presence 查询  | Presence(ctx, ch)                           | presence(ch): Promise<PresenceSnapshot>                        |
+// | 发起 Survey    | Survey(ctx, ch, payload, timeout)           | survey(ch, payload, timeoutMs?): Promise<SurveyAnswer[]>       |
+// | 应答 Survey    | OnSurvey / OnSurveyRequest                  | onSurvey / onSurveyRequest                                    |
+// | 服务端 Ping    | 同 id Inbound Pong + lastPong               | 同 id Pong + 清 pingTimeoutTimer                               |
+// | user_id        | metadata.entries["user_id"]                 | 同                                                             |
 
 import { create } from "@bufbuild/protobuf";
-import { OutboundMessageSchema } from "../src/proto/client/v1/service_pb";
+import { OutboundMessageSchema } from "../src/proto/client/v2/service_pb";
 import { MessageLoopClient } from "../src/client/client";
 import { buildClientOptions } from "../src/client/options";
 import { createTextMessage } from "../src/message";
@@ -43,27 +46,26 @@ async function flush(): Promise<void> {
 }
 
 describe("PR-09: recover", () => {
-  it("subscribe with recover sends recover=true, offset, epoch", async () => {
+  it("subscribe with recover sends recover=true and the cursor", async () => {
     const client = connectedClient();
     const sent = (client as any).transport.send;
 
     await client.subscribe({
       channel: "ch1",
       recover: true,
-      offset: 7n,
-      epoch: "ep",
+      cursor: { streamEpoch: "ep", offset: 7n },
     });
 
     const sub = sent.mock.calls[0][0].envelope.value.subscriptions[0];
     expect(sub).toMatchObject({
       channel: "ch1",
       recover: true,
-      offset: 7n,
-      epoch: "ep",
+      cursor: { streamEpoch: "ep", offset: 7n },
     });
+    expect(sub.fresh).toBe(false);
   });
 
-  it("recover with 0n offset and empty epoch still sends recover=true", async () => {
+  it("no-hint recover (no cursor) still sends recover=true without fresh", async () => {
     const client = connectedClient();
     const sent = (client as any).transport.send;
 
@@ -73,9 +75,24 @@ describe("PR-09: recover", () => {
     expect(sub).toMatchObject({
       channel: "ch2",
       recover: true,
-      offset: 0n,
-      epoch: "",
     });
+    expect(sub.cursor).toBeUndefined();
+    expect(sub.fresh).toBe(false);
+  });
+
+  it("fresh: true marks an explicit from-the-start replay", async () => {
+    const client = connectedClient();
+    const sent = (client as any).transport.send;
+
+    await client.subscribe({ channel: "ch3", recover: true, fresh: true });
+
+    const sub = sent.mock.calls[0][0].envelope.value.subscriptions[0];
+    expect(sub).toMatchObject({
+      channel: "ch3",
+      recover: true,
+      fresh: true,
+    });
+    expect(sub.cursor).toBeUndefined();
   });
 
   it("plain string channels do not recover", async () => {
@@ -89,7 +106,78 @@ describe("PR-09: recover", () => {
     expect(sub.recover).toBe(false);
   });
 
-  it("subscribeAck publications reach onMessage and track offsets", async () => {
+  it("replay and live publications share one path; RecoverComplete writes the cursor", async () => {
+    const client = connectedClient();
+    const handler = jest.fn();
+    client.onMessage(handler);
+
+    // Replayed publication: delivered to the same handler, but the cursor
+    // must not advance mid-replay.
+    const replay = create(OutboundMessageSchema, {
+      envelope: {
+        case: "publication",
+        value: {
+          messages: [
+            {
+              id: "m1",
+              channel: "ch1",
+              replay: true,
+              position: { streamEpoch: "e", offset: 42n },
+              payload: {
+                contentType: "text/plain",
+                data: { case: "text", value: "recovered" },
+              },
+            },
+          ],
+        },
+      },
+    });
+    (client as any).handleMessage(replay);
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler.mock.calls[0][0]).toEqual([
+      expect.objectContaining({ id: "m1", channel: "ch1", offset: 42n }),
+    ]);
+    expect((client as any).channelOffsets.has("ch1")).toBe(false);
+
+    // RecoverComplete echoes the authoritative position.
+    const complete = create(OutboundMessageSchema, {
+      envelope: {
+        case: "recoverComplete",
+        value: { channel: "ch1", position: { streamEpoch: "e", offset: 42n } },
+      },
+    });
+    (client as any).handleMessage(complete);
+    expect((client as any).channelOffsets.get("ch1")).toBe(42n);
+
+    // A live publication hits the same handler and advances the cursor.
+    const live = create(OutboundMessageSchema, {
+      envelope: {
+        case: "publication",
+        value: {
+          messages: [
+            {
+              id: "m2",
+              channel: "ch1",
+              position: { streamEpoch: "e", offset: 43n },
+              payload: {
+                contentType: "text/plain",
+                data: { case: "text", value: "live" },
+              },
+            },
+          ],
+        },
+      },
+    });
+    (client as any).handleMessage(live);
+    expect(handler).toHaveBeenCalledTimes(2);
+    expect(handler.mock.calls[1][0]).toEqual([
+      expect.objectContaining({ id: "m2", channel: "ch1", offset: 43n }),
+    ]);
+    expect((client as any).channelOffsets.get("ch1")).toBe(43n);
+  });
+
+  it("subscribeAck carries no recovery batches; its presence snapshots dispatch", async () => {
     const client = connectedClient();
     const handler = jest.fn();
     client.onMessage(handler);
@@ -99,33 +187,12 @@ describe("PR-09: recover", () => {
         case: "subscribeAck",
         value: {
           subscriptions: [{ channel: "ch1" }],
-          publications: [
-            {
-              messages: [
-                {
-                  id: "m1",
-                  channel: "ch1",
-                  offset: 42n,
-                  payload: {
-                    contentType: "text/plain",
-                    data: { case: "text", value: "recovered" },
-                  },
-                },
-              ],
-            },
-          ],
-          // Empty batch (offset 0) must not wipe a known position.
-          recoverResults: [{ channel: "ch1", recovered: true, truncated: false, offset: 0n, epoch: "e" }],
         },
       },
     });
     (client as any).handleMessage(ack);
 
-    expect(handler).toHaveBeenCalledTimes(1);
-    expect(handler.mock.calls[0][0]).toEqual([
-      expect.objectContaining({ id: "m1", channel: "ch1", offset: 42n }),
-    ]);
-    expect((client as any).channelOffsets.get("ch1")).toBe(42n);
+    expect(handler).not.toHaveBeenCalled();
     expect(client.getSubscribedChannels()).toEqual(["ch1"]);
   });
 });
@@ -163,7 +230,7 @@ describe("PR-09: presence", () => {
     expect(event.info.connectedAt).toBe(1234567890n);
   });
 
-  it("presence snapshot on connected dispatches one onPresenceSnapshot", () => {
+  it("presence snapshot after connected dispatches one onPresenceSnapshot", () => {
     const client = connectedClient();
     const snapHandler = jest.fn();
     client.onPresenceSnapshot(snapHandler);
@@ -173,25 +240,29 @@ describe("PR-09: presence", () => {
         case: "connected",
         value: {
           sessionId: "s1",
-          epoch: "e1",
+          streamEpoch: "e1",
           resumed: true,
           subscriptions: [{ channel: "ch1" }],
-          recoverResults: [
-            { channel: "ch1", recovered: true, truncated: false, offset: 9n, epoch: "e1" },
-          ],
-          presence: [
-            {
-              channel: "ch1",
-              clients: [{ sessionId: "s1", userId: "u1", clientId: "c1", connectedAt: 1n }],
-              truncated: false,
-              occupancy: 1,
-            },
-          ],
         },
       },
     });
     (client as any).handleMessage(connected);
     (client as any).stopPingLoop();
+    expect(snapHandler).not.toHaveBeenCalled();
+
+    // v2: presence snapshots are separate Presence envelopes after Connected.
+    const presence = create(OutboundMessageSchema, {
+      envelope: {
+        case: "presence",
+        value: {
+          channel: "ch1",
+          clients: [{ sessionId: "s1", userId: "u1", clientId: "c1", connectedAt: 1n }],
+          truncated: false,
+          occupancy: 1,
+        },
+      },
+    });
+    (client as any).handleMessage(presence);
 
     expect(snapHandler).toHaveBeenCalledTimes(1);
     expect(snapHandler.mock.calls[0][0]).toMatchObject({
@@ -199,8 +270,18 @@ describe("PR-09: presence", () => {
       occupancy: 1,
       truncated: false,
     });
-    // Connected.recoverResults write back the cursor (Go parity).
-    expect((client as any).channelOffsets.get("ch1")).toBe(9n);
+    // The bare Connected must not touch the cursor.
+    expect((client as any).channelOffsets.has("ch1")).toBe(false);
+
+    // A RecoverComplete with an unset position never creates a cursor.
+    const unset = create(OutboundMessageSchema, {
+      envelope: {
+        case: "recoverComplete",
+        value: { channel: "ch1", position: { streamEpoch: "e1" } },
+      },
+    });
+    (client as any).handleMessage(unset);
+    expect((client as any).channelOffsets.has("ch1")).toBe(false);
   });
 
   it("presence snapshot on subscribeAck dispatches one onPresenceSnapshot", () => {
@@ -573,19 +654,20 @@ describe("PR-09: server ping", () => {
 });
 
 describe("PR-09: resubscribe after non-resumed reconnect", () => {
-  it("resubscribeAllChannels sends recover=true with stored offset and epoch", async () => {
+  it("resubscribeAllChannels sends recover=true with the stored cursor", async () => {
     const client = connectedClient();
     const sent = (client as any).transport.send;
     (client as any).connectionState = "reconnecting";
     (client as any).subscribedChannels = new Map([["ch1", "tok1"]]);
     (client as any).channelOffsets.set("ch1", 42n);
+    (client as any).epoch = "e1";
 
     const connected = create(OutboundMessageSchema, {
       envelope: {
         case: "connected",
         value: {
           sessionId: "s",
-          epoch: "e1",
+          streamEpoch: "e1",
           resumed: false,
           subscriptions: [{ channel: "ch1" }],
         },
@@ -598,14 +680,13 @@ describe("PR-09: resubscribe after non-resumed reconnect", () => {
       (c: any[]) => c[0].envelope?.case === "subscribe"
     );
     expect(subscribeMsg).toBeDefined();
-    expect(subscribeMsg[0].envelope.value.subscriptions).toEqual([
-      expect.objectContaining({
+    expect(subscribeMsg[0].envelope.value.subscriptions).toMatchObject([
+      {
         channel: "ch1",
         token: "tok1",
         recover: true,
-        offset: 42n,
-        epoch: "e1",
-      }),
+        cursor: { streamEpoch: "e1", offset: 42n },
+      },
     ]);
   });
 });

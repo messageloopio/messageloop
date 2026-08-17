@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/messageloopio/messageloop"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	serverpb "github.com/messageloopio/messageloop/shared/genproto/server/v1"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
 // TestClientSubscribeWithToken verifies WithSubscriptionToken flows into the
@@ -186,7 +186,7 @@ func TestClientPublishWithAckResolve(t *testing.T) {
 	trans.push(&clientpb.OutboundMessage{
 		Id: id,
 		Envelope: &clientpb.OutboundMessage_PublishAck{
-			PublishAck: &clientpb.PublishAck{Id: id, Offset: 42},
+			PublishAck: &clientpb.PublishAck{Id: id, Position: Position("", 42)},
 		},
 	})
 
@@ -414,7 +414,7 @@ func TestClientPublishWithAckCarriesToken(t *testing.T) {
 	trans.push(&clientpb.OutboundMessage{
 		Id: id,
 		Envelope: &clientpb.OutboundMessage_PublishAck{
-			PublishAck: &clientpb.PublishAck{Id: id, Offset: 7},
+			PublishAck: &clientpb.PublishAck{Id: id, Position: Position("", 7)},
 		},
 	})
 

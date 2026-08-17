@@ -135,7 +135,7 @@ PR-KA-B1 起内核对象是 `Session`（可恢复逻辑连接，`type Client = S
 | `Fence(reason)` | 被抢：撤本地订阅与 Hub 条目 + 关附件；**不** Leave、**不** Unbind；对已 Closed 幂等 |
 | `Detach(reason)` | 本机撕附件：只关附件、停 writer、丢队列；Session 留在 Hub；对非 Attached 是 no-op |
 
-**写队列**（挂在 Session 上，三条传输不再做第二层有界队列）：Control 深度 32 / Data 深度 256；下一帧优先 Control（按信封分类：Ping/Pong、各类 Ack、Connected、Error、SubRefreshAck 为 Control；Publication、PresenceEvent、Survey 为 Data）。`Send` 入队并等待该帧落线（调用方同步观察写结果）；Data/Control 满 → `Close(DisconnectSlowConsumer)`（3512）。错误映射：`io.EOF` / gRPC `Canceled`/`Unavailable` / WS close 1000/1001 → 3000（`peer_closed`，**不是** 3512）；写超时 → 3512；`ErrSessionFenced` → `Fence(DisconnectStale)`（3502）。gRPC 传输的 `sendCh` 深度为 1（仅作 handoff），不保留 64 深的第二缓冲。
+**写队列**（挂在 Session 上，三条传输不再做第二层有界队列）：Control 深度 32 / Data 深度 256；下一帧优先 Control（按信封分类：Ping/Pong、各类 Ack、Connected、RecoverComplete、Error、SubRefreshAck 为 Control；Publication、PresenceEvent、Survey 为 Data）。`Send` 入队并等待该帧落线（调用方同步观察写结果）；Data/Control 满 → `Close(DisconnectSlowConsumer)`（3512）。错误映射：`io.EOF` / gRPC `Canceled`/`Unavailable` / WS close 1000/1001 → 3000（`peer_closed`，**不是** 3512）；写超时 → 3512；`ErrSessionFenced` → `Fence(DisconnectStale)`（3502）。gRPC 传输的 `sendCh` 深度为 1（仅作 handoff），不保留 64 深的第二缓冲。
 
 **连接生命周期（`handleConnect`）**：
 
@@ -146,15 +146,15 @@ PR-KA-B1 起内核对象是 `Session`（可恢复逻辑连接，`type Client = S
 5. `AddClient` 注册 + `MarkMetricsCharged`，集群模式下同步会话状态（本机 resume 走 same-fence Bind，版本 +1 后仍是自己）。
 6. 通知代理 `OnConnected`。
 7. 处理 Connect 携带的订阅列表：先做订阅数上限检查（超限 `DisconnectChannelLimit`），逐频道 Authorizer/代理检查，`AddSubscription` + presence 登记 + 异步发布 join 事件。
-8. 消息恢复：`sub.Recover` 时以 `sub.Offset+1` 为起点调 `broker.History`；若 broker 有 epoch（`Epoch()`）且与客户端携带的 `sub.Epoch` 不一致（或客户端未携带），从 0（开头）恢复；恢复总量受 `MaxRecoveredPublications`（1000）封顶。全部结果随 `Connected` 信封返回（含 `Resumed` 与 `Epoch` 字段）。
+8. 消息恢复（B3 流式恢复）：先发**裸 `Connected`**（v2 无 publications / recover_results / presence 列表，presence 快照是独立 `Presence` 信封），再对每个 `recover=true` 的精确频道走统一 Replayer（`recover.go`）：只有 `sub.Fresh=true` 或 resume 时快照 epoch ≠ broker epoch（两边都非空）才从 0（开头）恢复；非 resume 且 cursor 带 offset → `since=offset+1`；cursor 未带 → 回退服务端已记录 delivered offset（有则 `since=off+1`），没有则 **Skip**。`broker.History` 以 `MaxRecoveredPublications`（1000，请求级配额、多频道共享）为限，逐条 `Publication(replay=true)` 经 `Session.Send` 落线（每条受 `MaxMessageSize` 约束），最后每频道一条 `RecoverComplete{channel, position, truncated, gap, gap_reason, error?}`（标 Control）。恢复失败**不撤订阅**（KD-9）。
 
 **入站消息路由（`handleMessage`）**：
 
 | 信封类型 | 处理函数 | 行为要点 |
 | --- | --- | --- |
 | `Connect` | `handleConnect` | 鉴权、恢复、初始订阅与恢复（见上） |
-| `Publish` | `handlePublish` | 未鉴权 → `DisconnectInvalidToken`；限速 → `RATE_LIMITED` 错误；静态 `Decide(Publish)` 后问代理 `PublishAcl`（代理允许不越过静态 deny）；Payload 的 Json/Binary/Text 变体统一转字节；成功回 `PublishAck`（含 broker 分配的 offset） |
-| `Subscribe` | `handleSubscribe` | 订阅数上限检查、逐频道 Authorizer/代理、Saga 提交、presence 登记 + join 事件、代理 `OnSubscribed` 通知，回 `SubscribeAck` |
+| `Publish` | `handlePublish` | 未鉴权 → `DisconnectInvalidToken`；限速 → `RATE_LIMITED` 错误；静态 `Decide(Publish)` 后问代理 `PublishAcl`（代理允许不越过静态 deny）；Payload 的 Json/Binary/Text 变体统一转字节；成功回 `PublishAck`（`position` 携带 broker 分配的 offset，transient/无历史时 offset 缺省） |
+| `Subscribe` | `handleSubscribe` | 订阅数上限检查、逐频道 Authorizer/代理、Saga 提交、presence 登记 + join 事件、代理 `OnSubscribed` 通知，先回裸 `SubscribeAck`（`recover` 状态 NONE/SKIPPED/PENDING，presence 快照仍随 Ack），再对 `recover=true` 频道流式恢复（同 Connect 的 Replayer） |
 | `RpcRequest` | `handleRPC` | 经 `node.ProxyRPC` 转发（详见 §3.7）；超时回 `RPC_TIMEOUT`；无匹配代理回 `NO_PROXY`（不再 echo）；代理错误回 `PROXY_ERROR` |
 | `Unsubscribe` | `handleUnsubscribe` | 移除订阅、presence 清理 + leave 事件、代理 `OnUnsubscribed` 通知 |
 | `Ping` | `handlePing` | 刷新活动时间，回 `Pong`；presence/集群状态刷新被节流（`pingClusterRefreshInterval` 10s，CAS 保证单次） |
@@ -190,7 +190,7 @@ PR-KA-B1 起内核对象是 `Session`（可恢复逻辑连接，`type Client = S
 
 **Redis 实现（pkg/redisbroker/redis.go）**：发布先 `XAdd` 写入 Redis Stream（前缀 `ml:stream:`，`StreamMaxLength` 默认 10000 条、`HistoryTTL` 默认 24h），从 Stream ID 解析出 offset，再经 Redis Pub/Sub（前缀 `ml:pubsub:`）实时分发。**实时订阅按 Interest 编译（A3，`interest.go` 的 `CompileInterest`）**：精确频道 → `SUBSCRIBE ml:pubsub:<ch>`；字面前缀 + 末尾 `*` → `PSUBSCRIBE ml:pubsub:<prefix>.*`；末尾 `**` → 额外 `SUBSCRIBE ml:pubsub:<prefix>`（零段情况）；其余 pattern（`*.room`、`im.*.tick`、裸 `*`/`**`）在 `Subscribe` 入口即被拒绝（`ErrPatternNotRoutable`），客户端收到 `PATTERN_NOT_ROUTABLE` 信封、不断连。**不存在默认的 `PSubscribe(ml:pubsub:*)`**：每条 pub/sub 连接只订阅控制频道 `ml:pubsub:__live__`（其 ack 关闭 `Ready()`）加上当前 Interest 的编译结果；Interest 增删经串行队列（`liveOps`，由 `runPubSub` 同 goroutine 消费）动态增删 Redis 订阅，重连后按当前 Interest 重建；收到消息后除 `interested()` 外还按段匹配（`MatchAfterCompile`）丢弃 Redis glob 的跨点过匹配（`im.room.*` 不会把 `im.room.a.b` 交给 handler）。断线以指数退避（1s 起、上限 30s）重连。`XADD` 成功后 `PUBLISH` 失败**只记日志、不 `XDel`**，对调用方仍返回 `(offset, nil)`（Publish 成功 = 日志已接受）；每次成功 `XADD` 后维护 `first_retained` 标记键（`ml:stream:retained:<ch>`，TTL 与 stream 相同）供 gap 检测。`History` 用 `XRangeN` 以包含起始 ID（`"ts-seq"`，`streamStartID`）读取，offset 编码为 `ts<<20|seq`（Redis Stream ID 的毫秒时间戳与序列号拼入 uint64），与内存实现同为 `offset >= sinceOffset` 语义，并按同一张 gap 判定表（§5）填 `HistoryPage`。
 
-**offset + epoch 语义**：offset 是频道内的单调序号（内存实现从 1 起，Redis 实现由 Stream ID 编码），客户端用它做断线续读；epoch 用于判断 offset 是否仍属于当前 broker 代际——epoch 不匹配（或客户端未携带）时视为 offset 无效，从历史开头恢复。两种实现的 epoch 来源不同：**内存 broker** 每进程实例启动时生成随机 UUID（`broker_memory.go:33`），重启即失效；**Redis broker** 的 epoch 存于固定键 `ml:broker:epoch`，首个启动节点经 `SETNX` 写入随机 UUID，集群共享、跨重启持久（`pkg/redisbroker/redis.go` 的 `initEpoch`），因此 Redis 部署下 epoch 校验跨节点、跨重启均可通过（详见[《分布式集群指南》](04-cluster.md) 第 4.4 节）。
+**offset + epoch 语义**：内部 History 仍是频道内单调 uint64 offset（内存实现从 1 起，Redis 实现由 Stream ID 编码），客户端用它做断线续读；只在进出线转换为 v2 `Position{stream_epoch, offset?}`。线语义（B3）：`Subscription.cursor`（Position，offset 可缺省）+ `Subscription.fresh`；**只有 `fresh=true` 或 resume 时 epoch 重置才从头**，`offset==0` / cursor 缺省**不是**从头（`cursor.offset` 缺省 = 无提示，服务端回退已记录 delivered offset，无记录则 Skip）。epoch 用于判断 offset 是否仍属于当前 broker 代际——epoch 不匹配（且两边都非空）时视为 offset 无效，从历史开头恢复。两种实现的 epoch 来源不同：**内存 broker** 每进程实例启动时生成随机 UUID（`broker_memory.go:33`），重启即失效；**Redis broker** 的 epoch 存于固定键 `ml:broker:epoch`，首个启动节点经 `SETNX` 写入随机 UUID，集群共享、跨重启持久（`pkg/redisbroker/redis.go` 的 `initEpoch`），因此 Redis 部署下 epoch 校验跨节点、跨重启均可通过（详见[《分布式集群指南》](04-cluster.md) 第 4.4 节）。
 
 ### 3.5 Presence（presence.go、presence_event.go）
 
@@ -346,8 +346,10 @@ Hub 的 `wcSubs` 记录每个通配符订阅（键 `sessionID:channel`），广�
   │                     │   临时连接变成读循环 shell，委托给旧会话对象
   │                     │── AddClient + MarkMetricsCharged（本机 resume 走 same-fence Bind）
   │                     │── 逐频道 Authorizer/代理 → AddSubscription(saga)
-  │                     │── broker.History(offset+1)（校验 Epoch）
-  │◄── Connected ───────┤      （Resumed=true, Publications=恢复的消息）
+  │                     │── 逐频道 History(offset+1)（epoch 重置则从头）
+  │◄── Connected ───────┤      （裸 Connected：Resumed=true, StreamEpoch, Subscriptions）
+  │◄── Publication×N ───┤      （replay=true，逐条 Send，受 MaxMessageSize 约束）
+  │◄── RecoverComplete ─┤      （每频道一条：position/truncated/gap/gap_reason/error）
   │                     │
   │   连接中断（网络）   │
   │                     │   旧附件读循环结束时:

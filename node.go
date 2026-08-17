@@ -13,8 +13,8 @@ import (
 	"github.com/lynx-go/x/log"
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/proxy"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/protobuf/proto"
 )
@@ -1032,7 +1032,7 @@ func (n *Node) buildClientSurveyResult(requestID, channel string, results []*Sur
 func (n *Node) surveyAnswerFor(result *SurveyResult) *clientpb.SurveyAnswer {
 	answer := &clientpb.SurveyAnswer{SessionId: result.SessionID}
 	if result.Error != nil {
-		answer.Error = &sharedpb.Error{
+		answer.Error = &sharedv2.Error{
 			Code:    "SURVEY_FAILED",
 			Type:    "survey_error",
 			Message: result.Error.Error(),
@@ -1044,20 +1044,20 @@ func (n *Node) surveyAnswerFor(result *SurveyResult) *clientpb.SurveyAnswer {
 		return answer
 	}
 	if len(result.Payload) > 0 {
-		answer.Payload = &sharedpb.Payload{
-			Data: &sharedpb.Payload_Binary{
+		answer.Payload = &sharedv2.Payload{
+			Data: &sharedv2.Payload_Binary{
 				Binary: append([]byte(nil), result.Payload...),
 			},
 		}
 	}
 	if sess := n.hub.LookupSession(result.SessionID); sess != nil && sess.UserID() != "" {
-		answer.Metadata = &sharedpb.Metadata{Entries: map[string]string{"user_id": sess.UserID()}}
+		answer.Metadata = &sharedv2.Metadata{Entries: map[string]string{"user_id": sess.UserID()}}
 	}
 	return answer
 }
 
-func surveyTooLargeError(message string) *sharedpb.Error {
-	return &sharedpb.Error{
+func surveyTooLargeError(message string) *sharedv2.Error {
+	return &sharedv2.Error{
 		Code:    "SURVEY_ANSWER_TOO_LARGE",
 		Type:    "survey_error",
 		Message: message,
@@ -1075,10 +1075,10 @@ func encodedSurveyResultSize(result *clientpb.SurveyResult) int {
 }
 
 func (n *Node) sendSurveyRequest(ctx context.Context, session *Client, survey *Survey) {
-	var payload *sharedpb.Payload
+	var payload *sharedv2.Payload
 	if len(survey.Payload()) > 0 {
-		payload = &sharedpb.Payload{
-			Data: &sharedpb.Payload_Binary{
+		payload = &sharedv2.Payload{
+			Data: &sharedv2.Payload_Binary{
 				Binary: survey.Payload(),
 			},
 		}
@@ -1367,7 +1367,7 @@ func (n *Node) onOccupancy(ch string, evt OccupancyEvent) error {
 	bySession[sid] = evt.Gen
 	n.occMu.Unlock()
 
-	n.deliverPresenceEvent(ch, evt.Event, sid)
+	n.deliverPresenceEvent(ch, evt.Event, evt.Gen, sid)
 	return nil
 }
 
@@ -1392,8 +1392,10 @@ func (n *Node) onSyntheticLeave(ctx context.Context, ch, sessionID string) {
 // ch: exact subscribers read from the channel's subShard (preserving the
 // ephemeral flag) plus wildcard subscribers from the matcher. Recipients are
 // deduplicated by session ID; ephemeral subscriptions and the excluded
-// session never receive the event. Delivery counts no MessagesDelivered.
-func (n *Node) deliverPresenceEvent(ch string, evt *clientpb.PresenceEvent, excludeSession string) {
+// session never receive the event. The emitted v2 PresenceEvent carries the
+// occupancy generation (B2/§4.4) so clients can order join/leave per channel.
+// Delivery counts no MessagesDelivered.
+func (n *Node) deliverPresenceEvent(ch string, evt *clientpb.PresenceEvent, gen uint64, excludeSession string) {
 	if evt == nil {
 		return
 	}
@@ -1401,6 +1403,10 @@ func (n *Node) deliverPresenceEvent(ch string, evt *clientpb.PresenceEvent, excl
 	if len(recipients) == 0 {
 		return
 	}
+
+	// The occupancy generation travels with the live event: consumers on the
+	// same channel deduplicate join/leave by it (OccupancyGen, not offset).
+	evt.Gen = gen
 
 	out := MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_PresenceEvent{PresenceEvent: evt}

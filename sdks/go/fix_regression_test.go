@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

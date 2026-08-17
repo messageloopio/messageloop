@@ -9,8 +9,9 @@ import (
 
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/proxy"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
@@ -910,7 +911,7 @@ func TestNode_ClusterPublishCommand_MessagesDeliveredMetric(t *testing.T) {
 	client.ForceTestIDs("sess-delivered", "user-delivered", "client-delivered")
 	require.NoError(t, node.AddClient(client))
 
-	msg := &clientpb.Message{Id: "m-1", Channel: "x", Payload: &sharedpb.Payload{Data: &sharedpb.Payload_Text{Text: "hi"}}}
+	msg := &clientpb.Message{Id: "m-1", Channel: "x", Payload: &sharedv2.Payload{Data: &sharedv2.Payload_Text{Text: "hi"}}}
 	ok, err := node.PublishToSession(context.Background(), "sess-delivered", msg)
 	require.NoError(t, err)
 	require.True(t, ok)

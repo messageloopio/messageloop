@@ -1,6 +1,6 @@
 import { create } from "@bufbuild/protobuf";
-import { PayloadSchema } from "../proto/shared/v1/types_pb";
-import type { Payload } from "../proto/shared/v1/types_pb";
+import { PayloadSchema } from "../proto/shared/v2/types_pb";
+import type { Payload } from "../proto/shared/v2/types_pb";
 
 /**
  * Data type discriminator
@@ -301,8 +301,15 @@ export interface ReceivedMessage {
   id: string;
   /** Channel the message was published to */
   channel: string;
-  /** Message offset in the channel */
+  /**
+   * Message offset in the channel; 0n with offsetSet false when the wire
+   * position carried no offset.
+   */
   offset: bigint;
+  /** Whether the wire position carried an offset. */
+  offsetSet: boolean;
+  /** True when the message was delivered by a recovery replay. */
+  replay: boolean;
   /** The decoded message */
   message: Message;
 }
@@ -313,13 +320,16 @@ export interface ReceivedMessage {
 export function protoToReceivedMessage(msg: {
   id: string;
   channel: string;
-  offset: bigint;
+  position?: { streamEpoch: string; offset?: bigint };
+  replay?: boolean;
   payload?: Payload;
 }): ReceivedMessage {
   return {
     id: msg.id,
     channel: msg.channel,
-    offset: msg.offset,
+    offset: msg.position?.offset ?? 0n,
+    offsetSet: msg.position?.offset !== undefined,
+    replay: msg.replay || false,
     message: payloadToMessage(msg.payload || null as any, msg.id),
   };
 }

@@ -7,9 +7,10 @@ import (
 
 	"github.com/lynx-go/x/log"
 	"github.com/messageloopio/messageloop"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	serverpb "github.com/messageloopio/messageloop/shared/genproto/server/v1"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -86,11 +87,12 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverpb.PublishRe
 		// with every user's expanded sessions.
 		for _, sessionID := range h.unionSessions(ctx, dest.Sessions, dest.Users, "publish") {
 			attempted++
-			// Create OutboundMessage with Payload
+			// The session now speaks client.v2: bridge the admin's shared.v1
+			// payload into the v2 wire payload for the targeted session.
 			msg := &clientpb.Message{
 				Channel: "", // Session-based, no channel
 				Id:      pub.Id,
-				Payload: pub.Payload, // sharedpb.Payload is same type
+				Payload: adminPayloadV2(pub.Payload),
 			}
 
 			ok, err := h.node.PublishToSession(ctx, sessionID, msg)
@@ -483,6 +485,25 @@ func (h *apiServiceHandler) GetChannels(ctx context.Context, req *serverpb.GetCh
 	}
 
 	return &serverpb.GetChannelsResponse{Channels: channels}, nil
+}
+
+// adminPayloadV2 bridges an admin (shared.v1) payload into the client-v2
+// wire payload delivered to a targeted session. The oneof variants are the
+// same protobuf structs; only the enclosing package differs.
+func adminPayloadV2(p *sharedpb.Payload) *sharedv2.Payload {
+	if p == nil {
+		return nil
+	}
+	out := &sharedv2.Payload{ContentType: p.GetContentType()}
+	switch d := p.Data.(type) {
+	case *sharedpb.Payload_Json:
+		out.Data = &sharedv2.Payload_Json{Json: d.Json}
+	case *sharedpb.Payload_Binary:
+		out.Data = &sharedv2.Payload_Binary{Binary: d.Binary}
+	case *sharedpb.Payload_Text:
+		out.Data = &sharedv2.Payload_Text{Text: d.Text}
+	}
+	return out
 }
 
 func payloadBytes(payload *sharedpb.Payload) ([]byte, error) {

@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/messageloopio/messageloop/config"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
@@ -276,7 +276,9 @@ func TestHandlePublish_PolicyForcesTransient(t *testing.T) {
 	pubAck := ack.GetPublishAck()
 	require.NotNil(t, pubAck, "envelope must be PublishAck")
 	assert.Equal(t, "pub-1", pubAck.GetId())
-	assert.Equal(t, uint64(0), pubAck.GetOffset())
+	off, set := posOffset(pubAck.GetPosition())
+	assert.False(t, set, "transient publish must ack with an unset position")
+	assert.Equal(t, uint64(0), off)
 
 	// Nothing written to history.
 	page, err := node.Broker().History("game.tick.fps", 0, 0)

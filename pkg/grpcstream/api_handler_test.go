@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/messageloopio/messageloop"
 	"github.com/messageloopio/messageloop/config"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	serverpb "github.com/messageloopio/messageloop/shared/genproto/server/v1"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	"github.com/stretchr/testify/require"

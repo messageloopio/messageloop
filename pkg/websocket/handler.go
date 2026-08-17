@@ -7,8 +7,8 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/lynx-go/x/log"
 	"github.com/messageloopio/messageloop"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
 type Handler struct {

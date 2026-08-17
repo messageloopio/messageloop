@@ -14,7 +14,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/lynx-go/x/log"
 	"github.com/messageloopio/messageloop/proxy"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	"golang.org/x/time/rate"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -685,19 +685,16 @@ func isPeerClosedError(err error) bool {
 	return code == codes.Canceled || code == codes.Unavailable
 }
 
-// isConnectedEnvelope reports whether msg is the Connected envelope (the
-// pre-B3 recovery batch carrier; see the outbound size-cap exemption).
-func isConnectedEnvelope(msg proto.Message) bool {
-	out, ok := msg.(*clientpb.OutboundMessage)
-	if !ok {
-		return false
-	}
-	_, ok = out.Envelope.(*clientpb.OutboundMessage_Connected)
-	return ok
-}
+// isConnectedEnvelope was the pre-B3 recovery batch carrier exemption
+// (the Connected envelope carried up to 1000 recovered publications in one
+// frame). B3 streams recovery, so the exemption — and this predicate — are
+// gone: every outbound frame honors MaxMessageSize.
 
 // outboundFrameClass reports whether the outbound envelope is a Control
 // frame. Classification is by envelope, never by payload shape (§7).
+// RecoverComplete is Control: the per-frame replay publications have already
+// landed on the wire one by one, so a Control Complete cannot reorder ahead
+// of them (§4.3).
 func outboundFrameClass(msg proto.Message) bool {
 	out, ok := msg.(*clientpb.OutboundMessage)
 	if !ok {
@@ -710,6 +707,7 @@ func outboundFrameClass(msg proto.Message) bool {
 		*clientpb.OutboundMessage_SubscribeAck,
 		*clientpb.OutboundMessage_UnsubscribeAck,
 		*clientpb.OutboundMessage_Connected,
+		*clientpb.OutboundMessage_RecoverComplete,
 		*clientpb.OutboundMessage_Error,
 		*clientpb.OutboundMessage_SubRefreshAck:
 		return true
@@ -744,11 +742,10 @@ func (s *Session) enqueue(ctx context.Context, msg proto.Message) error {
 	if err != nil {
 		return err
 	}
-	// The outbound frame cap applies per queue frame. The Connected envelope
-	// is exempt: it still carries the recovery batch (up to 1000 publications
-	// in one frame) until the streaming recovery of B3 splits it into
-	// RecoverComplete-prefixed frames.
-	if max := s.node.MaxMessageSize(); max > 0 && len(*buf) > max && !isConnectedEnvelope(msg) {
+	// The outbound frame cap applies per queue frame. B3 streams recovery as
+	// single-message replay frames, so there is no Connected batch exemption
+	// anymore: every frame, Connected included, honors MaxMessageSize (§4.3).
+	if max := s.node.MaxMessageSize(); max > 0 && len(*buf) > max {
 		return ErrOutboundTooLarge
 	}
 	frame := &queuedFrame{

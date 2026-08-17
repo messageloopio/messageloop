@@ -100,13 +100,26 @@ client.OnError(func(err error) {
 
 ## 恢复订阅
 
-`SubscribeWith(channel, messageloopgo.WithRecover(offset, epoch))`：从指定 offset 恢复订阅，恢复消息随 `SubscribeAck.publications` 走普通 `OnMessage` 路径。传 `0` / `""` 仍发送 `recover=true`。
+恢复走流式：Connect / Subscribe 先收到 Ack，再按频道收到 `replay=true` 的 `Publication`（与 live 消息走同一条 `OnMessage` 路径），最后收到 `RecoverComplete`。游标（用于下次重连）只从 `RecoverComplete.position` 与 live `Message.position` 更新，恢复放心用 `Position(epoch, lastOffset)` 构造：
 
 ```go
-if err := client.SubscribeWith("chat.recover", messageloopgo.WithRecover(42, "ep")); err != nil {
+// 从已知 offset 之后继续（cursor 是 resume hint）
+if err := client.SubscribeWith("chat.recover", messageloopgo.WithRecover(messageloopgo.Position("ep", 42))); err != nil {
+    panic(err)
+}
+
+// 无提示恢复：recover=true，不带 cursor，服务端从自身记录的 delivered 位置继续（无则 skip）
+if err := client.SubscribeWith("chat.nohint", messageloopgo.WithRecover(nil)); err != nil {
+    panic(err)
+}
+
+// 显式从头：fresh=true，重放整个历史
+if err := client.SubscribeWith("chat.fresh", messageloopgo.WithFresh()); err != nil {
     panic(err)
 }
 ```
+
+没有「offset 0 = 从头」：需要从头就用 `WithFresh()`。
 
 ## Presence
 
@@ -116,7 +129,7 @@ client.OnPresenceSnapshot(func(snap messageloopgo.PresenceSnapshot) { ... })    
 snap, err := client.Presence(ctx, "room.x")                                            // 主动查询
 ```
 
-`Connected.presence` / `SubscribeAck.presence` 快照在状态写回后触发 `OnPresenceSnapshot`；`Presence(ctx, channel)` 返回同 id 快照并再触发一次该回调。
+Connect 后的 presence 快照是独立的 `Presence` 信封；`SubscribeAck.presence` 快照在状态写回后触发 `OnPresenceSnapshot`；`Presence(ctx, channel)` 返回同 id 快照并再触发一次该回调。
 
 ## Survey
 

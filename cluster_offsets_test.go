@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/messageloopio/messageloop/config"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -246,8 +246,8 @@ func remoteResumeTestNode(t *testing.T, snapshot *ClusterSessionSnapshot, histor
 	return node
 }
 
-// connectOffsets returns the offsets of the Connected envelope's recovered
-// publications.
+// connectOffsets returns the offsets of the replayed publications of a remote
+// resume Connect, read from the full replay stream.
 func connectOffsets(t *testing.T, node *Node, transport *capturingTransport, clientOffset uint64, clientEpoch string) []uint64 {
 	t.Helper()
 	ctx := context.Background()
@@ -262,24 +262,13 @@ func connectOffsets(t *testing.T, node *Node, transport *capturingTransport, cli
 				Token:     "t",
 				SessionId: "sess-off-resume",
 				Subscriptions: []*clientpb.Subscription{
-					{Channel: "off.news", Recover: true, Offset: clientOffset, Epoch: clientEpoch},
+					{Channel: "off.news", Recover: true, Cursor: cursorOf(clientEpoch, clientOffset)},
 				},
 			},
 		},
 	}
 	require.NoError(t, client.HandleMessage(ctx, msg))
-
-	var out clientpb.OutboundMessage
-	require.NoError(t, JSONMarshaler{}.Unmarshal(transport.getLastMessage(), &out))
-	connected := out.GetConnected()
-	require.NotNil(t, connected)
-	var offsets []uint64
-	for _, pub := range connected.GetPublications() {
-		for _, m := range pub.GetMessages() {
-			offsets = append(offsets, m.GetOffset())
-		}
-	}
-	return offsets
+	return publicationOffsets(replayPublications(outboundMessages(t, transport)))
 }
 
 // TestClient_RemoteResume_ServerOffsetWinsOverClientOffset verifies that a

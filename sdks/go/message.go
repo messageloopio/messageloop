@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -258,8 +258,8 @@ func (m *Message) DataAs(out any) error {
 }
 
 // ToPayload converts Message to protobuf Payload.
-func (m *Message) ToPayload() (*sharedpb.Payload, error) {
-	payload := &sharedpb.Payload{
+func (m *Message) ToPayload() (*sharedv2.Payload, error) {
+	payload := &sharedv2.Payload{
 		ContentType: m.Data.contentType,
 	}
 
@@ -268,18 +268,18 @@ func (m *Message) ToPayload() (*sharedpb.Payload, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert JSON to struct: %w", err)
 		}
-		payload.Data = &sharedpb.Payload_Json{Json: s}
+		payload.Data = &sharedv2.Payload_Json{Json: s}
 	} else if m.Data.isBinary() {
-		payload.Data = &sharedpb.Payload_Binary{Binary: m.Data.AsBinary()}
+		payload.Data = &sharedv2.Payload_Binary{Binary: m.Data.AsBinary()}
 	} else if m.Data.isText() {
-		payload.Data = &sharedpb.Payload_Text{Text: m.Data.AsText()}
+		payload.Data = &sharedv2.Payload_Text{Text: m.Data.AsText()}
 	}
 
 	return payload, nil
 }
 
 // PayloadToMessage converts protobuf Payload to Message.
-func PayloadToMessage(payload *sharedpb.Payload, id string) *Message {
+func PayloadToMessage(payload *sharedv2.Payload, id string) *Message {
 	msg := NewMessage("messageloop.message")
 	if id != "" {
 		msg.ID = id
@@ -292,17 +292,17 @@ func PayloadToMessage(payload *sharedpb.Payload, id string) *Message {
 	msg.Data.contentType = payload.GetContentType()
 
 	switch d := payload.GetData().(type) {
-	case *sharedpb.Payload_Json:
+	case *sharedv2.Payload_Json:
 		msg.Data.value = d.Json.AsMap()
 		if msg.Data.contentType == "" {
 			msg.Data.contentType = "application/json"
 		}
-	case *sharedpb.Payload_Binary:
+	case *sharedv2.Payload_Binary:
 		msg.Data.value = d.Binary
 		if msg.Data.contentType == "" {
 			msg.Data.contentType = "application/octet-stream"
 		}
-	case *sharedpb.Payload_Text:
+	case *sharedv2.Payload_Text:
 		msg.Data.value = d.Text
 		if msg.Data.contentType == "" {
 			msg.Data.contentType = "text/plain"
@@ -312,36 +312,57 @@ func PayloadToMessage(payload *sharedpb.Payload, id string) *Message {
 	return msg
 }
 
+// posOffset returns the offset carried by a v2 Position and whether it was
+// set. An unset offset (nil) is a deliberate "no hint" and is never treated
+// as 0-means-start.
+func posOffset(p *sharedv2.Position) (uint64, bool) {
+	if p == nil || p.Offset == nil {
+		return 0, false
+	}
+	return p.GetOffset(), true
+}
+
+// Position builds a v2 Position with a set offset. Use it with WithRecover to
+// resume a subscription from a known point: for example
+// WithRecover(Position(epoch, lastSeenOffset)). A nil cursor passed to
+// WithRecover is a "no hint" recover.
+func Position(streamEpoch string, offset uint64) *sharedv2.Position {
+	return &sharedv2.Position{StreamEpoch: streamEpoch, Offset: &offset}
+}
+
 // ReceivedMessage represents a message received from a subscribed channel.
 type ReceivedMessage struct {
 	// ID is the unique message identifier
 	ID string
 	// Channel is the channel the message was published to
 	Channel string
-	// Offset is the message offset in the channel
-	Offset uint64
+	// Offset is the message offset in the channel; 0 with OffsetSet false when
+	// the wire position carried no offset
+	Offset    uint64
+	OffsetSet bool
+	// Position is the authoritative wire position of the message
+	Position *sharedv2.Position
+	// Replay is true for messages delivered by a recovery replay rather than
+	// in real time
+	Replay bool
 	// Message is the decoded message
 	Message *Message
 }
 
-// wrapPublicationToMessages converts a protobuf Publication to a slice of ReceivedMessage.
-func wrapPublicationToMessages(pub *clientpb.Publication) []*Message {
-	if pub == nil {
+// messageFromEnv converts one client-v2 Message envelope into the SDK Message
+// type, tagging the channel and (when set) the position offset in metadata.
+// Replay and live messages share this single consumer path (§5).
+func messageFromEnv(env *clientpb.Message) *Message {
+	if env == nil {
 		return nil
 	}
-	messages := make([]*Message, 0, len(pub.GetMessages()))
-	for _, env := range pub.GetMessages() {
-		if env == nil {
-			continue
-		}
-		msg := PayloadToMessage(env.GetPayload(), env.GetId())
-		msg.Type = "messageloop.message"
-		// Store channel and offset in metadata
-		msg.SetMetadata("channel", env.GetChannel())
-		msg.SetMetadata("offset", fmt.Sprintf("%d", env.GetOffset()))
-		messages = append(messages, msg)
+	msg := PayloadToMessage(env.GetPayload(), env.GetId())
+	msg.Type = "messageloop.message"
+	msg.SetMetadata("channel", env.GetChannel())
+	if off, set := posOffset(env.GetPosition()); set {
+		msg.SetMetadata("offset", fmt.Sprintf("%d", off))
 	}
-	return messages
+	return msg
 }
 
 // String returns a string representation of the message for debugging.

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	"google.golang.org/protobuf/proto"
 )
 

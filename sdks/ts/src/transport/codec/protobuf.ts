@@ -1,8 +1,8 @@
 import { fromBinary, toBinary } from "@bufbuild/protobuf";
-import { InboundMessage, InboundMessageSchema, OutboundMessage, OutboundMessageSchema } from "../../proto/client/v1/service_pb";
+import { InboundMessage, InboundMessageSchema, OutboundMessage, OutboundMessageSchema } from "../../proto/client/v2/service_pb";
 import type { Codec } from "./codec";
 
-const INBOUND_TYPE = "messageloop.client.v1.InboundMessage";
+const INBOUND_TYPE = "messageloop.client.v2.InboundMessage";
 
 /**
  * Protobuf codec implementation.

@@ -7,7 +7,7 @@ A TypeScript SDK for MessageLoop, supporting Node.js and browsers over WebSocket
 - WebSocket client for Node.js and browsers
 - JSON and protobuf encoding
 - Channel pub/sub and RPC
-- Per-channel subscription tokens and message recovery (`recover` + offset/epoch)
+- Per-channel subscription tokens and streamed message recovery (`recover` + `cursor`/`fresh`)
 - Presence: `onPresence` events, `onPresenceSnapshot`, and `presence(channel)` queries
 - Client-initiated surveys (`survey`) and survey answering (`onSurvey` / `onSurveyRequest`)
 - Server-initiated Ping answered with a same-id Pong
@@ -94,10 +94,15 @@ await client.close();
 
 - `close()` - Close the connection
 - `subscribe(...channels)` - Subscribe to channels; each argument is a channel
-  name or `{ channel, token?, recover?, offset?, epoch? }`. With `recover:
-  true` the server replays messages published after `offset` (in `epoch`)
-  through the `SubscribeAck` publications, delivered via `onMessage` /
-  `addMessageHandler` (Go SDK `WithRecover` parity).
+  name or `{ channel, token?, recover?, cursor?, fresh? }`. With `recover:
+  true` the server streams the channel history as `Publication` envelopes with
+  `replay=true` (delivered via the same `onMessage` / `addMessageHandler` path
+  as live messages), followed by a `recover_complete` echoing the
+  authoritative position. `cursor: { streamEpoch, offset }` is the resume
+  hint; omitting it is a no-hint recover (the server resumes from its own
+  record or skips). There is no "offset 0 means from the start": use
+  `fresh: true` for an explicit from-the-start replay (Go SDK `WithRecover` /
+  `WithFresh` parity).
 - `unsubscribe(...channels)` - Unsubscribe from channels (same argument form)
 - `publish(channel, message)` - Publish a message to a channel (fire-and-forget)
 - `publishWithAck(channel, message, options?)` - Publish and await the server

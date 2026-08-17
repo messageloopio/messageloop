@@ -1,5 +1,5 @@
 import { create } from "@bufbuild/protobuf";
-import { InboundMessageSchema } from "../src/proto/client/v1/service_pb";
+import { InboundMessageSchema } from "../src/proto/client/v2/service_pb";
 import { JSONCodec, jsonCodec, ProtobufCodec, protobufCodec } from "../src/transport/codec";
 
 describe("Codec", () => {
@@ -49,11 +49,11 @@ describe("Codec", () => {
     });
 
     it("decodes connected with snake_case fields", () => {
-      const wire = JSON.stringify({ connected: { session_id: "s1", epoch: "e1", resumed: false } });
+      const wire = JSON.stringify({ connected: { session_id: "s1", stream_epoch: "e1", resumed: false } });
       const decoded = codec.decode(wire) as any;
       expect(decoded.envelope.case).toBe("connected");
       expect(decoded.envelope.value.sessionId).toBe("s1");
-      expect(decoded.envelope.value.epoch).toBe("e1");
+      expect(decoded.envelope.value.streamEpoch).toBe("e1");
     });
 
     it("decodes survey_reply", () => {
@@ -65,11 +65,11 @@ describe("Codec", () => {
     it("parses server golden connected wire payload", () => {
       // Golden sample produced by the server's ProtoJSONMarshaler
       // (shared/marshaler.go, UseProtoNames: true).
-      const golden = { id: "msg-1", time: "1700000000000", connected: { session_id: "s1", epoch: "e1" } };
+      const golden = { id: "msg-1", time: "1700000000000", connected: { session_id: "s1", stream_epoch: "e1" } };
       const decoded = codec.decode(JSON.stringify(golden)) as any;
       expect(decoded.envelope.case).toBe("connected");
       expect(decoded.envelope.value.sessionId).toBe("s1");
-      expect(decoded.envelope.value.epoch).toBe("e1");
+      expect(decoded.envelope.value.streamEpoch).toBe("e1");
     });
 
     it("parses server golden publication wire payload", () => {
@@ -83,7 +83,7 @@ describe("Codec", () => {
             {
               id: "chat-42",
               channel: "chat",
-              offset: "42",
+              position: { stream_epoch: "e1", offset: "42" },
               payload: { content_type: "text/plain", text: "hello" },
             },
           ],
@@ -94,7 +94,7 @@ describe("Codec", () => {
       const m = decoded.envelope.value.messages[0];
       expect(m.id).toBe("chat-42");
       expect(m.channel).toBe("chat");
-      expect(m.offset.toString()).toBe("42");
+      expect(m.position.offset.toString()).toBe("42");
       expect(m.payload.contentType).toBe("text/plain");
       expect(m.payload.data.case).toBe("text");
       expect(m.payload.data.value).toBe("hello");

@@ -12,7 +12,7 @@ import (
 
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/pkg/topics"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
@@ -302,8 +302,9 @@ func TestPresence_SnapshotTruncated(t *testing.T) {
 }
 
 // TestPresence_ConnectedSnapshotFilled verifies §9.9: a Connect carrying
-// subscriptions returns one presence snapshot per tracked channel in
-// connected.presence, while the PR-03 recovery fields stay intact.
+// subscriptions returns one presence snapshot per tracked channel as a
+// standalone presence envelope right after Connection (client.v2 has no
+// presence list on Connected, so snapshots ride their own envelope).
 func TestPresence_ConnectedSnapshotFilled(t *testing.T) {
 	ctx := context.Background()
 	node := NewNode(nil)
@@ -324,23 +325,23 @@ func TestPresence_ConnectedSnapshotFilled(t *testing.T) {
 	}
 	require.NoError(t, client.HandleMessage(ctx, connectMsg))
 
-	var connected *clientpb.Connected
-	for i := 0; i < transport.getMessageCount(); i++ {
-		var out clientpb.OutboundMessage
-		require.NoError(t, JSONMarshaler{}.Unmarshal(transport.getMessage(i), &out))
-		if got := out.GetConnected(); got != nil {
-			connected = got
+	msgs := outboundMessages(t, transport)
+	// The first frame is the bare Connected (no presence embedded).
+	require.NotNil(t, msgs[0].GetConnected())
+	require.Len(t, msgs[0].GetConnected().GetSubscriptions(), 1)
+
+	var snapshots []*clientpb.PresenceSnapshot
+	for _, m := range msgs {
+		if s := m.GetPresence(); s != nil {
+			snapshots = append(snapshots, s)
 		}
 	}
-	require.NotNil(t, connected)
-	require.Len(t, connected.GetPresence(), 1, "connected.presence must carry the tracked channel snapshot")
-	require.Equal(t, ch, connected.GetPresence()[0].GetChannel())
-	require.Equal(t, int32(1), connected.GetPresence()[0].GetOccupancy())
-	require.Equal(t, 1, len(connected.GetPresence()[0].GetClients()))
-	require.Equal(t, client.SessionID(), connected.GetPresence()[0].GetClients()[0].GetSessionId())
-	// PR-03 recovery fields remain present.
-	require.NotNil(t, connected.GetRecoverResults())
-	require.Equal(t, connected.GetSessionId(), client.SessionID())
+	require.Len(t, snapshots, 1, "a tracked channel must deliver one presence snapshot envelope")
+	require.Equal(t, ch, snapshots[0].GetChannel())
+	require.Equal(t, int32(1), snapshots[0].GetOccupancy())
+	require.Equal(t, 1, len(snapshots[0].GetClients()))
+	require.Equal(t, client.SessionID(), snapshots[0].GetClients()[0].GetSessionId())
+	require.Equal(t, msgs[0].GetConnected().GetSessionId(), client.SessionID())
 }
 
 // countingBroker records every PublishTransient / PublishOccupancy channel

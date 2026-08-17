@@ -1,5 +1,5 @@
-import type { OutboundMessage } from "../proto/client/v1/service_pb";
-import type { SurveyRequest } from "../proto/client/v1/service_pb";
+import type { OutboundMessage } from "../proto/client/v2/service_pb";
+import type { SurveyRequest } from "../proto/client/v2/service_pb";
 import type { ReceivedMessage, Message } from "../message";
 import type { ChannelOrSpec } from "../message";
 import type { Transport } from "../transport/transport";
@@ -283,7 +283,7 @@ export class MessageLoopClient implements IClient {
     switch (parsed.type) {
       case "connected": {
         this.sessionId = parsed.data.sessionId || null;
-        this.epoch = parsed.data.epoch || "";
+        this.epoch = parsed.data.streamEpoch || "";
         const resumed = parsed.data.resumed || false;
         this.isConnectedFlag = true;
         this.reconnectAttempts = 0;
@@ -315,21 +315,10 @@ export class MessageLoopClient implements IClient {
           serverSubs.map((sub) => [sub.channel, sub.token])
         );
 
-        // Deliver recovery messages carried in Connected.publications and
-        // update per-channel offsets so the next reconnect resumes past them.
-        for (const pub of parsed.data.publications || []) {
-          this.deliverMessages(pub.messages || []);
-        }
-
-        // Recover results echo the per-channel cursor: keep it so a reconnect
-        // resumes from the server-confirmed position.
-        this.applyRecoverResults(parsed.data.recoverResults);
-
-        // Presence snapshots ride the Connected message; dispatch one
-        // onPresenceSnapshot per entry, after the subscription write-back.
-        for (const snap of parsed.data.presence || []) {
-          this.dispatchPresenceSnapshot(presenceSnapshotFromPB(snap));
-        }
+        // v2 delivers no recovery batches on Connected: any recovery replay
+        // arrives as streamed Publication envelopes (replay=true) followed by
+        // one RecoverComplete per channel after the bare Connected frame.
+        // Presence snapshots ride separate Presence envelopes.
 
         // Update connection state
         const wasReconnecting = this.connectionState === "reconnecting";
@@ -372,20 +361,10 @@ export class MessageLoopClient implements IClient {
           this.subscribedChannels.set(sub.channel, sub.token);
         }
 
-        // Recovered messages take the same delivery path as Connected
-        // publications: onMessage/addMessageHandler plus per-message offset
-        // tracking.
-        for (const pub of parsed.data.publications || []) {
-          this.deliverMessages(pub.messages || []);
-        }
-
-        // Recover results echo the per-channel cursor: keep it so a reconnect
-        // resumes from the server-confirmed position. An empty batch (offset
-        // 0) must not wipe a known position.
-        this.applyRecoverResults(parsed.data.recoverResults);
-
-        // Presence snapshots ride the subscribe ack; dispatch after the
-        // subscription write-back above.
+        // v2 delivers no recovery batches on SubscribeAck: the per-channel
+        // replay stream (Publication replay=true + RecoverComplete) follows
+        // the bare ack. Presence snapshots still ride the ack; dispatch them
+        // after the subscription write-back above.
         for (const snap of parsed.data.presence || []) {
           this.dispatchPresenceSnapshot(presenceSnapshotFromPB(snap));
         }
@@ -417,28 +396,45 @@ export class MessageLoopClient implements IClient {
 
       case "publishAck": {
         // The server echoes the publish message id on the envelope and in
-        // PublishAck.id: resolve the matching pending publishWithAck.
+        // PublishAck.id: resolve the matching pending publishWithAck. Only a
+        // set position offset is authoritative; an unset position (transient
+        // / no-history) yields 0n.
         const pending = this.pendingPublish.get(parsed.id);
         if (pending) {
           this.pendingPublish.delete(parsed.id);
           clearTimeout(pending.timer);
           pending.resolve({
             id: parsed.data.id,
-            offset: parsed.data.offset,
+            offset: parsed.data.position?.offset ?? 0n,
           });
         }
         break;
       }
 
+      case "recoverComplete": {
+        // RecoverComplete echoes the authoritative position for exactly one
+        // recovered channel: write it back so the next reconnect resumes from
+        // the server-confirmed cursor. An unset position never creates or
+        // wipes a cursor ("0 means from the start" is forbidden).
+        const rc = parsed.data;
+        if (rc && rc.channel && rc.position && rc.position.offset !== undefined) {
+          this.channelOffsets.set(rc.channel, rc.position.offset);
+        }
+        break;
+      }
+
       case "presence": {
-        // Snapshot reply to our PresenceQuery, matched by the inbound id.
-        // The snapshot is also dispatched to onPresenceSnapshot.
+        // A same-id snapshot resolves a pending PresenceQuery; snapshot
+        // replies without a pending match (pushed after Connected) are simply
+        // dispatched to onPresenceSnapshot.
         const pending = this.pendingPresence.get(parsed.id);
         if (pending) {
           this.pendingPresence.delete(parsed.id);
           const snap = presenceSnapshotFromPB(parsed.data);
           this.dispatchPresenceSnapshot(snap);
           pending.resolve(snap);
+        } else if (parsed.data) {
+          this.dispatchPresenceSnapshot(presenceSnapshotFromPB(parsed.data));
         }
         break;
       }
@@ -555,24 +551,31 @@ export class MessageLoopClient implements IClient {
 
   /**
    * Convert messages to ReceivedMessage format, track per-channel offsets for
-   * session resumption, and deliver them to all registered handlers.
+   * session resumption (live messages only), and deliver them to all
+   * registered handlers. Replay and live messages share this single consumer
+   * path (§5); a replayed run waits for the RecoverComplete position instead
+   * of advancing the cursor mid-replay.
    */
   private deliverMessages(msgs: Array<{
     id: string;
     channel: string;
-    offset: bigint;
+    position?: { streamEpoch: string; offset?: bigint };
+    replay?: boolean;
     payload?: any;
   }>): void {
     const messages: ReceivedMessage[] = [];
     for (const m of msgs) {
-      // Track per-channel offsets for session resumption
-      if (m.offset && m.channel) {
-        this.channelOffsets.set(m.channel, BigInt(m.offset));
+      // Live (non-replay) messages advance the per-channel cursor; replayed
+      // messages let RecoverComplete set it.
+      if (!m.replay && m.position?.offset !== undefined && m.channel) {
+        this.channelOffsets.set(m.channel, m.position.offset);
       }
       messages.push({
         id: m.id,
         channel: m.channel,
-        offset: m.offset,
+        offset: m.position?.offset ?? 0n,
+        offsetSet: m.position?.offset !== undefined,
+        replay: m.replay || false,
         message: m.payload ? payloadToMessage(m.payload, m.id) : createMessage("messageloop.message", { contentType: "", type: "binary" }),
       });
     }
@@ -589,20 +592,6 @@ export class MessageLoopClient implements IClient {
         } catch {
           // Ignore handler errors
         }
-      }
-    }
-  }
-
-  /**
-   * Write back server-echoed recovery cursors. An empty batch (offset 0)
-   * must not wipe a known position.
-   */
-  private applyRecoverResults(
-    results: Array<{ channel: string; offset: bigint }> | undefined
-  ): void {
-    for (const rr of results || []) {
-      if (rr && rr.channel && rr.offset > 0n) {
-        this.channelOffsets.set(rr.channel, BigInt(rr.offset));
       }
     }
   }
@@ -881,21 +870,26 @@ export class MessageLoopClient implements IClient {
   /**
    * Resubscribe to all channels after reconnection. The session was not
    * resumed, so every channel is re-subscribed with recover=true and the
-   * recorded per-channel offset/epoch so the server replays messages missed
-   * while disconnected (Go SDK resumeSubscriptions parity).
+   * recorded per-channel cursor so the server replays messages missed while
+   * disconnected (Go SDK resumeSubscriptions parity).
    */
   private async resubscribeAllChannels(): Promise<void> {
     if (this.subscribedChannels.size === 0) return;
 
     const channels: ChannelOrSpec[] = Array.from(
       this.subscribedChannels,
-      ([channel, token]) => ({
-        channel,
-        token,
-        recover: true,
-        offset: this.channelOffsets.get(channel) ?? BigInt(0),
-        epoch: this.epoch,
-      })
+      ([channel, token]) => {
+        const offset = this.channelOffsets.get(channel);
+        return {
+          channel,
+          token,
+          recover: true,
+          cursor:
+            offset !== undefined
+              ? { streamEpoch: this.epoch, offset }
+              : undefined,
+        };
+      }
     );
     try {
       const msg = createSubscribeMessage(channels, this.options.ephemeral);
@@ -971,17 +965,24 @@ export class MessageLoopClient implements IClient {
       throw new Error("Transport not initialized");
     }
 
-    // Build subscription list with recovery info when reconnecting.
-    // recover matches the Go SDK: always true when reconnecting (the server
-    // falls back to recovering from the beginning when epoch is unknown).
-    const subs = Array.from(this.subscribedChannels).map(([channel, token]) => ({
-      channel,
-      ephemeral: this.options.ephemeral,
-      token,
-      recover: this.isReconnecting,
-      offset: this.channelOffsets.get(channel) || BigInt(0),
-      epoch: this.isReconnecting ? this.epoch : "",
-    }));
+    // Build subscription list with recovery info when reconnecting. recover
+    // matches the Go SDK: always true when reconnecting. A recorded
+    // per-channel cursor resumes from that point; without one the server
+    // falls back to its own recorded delivered position (or skips). No
+    // "offset 0 means from the start".
+    const subs = Array.from(this.subscribedChannels).map(([channel, token]) => {
+      const offset = this.channelOffsets.get(channel);
+      return {
+        channel,
+        ephemeral: this.options.ephemeral,
+        token,
+        recover: this.isReconnecting,
+        cursor:
+          this.isReconnecting && offset !== undefined
+            ? { streamEpoch: this.epoch, offset }
+            : undefined,
+      };
+    });
 
     const connectMsg = createConnectMessage(
       this.options.clientId,

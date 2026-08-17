@@ -3,7 +3,7 @@
 | 字段 | 值 |
 | --- | --- |
 | 标题 | `recover: stream replay publications; RecoverComplete; client v2 wire` |
-| 状态 | **Ready**（尚未实现） |
+| 状态 | **Accepted**（2026-08-17 主 agent 终验通过，尚未 commit） |
 | 依赖 | B2 已合。A0 已冻结 `client.v2` / `shared.v2`。在 `v2` 分支上做 |
 | 设计来源 | [kernel-architecture.md](../kernel-architecture.md) Protocol 恢复节、KD-K11、KD-K12、KD-K16、KD-K22、KD-K31 |
 | 验收人 | 主 agent |
@@ -151,3 +151,66 @@ TS：同样删 `applyRecoverResults` 与 Connected/SubscribeAck 批次投递。
 ## 9. 实现备注（完成后填写）
 
 （实现者填写）
+
+### 9.1 文件列表
+
+**服务端（本 session 续做，主 agent 已抽查的流式恢复不在此列）**
+
+- `client_fix_test.go`：`TestClientSession_HandleMessage_Connect_ACLDeniedSubscription` / `TestClient_ConnectWithUnroutableSubscription_SoftFail` 补 v2 presence 独立信封断言（error → Connected → Presence 三帧）
+- `cluster_redis_integration_test.go`：`TestClusterRedis_RemoteResumeTakeover` 改为扫描 Connected 信封（presence/RecoverComplete 落在其后）；新增 `messagesSnapshot()` 访问器
+- `pkg/websocket/handler_test.go`：客户端信封 import 切 `client/v2` + `shared/v2`；`Message.Offset` → `Message.Position`
+- `pkg/websocket/integration_test.go`：import 切 `client/v2`
+- `pkg/quicstream/e2e_test.go`：import 切 `client/v2` + `shared/v2`（`sharedpb` → `sharedv2`）
+- `shared/marshaler_test.go`：客户端信封 import 切 `client/v2`
+
+**Go SDK（`sdks/go`，独立 module，replace 走现有 `./../../shared`）**
+
+- `client.go`：import 切 `client/v2`/`shared/v2`；`handleConnected` 读 `stream_epoch`、删 `GetPublications`/`GetRecoverResults`/`GetPresence` 批次；`handleSubscribeAck` 删批次；删 `applyRecoverResults`；`handlePublication` 单一路径（replay 与 live 同回调，仅 live 从 `Message.position` 更新游标）；新增 `handleRecoverComplete`（`RecoverComplete.position` 写游标，unset 不动）；`resumeSubscriptions` 用 `Cursor: Position(epoch, offset)`；`handlePublishAck` 读 `Position`；`WithRecover(cursor *sharedv2.Position)` + 新增 `WithFresh()`；receiveLoop 加 `RecoverComplete` 分支、`Presence` 无 pending 时投给 `OnPresenceSnapshot`；`SendSurveyReply`/`Survey`/`rejectPendingPresence`/`BuildErrorMessage` 换 `sharedv2`
+- `message.go`：import 切 v2；`wrapPublicationToMessages` 改为 `messageFromEnv`（读 `position`）；新增 `posOffset` / `Position()` 辅助；`ReceivedMessage` 增加 `OffsetSet`/`Replay`/`Position`
+- `presence.go` / `survey.go` / `websocket.go` / `grpc.go` / `quic.go` / `disconnect.go`：import 切 v2
+- `mux.go`：`RPCResponse.Error` 随 SDK 类型切 `sharedv2.Error`
+- `proxy.go`：SDK 面（`RPCResponse`/`AuthenticateResponse`）切 `sharedv2`；proxy wire（`protocol/proxy/v1` 仍说 shared.v1）新增 `payloadV1toV2`/`payloadV2toV1`/`errorV2toV1` 桥接
+- `example/proxyserver/main.go`：同样桥接
+- `pr08_test.go`：`TestSDK_SubscribeWithRecover` 改 cursor/fresh 断言；`TestSDK_SubscribeAckPublications` → `TestSDK_RecoverySinglePath`（replay/live 同回调、`RecoverComplete` 写游标、不读 recoverResults）；`TestSDK_PresenceSnapshotOnConnected` → `TestSDK_PresenceSnapshotPushedAfterConnected`（独立 Presence 信封 + unset position 不建游标）
+- `proxy_test.go`：payload 辅助拆 v1/v2 两个版本
+- `token_ack_test.go` / `client_test.go` / `fix_regression_test.go` / `disconnect_error_test.go` / `quic_test.go`：import 切 v2；`PublishAck{Id, Position}` 断言
+- `README.md` / `MIGRATION_GUIDE.md`：恢复段改写（cursor/fresh，删「offset 0 = 从头」）
+
+**TS SDK（`sdks/ts`）**
+
+- `src/message/message.ts`：Payload 切 `shared/v2`；`ReceivedMessage` 增 `offsetSet`/`replay`；`protoToReceivedMessage` 读 `position`
+- `src/message/converters.ts`：schema 切 `client/v2`+`shared/v2`；`createConnectMessage`/`createSubscribeMessage` 用 `cursor`+`fresh`；`messageToReceived` 读 `position`；`parseOutboundMessage` 加 `recoverComplete`
+- `src/client/types.ts`：`SubscriptionSpec.offset/epoch` → `cursor`/`fresh`
+- `src/client/client.ts`：删 Connected/SubscribeAck 批次投递与 `applyRecoverResults`；`recoverComplete` 写游标；presence 独立信封（无 pending query 也投 `onPresenceSnapshot`）；`publishAck` 读 `position.offset`；`deliverMessages` 仅 live 消息推进游标；`connect()`/`resubscribeAllChannels()` 用 `cursor`（无记录则不带 cursor）
+- `src/transport/*` 四个文件：import 切 `client/v2`（protobuf codec 的 `$typeName` 校验改为 `messageloop.client.v2.InboundMessage`）
+- `test/pr09.test.ts`：恢复段改 cursor/fresh/流式断言（replay+RecoverComplete）；connected presence 改独立信封
+- `test/regression.test.ts`：`P0-4` 改流式恢复断言；`epoch` → `streamEpoch`
+- `test/protocol.test.ts` / `test/codec.test.ts`：import 与字段切 v2（`stream_epoch`、`position`）
+- `README.md`：恢复段改写
+
+**文档**
+
+- `docs/developer/01-architecture.md`：写队列 Control 表加 `RecoverComplete`；`handleConnect` §8 改流式恢复；`Subscribe` 行改裸 Ack + Replayer；offset/epoch 语义段改 cursor/fresh；恢复时序图改流式
+- `docs/protocol.md`：`connected` 字段表、`publish_ack`、`publication`、`subscribe_ack` 恢复段全部改 v2 流式（`stream_epoch`、`position`、`recover_complete`、`cursor`+`fresh`，删「offset 0 = 从头」）
+
+### 9.2 偏离
+
+无。硬约束逐条核对：
+
+- 未改 `protocol/**/v1/**`（含生成的 `shared/genproto/client/v1`，仅运行时引用切 v2）
+- 未动 A2 `HistoryPage`/gap 算法、A3 `CompileInterest`、A4 Decide、B2 Occupancy 投递面、Redis offset 编码
+- 未做 HMAC / `internal/*`；admin 仍 `server.v1`（`page.Pubs()` 不变）
+- 服务端流式恢复未回退；`Connected`/`SubscribeAck` 无内嵌批次
+- 未 commit / push
+
+### 9.3 验证
+
+```bash
+go test ./...                                  # 全绿（root 56s 全包 ok）
+go test -race .                                # 全绿
+cd sdks/go && go test ./...                    # ok
+cd sdks/go && go test -race ./...              # ok
+cd sdks/ts && npm test                         # 5 suites / 79 tests 全过
+```
+
+Windows 上逐条执行；`sdks/go` 在其目录内执行（replace `./../../shared`）。

@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -560,7 +560,9 @@ func TestClientSession_HandleMessage_Publish_Transient(t *testing.T) {
 	ack := out.GetPublishAck()
 	require.NotNil(t, ack, "envelope must be PublishAck")
 	assert.Equal(t, "msg-3", ack.GetId())
-	assert.Equal(t, uint64(0), ack.GetOffset(), "transient publish must ack with offset 0")
+	off, set := posOffset(ack.GetPosition())
+	assert.False(t, set, "transient publish must ack with an unset position")
+	assert.Equal(t, uint64(0), off)
 
 	// Transient publish must NOT be stored in history (still exactly the
 	// single regular publication).
@@ -1311,11 +1313,11 @@ func TestNode_Connect_RecoveryIDsMatchRealtime(t *testing.T) {
 	}
 	require.NoError(t, client1.HandleMessage(ctx, connectMsg))
 
-	// Capture the broker epoch from the Connected envelope so the reconnect
-	// can prove its offset belongs to the current broker generation.
+	// Capture the broker stream epoch from the Connected envelope so the
+	// reconnect cursor can be tagged with the current broker generation.
 	var connectedMsg clientpb.OutboundMessage
 	require.NoError(t, JSONMarshaler{}.Unmarshal(transport1.getLastMessage(), &connectedMsg))
-	epoch := connectedMsg.GetConnected().GetEpoch()
+	epoch := connectedMsg.GetConnected().GetStreamEpoch()
 	require.NotEmpty(t, epoch)
 
 	transport1.messages = nil
@@ -1343,8 +1345,9 @@ func TestNode_Connect_RecoveryIDsMatchRealtime(t *testing.T) {
 		require.NotNil(t, pub)
 		require.Len(t, pub.GetMessages(), 1)
 		m := pub.GetMessages()[0]
-		realtimeIDs[m.GetOffset()] = m.GetId()
-		assert.Equal(t, fmt.Sprintf("recovery.ch-%d", m.GetOffset()), m.GetId(),
+		off, _ := posOffset(m.GetPosition())
+		realtimeIDs[off] = m.GetId()
+		assert.Equal(t, fmt.Sprintf("recovery.ch-%d", off), m.GetId(),
 			"realtime ID must follow the channel-offset rule")
 	}
 
@@ -1360,27 +1363,28 @@ func TestNode_Connect_RecoveryIDsMatchRealtime(t *testing.T) {
 			Connect: &clientpb.Connect{
 				ClientId: "client-2",
 				Subscriptions: []*clientpb.Subscription{
-					{Channel: "recovery.ch", Recover: true, Offset: 1, Epoch: epoch},
+					{Channel: "recovery.ch", Recover: true, Cursor: cursorOf(epoch, 1)},
 				},
 			},
 		},
 	}
 	require.NoError(t, client2.HandleMessage(ctx, recoverMsg))
 
-	var out clientpb.OutboundMessage
-	require.NoError(t, JSONMarshaler{}.Unmarshal(transport2.getLastMessage(), &out))
-	connected := out.GetConnected()
-	require.NotNil(t, connected)
-	require.Len(t, connected.GetPublications(), 2)
-	for _, pub := range connected.GetPublications() {
+	replays := replayPublications(outboundMessages(t, transport2))
+	require.Len(t, replays, 2)
+	for _, pub := range replays {
 		msgs := pub.GetMessages()
 		require.Len(t, msgs, 1)
 		m := msgs[0]
-		expected := fmt.Sprintf("recovery.ch-%d", m.GetOffset())
+		off, _ := posOffset(m.GetPosition())
+		expected := fmt.Sprintf("recovery.ch-%d", off)
 		assert.Equal(t, expected, m.GetId(), "recovered ID must follow the channel-offset rule")
-		assert.Equal(t, realtimeIDs[m.GetOffset()], m.GetId(),
-			"recovered ID must equal the realtime ID for offset %d", m.GetOffset())
+		assert.Equal(t, realtimeIDs[off], m.GetId(),
+			"recovered ID must equal the realtime ID for offset %d", off)
 	}
+	rc := findReplayComplete(outboundMessages(t, transport2), "recovery.ch")
+	require.NotNil(t, rc, "recovery must end with a RecoverComplete")
+	assert.Equal(t, uint64(3), mustPosOffset(t, rc.GetPosition()))
 }
 
 func TestNode_Connect_RecoveryCap(t *testing.T) {
@@ -1410,36 +1414,33 @@ func TestNode_Connect_RecoveryCap(t *testing.T) {
 			Connect: &clientpb.Connect{
 				ClientId: "client-1",
 				Subscriptions: []*clientpb.Subscription{
-					{Channel: "cap-ch", Recover: true, Offset: 1},
+					{Channel: "cap-ch", Recover: true, Cursor: cursorOf("", 1)},
 				},
 			},
 		},
 	}
 	require.NoError(t, client.HandleMessage(ctx, msg))
 
-	var out clientpb.OutboundMessage
-	require.NoError(t, JSONMarshaler{}.Unmarshal(transport.getLastMessage(), &out))
-	connected := out.GetConnected()
-	require.NotNil(t, connected)
-	require.Len(t, connected.GetPublications(), MaxRecoveredPublications)
-	// The first recovered publication is offset 2 (sinceOffset = offset+1) and
+	replays := replayPublications(outboundMessages(t, transport))
+	require.Len(t, replays, MaxRecoveredPublications)
+	// The first recovered publication is offset 2 (sinceOffset = cursor+1) and
 	// its ID must follow the channel-offset rule.
-	msgs := connected.GetPublications()[0].GetMessages()
+	msgs := replays[0].GetMessages()
 	require.NotEmpty(t, msgs)
-	assert.Equal(t, fmt.Sprintf("cap-ch-%d", msgs[0].GetOffset()), msgs[0].GetId())
+	off, _ := posOffset(msgs[0].GetPosition())
+	assert.Equal(t, uint64(2), off)
+	assert.Equal(t, fmt.Sprintf("cap-ch-%d", off), msgs[0].GetId())
 
-	// PR-03: the cap must be visible: truncated=true and a recover_result
-	// carrying the last delivered offset.
-	require.True(t, connected.GetTruncated(), "hitting the recovery cap must set Connected.truncated")
-	require.NotEmpty(t, connected.GetRecoverResults(), "recover_results must cover every recovered channel")
-	res := connected.GetRecoverResults()[0]
-	require.Equal(t, "cap-ch", res.GetChannel())
-	require.True(t, res.GetRecovered())
-	require.True(t, res.GetTruncated())
-	lastMsgs := connected.GetPublications()[len(connected.GetPublications())-1].GetMessages()
+	// The cap must be visible on the RecoverComplete, carrying the last
+	// delivered offset as the authoritative position.
+	rc := findReplayComplete(outboundMessages(t, transport), "cap-ch")
+	require.NotNil(t, rc, "recovery must end with a RecoverComplete")
+	require.True(t, rc.GetTruncated(), "hitting the recovery cap must set RecoverComplete.truncated")
+	lastMsgs := replays[len(replays)-1].GetMessages()
 	require.NotEmpty(t, lastMsgs)
-	assert.Equal(t, lastMsgs[0].GetOffset(), res.GetOffset(),
-		"truncated offset must be the last delivered publication's offset")
+	assert.Equal(t, mustPosOffset(t, lastMsgs[0].GetPosition()), mustPosOffset(t, rc.GetPosition()),
+		"truncated position must be the last delivered publication's offset")
+	assert.Nil(t, rc.GetError())
 }
 
 // --- P1-4: PublishAck.Offset must carry the broker-assigned offset ---
@@ -1481,7 +1482,9 @@ func TestClientSession_PublishAck_Offset(t *testing.T) {
 	require.NoError(t, JSONMarshaler{}.Unmarshal(transport.getLastMessage(), &out))
 	ack := out.GetPublishAck()
 	require.NotNil(t, ack, "expected a PublishAck envelope")
-	assert.Equal(t, uint64(2), ack.GetOffset())
+	off, set := posOffset(ack.GetPosition())
+	require.True(t, set)
+	assert.Equal(t, uint64(2), off)
 }
 
 func TestSessionState_String(t *testing.T) {
