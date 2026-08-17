@@ -18,5 +18,6 @@
 | [PR-KA-C1 实现规格](tasks/pr-ka-c1-sim.md) | Accepted | 确定性 fencing 模拟（KD-K20）；[prompt](tasks/pr-ka-c1-prompt.md) |
 | [PR-KA-C2 实现规格](tasks/pr-ka-c2-epoch.md) | Accepted | `node_epoch` 只准 INCR，禁止 UUID incarnation；[prompt](tasks/pr-ka-c2-prompt.md) |
 | [PR-KA-C3 实现规格](tasks/pr-ka-c3-stream.md) | Accepted | NodeRPC 请求改 Redis Stream + consumer group；[prompt](tasks/pr-ka-c3-prompt.md) |
+| [PR-KA-C4 实现规格](tasks/pr-ka-c4-dense-seq.md) | Ready | History 稠密 seq、真中洞检测（Q8）；[prompt](tasks/pr-ka-c4-prompt.md) |
 
 第三方实现：复制对应 `tasks/pr-ka-*-prompt.md` 围栏全文；规格与靶心冲突时以该步规格为准。

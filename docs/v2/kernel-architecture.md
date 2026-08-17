@@ -652,8 +652,9 @@ Session 与 Stream 同区域。**跨区域 Directory Bind 直接禁止。** 只�
 | **C1** | 确定性 fencing 模拟。规格：[pr-ka-c1-sim.md](tasks/pr-ka-c1-sim.md) | 无 Redis、无 Sleep；B 抢权后 A ping 不得写回；丢 Evict 无双活 |
 | **C2** | `node_epoch` 只准 INCR。规格：[pr-ka-c2-epoch.md](tasks/pr-ka-c2-epoch.md) | 生产 incarnation 无 UUID；同 node 两次启动 epoch 严格 +1 |
 | **C3** | NodeRPC 请求改 Redis Stream。规格：[pr-ka-c3-stream.md](tasks/pr-ka-c3-stream.md) | 请求无 `cmd:req:` Pub/Sub；HMAC 拒绝也 XACK |
+| **C4** | History 稠密 seq，真中洞检测（Q8）。规格：[pr-ka-c4-dense-seq.md](tasks/pr-ka-c4-dense-seq.md) | 页内中洞报 `middle`；发号与 XADD 原子，无假洞 |
 
-稠密 seq（Q8）、`ml2:` 键前缀仍是后续独立刀。
+`ml2:` 键前缀仍是后续独立刀。
 
 A0–A4 可在仍叫 `*Client` 的代码上先改合同；B1 再改对象名。不必等「旧 RC」。
 
@@ -706,10 +707,9 @@ A0–A4 可在仍叫 `*Client` 的代码上先改合同；B1 再改对象名。�
 | # | 问题 | 选项 |
 | --- | --- | --- |
 | Q7 | 不可路由 pattern（`*.room`） | (a) 直接拒绝（倾向，KD-K13）；(b) 该节点全量收 + 本地过滤并打黄金指标 |
-| Q8 | 稠密 seq（真中洞检测）放哪一步 | 默认 A2 之后独立刀，不挡 A2 |
 | Q9 | 独立版本的仓库形态 | (a) 新分支 / 新 tag 线在本仓库；(b) 新模块路径继续同一 repo |
 
-已关闭：Q1→KD-K21；Q2→Non-Goals/KD-K8；Q3→KD-K22；Q4→KD-K6；Q5→KD-K26；**Q6 齐步→KD-K31 废止**。
+已关闭：Q1→KD-K21；Q2→Non-Goals/KD-K8；Q3→KD-K22；Q4→KD-K6；Q5→KD-K26；**Q6 齐步→KD-K31 废止**；**Q8→C4 规格**（[pr-ka-c4-dense-seq.md](tasks/pr-ka-c4-dense-seq.md)，A2 之后独立刀）。
 
 ---
 
