@@ -22,5 +22,6 @@
 | [PR-KA-C5 实现规格](tasks/pr-ka-c5-keyprefix.md) | Accepted | Redis 键前缀换代 `ml:` → `ml2:`（KD-K31）；[prompt](tasks/pr-ka-c5-prompt.md) |
 | [PR-KA-C6 实现规格](tasks/pr-ka-c6-gap-notice.md) | Accepted | catch-up 洞的 client-facing GapNotice；[prompt](tasks/pr-ka-c6-prompt.md) |
 | [PR-KA-D1 实现规格](tasks/pr-ka-d1-graduation-docs.md) | Accepted | 转正收口：文档对齐 v2 + 删死代码；[prompt](tasks/pr-ka-d1-prompt.md) |
+| [PR-KA-D2 实现规格](tasks/pr-ka-d2-version-gate.md) | Ready | 握手版本门：Connect.version 世代校验 + SDK 默认 2.0.0；[prompt](tasks/pr-ka-d2-prompt.md) |
 
 第三方实现：复制对应 `tasks/pr-ka-*-prompt.md` 围栏全文；规格与靶心冲突时以该步规格为准。
