@@ -651,8 +651,9 @@ Session 与 Stream 同区域。**跨区域 Directory Bind 直接禁止。** 只�
 | **B4** | NodeRPC HMAC（现有 Pub/Sub 总线）；repair 合一；范围化 `internal/cluster`。规格：[pr-ka-b4-noderpc.md](tasks/pr-ka-b4-noderpc.md) | 无盲写、无未签名命令 |
 | **C1** | 确定性 fencing 模拟。规格：[pr-ka-c1-sim.md](tasks/pr-ka-c1-sim.md) | 无 Redis、无 Sleep；B 抢权后 A ping 不得写回；丢 Evict 无双活 |
 | **C2** | `node_epoch` 只准 INCR。规格：[pr-ka-c2-epoch.md](tasks/pr-ka-c2-epoch.md) | 生产 incarnation 无 UUID；同 node 两次启动 epoch 严格 +1 |
+| **C3** | NodeRPC 请求改 Redis Stream。规格：[pr-ka-c3-stream.md](tasks/pr-ka-c3-stream.md) | 请求无 `cmd:req:` Pub/Sub；HMAC 拒绝也 XACK |
 
-命令总线换 Stream、稠密 seq（Q8）、`ml2:` 键前缀仍是后续独立刀。
+稠密 seq（Q8）、`ml2:` 键前缀仍是后续独立刀。
 
 A0–A4 可在仍叫 `*Client` 的代码上先改合同；B1 再改对象名。不必等「旧 RC」。
 
