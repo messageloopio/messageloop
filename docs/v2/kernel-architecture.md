@@ -707,10 +707,9 @@ A0–A4 可在仍叫 `*Client` 的代码上先改合同；B1 再改对象名。�
 
 | # | 问题 | 选项 |
 | --- | --- | --- |
-| Q7 | 不可路由 pattern（`*.room`） | (a) 直接拒绝（倾向，KD-K13）；(b) 该节点全量收 + 本地过滤并打黄金指标 |
 | Q9 | 独立版本的仓库形态 | (a) 新分支 / 新 tag 线在本仓库；(b) 新模块路径继续同一 repo |
 
-已关闭：Q1→KD-K21；Q2→Non-Goals/KD-K8；Q3→KD-K22；Q4→KD-K6；Q5→KD-K26；**Q6 齐步→KD-K31 废止**；**Q8→C4 规格**（[pr-ka-c4-dense-seq.md](tasks/pr-ka-c4-dense-seq.md)，A2 之后独立刀）。
+已关闭：Q1→KD-K21；Q2→Non-Goals/KD-K8；Q3→KD-K22；Q4→KD-K6；Q5→KD-K26；**Q6 齐步→KD-K31 废止**；**Q7→KD-K13/A3 已落地**（`ErrPatternNotRoutable` 直接拒绝，`not_routable` 先于 ACL，内存/Redis 一致）；**Q8→C4 规格**（[pr-ka-c4-dense-seq.md](tasks/pr-ka-c4-dense-seq.md)，A2 之后独立刀）。
 
 ---
 
