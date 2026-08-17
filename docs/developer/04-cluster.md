@@ -404,3 +404,9 @@ hash 的字段是频道名、值是本节点在该频道的订阅者计数。增
 | `GetHistory` | 从共享 Redis Stream 读取，`since_offset` 为包含（inclusive）语义，跨节点数据一致 |
 
 非集群模式下上述操作只作用于本节点。完整语义、请求/响应格式与示例见[《管理 API 参考》](03-admin-api.md) 的「集群感知行为」一节。
+
+## 12. 确定性模拟（测试）
+
+`internal/cluster/sim` 提供一套进程内、无 Redis、无 `time.Sleep` 的确定性 fencing 模拟夹具（PR-KA-C1，KD-K20）：一个共享的内存 `Directory`（按 `SessionID, NodeID, IncarnationID, LeaseVersion` 谓词做真 CAS，check-and-swap 在一把锁下原子完成）、一个可编排的内存命令总线（默认在同一 goroutine 同步投递；`Hold`/`Flush`/`DropNext` 显式编排暂扣与丢 Evict），以及 `World` 两节点夹具——A（`node-a`/`inc-a`）与 B（`node-b`/`inc-b`）都是真 `*messageloop.Node`，跑生产的 `syncClusterSessionState` / `resumeRemoteSession` / `Fence` 代码路径，incarnation 由脚本写死，不依赖 `uuid.New`。该包只服务测试，`cmd/server` 不装配它。
+
+宪法场景在根包 `cluster_sim_test.go`（`TestSim_*`）：B 抢权后 A 的 ping 刷新不得写回；Bind 后 Evict 同步投递、旧节点 Fence 且不解绑新 owner；`DropNext` 丢掉 Evict 后任意时刻至多一个 Attached、旧节点下一拍 sync 自 Fence；本机 Detach/Attach 指针与 fencing 不变；死节点经两次 `membershipOnce`（首拍只 prime）OnLeave 后可被 `CAS(nil)` 抢占；并发 `CAS(nil)` 恰好一个赢家。运行：`go test -run 'TestSim_' .` 与 `go test ./internal/cluster/sim`，均不访问 Redis。

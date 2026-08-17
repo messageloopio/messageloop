@@ -3,7 +3,7 @@
 | 字段 | 值 |
 | --- | --- |
 | 标题 | `cluster: deterministic fencing simulator; lock Bind/Evict/Fence` |
-| 状态 | **Ready** |
+| 状态 | **Accepted**（2026-08-17 主 agent 终验通过，尚未 commit） |
 | 依赖 | B4 已合（`a0ea543`）。在 `v2` 分支上做 |
 | 设计来源 | [kernel-architecture.md](../kernel-architecture.md) Cluster / 状态机、KD-K3、KD-K4、KD-K5、KD-K20、KD-K30 |
 | 验收人 | 主 agent |
@@ -165,4 +165,8 @@ func NewWorld() *World
 
 ## 10. 实现备注（完成后填写）
 
-（实现者填写）
+- 新增 `internal/cluster/sim`（`clock.go` / `directory.go` / `bus.go` / `world.go` + 三个单测文件）。`Directory` 共享内存实现，session lease 按 `SessionID`、node lease 按 `(NodeID, IncarnationID)` 存，CAS 谓词与生产一致且在一把锁下原子完成；`DeleteSessionLease` 同步 user 索引并记录调用（`DeletedSessionLeases`）供「fenced 不得解绑」断言；`DeleteNodeLease` 为夹具助手（生产接口没有该方法，用于不等 TTL 地演死节点）。`Bus` 默认同步投递，`Hold`/`Flush`（FIFO、返回结果）/`DropNext`（`unknown_final_state` + `SIM_DROPPED`）显式编排；`Register(nodeID, incarnationID, handler)` 按目标 incarnation 路由，`SetHandler` 仅作 fallback（共享总线无法从 `SetHandler` 推出身份），未登记目标返回 failed/`TARGET_NODE_NOT_ALIVE`。`Clock.Advance` 对非正 delta 返回 error、不回拨。
+- 根包 `cluster_sim.go` 只放三个薄封装（`SimSyncClusterSessionState` / `SimResumeRemoteSession` / `SimMembershipOnce`），未改任何生产热路径，未注入 Clock（§4.1 允许宪法场景不走 Clock；CAS 不比 TTL，场景 5 用真实墙钟写 lease 的 `ExpiresAt`）。
+- 场景测试在根包 `cluster_sim_test.go`，用 **external test package**（`package messageloop_test`）：sim 包 import 根包，internal test package 再 import sim 会构成 Go 禁止的测试 import cycle；外部测试包经由 `cluster_sim.go` 的导出封装访问未导出路径（仓内已有 `cluster_v1_e2e_test.go` 同此前例）。
+- 场景 3 依赖 KD-K30 死节点旁路：World 默认不注册 node lease，Evict 丢失后 `GetNodeLease` 为 nil，B 的 CAS 保留、Directory 归 B；场景 5 由测试显式 `PutNodeLease` 两个 incarnation。
+- 未动 A1 CAS 谓词、B1 Fence/Detach、B4 HMAC、`fakeSessionDirectory`、Redis、Stream、`internal/*` 布局；`cmd/server` 不装配 sim。
