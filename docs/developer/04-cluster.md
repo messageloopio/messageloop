@@ -340,6 +340,7 @@ hash 的字段是频道名、值是本节点在该频道的订阅者计数。增
 - 发布路径（`redis.go` 的 `Publish`）：Lua 脚本原子完成 `INCR ml2:stream:seq:<channel>`（每频道稠密 seq，C4）+ `XADD` 写入 `ml2:stream:<channel>`（条目带 `s` 字段；`StreamMaxLength` 默认 10000 条、`StreamApproximate` 默认 true，`HistoryTTL` 默认 24 小时，seq 键与 stream 同 TTL），从 Stream ID 解析出 offset；再 `PUBLISH` 到 `ml2:pubsub:<channel>` 做实时分发。任意节点发布，全部节点共享同一份历史。
 - 消费路径（`pubsub.go`）：每个节点 `PSUBSCRIBE ml2:pubsub:*` 模式订阅，只处理本节点登记过兴趣（`Subscribe`）的频道；断线以指数退避重连（1 秒起、上限 30 秒）。
 - **offset 语义**：offset 由 Stream ID 编码而来，`offset = ts<<20 | seq`（毫秒时间戳与序列号拼入 uint64，`history.go`）。历史查询 `History(ch, sinceOffset, limit)` 用**包含**起始 ID（`"ts-seq"`，`streamStartID`）——Redis broker 与内存 broker 的 `since_offset` 均为**包含**（inclusive）语义，返回 `offset >= since_offset`（契约见 `broker.go:105-108`）；`limit <= 0` 时上限为 `DefaultHistoryLimit`（1000 条）。offset 编码**不是**稠密序号；中洞检测走条目旁的稠密 seq（`s` 字段，C4）：页内相邻条目 seq 不连续 → `HistoryGapMiddle`（线上 `GAP_REASON_MIDDLE`），无 `s` 的 legacy 条目断开证据链、不诬报。
+- **catch-up 洞通知（C6）**：重连 catch-up 检出洞（中洞按稠密 seq，尾截按回放批被 `StreamMaxLength` 截断且 stream 仍有更新条目）时，除 `catchUpGaps` 计数 + Warn 外，broker 经 `SetGapHandler` 第二管道上报一次（每频道每次 catch-up 至多一条），node 侧 `onGap` 向该频道本地订阅者（精确 + 命中通配）扇出 `GapNotice` 信封（channel + `gap_reason` + 最后已知安全 position），指标 `live_gap_notice_total{reason}`。
 - 由于历史与 offset 都来自共享的 Redis Stream，跨节点查询历史得到的是同一份数据；跨节点**恢复**的 epoch 校验也因 Redis epoch 集群共享而可通过（见 4.4）。
 - 瞬时消息（`PublishTransient`，presence 事件等）不写 Stream，offset 恒为 0，永不进入历史。
 

@@ -32,6 +32,7 @@ import type {
   PresenceSnapshot as PresenceSnapshotPB,
   PresenceInfo as PresenceInfoPB,
   SurveyAnswer as SurveyAnswerPB,
+  GapNotice as GapNoticePB,
   Subscription,
 } from "../proto/client/v2/service_pb";
 import type { Payload, Metadata } from "../proto/shared/v2/types_pb";
@@ -43,6 +44,7 @@ import type {
   PresenceSnapshot,
   PresenceInfo,
   SurveyAnswer,
+  GapNotice,
 } from "../client/types";
 
 import {
@@ -402,7 +404,7 @@ export function messageToReceived(msg: ProtoMessage): ReceivedMessage {
 export function parseOutboundMessage(
   msg: OutboundMessage
 ): {
-  type: "connected" | "error" | "subscribeAck" | "unsubscribeAck" | "publishAck" | "publication" | "rpcReply" | "pong" | "subRefreshAck" | "surveyRequest" | "surveyReply" | "presence" | "presenceEvent" | "ping" | "surveyResult" | "recoverComplete";
+  type: "connected" | "error" | "subscribeAck" | "unsubscribeAck" | "publishAck" | "publication" | "rpcReply" | "pong" | "subRefreshAck" | "surveyRequest" | "surveyReply" | "presence" | "presenceEvent" | "ping" | "surveyResult" | "recoverComplete" | "gapNotice";
   data: any;
   id: string;
 } {
@@ -441,6 +443,8 @@ export function parseOutboundMessage(
     return { type: "surveyResult", data: envelope.value, id };
   } else if (envelope.case === "recoverComplete") {
     return { type: "recoverComplete", data: envelope.value, id };
+  } else if (envelope.case === "gapNotice") {
+    return { type: "gapNotice", data: envelope.value, id };
   }
 
   return { type: "error", data: new Error("Unknown message type"), id };
@@ -482,6 +486,20 @@ export function presenceSnapshotFromPB(snap: PresenceSnapshotPB): PresenceSnapsh
     clients: (snap.clients || []).map(presenceInfoFromPB),
     truncated: snap.truncated,
     occupancy: snap.occupancy,
+  };
+}
+
+/**
+ * Convert a protocol GapNotice to the SDK type (C6). The notice is
+ * informational only: it never enters the message stream and never advances
+ * the channel cursor. An unset position offset stays undefined (never 0).
+ */
+export function gapNoticeFromPB(notice: GapNoticePB): GapNotice {
+  return {
+    channel: notice.channel,
+    gapReason: notice.gapReason,
+    streamEpoch: notice.position?.streamEpoch ?? "",
+    offset: notice.position?.offset,
   };
 }
 

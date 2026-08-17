@@ -76,6 +76,7 @@ func (b *failPublishBroker) PublishOccupancy(ch string, evt messageloop.Occupanc
 }
 
 func (b *failPublishBroker) SetOccupancyHandler(messageloop.OccupancyHandler) error { return nil }
+func (b *failPublishBroker) SetGapHandler(messageloop.GapHandler)                   {}
 
 func (b *failPublishBroker) History(ch string, sinceOffset uint64, limit int) (*messageloop.HistoryPage, error) {
 	return nil, nil
@@ -133,6 +134,7 @@ func (b *probeBroker) PublishOccupancy(ch string, evt messageloop.OccupancyEvent
 }
 
 func (b *probeBroker) SetOccupancyHandler(messageloop.OccupancyHandler) error { return nil }
+func (b *probeBroker) SetGapHandler(messageloop.GapHandler)                   {}
 
 func (b *probeBroker) History(ch string, sinceOffset uint64, limit int) (*messageloop.HistoryPage, error) {
 	b.historyCalls++

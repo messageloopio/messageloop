@@ -253,6 +253,10 @@ func (b *memoryBroker) SetOccupancyHandler(handler OccupancyHandler) error {
 	return nil
 }
 
+// SetGapHandler is a no-op: the memory broker has no pub/sub reconnect and
+// therefore no catch-up, so catch-up gaps cannot occur (C6).
+func (b *memoryBroker) SetGapHandler(handler GapHandler) {}
+
 // PublishOccupancy invokes the occupancy handler only when this node is
 // interested in ch (exact or wildcard match), mirroring PublishTransient's
 // interest gate. It never writes history. Synchronous by design (B2 §5.2);

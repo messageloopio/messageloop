@@ -12,6 +12,7 @@ import type {
   PresenceEvent,
   PresenceSnapshot,
   SurveyAnswer,
+  GapNotice,
 } from "./types";
 
 import { WebSocketTransport } from "../transport/websocket";
@@ -35,6 +36,7 @@ import {
   presenceEventFromPB,
   presenceSnapshotFromPB,
   surveyAnswerFromPB,
+  gapNoticeFromPB,
 } from "../message";
 
 /**
@@ -119,6 +121,9 @@ export class MessageLoopClient implements IClient {
   private presenceHandler: ((event: PresenceEvent) => void) | null = null;
   private presenceSnapshotHandler: ((snap: PresenceSnapshot) => void) | null =
     null;
+
+  // Catch-up gap notice handler (C6)
+  private gapNoticeHandler: ((notice: GapNotice) => void) | null = null;
 
   // Presence query pending replies, keyed by the inbound message id
   private pendingPresence: Map<
@@ -443,6 +448,17 @@ export class MessageLoopClient implements IClient {
         // Unknown actions are still delivered.
         if (this.presenceHandler) {
           this.presenceHandler(presenceEventFromPB(parsed.data));
+        }
+        break;
+      }
+
+      case "gapNotice": {
+        // A catch-up hole notification (C6): informational only — it never
+        // enters the message stream and never advances the channel cursor.
+        // Without a handler it is silently ignored; it must never reach the
+        // "Unknown message type" error path.
+        if (this.gapNoticeHandler) {
+          this.gapNoticeHandler(gapNoticeFromPB(parsed.data));
         }
         break;
       }
@@ -1315,6 +1331,15 @@ export class MessageLoopClient implements IClient {
    */
   onPresenceSnapshot(handler: (snap: PresenceSnapshot) => void): void {
     this.presenceSnapshotHandler = handler;
+  }
+
+  /**
+   * Register the handler for catch-up gap notices (C6). The notice is
+   * informational only: it never enters the message stream and never
+   * advances the channel recovery cursor.
+   */
+  onGapNotice(handler: (notice: GapNotice) => void): void {
+    this.gapNoticeHandler = handler;
   }
 
   /**

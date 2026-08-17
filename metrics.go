@@ -41,6 +41,7 @@ type Metrics struct {
 	RecoveryPublications            *prometheus.HistogramVec
 	RecoveryTruncatedTotal          *prometheus.CounterVec
 	RecoveryGapTotal                *prometheus.CounterVec
+	LiveGapNoticeTotal              *prometheus.CounterVec
 	HeartbeatIdleDisconnects        prometheus.Counter
 	AdminUserFanout                 *prometheus.HistogramVec
 	SurveyClientTotal               *prometheus.CounterVec
@@ -159,6 +160,11 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name:      "recovery_gap_total",
 			Help:      "Total number of channel recovery attempts that observed a history gap, by reason (head_trimmed/empty_expired).",
 		}, []string{"reason"}),
+		LiveGapNoticeTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "messageloop",
+			Name:      "live_gap_notice_total",
+			Help:      "Total number of catch-up gap notices fanned out to local subscribers, by reason (middle/replay_truncated).",
+		}, []string{"reason"}),
 		HeartbeatIdleDisconnects: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: "messageloop",
 			Name:      "heartbeat_idle_disconnects_total",
@@ -200,6 +206,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.RecoveryPublications,
 		m.RecoveryTruncatedTotal,
 		m.RecoveryGapTotal,
+		m.LiveGapNoticeTotal,
 		m.HeartbeatIdleDisconnects,
 		m.AdminUserFanout,
 		m.SurveyClientTotal,

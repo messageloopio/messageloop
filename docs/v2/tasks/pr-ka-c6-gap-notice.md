@@ -3,7 +3,7 @@
 | 字段 | 值 |
 | --- | --- |
 | 标题 | `broker: client-facing GapNotice for reconnect catch-up holes` |
-| 状态 | **Ready** |
+| 状态 | **Accepted**（2026-08-17 主 agent 终验通过，尚未 commit） |
 | 依赖 | C5 已合（`1debf5a`）；C4 的稠密 seq 中洞检测已在。在 `v2` 分支上做 |
 | 设计来源 | [kernel-architecture.md](../kernel-architecture.md) Gap 合同 / LiveBus / KD-K12、KD-K14 |
 | 验收人 | 主 agent |
@@ -140,4 +140,23 @@ message GapNotice {
 
 ## 9. 实现备注（完成后填写）
 
-（空）
+实现于 `v2` 分支（基线为 C6 规格提交 `98d18c9`，C5 tip `1debf5a` 之上）。真实 Redis（127.0.0.1:6379，测试 DB 14，沿用 `requireCommandBusRedis`）全量实跑，无 skip。
+
+- **broker 合同（`broker.go`）**：`HistoryGapReason` iota 追加 `HistoryGapReplayTruncated`（现有值序不动）；新增 `CatchUpGap{Channel, Reason, LastGoodSeq, LastGoodOffset}`、`GapHandler`、`Broker.SetGapHandler(handler GapHandler)`（按 §4.1 签名，无 error 返回，区别于 `SetOccupancyHandler`）。合同注释写明：nil 关闭通知、检测计数/日志不受影响、panic recover、每频道每次 catch-up 至多一条、memory 为 no-op。
+- **Redis broker（`pkg/redisbroker/redis.go` / `pubsub.go`）**：`redisBroker` 加 `gapHandlerMu + gapHandler` 字段与 `SetGapHandler`；`pubsub.go` 加 `notifyGap`（nil 短路 + recover 记 Error，照 `deliver`/`deliverOccupancy` 先例）。`checkCatchUpSeqGap` 加 `baselineOffset` 形参并跟踪 `prevOffset`（洞前最后连续条目的 stream offset；洞开在基线之后时取基线 offset），第一个洞通知一次（`Reason=HistoryGapMiddle`，`LastGoodSeq/Offset`=洞前条目）并返回「已通知」；`checkCatchUpGap`（尾截）加 `alreadyNotified` 形参，检出时计数 + Warn 照旧、仅在未通知过时才以 `HistoryGapReplayTruncated` + `LastGoodOffset=deliveredTail` 通知。检测规则、legacy 断链（seq 0 → prev/prevOffset 归零断链）、`catchUpGaps` 计数语义零改动。pubsub.go 两处「client-facing gap envelope 是 future work」注释同步更新为 C6 语义。
+- **memory broker**：`SetGapHandler` no-op（无 catch-up 概念）。
+- **fakes**：`Broker` 接口新增方法导致 12 个测试 fake 补 no-op：`client_test.go` fakeHistoryBroker、`client_fix_test.go` fakeEpochHistoryBroker + failStartBroker、`cluster_resume_test.go` evictTestBroker/failSubscribeBroker/failSecondSubscribeBroker、`health_test.go` fakeBrokerNoReady、`node_test.go` failTransientBroker、`recover_test.go` gapHistoryBroker/trimmedHistoryBroker、`presence_test.go` countingBroker、`pkg/grpcstream/api_handler_test.go` failPublishBroker/probeBroker。全部只加一行 `SetGapHandler(GapHandler) {}`，diff 逐行核对无 gofmt 无关 churn（HEAD 若干文件本非 gofmt-clean，已回退重做一次以保 diff 干净）。
+- **node/hub（`node.go`，hub.go 零改动）**：`Run` 中 `broker.SetGapHandler(n.onGap)` 与 `SetOccupancyHandler` 并列接线。`onGap` 复用现有 `hub.GetMatchingSubscribers(ch)`（精确 + 通配命中、按 session 去重——ephemeral 不过滤，spec 未要求），构造 `OutboundMessage_GapNotice{channel, position=positionFrom(n.streamEpoch(), LastGoodOffset, LastGoodOffset>0), gap_reason}` 逐 Session `Send`。reason 映射放在 node.go 的 `gapNoticeReasonV2`（**不动 recover.go 的 `gapReasonV2`**：Replayer 路径零改动约束）；指标 label 走 `gapNoticeReasonLabel`（middle/replay_truncated）。无本地订阅者不发不计指标；发送失败 Warn + `DeliveryFailures`，不计 MessagesDelivered。
+- **lane / 指标**：`session.go outboundFrameClass` 加 `OutboundMessage_GapNotice` → Control 车道；`metrics.go` 加 `LiveGapNoticeTotal`（`live_gap_notice_total{reason}`）并注册。
+- **proto / 再生**：`protocol/client/v2/service.proto` 加 `GapNotice` message（channel/position/gap_reason）+ oneof field 19；`protocol/shared/v2/types.proto` 加 `GAP_REASON_REPLAY_TRUNCATED = 6`。`buf generate`（buf 1.65.0，远端插件）后 diff 仅 `shared/genproto/client/v2/service.pb.go`、`shared/genproto/client/v2/service.swagger.json`、`shared/genproto/shared/v2/types.pb.go`、`sdks/ts/src/proto/client/v2/service_pb.ts`、`sdks/ts/src/proto/shared/v2/types_pb.ts`；openapiv2 插件对 client/v1、proxy/v1、server/v1 三个 swagger 的无关重命名 churn（C4 同款）已 `git checkout` 回退。
+- **Go SDK（`sdks/go`）**：新文件 `gap.go`（`GapNotice{Channel, GapReason sharedv2.GapReason, StreamEpoch, Offset, OffsetSet}` + `gapNoticeFromPB`）；`client.go` 加 `gapNoticeHandler` 字段、`OnGapNotice` 回调（Client 接口 + 实现）、`handleMessage` 加 `OutboundMessage_GapNotice` case → `handleGapNotice`。不进消息流、不动 `channelOffsets` cursor、无 handler 静默忽略。
+- **TS SDK（`sdks/ts`）**：`client/types.ts` 加 `GapNotice` 接口（`gapReason` 直接用 proto 枚举类型）与 `IClient.onGapNotice`；`message/converters.ts` 加 `gapNoticeFromPB` 与 `parseOutboundMessage` 的 `"gapNotice"` case（union type 同步扩展——**消掉「Unknown message type」路径**）；`client/client.ts` 加 `gapNoticeHandler` 字段、`onGapNotice` 方法、switch case；`client/index.ts`、`src/index.ts` 导出 `GapNotice` 类型。cursor（`channelOffsets`）零触碰。
+- **测试**（全部实跑通过，无固定长 Sleep；均用直接调 `catchUpMissed`/`onGap`/`handleMessage` 或 channel 同步点）：
+  - `pkg/redisbroker/pubsub_test.go`：`CatchUpMissed_MiddleGapNotified`（恰好一次，`Reason=Middle`、`LastGoodSeq=2`、`LastGoodOffset`=seq2 条目 offset，counter 仍 +1）、`CatchUpMissed_ReplayTruncatedNotified`（发布后缩 `StreamMaxLength=2` 再直接调 catch-up，`Reason=ReplayTruncated`、`LastGoodOffset`=回放尾部，counter +1）、`CatchUpMissed_OneNoticePerChannelPerCatchUp`（同一次 catch-up 同时中洞+尾截：counter +2、通知恰好一条且中洞胜出）、`CatchUpMissed_GapHandlerPanicContained`（panic recover，补投与计数照常）、`CatchUpMissed_LegacyBaselineNoNotification`（注册 handler 的 legacy 基线零通知）。nil handler 零行为变化由既有 `CatchUpMissed_MiddleGapCounted` / `CatchUpGapDetected` / `CatchUpMissed_LegacyBaselineNoFalsePositive`（均未设 handler、只断言计数）覆盖。
+  - 根包新文件 `gap_notice_test.go`：`OnGapFansOutGapNotice`（精确订阅者收到且 wire 上 channel/gap_reason=MIDDLE/position.offset+stream_epoch 正确；`gap.**` 通配订阅者收到；无关订阅者收不到；非 Publication；`live_gap_notice_total{middle}` +1）、`OnGapReplayTruncated`（REPLAY_TRUNCATED 映射；offset=0 → wire 上 offset 缺省而非 0）、`OnGapNoLocalSubscribers`（无订阅者不发不计指标）。
+  - `session_test.go` `OutboundFrameClass_GapNotice`（Control 车道；Publication 仍 Data）；`metrics_test.go` `LiveGapNoticeRegistered`。
+  - `sdks/go/gap_test.go`：回调可达、字段映射正确、OnError 不触发、cursor 不动；无 handler 静默忽略 + unset offset 不落成 0。
+  - `sdks/ts/test/gapnotice.test.ts`：converter 映射（含 unset offset → undefined）、client 分发到 onGapNotice、onError 不触发、cursor 不动、无 handler 静默忽略。
+- **文档**：`01-architecture.md` Redis broker 段 catch-up 句改为「检出洞 → SetGapHandler 上报 → node 扇出 GapNotice（C6）」；`04-cluster.md` §8 加「catch-up 洞通知（C6）」一条；`kernel-architecture.md`「Gap 合同」节把「不下发客户端……独立里程碑」改为已落地（C6）并写明信封形状。
+- **验证**（串行执行，真实输出）：`go test -count=1 ./pkg/redisbroker` ok 61.989s；`go test -count=1 -run "TestSim_|TestClusterCommandBus" .` ok 0.134s；`go test ./...` 全 ok（根包 76.915s 等 11 包）；`go test -race . ./pkg/redisbroker` ok（79.535s / 66.749s）；`cd sdks/go && go test ./...` ok；`cd sdks/ts && npx jest` 6 suites / 83 tests 全过（含新 gapnotice.test.ts 4 条）；`npm run build`（esm+cjs+types tsc）通过。回退重做 broker.go/redis.go/broker_memory.go/node_test.go/cluster_resume_test.go 后，`go build ./...` + 点名复跑全部新增测试再确认通过。
+- **偏离**：无。hub.go 未加 helper（`GetMatchingSubscribers` 直接复用，符合 §2「仅当不能复用时才加」）；`recover.go` / `client.go` / C1–C5 合同零改动（git status 佐证）。

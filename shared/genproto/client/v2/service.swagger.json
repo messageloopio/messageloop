@@ -162,6 +162,9 @@
         },
         "pong": {
           "$ref": "#/definitions/clientv2Pong"
+        },
+        "gapNotice": {
+          "$ref": "#/definitions/v2GapNotice"
         }
       },
       "title": "服务端 -\u003e 客户端"
@@ -598,6 +601,21 @@
       },
       "title": "统一的数据载荷类型"
     },
+    "v2GapNotice": {
+      "type": "object",
+      "properties": {
+        "channel": {
+          "type": "string"
+        },
+        "position": {
+          "$ref": "#/definitions/v2Position"
+        },
+        "gapReason": {
+          "$ref": "#/definitions/v2GapReason"
+        }
+      },
+      "title": "GapNotice：重连 catch-up 检出洞（C6）。position = 最后已知安全位置；\noffset 缺省 = 未知。它是通知：不进消息流，不与回放消息排序。"
+    },
     "v2GapReason": {
       "type": "string",
       "enum": [
@@ -606,10 +624,11 @@
         "GAP_REASON_HEAD_TRIMMED",
         "GAP_REASON_EMPTY_EXPIRED",
         "GAP_REASON_EPOCH_RESET",
-        "GAP_REASON_MIDDLE"
+        "GAP_REASON_MIDDLE",
+        "GAP_REASON_REPLAY_TRUNCATED"
       ],
       "default": "GAP_REASON_UNSPECIFIED",
-      "description": "- GAP_REASON_MIDDLE: 页内/保留区中间缺条目：相邻条目稠密 seq 不连续（C4）。",
+      "description": "- GAP_REASON_MIDDLE: 页内/保留区中间缺条目：相邻条目稠密 seq 不连续（C4）。\n - GAP_REASON_REPLAY_TRUNCATED: 重连 catch-up 回放批被 limit 截断：stream 仍有更新条目未送达（C6）。\n历史里还在，客户端可 recover 补齐。",
       "title": "恢复 / 历史读取时的缺口原因"
     },
     "v2Position": {

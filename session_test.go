@@ -417,3 +417,20 @@ func TestSession_Close_LeavesAndUnbinds(t *testing.T) {
 	// Idempotency: a second Close is a no-op.
 	require.NoError(t, sess.Close(Disconnect{}))
 }
+
+// TestSession_OutboundFrameClass_GapNotice verifies C6: the GapNotice
+// envelope rides the Control lane (small, low-frequency, control semantics),
+// like the other control envelopes.
+func TestSession_OutboundFrameClass_GapNotice(t *testing.T) {
+	notice := MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
+		out.Envelope = &clientpb.OutboundMessage_GapNotice{
+			GapNotice: &clientpb.GapNotice{Channel: "ch"},
+		}
+	})
+	require.True(t, outboundFrameClass(notice), "GapNotice must be a Control frame")
+
+	pub := MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
+		out.Envelope = &clientpb.OutboundMessage_Publication{Publication: &clientpb.Publication{}}
+	})
+	require.False(t, outboundFrameClass(pub), "publications stay on the Data lane")
+}

@@ -195,6 +195,9 @@ func (n *Node) Run(ctx context.Context) error {
 			startErr <- err
 			return
 		}
+		// C6: catch-up gap notifications fan out to local subscribers via the
+		// same second-pipe pattern as occupancy (the broker knows no sessions).
+		n.broker.SetGapHandler(n.onGap)
 		if err := n.broker.Start(ctx, func(ch string, pub *Publication) error {
 			return n.hub.broadcastPublication(ch, pub)
 		}); err != nil {
@@ -1452,6 +1455,69 @@ func (n *Node) deliverPresenceEvent(ch string, evt *clientpb.PresenceEvent, gen 
 		}(r)
 	}
 	wg.Wait()
+}
+
+// gapNoticeReasonV2 maps a catch-up gap reason to the client-wire GapReason
+// (C6). It lives here, not in recover.go's gapReasonV2: the Replayer
+// recovery path is untouched by C6.
+func gapNoticeReasonV2(reason HistoryGapReason) sharedv2.GapReason {
+	switch reason {
+	case HistoryGapMiddle:
+		return sharedv2.GapReason_GAP_REASON_MIDDLE
+	case HistoryGapReplayTruncated:
+		return sharedv2.GapReason_GAP_REASON_REPLAY_TRUNCATED
+	}
+	return sharedv2.GapReason_GAP_REASON_UNSPECIFIED
+}
+
+// gapNoticeReasonLabel is the live_gap_notice_total reason label.
+func gapNoticeReasonLabel(reason HistoryGapReason) string {
+	switch reason {
+	case HistoryGapMiddle:
+		return "middle"
+	case HistoryGapReplayTruncated:
+		return "replay_truncated"
+	}
+	return "unknown"
+}
+
+// onGap is the catch-up gap receiver (registered as the broker's gap
+// handler, C6). It fans one GapNotice envelope out to every local session
+// covered by the gap's channel — exact subscribers plus matching wildcard
+// subscribers — so clients learn that reconnect catch-up could not replay
+// the full missed range. The notice carries the channel, the gap reason, and
+// the last known safe position (broker epoch + last-good offset; offset
+// unset when unknown). With no local subscribers nothing is sent and no
+// notice metric is counted (the broker's internal gap counter still ran).
+// Delivery counts no MessagesDelivered.
+func (n *Node) onGap(gap CatchUpGap) {
+	recipients := n.hub.GetMatchingSubscribers(gap.Channel)
+	if len(recipients) == 0 {
+		return
+	}
+
+	notice := &clientpb.GapNotice{
+		Channel:   gap.Channel,
+		Position:  positionFrom(n.streamEpoch(), gap.LastGoodOffset, gap.LastGoodOffset > 0),
+		GapReason: gapNoticeReasonV2(gap.Reason),
+	}
+	out := MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
+		out.Envelope = &clientpb.OutboundMessage_GapNotice{GapNotice: notice}
+	})
+
+	if n.metrics != nil {
+		n.metrics.LiveGapNoticeTotal.WithLabelValues(gapNoticeReasonLabel(gap.Reason)).Inc()
+	}
+
+	ctx := context.Background()
+	for _, c := range recipients {
+		if err := c.Send(ctx, out); err != nil {
+			log.WarnContext(ctx, "failed to send gap notice", err, "channel", gap.Channel, "session", c.SessionID())
+			if n.metrics != nil {
+				n.metrics.DeliveryFailures.Inc()
+			}
+		}
+	}
 }
 
 // presenceSnapshot builds the current snapshot for ch under the channel

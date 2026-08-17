@@ -50,6 +50,7 @@ func (b *evictTestBroker) PublishTransient(ch string, _ *Publication) error {
 }
 func (b *evictTestBroker) PublishOccupancy(string, OccupancyEvent) error { return nil }
 func (b *evictTestBroker) SetOccupancyHandler(OccupancyHandler) error    { return nil }
+func (b *evictTestBroker) SetGapHandler(GapHandler)                      {}
 func (b *evictTestBroker) History(string, uint64, int) (*HistoryPage, error) { return nil, nil }
 
 // projectionQueryStore accumulates shared channel projection deltas and lists
@@ -330,6 +331,7 @@ func (b *failSubscribeBroker) Publish(string, *Publication) (uint64, error)     
 func (b *failSubscribeBroker) PublishTransient(string, *Publication) error      { return nil }
 func (b *failSubscribeBroker) PublishOccupancy(string, OccupancyEvent) error    { return nil }
 func (b *failSubscribeBroker) SetOccupancyHandler(OccupancyHandler) error       { return nil }
+func (b *failSubscribeBroker) SetGapHandler(GapHandler)                         {}
 func (b *failSubscribeBroker) History(string, uint64, int) (*HistoryPage, error) {
 	return nil, nil
 }
@@ -490,6 +492,7 @@ func (b *failSecondSubscribeBroker) PublishOccupancy(string, OccupancyEvent) err
 	return nil
 }
 func (b *failSecondSubscribeBroker) SetOccupancyHandler(OccupancyHandler) error { return nil }
+func (b *failSecondSubscribeBroker) SetGapHandler(GapHandler)                   {}
 func (b *failSecondSubscribeBroker) History(string, uint64, int) (*HistoryPage, error) {
 	return nil, nil
 }

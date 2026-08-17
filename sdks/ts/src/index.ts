@@ -11,6 +11,7 @@ export type {
   PresenceEvent,
   PresenceSnapshot,
   SurveyAnswer,
+  GapNotice,
 } from "./client/types";
 
 // Transport exports

@@ -54,6 +54,7 @@ message OutboundMessage {
     PresenceEvent presence_event = 16;
     Ping ping = 17;
     Pong pong = 18;
+    GapNotice gap_notice = 19;
   }
 }
 
@@ -123,6 +124,14 @@ message RecoverComplete {
   bool gap = 4;
   messageloop.shared.v2.GapReason gap_reason = 5;
   messageloop.shared.v2.Error error = 6; // SKIPPED/FAILED 细节
+}
+
+// GapNotice：重连 catch-up 检出洞（C6）。position = 最后已知安全位置；
+// offset 缺省 = 未知。它是通知：不进消息流，不与回放消息排序。
+message GapNotice {
+  string channel = 1;
+  messageloop.shared.v2.Position position = 2;
+  messageloop.shared.v2.GapReason gap_reason = 3;
 }
 
 // --- 发布相关 ---

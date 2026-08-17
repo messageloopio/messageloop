@@ -26,6 +26,13 @@ type redisBroker struct {
 	// occHandler receives live occupancy events (B2). Set via
 	// SetOccupancyHandler before Start; never the publication handler.
 	occHandler messageloop.OccupancyHandler
+	// gapHandler receives catch-up gap notifications (C6). Set via
+	// SetGapHandler; nil disables client notification while detection
+	// counters/logging keep running. Written before Start and read on the
+	// catch-up path, so it is guarded by gapHandlerMu for tests that
+	// register it on a running broker.
+	gapHandlerMu sync.RWMutex
+	gapHandler   messageloop.GapHandler
 	// epoch is set by initEpoch during Start and read concurrently by
 	// Publish/PublishTransient/Epoch, so it is guarded by atomic.Value.
 	epoch atomic.Value
@@ -460,6 +467,14 @@ func (b *redisBroker) PublishTransient(ch string, pub *messageloop.Publication) 
 func (b *redisBroker) SetOccupancyHandler(handler messageloop.OccupancyHandler) error {
 	b.occHandler = handler
 	return nil
+}
+
+// SetGapHandler registers the catch-up gap handler (C6); nil disables client
+// notification while detection counters and warnings keep running.
+func (b *redisBroker) SetGapHandler(handler messageloop.GapHandler) {
+	b.gapHandlerMu.Lock()
+	b.gapHandler = handler
+	b.gapHandlerMu.Unlock()
 }
 
 // PublishOccupancy broadcasts an occupancy event on the exact channel's

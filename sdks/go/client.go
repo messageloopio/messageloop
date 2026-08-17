@@ -77,6 +77,9 @@ type Client interface {
 	// with Connected / SubscribeAck, and for the snapshot returned by a
 	// Presence query.
 	OnPresenceSnapshot(fn func(PresenceSnapshot))
+	// OnGapNotice sets the handler for catch-up gap notices (C6). The notice
+	// is informational and never advances the recovery cursor.
+	OnGapNotice(fn func(GapNotice))
 	// Presence queries the current presence snapshot of an exact channel and
 	// waits for the server's reply on the caller's goroutine.
 	Presence(ctx context.Context, channel string) (*PresenceSnapshot, error)
@@ -175,6 +178,7 @@ type client struct {
 	surveyRequestHandler    func(requestID, channel string, req *Message) (*Message, error)
 	presenceHandler         func(PresenceEvent)
 	presenceSnapshotHandler func(PresenceSnapshot)
+	gapNoticeHandler        func(GapNotice)
 	pendingRPC              map[string]*rpcPending
 	pendingRPCMu            sync.RWMutex
 	pendingAck              map[string]*ackPending // Publish id -> pending publish awaiting its PublishAck
@@ -570,6 +574,11 @@ func (c *client) handleMessage(msg *clientpb.OutboundMessage, gen uint64) {
 	case *clientpb.OutboundMessage_RecoverComplete:
 		c.handleRecoverComplete(env.RecoverComplete)
 
+	case *clientpb.OutboundMessage_GapNotice:
+		// A catch-up hole notification (C6): it is not part of the message
+		// stream and never touches the per-channel cursor.
+		c.handleGapNotice(env.GapNotice)
+
 	case *clientpb.OutboundMessage_SurveyResult:
 		c.handleSurveyResult(env.SurveyResult)
 
@@ -746,6 +755,20 @@ func (c *client) handlePublication(pub *clientpb.Publication) {
 	c.handlerMu.RUnlock()
 	if handler != nil {
 		handler(msgs)
+	}
+}
+
+// handleGapNotice dispatches a catch-up gap notice to the OnGapNotice
+// handler, if any. Without a handler the notice is silently ignored.
+func (c *client) handleGapNotice(notice *clientpb.GapNotice) {
+	if notice == nil {
+		return
+	}
+	c.handlerMu.RLock()
+	handler := c.gapNoticeHandler
+	c.handlerMu.RUnlock()
+	if handler != nil {
+		handler(gapNoticeFromPB(notice))
 	}
 }
 
@@ -1361,6 +1384,16 @@ func (c *client) OnPresence(fn func(PresenceEvent)) {
 func (c *client) OnPresenceSnapshot(fn func(PresenceSnapshot)) {
 	c.handlerMu.Lock()
 	c.presenceSnapshotHandler = fn
+	c.handlerMu.Unlock()
+}
+
+// OnGapNotice sets the handler for catch-up gap notices (C6): the server
+// sends one when reconnect catch-up detected a hole on a subscribed channel.
+// The notice never advances the per-channel recovery cursor. Without a
+// handler the notice is silently ignored.
+func (c *client) OnGapNotice(fn func(GapNotice)) {
+	c.handlerMu.Lock()
+	c.gapNoticeHandler = fn
 	c.handlerMu.Unlock()
 }
 

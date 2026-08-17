@@ -380,7 +380,7 @@ StreamLog
 
 禁止：`RecoverOK ∧ 空批 ∧ gap=none` 用在 `from` 已设置且适配器无法证明「保留区仍覆盖 from」的时候。证明不了就标 `head_trimmed` 或 `empty_expired`，宁可假阳性。
 
-重连 catch-up 的中洞同样按稠密 `seq` 检测：现状为计数 + Warn，不下发客户端；client-facing live gap 信封仍是独立里程碑。
+重连 catch-up 的中洞同样按稠密 `seq` 检测，尾截按回放批被 limit 截断且 stream 仍有更新条目检测；检出即向该频道本地订阅者下发 client-facing live gap 信封（C6 已落地）：`OutboundMessage.gap_notice = GapNotice{ channel, position, gap_reason }`（`gap_reason` ∈ `GAP_REASON_MIDDLE` / `GAP_REASON_REPLAY_TRUNCATED`，`position` = 最后已知安全位置，offset 未知则缺省），每频道每次 catch-up 至多一条，指标 `live_gap_notice_total{reason}`。
 
 ### LiveBus
 

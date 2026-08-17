@@ -343,6 +343,7 @@ type OutboundMessage struct {
 	//	*OutboundMessage_PresenceEvent
 	//	*OutboundMessage_Ping
 	//	*OutboundMessage_Pong
+	//	*OutboundMessage_GapNotice
 	Envelope      isOutboundMessage_Envelope `protobuf_oneof:"envelope"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -543,6 +544,15 @@ func (x *OutboundMessage) GetPong() *Pong {
 	return nil
 }
 
+func (x *OutboundMessage) GetGapNotice() *GapNotice {
+	if x != nil {
+		if x, ok := x.Envelope.(*OutboundMessage_GapNotice); ok {
+			return x.GapNotice
+		}
+	}
+	return nil
+}
+
 type isOutboundMessage_Envelope interface {
 	isOutboundMessage_Envelope()
 }
@@ -611,6 +621,10 @@ type OutboundMessage_Pong struct {
 	Pong *Pong `protobuf:"bytes,18,opt,name=pong,proto3,oneof"`
 }
 
+type OutboundMessage_GapNotice struct {
+	GapNotice *GapNotice `protobuf:"bytes,19,opt,name=gap_notice,json=gapNotice,proto3,oneof"`
+}
+
 func (*OutboundMessage_Error) isOutboundMessage_Envelope() {}
 
 func (*OutboundMessage_Connected) isOutboundMessage_Envelope() {}
@@ -642,6 +656,8 @@ func (*OutboundMessage_PresenceEvent) isOutboundMessage_Envelope() {}
 func (*OutboundMessage_Ping) isOutboundMessage_Envelope() {}
 
 func (*OutboundMessage_Pong) isOutboundMessage_Envelope() {}
+
+func (*OutboundMessage_GapNotice) isOutboundMessage_Envelope() {}
 
 type Connect struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1187,6 +1203,68 @@ func (x *RecoverComplete) GetError() *v2.Error {
 	return nil
 }
 
+// GapNotice：重连 catch-up 检出洞（C6）。position = 最后已知安全位置；
+// offset 缺省 = 未知。它是通知：不进消息流，不与回放消息排序。
+type GapNotice struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Channel       string                 `protobuf:"bytes,1,opt,name=channel,proto3" json:"channel,omitempty"`
+	Position      *v2.Position           `protobuf:"bytes,2,opt,name=position,proto3" json:"position,omitempty"`
+	GapReason     v2.GapReason           `protobuf:"varint,3,opt,name=gap_reason,json=gapReason,proto3,enum=messageloop.shared.v2.GapReason" json:"gap_reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GapNotice) Reset() {
+	*x = GapNotice{}
+	mi := &file_client_v2_service_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GapNotice) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GapNotice) ProtoMessage() {}
+
+func (x *GapNotice) ProtoReflect() protoreflect.Message {
+	mi := &file_client_v2_service_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GapNotice.ProtoReflect.Descriptor instead.
+func (*GapNotice) Descriptor() ([]byte, []int) {
+	return file_client_v2_service_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *GapNotice) GetChannel() string {
+	if x != nil {
+		return x.Channel
+	}
+	return ""
+}
+
+func (x *GapNotice) GetPosition() *v2.Position {
+	if x != nil {
+		return x.Position
+	}
+	return nil
+}
+
+func (x *GapNotice) GetGapReason() v2.GapReason {
+	if x != nil {
+		return x.GapReason
+	}
+	return v2.GapReason(0)
+}
+
 type Publish struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	Channel        string                 `protobuf:"bytes,1,opt,name=channel,proto3" json:"channel,omitempty"`
@@ -1201,7 +1279,7 @@ type Publish struct {
 
 func (x *Publish) Reset() {
 	*x = Publish{}
-	mi := &file_client_v2_service_proto_msgTypes[10]
+	mi := &file_client_v2_service_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1213,7 +1291,7 @@ func (x *Publish) String() string {
 func (*Publish) ProtoMessage() {}
 
 func (x *Publish) ProtoReflect() protoreflect.Message {
-	mi := &file_client_v2_service_proto_msgTypes[10]
+	mi := &file_client_v2_service_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1226,7 +1304,7 @@ func (x *Publish) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Publish.ProtoReflect.Descriptor instead.
 func (*Publish) Descriptor() ([]byte, []int) {
-	return file_client_v2_service_proto_rawDescGZIP(), []int{10}
+	return file_client_v2_service_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *Publish) GetChannel() string {
@@ -1281,7 +1359,7 @@ type PublishAck struct {
 
 func (x *PublishAck) Reset() {
 	*x = PublishAck{}
-	mi := &file_client_v2_service_proto_msgTypes[11]
+	mi := &file_client_v2_service_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1293,7 +1371,7 @@ func (x *PublishAck) String() string {
 func (*PublishAck) ProtoMessage() {}
 
 func (x *PublishAck) ProtoReflect() protoreflect.Message {
-	mi := &file_client_v2_service_proto_msgTypes[11]
+	mi := &file_client_v2_service_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1306,7 +1384,7 @@ func (x *PublishAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PublishAck.ProtoReflect.Descriptor instead.
 func (*PublishAck) Descriptor() ([]byte, []int) {
-	return file_client_v2_service_proto_rawDescGZIP(), []int{11}
+	return file_client_v2_service_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *PublishAck) GetId() string {
@@ -1337,7 +1415,7 @@ type Message struct {
 
 func (x *Message) Reset() {
 	*x = Message{}
-	mi := &file_client_v2_service_proto_msgTypes[12]
+	mi := &file_client_v2_service_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1349,7 +1427,7 @@ func (x *Message) String() string {
 func (*Message) ProtoMessage() {}
 
 func (x *Message) ProtoReflect() protoreflect.Message {
-	mi := &file_client_v2_service_proto_msgTypes[12]
+	mi := &file_client_v2_service_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1362,7 +1440,7 @@ func (x *Message) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Message.ProtoReflect.Descriptor instead.
 func (*Message) Descriptor() ([]byte, []int) {
-	return file_client_v2_service_proto_rawDescGZIP(), []int{12}
+	return file_client_v2_service_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *Message) GetId() string {
@@ -1416,7 +1494,7 @@ type Publication struct {
 
 func (x *Publication) Reset() {
 	*x = Publication{}
-	mi := &file_client_v2_service_proto_msgTypes[13]
+	mi := &file_client_v2_service_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1428,7 +1506,7 @@ func (x *Publication) String() string {
 func (*Publication) ProtoMessage() {}
 
 func (x *Publication) ProtoReflect() protoreflect.Message {
-	mi := &file_client_v2_service_proto_msgTypes[13]
+	mi := &file_client_v2_service_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1441,7 +1519,7 @@ func (x *Publication) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Publication.ProtoReflect.Descriptor instead.
 func (*Publication) Descriptor() ([]byte, []int) {
-	return file_client_v2_service_proto_rawDescGZIP(), []int{13}
+	return file_client_v2_service_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *Publication) GetMessages() []*Message {
@@ -1463,7 +1541,7 @@ type RpcRequest struct {
 
 func (x *RpcRequest) Reset() {
 	*x = RpcRequest{}
-	mi := &file_client_v2_service_proto_msgTypes[14]
+	mi := &file_client_v2_service_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1475,7 +1553,7 @@ func (x *RpcRequest) String() string {
 func (*RpcRequest) ProtoMessage() {}
 
 func (x *RpcRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_client_v2_service_proto_msgTypes[14]
+	mi := &file_client_v2_service_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1488,7 +1566,7 @@ func (x *RpcRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RpcRequest.ProtoReflect.Descriptor instead.
 func (*RpcRequest) Descriptor() ([]byte, []int) {
-	return file_client_v2_service_proto_rawDescGZIP(), []int{14}
+	return file_client_v2_service_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *RpcRequest) GetChannel() string {
@@ -1531,7 +1609,7 @@ type RpcReply struct {
 
 func (x *RpcReply) Reset() {
 	*x = RpcReply{}
-	mi := &file_client_v2_service_proto_msgTypes[15]
+	mi := &file_client_v2_service_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1543,7 +1621,7 @@ func (x *RpcReply) String() string {
 func (*RpcReply) ProtoMessage() {}
 
 func (x *RpcReply) ProtoReflect() protoreflect.Message {
-	mi := &file_client_v2_service_proto_msgTypes[15]
+	mi := &file_client_v2_service_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1556,7 +1634,7 @@ func (x *RpcReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RpcReply.ProtoReflect.Descriptor instead.
 func (*RpcReply) Descriptor() ([]byte, []int) {
-	return file_client_v2_service_proto_rawDescGZIP(), []int{15}
+	return file_client_v2_service_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *RpcReply) GetRequestId() string {
@@ -1596,7 +1674,7 @@ type SubRefresh struct {
 
 func (x *SubRefresh) Reset() {
 	*x = SubRefresh{}
-	mi := &file_client_v2_service_proto_msgTypes[16]
+	mi := &file_client_v2_service_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1608,7 +1686,7 @@ func (x *SubRefresh) String() string {
 func (*SubRefresh) ProtoMessage() {}
 
 func (x *SubRefresh) ProtoReflect() protoreflect.Message {
-	mi := &file_client_v2_service_proto_msgTypes[16]
+	mi := &file_client_v2_service_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1621,7 +1699,7 @@ func (x *SubRefresh) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubRefresh.ProtoReflect.Descriptor instead.
 func (*SubRefresh) Descriptor() ([]byte, []int) {
-	return file_client_v2_service_proto_rawDescGZIP(), []int{16}
+	return file_client_v2_service_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *SubRefresh) GetChannels() []string {
@@ -1639,7 +1717,7 @@ type SubRefreshAck struct {
 
 func (x *SubRefreshAck) Reset() {
 	*x = SubRefreshAck{}
-	mi := &file_client_v2_service_proto_msgTypes[17]
+	mi := &file_client_v2_service_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1651,7 +1729,7 @@ func (x *SubRefreshAck) String() string {
 func (*SubRefreshAck) ProtoMessage() {}
 
 func (x *SubRefreshAck) ProtoReflect() protoreflect.Message {
-	mi := &file_client_v2_service_proto_msgTypes[17]
+	mi := &file_client_v2_service_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1664,7 +1742,7 @@ func (x *SubRefreshAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubRefreshAck.ProtoReflect.Descriptor instead.
 func (*SubRefreshAck) Descriptor() ([]byte, []int) {
-	return file_client_v2_service_proto_rawDescGZIP(), []int{17}
+	return file_client_v2_service_proto_rawDescGZIP(), []int{18}
 }
 
 type SurveyRequest struct {
@@ -1680,7 +1758,7 @@ type SurveyRequest struct {
 
 func (x *SurveyRequest) Reset() {
 	*x = SurveyRequest{}
-	mi := &file_client_v2_service_proto_msgTypes[18]
+	mi := &file_client_v2_service_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1692,7 +1770,7 @@ func (x *SurveyRequest) String() string {
 func (*SurveyRequest) ProtoMessage() {}
 
 func (x *SurveyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_client_v2_service_proto_msgTypes[18]
+	mi := &file_client_v2_service_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1705,7 +1783,7 @@ func (x *SurveyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SurveyRequest.ProtoReflect.Descriptor instead.
 func (*SurveyRequest) Descriptor() ([]byte, []int) {
-	return file_client_v2_service_proto_rawDescGZIP(), []int{18}
+	return file_client_v2_service_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *SurveyRequest) GetRequestId() string {
@@ -1755,7 +1833,7 @@ type SurveyReply struct {
 
 func (x *SurveyReply) Reset() {
 	*x = SurveyReply{}
-	mi := &file_client_v2_service_proto_msgTypes[19]
+	mi := &file_client_v2_service_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1767,7 +1845,7 @@ func (x *SurveyReply) String() string {
 func (*SurveyReply) ProtoMessage() {}
 
 func (x *SurveyReply) ProtoReflect() protoreflect.Message {
-	mi := &file_client_v2_service_proto_msgTypes[19]
+	mi := &file_client_v2_service_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1780,7 +1858,7 @@ func (x *SurveyReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SurveyReply.ProtoReflect.Descriptor instead.
 func (*SurveyReply) Descriptor() ([]byte, []int) {
-	return file_client_v2_service_proto_rawDescGZIP(), []int{19}
+	return file_client_v2_service_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *SurveyReply) GetRequestId() string {
@@ -1824,7 +1902,7 @@ type SurveyResult struct {
 
 func (x *SurveyResult) Reset() {
 	*x = SurveyResult{}
-	mi := &file_client_v2_service_proto_msgTypes[20]
+	mi := &file_client_v2_service_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1836,7 +1914,7 @@ func (x *SurveyResult) String() string {
 func (*SurveyResult) ProtoMessage() {}
 
 func (x *SurveyResult) ProtoReflect() protoreflect.Message {
-	mi := &file_client_v2_service_proto_msgTypes[20]
+	mi := &file_client_v2_service_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1849,7 +1927,7 @@ func (x *SurveyResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SurveyResult.ProtoReflect.Descriptor instead.
 func (*SurveyResult) Descriptor() ([]byte, []int) {
-	return file_client_v2_service_proto_rawDescGZIP(), []int{20}
+	return file_client_v2_service_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *SurveyResult) GetRequestId() string {
@@ -1892,7 +1970,7 @@ type SurveyAnswer struct {
 
 func (x *SurveyAnswer) Reset() {
 	*x = SurveyAnswer{}
-	mi := &file_client_v2_service_proto_msgTypes[21]
+	mi := &file_client_v2_service_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1904,7 +1982,7 @@ func (x *SurveyAnswer) String() string {
 func (*SurveyAnswer) ProtoMessage() {}
 
 func (x *SurveyAnswer) ProtoReflect() protoreflect.Message {
-	mi := &file_client_v2_service_proto_msgTypes[21]
+	mi := &file_client_v2_service_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1917,7 +1995,7 @@ func (x *SurveyAnswer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SurveyAnswer.ProtoReflect.Descriptor instead.
 func (*SurveyAnswer) Descriptor() ([]byte, []int) {
-	return file_client_v2_service_proto_rawDescGZIP(), []int{21}
+	return file_client_v2_service_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *SurveyAnswer) GetSessionId() string {
@@ -1957,7 +2035,7 @@ type PresenceQuery struct {
 
 func (x *PresenceQuery) Reset() {
 	*x = PresenceQuery{}
-	mi := &file_client_v2_service_proto_msgTypes[22]
+	mi := &file_client_v2_service_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1969,7 +2047,7 @@ func (x *PresenceQuery) String() string {
 func (*PresenceQuery) ProtoMessage() {}
 
 func (x *PresenceQuery) ProtoReflect() protoreflect.Message {
-	mi := &file_client_v2_service_proto_msgTypes[22]
+	mi := &file_client_v2_service_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1982,7 +2060,7 @@ func (x *PresenceQuery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PresenceQuery.ProtoReflect.Descriptor instead.
 func (*PresenceQuery) Descriptor() ([]byte, []int) {
-	return file_client_v2_service_proto_rawDescGZIP(), []int{22}
+	return file_client_v2_service_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *PresenceQuery) GetChannel() string {
@@ -2004,7 +2082,7 @@ type PresenceInfo struct {
 
 func (x *PresenceInfo) Reset() {
 	*x = PresenceInfo{}
-	mi := &file_client_v2_service_proto_msgTypes[23]
+	mi := &file_client_v2_service_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2016,7 +2094,7 @@ func (x *PresenceInfo) String() string {
 func (*PresenceInfo) ProtoMessage() {}
 
 func (x *PresenceInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_client_v2_service_proto_msgTypes[23]
+	mi := &file_client_v2_service_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2029,7 +2107,7 @@ func (x *PresenceInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PresenceInfo.ProtoReflect.Descriptor instead.
 func (*PresenceInfo) Descriptor() ([]byte, []int) {
-	return file_client_v2_service_proto_rawDescGZIP(), []int{23}
+	return file_client_v2_service_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *PresenceInfo) GetSessionId() string {
@@ -2072,7 +2150,7 @@ type PresenceSnapshot struct {
 
 func (x *PresenceSnapshot) Reset() {
 	*x = PresenceSnapshot{}
-	mi := &file_client_v2_service_proto_msgTypes[24]
+	mi := &file_client_v2_service_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2084,7 +2162,7 @@ func (x *PresenceSnapshot) String() string {
 func (*PresenceSnapshot) ProtoMessage() {}
 
 func (x *PresenceSnapshot) ProtoReflect() protoreflect.Message {
-	mi := &file_client_v2_service_proto_msgTypes[24]
+	mi := &file_client_v2_service_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2097,7 +2175,7 @@ func (x *PresenceSnapshot) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PresenceSnapshot.ProtoReflect.Descriptor instead.
 func (*PresenceSnapshot) Descriptor() ([]byte, []int) {
-	return file_client_v2_service_proto_rawDescGZIP(), []int{24}
+	return file_client_v2_service_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *PresenceSnapshot) GetChannel() string {
@@ -2140,7 +2218,7 @@ type PresenceEvent struct {
 
 func (x *PresenceEvent) Reset() {
 	*x = PresenceEvent{}
-	mi := &file_client_v2_service_proto_msgTypes[25]
+	mi := &file_client_v2_service_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2152,7 +2230,7 @@ func (x *PresenceEvent) String() string {
 func (*PresenceEvent) ProtoMessage() {}
 
 func (x *PresenceEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_client_v2_service_proto_msgTypes[25]
+	mi := &file_client_v2_service_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2165,7 +2243,7 @@ func (x *PresenceEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PresenceEvent.ProtoReflect.Descriptor instead.
 func (*PresenceEvent) Descriptor() ([]byte, []int) {
-	return file_client_v2_service_proto_rawDescGZIP(), []int{25}
+	return file_client_v2_service_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *PresenceEvent) GetChannel() string {
@@ -2204,7 +2282,7 @@ type Ping struct {
 
 func (x *Ping) Reset() {
 	*x = Ping{}
-	mi := &file_client_v2_service_proto_msgTypes[26]
+	mi := &file_client_v2_service_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2216,7 +2294,7 @@ func (x *Ping) String() string {
 func (*Ping) ProtoMessage() {}
 
 func (x *Ping) ProtoReflect() protoreflect.Message {
-	mi := &file_client_v2_service_proto_msgTypes[26]
+	mi := &file_client_v2_service_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2229,7 +2307,7 @@ func (x *Ping) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Ping.ProtoReflect.Descriptor instead.
 func (*Ping) Descriptor() ([]byte, []int) {
-	return file_client_v2_service_proto_rawDescGZIP(), []int{26}
+	return file_client_v2_service_proto_rawDescGZIP(), []int{27}
 }
 
 type Pong struct {
@@ -2240,7 +2318,7 @@ type Pong struct {
 
 func (x *Pong) Reset() {
 	*x = Pong{}
-	mi := &file_client_v2_service_proto_msgTypes[27]
+	mi := &file_client_v2_service_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2252,7 +2330,7 @@ func (x *Pong) String() string {
 func (*Pong) ProtoMessage() {}
 
 func (x *Pong) ProtoReflect() protoreflect.Message {
-	mi := &file_client_v2_service_proto_msgTypes[27]
+	mi := &file_client_v2_service_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2265,7 +2343,7 @@ func (x *Pong) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Pong.ProtoReflect.Descriptor instead.
 func (*Pong) Descriptor() ([]byte, []int) {
-	return file_client_v2_service_proto_rawDescGZIP(), []int{27}
+	return file_client_v2_service_proto_rawDescGZIP(), []int{28}
 }
 
 var File_client_v2_service_proto protoreflect.FileDescriptor
@@ -2291,7 +2369,7 @@ const file_client_v2_service_proto_rawDesc = "" +
 	"\x04pong\x18\f \x01(\v2\x1b.messageloop.client.v2.PongH\x00R\x04pong\x12M\n" +
 	"\x0epresence_query\x18\r \x01(\v2$.messageloop.client.v2.PresenceQueryH\x00R\rpresenceQueryB\n" +
 	"\n" +
-	"\benvelope\"\xaa\t\n" +
+	"\benvelope\"\xed\t\n" +
 	"\x0fOutboundMessage\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04time\x18\x02 \x01(\x04R\x04time\x124\n" +
@@ -2312,7 +2390,9 @@ const file_client_v2_service_proto_rawDesc = "" +
 	"\bpresence\x18\x0f \x01(\v2'.messageloop.client.v2.PresenceSnapshotH\x00R\bpresence\x12M\n" +
 	"\x0epresence_event\x18\x10 \x01(\v2$.messageloop.client.v2.PresenceEventH\x00R\rpresenceEvent\x121\n" +
 	"\x04ping\x18\x11 \x01(\v2\x1b.messageloop.client.v2.PingH\x00R\x04ping\x121\n" +
-	"\x04pong\x18\x12 \x01(\v2\x1b.messageloop.client.v2.PongH\x00R\x04pongB\n" +
+	"\x04pong\x18\x12 \x01(\v2\x1b.messageloop.client.v2.PongH\x00R\x04pong\x12A\n" +
+	"\n" +
+	"gap_notice\x18\x13 \x01(\v2 .messageloop.client.v2.GapNoticeH\x00R\tgapNoticeB\n" +
 	"\n" +
 	"\benvelope\"\xf5\x01\n" +
 	"\aConnect\x12\x1b\n" +
@@ -2358,7 +2438,12 @@ const file_client_v2_service_proto_rawDesc = "" +
 	"\x03gap\x18\x04 \x01(\bR\x03gap\x12?\n" +
 	"\n" +
 	"gap_reason\x18\x05 \x01(\x0e2 .messageloop.shared.v2.GapReasonR\tgapReason\x122\n" +
-	"\x05error\x18\x06 \x01(\v2\x1c.messageloop.shared.v2.ErrorR\x05error\"\xf7\x01\n" +
+	"\x05error\x18\x06 \x01(\v2\x1c.messageloop.shared.v2.ErrorR\x05error\"\xa3\x01\n" +
+	"\tGapNotice\x12\x18\n" +
+	"\achannel\x18\x01 \x01(\tR\achannel\x12;\n" +
+	"\bposition\x18\x02 \x01(\v2\x1f.messageloop.shared.v2.PositionR\bposition\x12?\n" +
+	"\n" +
+	"gap_reason\x18\x03 \x01(\x0e2 .messageloop.shared.v2.GapReasonR\tgapReason\"\xf7\x01\n" +
 	"\aPublish\x12\x18\n" +
 	"\achannel\x18\x01 \x01(\tR\achannel\x128\n" +
 	"\apayload\x18\x02 \x01(\v2\x1e.messageloop.shared.v2.PayloadR\apayload\x12;\n" +
@@ -2463,7 +2548,7 @@ func file_client_v2_service_proto_rawDescGZIP() []byte {
 }
 
 var file_client_v2_service_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_client_v2_service_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
+var file_client_v2_service_proto_msgTypes = make([]protoimpl.MessageInfo, 29)
 var file_client_v2_service_proto_goTypes = []any{
 	(RecoverState)(0),        // 0: messageloop.client.v2.RecoverState
 	(*InboundMessage)(nil),   // 1: messageloop.client.v2.InboundMessage
@@ -2476,102 +2561,106 @@ var file_client_v2_service_proto_goTypes = []any{
 	(*Unsubscribe)(nil),      // 8: messageloop.client.v2.Unsubscribe
 	(*UnsubscribeAck)(nil),   // 9: messageloop.client.v2.UnsubscribeAck
 	(*RecoverComplete)(nil),  // 10: messageloop.client.v2.RecoverComplete
-	(*Publish)(nil),          // 11: messageloop.client.v2.Publish
-	(*PublishAck)(nil),       // 12: messageloop.client.v2.PublishAck
-	(*Message)(nil),          // 13: messageloop.client.v2.Message
-	(*Publication)(nil),      // 14: messageloop.client.v2.Publication
-	(*RpcRequest)(nil),       // 15: messageloop.client.v2.RpcRequest
-	(*RpcReply)(nil),         // 16: messageloop.client.v2.RpcReply
-	(*SubRefresh)(nil),       // 17: messageloop.client.v2.SubRefresh
-	(*SubRefreshAck)(nil),    // 18: messageloop.client.v2.SubRefreshAck
-	(*SurveyRequest)(nil),    // 19: messageloop.client.v2.SurveyRequest
-	(*SurveyReply)(nil),      // 20: messageloop.client.v2.SurveyReply
-	(*SurveyResult)(nil),     // 21: messageloop.client.v2.SurveyResult
-	(*SurveyAnswer)(nil),     // 22: messageloop.client.v2.SurveyAnswer
-	(*PresenceQuery)(nil),    // 23: messageloop.client.v2.PresenceQuery
-	(*PresenceInfo)(nil),     // 24: messageloop.client.v2.PresenceInfo
-	(*PresenceSnapshot)(nil), // 25: messageloop.client.v2.PresenceSnapshot
-	(*PresenceEvent)(nil),    // 26: messageloop.client.v2.PresenceEvent
-	(*Ping)(nil),             // 27: messageloop.client.v2.Ping
-	(*Pong)(nil),             // 28: messageloop.client.v2.Pong
-	(*v2.Error)(nil),         // 29: messageloop.shared.v2.Error
-	(*v2.Position)(nil),      // 30: messageloop.shared.v2.Position
-	(v2.GapReason)(0),        // 31: messageloop.shared.v2.GapReason
-	(*v2.Payload)(nil),       // 32: messageloop.shared.v2.Payload
-	(*v2.Metadata)(nil),      // 33: messageloop.shared.v2.Metadata
+	(*GapNotice)(nil),        // 11: messageloop.client.v2.GapNotice
+	(*Publish)(nil),          // 12: messageloop.client.v2.Publish
+	(*PublishAck)(nil),       // 13: messageloop.client.v2.PublishAck
+	(*Message)(nil),          // 14: messageloop.client.v2.Message
+	(*Publication)(nil),      // 15: messageloop.client.v2.Publication
+	(*RpcRequest)(nil),       // 16: messageloop.client.v2.RpcRequest
+	(*RpcReply)(nil),         // 17: messageloop.client.v2.RpcReply
+	(*SubRefresh)(nil),       // 18: messageloop.client.v2.SubRefresh
+	(*SubRefreshAck)(nil),    // 19: messageloop.client.v2.SubRefreshAck
+	(*SurveyRequest)(nil),    // 20: messageloop.client.v2.SurveyRequest
+	(*SurveyReply)(nil),      // 21: messageloop.client.v2.SurveyReply
+	(*SurveyResult)(nil),     // 22: messageloop.client.v2.SurveyResult
+	(*SurveyAnswer)(nil),     // 23: messageloop.client.v2.SurveyAnswer
+	(*PresenceQuery)(nil),    // 24: messageloop.client.v2.PresenceQuery
+	(*PresenceInfo)(nil),     // 25: messageloop.client.v2.PresenceInfo
+	(*PresenceSnapshot)(nil), // 26: messageloop.client.v2.PresenceSnapshot
+	(*PresenceEvent)(nil),    // 27: messageloop.client.v2.PresenceEvent
+	(*Ping)(nil),             // 28: messageloop.client.v2.Ping
+	(*Pong)(nil),             // 29: messageloop.client.v2.Pong
+	(*v2.Error)(nil),         // 30: messageloop.shared.v2.Error
+	(*v2.Position)(nil),      // 31: messageloop.shared.v2.Position
+	(v2.GapReason)(0),        // 32: messageloop.shared.v2.GapReason
+	(*v2.Payload)(nil),       // 33: messageloop.shared.v2.Payload
+	(*v2.Metadata)(nil),      // 34: messageloop.shared.v2.Metadata
 }
 var file_client_v2_service_proto_depIdxs = []int32{
 	3,  // 0: messageloop.client.v2.InboundMessage.connect:type_name -> messageloop.client.v2.Connect
 	6,  // 1: messageloop.client.v2.InboundMessage.subscribe:type_name -> messageloop.client.v2.Subscribe
 	8,  // 2: messageloop.client.v2.InboundMessage.unsubscribe:type_name -> messageloop.client.v2.Unsubscribe
-	11, // 3: messageloop.client.v2.InboundMessage.publish:type_name -> messageloop.client.v2.Publish
-	15, // 4: messageloop.client.v2.InboundMessage.rpc_request:type_name -> messageloop.client.v2.RpcRequest
-	17, // 5: messageloop.client.v2.InboundMessage.sub_refresh:type_name -> messageloop.client.v2.SubRefresh
-	19, // 6: messageloop.client.v2.InboundMessage.survey_request:type_name -> messageloop.client.v2.SurveyRequest
-	20, // 7: messageloop.client.v2.InboundMessage.survey_reply:type_name -> messageloop.client.v2.SurveyReply
-	27, // 8: messageloop.client.v2.InboundMessage.ping:type_name -> messageloop.client.v2.Ping
-	28, // 9: messageloop.client.v2.InboundMessage.pong:type_name -> messageloop.client.v2.Pong
-	23, // 10: messageloop.client.v2.InboundMessage.presence_query:type_name -> messageloop.client.v2.PresenceQuery
-	29, // 11: messageloop.client.v2.OutboundMessage.error:type_name -> messageloop.shared.v2.Error
+	12, // 3: messageloop.client.v2.InboundMessage.publish:type_name -> messageloop.client.v2.Publish
+	16, // 4: messageloop.client.v2.InboundMessage.rpc_request:type_name -> messageloop.client.v2.RpcRequest
+	18, // 5: messageloop.client.v2.InboundMessage.sub_refresh:type_name -> messageloop.client.v2.SubRefresh
+	20, // 6: messageloop.client.v2.InboundMessage.survey_request:type_name -> messageloop.client.v2.SurveyRequest
+	21, // 7: messageloop.client.v2.InboundMessage.survey_reply:type_name -> messageloop.client.v2.SurveyReply
+	28, // 8: messageloop.client.v2.InboundMessage.ping:type_name -> messageloop.client.v2.Ping
+	29, // 9: messageloop.client.v2.InboundMessage.pong:type_name -> messageloop.client.v2.Pong
+	24, // 10: messageloop.client.v2.InboundMessage.presence_query:type_name -> messageloop.client.v2.PresenceQuery
+	30, // 11: messageloop.client.v2.OutboundMessage.error:type_name -> messageloop.shared.v2.Error
 	4,  // 12: messageloop.client.v2.OutboundMessage.connected:type_name -> messageloop.client.v2.Connected
 	7,  // 13: messageloop.client.v2.OutboundMessage.subscribe_ack:type_name -> messageloop.client.v2.SubscribeAck
 	9,  // 14: messageloop.client.v2.OutboundMessage.unsubscribe_ack:type_name -> messageloop.client.v2.UnsubscribeAck
-	12, // 15: messageloop.client.v2.OutboundMessage.publish_ack:type_name -> messageloop.client.v2.PublishAck
-	14, // 16: messageloop.client.v2.OutboundMessage.publication:type_name -> messageloop.client.v2.Publication
+	13, // 15: messageloop.client.v2.OutboundMessage.publish_ack:type_name -> messageloop.client.v2.PublishAck
+	15, // 16: messageloop.client.v2.OutboundMessage.publication:type_name -> messageloop.client.v2.Publication
 	10, // 17: messageloop.client.v2.OutboundMessage.recover_complete:type_name -> messageloop.client.v2.RecoverComplete
-	16, // 18: messageloop.client.v2.OutboundMessage.rpc_reply:type_name -> messageloop.client.v2.RpcReply
-	18, // 19: messageloop.client.v2.OutboundMessage.sub_refresh_ack:type_name -> messageloop.client.v2.SubRefreshAck
-	19, // 20: messageloop.client.v2.OutboundMessage.survey_request:type_name -> messageloop.client.v2.SurveyRequest
-	20, // 21: messageloop.client.v2.OutboundMessage.survey_reply:type_name -> messageloop.client.v2.SurveyReply
-	21, // 22: messageloop.client.v2.OutboundMessage.survey_result:type_name -> messageloop.client.v2.SurveyResult
-	25, // 23: messageloop.client.v2.OutboundMessage.presence:type_name -> messageloop.client.v2.PresenceSnapshot
-	26, // 24: messageloop.client.v2.OutboundMessage.presence_event:type_name -> messageloop.client.v2.PresenceEvent
-	27, // 25: messageloop.client.v2.OutboundMessage.ping:type_name -> messageloop.client.v2.Ping
-	28, // 26: messageloop.client.v2.OutboundMessage.pong:type_name -> messageloop.client.v2.Pong
-	5,  // 27: messageloop.client.v2.Connect.subscriptions:type_name -> messageloop.client.v2.Subscription
-	5,  // 28: messageloop.client.v2.Connected.subscriptions:type_name -> messageloop.client.v2.Subscription
-	30, // 29: messageloop.client.v2.Subscription.cursor:type_name -> messageloop.shared.v2.Position
-	5,  // 30: messageloop.client.v2.Subscribe.subscriptions:type_name -> messageloop.client.v2.Subscription
-	5,  // 31: messageloop.client.v2.SubscribeAck.subscriptions:type_name -> messageloop.client.v2.Subscription
-	0,  // 32: messageloop.client.v2.SubscribeAck.recover:type_name -> messageloop.client.v2.RecoverState
-	25, // 33: messageloop.client.v2.SubscribeAck.presence:type_name -> messageloop.client.v2.PresenceSnapshot
-	29, // 34: messageloop.client.v2.SubscribeAck.error:type_name -> messageloop.shared.v2.Error
-	5,  // 35: messageloop.client.v2.Unsubscribe.subscriptions:type_name -> messageloop.client.v2.Subscription
-	5,  // 36: messageloop.client.v2.UnsubscribeAck.subscriptions:type_name -> messageloop.client.v2.Subscription
-	30, // 37: messageloop.client.v2.RecoverComplete.position:type_name -> messageloop.shared.v2.Position
-	31, // 38: messageloop.client.v2.RecoverComplete.gap_reason:type_name -> messageloop.shared.v2.GapReason
-	29, // 39: messageloop.client.v2.RecoverComplete.error:type_name -> messageloop.shared.v2.Error
-	32, // 40: messageloop.client.v2.Publish.payload:type_name -> messageloop.shared.v2.Payload
-	33, // 41: messageloop.client.v2.Publish.metadata:type_name -> messageloop.shared.v2.Metadata
-	30, // 42: messageloop.client.v2.PublishAck.position:type_name -> messageloop.shared.v2.Position
-	30, // 43: messageloop.client.v2.Message.position:type_name -> messageloop.shared.v2.Position
-	32, // 44: messageloop.client.v2.Message.payload:type_name -> messageloop.shared.v2.Payload
-	33, // 45: messageloop.client.v2.Message.metadata:type_name -> messageloop.shared.v2.Metadata
-	13, // 46: messageloop.client.v2.Publication.messages:type_name -> messageloop.client.v2.Message
-	32, // 47: messageloop.client.v2.RpcRequest.payload:type_name -> messageloop.shared.v2.Payload
-	33, // 48: messageloop.client.v2.RpcRequest.metadata:type_name -> messageloop.shared.v2.Metadata
-	32, // 49: messageloop.client.v2.RpcReply.payload:type_name -> messageloop.shared.v2.Payload
-	33, // 50: messageloop.client.v2.RpcReply.metadata:type_name -> messageloop.shared.v2.Metadata
-	29, // 51: messageloop.client.v2.RpcReply.error:type_name -> messageloop.shared.v2.Error
-	32, // 52: messageloop.client.v2.SurveyRequest.payload:type_name -> messageloop.shared.v2.Payload
-	33, // 53: messageloop.client.v2.SurveyRequest.metadata:type_name -> messageloop.shared.v2.Metadata
-	32, // 54: messageloop.client.v2.SurveyReply.payload:type_name -> messageloop.shared.v2.Payload
-	33, // 55: messageloop.client.v2.SurveyReply.metadata:type_name -> messageloop.shared.v2.Metadata
-	29, // 56: messageloop.client.v2.SurveyReply.error:type_name -> messageloop.shared.v2.Error
-	22, // 57: messageloop.client.v2.SurveyResult.answers:type_name -> messageloop.client.v2.SurveyAnswer
-	29, // 58: messageloop.client.v2.SurveyResult.error:type_name -> messageloop.shared.v2.Error
-	32, // 59: messageloop.client.v2.SurveyAnswer.payload:type_name -> messageloop.shared.v2.Payload
-	33, // 60: messageloop.client.v2.SurveyAnswer.metadata:type_name -> messageloop.shared.v2.Metadata
-	29, // 61: messageloop.client.v2.SurveyAnswer.error:type_name -> messageloop.shared.v2.Error
-	24, // 62: messageloop.client.v2.PresenceSnapshot.clients:type_name -> messageloop.client.v2.PresenceInfo
-	24, // 63: messageloop.client.v2.PresenceEvent.info:type_name -> messageloop.client.v2.PresenceInfo
-	1,  // 64: messageloop.client.v2.MessageLoopService.MessageLoop:input_type -> messageloop.client.v2.InboundMessage
-	2,  // 65: messageloop.client.v2.MessageLoopService.MessageLoop:output_type -> messageloop.client.v2.OutboundMessage
-	65, // [65:66] is the sub-list for method output_type
-	64, // [64:65] is the sub-list for method input_type
-	64, // [64:64] is the sub-list for extension type_name
-	64, // [64:64] is the sub-list for extension extendee
-	0,  // [0:64] is the sub-list for field type_name
+	17, // 18: messageloop.client.v2.OutboundMessage.rpc_reply:type_name -> messageloop.client.v2.RpcReply
+	19, // 19: messageloop.client.v2.OutboundMessage.sub_refresh_ack:type_name -> messageloop.client.v2.SubRefreshAck
+	20, // 20: messageloop.client.v2.OutboundMessage.survey_request:type_name -> messageloop.client.v2.SurveyRequest
+	21, // 21: messageloop.client.v2.OutboundMessage.survey_reply:type_name -> messageloop.client.v2.SurveyReply
+	22, // 22: messageloop.client.v2.OutboundMessage.survey_result:type_name -> messageloop.client.v2.SurveyResult
+	26, // 23: messageloop.client.v2.OutboundMessage.presence:type_name -> messageloop.client.v2.PresenceSnapshot
+	27, // 24: messageloop.client.v2.OutboundMessage.presence_event:type_name -> messageloop.client.v2.PresenceEvent
+	28, // 25: messageloop.client.v2.OutboundMessage.ping:type_name -> messageloop.client.v2.Ping
+	29, // 26: messageloop.client.v2.OutboundMessage.pong:type_name -> messageloop.client.v2.Pong
+	11, // 27: messageloop.client.v2.OutboundMessage.gap_notice:type_name -> messageloop.client.v2.GapNotice
+	5,  // 28: messageloop.client.v2.Connect.subscriptions:type_name -> messageloop.client.v2.Subscription
+	5,  // 29: messageloop.client.v2.Connected.subscriptions:type_name -> messageloop.client.v2.Subscription
+	31, // 30: messageloop.client.v2.Subscription.cursor:type_name -> messageloop.shared.v2.Position
+	5,  // 31: messageloop.client.v2.Subscribe.subscriptions:type_name -> messageloop.client.v2.Subscription
+	5,  // 32: messageloop.client.v2.SubscribeAck.subscriptions:type_name -> messageloop.client.v2.Subscription
+	0,  // 33: messageloop.client.v2.SubscribeAck.recover:type_name -> messageloop.client.v2.RecoverState
+	26, // 34: messageloop.client.v2.SubscribeAck.presence:type_name -> messageloop.client.v2.PresenceSnapshot
+	30, // 35: messageloop.client.v2.SubscribeAck.error:type_name -> messageloop.shared.v2.Error
+	5,  // 36: messageloop.client.v2.Unsubscribe.subscriptions:type_name -> messageloop.client.v2.Subscription
+	5,  // 37: messageloop.client.v2.UnsubscribeAck.subscriptions:type_name -> messageloop.client.v2.Subscription
+	31, // 38: messageloop.client.v2.RecoverComplete.position:type_name -> messageloop.shared.v2.Position
+	32, // 39: messageloop.client.v2.RecoverComplete.gap_reason:type_name -> messageloop.shared.v2.GapReason
+	30, // 40: messageloop.client.v2.RecoverComplete.error:type_name -> messageloop.shared.v2.Error
+	31, // 41: messageloop.client.v2.GapNotice.position:type_name -> messageloop.shared.v2.Position
+	32, // 42: messageloop.client.v2.GapNotice.gap_reason:type_name -> messageloop.shared.v2.GapReason
+	33, // 43: messageloop.client.v2.Publish.payload:type_name -> messageloop.shared.v2.Payload
+	34, // 44: messageloop.client.v2.Publish.metadata:type_name -> messageloop.shared.v2.Metadata
+	31, // 45: messageloop.client.v2.PublishAck.position:type_name -> messageloop.shared.v2.Position
+	31, // 46: messageloop.client.v2.Message.position:type_name -> messageloop.shared.v2.Position
+	33, // 47: messageloop.client.v2.Message.payload:type_name -> messageloop.shared.v2.Payload
+	34, // 48: messageloop.client.v2.Message.metadata:type_name -> messageloop.shared.v2.Metadata
+	14, // 49: messageloop.client.v2.Publication.messages:type_name -> messageloop.client.v2.Message
+	33, // 50: messageloop.client.v2.RpcRequest.payload:type_name -> messageloop.shared.v2.Payload
+	34, // 51: messageloop.client.v2.RpcRequest.metadata:type_name -> messageloop.shared.v2.Metadata
+	33, // 52: messageloop.client.v2.RpcReply.payload:type_name -> messageloop.shared.v2.Payload
+	34, // 53: messageloop.client.v2.RpcReply.metadata:type_name -> messageloop.shared.v2.Metadata
+	30, // 54: messageloop.client.v2.RpcReply.error:type_name -> messageloop.shared.v2.Error
+	33, // 55: messageloop.client.v2.SurveyRequest.payload:type_name -> messageloop.shared.v2.Payload
+	34, // 56: messageloop.client.v2.SurveyRequest.metadata:type_name -> messageloop.shared.v2.Metadata
+	33, // 57: messageloop.client.v2.SurveyReply.payload:type_name -> messageloop.shared.v2.Payload
+	34, // 58: messageloop.client.v2.SurveyReply.metadata:type_name -> messageloop.shared.v2.Metadata
+	30, // 59: messageloop.client.v2.SurveyReply.error:type_name -> messageloop.shared.v2.Error
+	23, // 60: messageloop.client.v2.SurveyResult.answers:type_name -> messageloop.client.v2.SurveyAnswer
+	30, // 61: messageloop.client.v2.SurveyResult.error:type_name -> messageloop.shared.v2.Error
+	33, // 62: messageloop.client.v2.SurveyAnswer.payload:type_name -> messageloop.shared.v2.Payload
+	34, // 63: messageloop.client.v2.SurveyAnswer.metadata:type_name -> messageloop.shared.v2.Metadata
+	30, // 64: messageloop.client.v2.SurveyAnswer.error:type_name -> messageloop.shared.v2.Error
+	25, // 65: messageloop.client.v2.PresenceSnapshot.clients:type_name -> messageloop.client.v2.PresenceInfo
+	25, // 66: messageloop.client.v2.PresenceEvent.info:type_name -> messageloop.client.v2.PresenceInfo
+	1,  // 67: messageloop.client.v2.MessageLoopService.MessageLoop:input_type -> messageloop.client.v2.InboundMessage
+	2,  // 68: messageloop.client.v2.MessageLoopService.MessageLoop:output_type -> messageloop.client.v2.OutboundMessage
+	68, // [68:69] is the sub-list for method output_type
+	67, // [67:68] is the sub-list for method input_type
+	67, // [67:67] is the sub-list for extension type_name
+	67, // [67:67] is the sub-list for extension extendee
+	0,  // [0:67] is the sub-list for field type_name
 }
 
 func init() { file_client_v2_service_proto_init() }
@@ -2609,6 +2698,7 @@ func file_client_v2_service_proto_init() {
 		(*OutboundMessage_PresenceEvent)(nil),
 		(*OutboundMessage_Ping)(nil),
 		(*OutboundMessage_Pong)(nil),
+		(*OutboundMessage_GapNotice)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -2616,7 +2706,7 @@ func file_client_v2_service_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_client_v2_service_proto_rawDesc), len(file_client_v2_service_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   28,
+			NumMessages:   29,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

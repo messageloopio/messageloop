@@ -25,6 +25,7 @@ func (fakeBrokerNoReady) Publish(string, *Publication) (uint64, error)    { retu
 func (fakeBrokerNoReady) PublishTransient(string, *Publication) error     { return nil }
 func (fakeBrokerNoReady) PublishOccupancy(string, OccupancyEvent) error   { return nil }
 func (fakeBrokerNoReady) SetOccupancyHandler(OccupancyHandler) error      { return nil }
+func (fakeBrokerNoReady) SetGapHandler(GapHandler)                        {}
 func (fakeBrokerNoReady) History(string, uint64, int) (*HistoryPage, error) {
 	return nil, nil
 }

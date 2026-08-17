@@ -130,6 +130,25 @@ type PublicationHandler func(ch string, pub *Publication) error
 // (KD-K14).
 type OccupancyHandler func(channel string, evt OccupancyEvent) error
 
+// CatchUpGap describes one hole detected during reconnect catch-up (C6).
+type CatchUpGap struct {
+	Channel string
+	// Reason is HistoryGapMiddle (dense-seq discontinuity inside the replayed
+	// range) or HistoryGapReplayTruncated (replay batch truncated by the
+	// limit while newer entries exist).
+	Reason HistoryGapReason
+	// LastGoodSeq is the dense seq of the last continuous entry before the
+	// hole (middle gaps); 0 = unknown.
+	LastGoodSeq uint64
+	// LastGoodOffset is the ts<<20|seq offset of the last safely delivered
+	// entry; 0 = unknown.
+	LastGoodOffset uint64
+}
+
+// GapHandler is invoked when reconnect catch-up detects a hole (C6). It runs
+// on the catch-up path: a panic is recovered and logged, never propagated.
+type GapHandler func(gap CatchUpGap)
+
 // HistoryGapReason classifies why a history page cannot prove full coverage
 // of the requested offset range.
 type HistoryGapReason int
@@ -154,6 +173,11 @@ const (
 	// without a dense seq (legacy) break the evidence chain and never
 	// trigger this reason.
 	HistoryGapMiddle
+	// HistoryGapReplayTruncated means a reconnect catch-up replay batch was
+	// cut short by the replay limit while the stream still held newer
+	// entries: the tail beyond the replayed range was not delivered live.
+	// The entries remain in history and clients can recover them (C6).
+	HistoryGapReplayTruncated
 )
 
 // HistoryPage is one page of channel history plus gap metadata.
@@ -224,6 +248,15 @@ type Broker interface {
 	// SetOccupancyHandler registers the live occupancy handler; it must be
 	// called before Start. The publication handler never receives occupancy.
 	SetOccupancyHandler(handler OccupancyHandler) error
+
+	// SetGapHandler registers the catch-up gap handler (C6); nil disables
+	// client notification. Detection itself (counters and warnings) is
+	// unaffected by the handler being nil, and a handler panic must never
+	// break catch-up. At most one notification is emitted per channel per
+	// catch-up pass (the first detected hole wins). The handler runs on the
+	// broker's catch-up path and must not block. The memory broker has no
+	// catch-up concept: its SetGapHandler is a no-op.
+	SetGapHandler(handler GapHandler)
 
 	// History returns a page of publications stored for ch with offset >=
 	// sinceOffset, plus gap metadata (see HistoryPage). limit <= 0 uses

@@ -98,6 +98,23 @@ export interface PresenceSnapshot {
 }
 
 /**
+ * Server notification that reconnect catch-up detected a hole on a channel
+ * (C6): a middle hole (dense-seq discontinuity) or a replay batch truncated
+ * by the limit while newer stream entries exist. It is a notification only:
+ * it never enters the message stream and never advances the channel cursor.
+ */
+export interface GapNotice {
+  /** The exact channel the gap was detected on. */
+  channel: string;
+  /** Why the gap exists (e.g. GAP_REASON_MIDDLE / GAP_REASON_REPLAY_TRUNCATED). */
+  gapReason: import("../proto/shared/v2/types_pb").GapReason;
+  /** Broker epoch of the last known safe position. */
+  streamEpoch: string;
+  /** Last known safe offset; undefined when the server did not know one. */
+  offset?: bigint;
+}
+
+/**
  * One answer of a client-initiated survey.
  */
 export interface SurveyAnswer {
@@ -165,6 +182,13 @@ export interface IClient {
   ): Promise<SurveyAnswer[]>;
   /** Register the handler for presence events (join/leave). */
   onPresence(handler: (event: PresenceEvent) => void): void;
+  /**
+   * Register the handler for catch-up gap notices (C6). The notice is
+   * informational: it never enters the message stream and never advances
+   * the channel recovery cursor. Without a handler the notice is silently
+   * ignored (it never reaches onError).
+   */
+  onGapNotice(handler: (notice: GapNotice) => void): void;
   /**
    * Register the handler for presence snapshots delivered with Connected /
    * SubscribeAck, and for the snapshot returned by a presence() query.

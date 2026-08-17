@@ -358,6 +358,7 @@ func (b *countingBroker) Subscribe(string) error                          { retu
 func (b *countingBroker) Unsubscribe(string) error                        { return nil }
 func (b *countingBroker) Publish(string, *Publication) (uint64, error)    { return 0, nil }
 func (b *countingBroker) SetOccupancyHandler(OccupancyHandler) error      { return nil }
+func (b *countingBroker) SetGapHandler(GapHandler)                        {}
 func (b *countingBroker) PublishTransient(ch string, _ *Publication) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()

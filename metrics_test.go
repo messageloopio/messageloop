@@ -239,3 +239,26 @@ func TestMetrics_RecoveryRegistered(t *testing.T) {
 	}
 	require.True(t, foundCapBucket, "messageloop_recovery_publications must include a 1000 bucket")
 }
+
+// TestMetrics_LiveGapNoticeRegistered verifies the live_gap_notice_total
+// counter vector (C6) is registered with the reason label and increments
+// through the metrics object.
+func TestMetrics_LiveGapNoticeRegistered(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	metrics := NewMetrics(reg)
+
+	metrics.LiveGapNoticeTotal.WithLabelValues("middle").Inc()
+	metrics.LiveGapNoticeTotal.WithLabelValues("replay_truncated").Inc()
+
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.LiveGapNoticeTotal.WithLabelValues("middle")))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.LiveGapNoticeTotal.WithLabelValues("replay_truncated")))
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	names := make(map[string]bool, len(families))
+	for _, family := range families {
+		names[family.GetName()] = true
+	}
+	require.True(t, names["messageloop_live_gap_notice_total"],
+		"messageloop_live_gap_notice_total must be registered")
+}

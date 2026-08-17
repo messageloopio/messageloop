@@ -33,6 +33,9 @@ const (
 	GapReason_GAP_REASON_EPOCH_RESET   GapReason = 4
 	// 页内/保留区中间缺条目：相邻条目稠密 seq 不连续（C4）。
 	GapReason_GAP_REASON_MIDDLE GapReason = 5
+	// 重连 catch-up 回放批被 limit 截断：stream 仍有更新条目未送达（C6）。
+	// 历史里还在，客户端可 recover 补齐。
+	GapReason_GAP_REASON_REPLAY_TRUNCATED GapReason = 6
 )
 
 // Enum value maps for GapReason.
@@ -44,14 +47,16 @@ var (
 		3: "GAP_REASON_EMPTY_EXPIRED",
 		4: "GAP_REASON_EPOCH_RESET",
 		5: "GAP_REASON_MIDDLE",
+		6: "GAP_REASON_REPLAY_TRUNCATED",
 	}
 	GapReason_value = map[string]int32{
-		"GAP_REASON_UNSPECIFIED":   0,
-		"GAP_REASON_NONE":          1,
-		"GAP_REASON_HEAD_TRIMMED":  2,
-		"GAP_REASON_EMPTY_EXPIRED": 3,
-		"GAP_REASON_EPOCH_RESET":   4,
-		"GAP_REASON_MIDDLE":        5,
+		"GAP_REASON_UNSPECIFIED":      0,
+		"GAP_REASON_NONE":             1,
+		"GAP_REASON_HEAD_TRIMMED":     2,
+		"GAP_REASON_EMPTY_EXPIRED":    3,
+		"GAP_REASON_EPOCH_RESET":      4,
+		"GAP_REASON_MIDDLE":           5,
+		"GAP_REASON_REPLAY_TRUNCATED": 6,
 	}
 )
 
@@ -307,14 +312,15 @@ const file_shared_v2_types_proto_rawDesc = "" +
 	"\aentries\x18\x01 \x03(\v2,.messageloop.shared.v2.Metadata.EntriesEntryR\aentries\x1a:\n" +
 	"\fEntriesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01*\xaa\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01*\xcb\x01\n" +
 	"\tGapReason\x12\x1a\n" +
 	"\x16GAP_REASON_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fGAP_REASON_NONE\x10\x01\x12\x1b\n" +
 	"\x17GAP_REASON_HEAD_TRIMMED\x10\x02\x12\x1c\n" +
 	"\x18GAP_REASON_EMPTY_EXPIRED\x10\x03\x12\x1a\n" +
 	"\x16GAP_REASON_EPOCH_RESET\x10\x04\x12\x15\n" +
-	"\x11GAP_REASON_MIDDLE\x10\x05BIZGgithub.com/messageloopio/messageloop/shared/genproto/shared/v2;sharedv2b\x06proto3"
+	"\x11GAP_REASON_MIDDLE\x10\x05\x12\x1f\n" +
+	"\x1bGAP_REASON_REPLAY_TRUNCATED\x10\x06BIZGgithub.com/messageloopio/messageloop/shared/genproto/shared/v2;sharedv2b\x06proto3"
 
 var (
 	file_shared_v2_types_proto_rawDescOnce sync.Once

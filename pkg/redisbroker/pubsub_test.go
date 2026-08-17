@@ -822,3 +822,209 @@ func TestRedisBroker_CatchUpMissed_LegacyBaselineNoFalsePositive(t *testing.T) {
 	broker.catchUpMissed(context.Background())
 	require.EqualValues(t, 0, broker.catchUpGaps.Load(), "a legacy (seq-less) baseline must never produce a middle-gap report")
 }
+
+// --- C6: catch-up gap notifications (GapHandler) ---
+
+// publishGapTestEntries publishes n entries on ch and returns their
+// publications (with Offset and Seq backfilled by Publish).
+func publishGapTestEntries(t *testing.T, broker *redisBroker, ch string, n int) []*messageloop.Publication {
+	t.Helper()
+	pubs := make([]*messageloop.Publication, 0, n)
+	for i := 0; i < n; i++ {
+		pub := &messageloop.Publication{Payload: []byte{byte('a' + i)}, Kind: messageloop.PayloadKindBinary}
+		_, err := broker.Publish(ch, pub)
+		require.NoError(t, err)
+		pubs = append(pubs, pub)
+	}
+	return pubs
+}
+
+// TestRedisBroker_CatchUpMissed_MiddleGapNotified verifies C6: with a
+// GapHandler registered, the middle-hole detection of
+// CatchUpMissed_MiddleGapCounted additionally notifies the handler exactly
+// once, with the last continuous entry before the hole as the
+// last-known-good position. Detection itself is unchanged: the counter still
+// goes up by one. The catch-up is invoked directly — no sleeps.
+func TestRedisBroker_CatchUpMissed_MiddleGapNotified(t *testing.T) {
+	redisCfg := requireCommandBusRedis(t)
+	broker := New(redisCfg).(*redisBroker)
+	t.Cleanup(func() { _ = broker.client.Close() })
+
+	ch := "catchup-middle-gap-notify"
+	require.NoError(t, broker.Subscribe(ch))
+
+	// Four entries with dense seqs 1..4.
+	pubs := publishGapTestEntries(t, broker, ch, 4)
+
+	// Delivery baseline: the first entry was delivered live (offset + seq 1).
+	broker.handler = func(_ string, pub *messageloop.Publication) error { return nil }
+	broker.deliverOnce(ch, &messageloop.Publication{Channel: ch, Offset: pubs[0].Offset, Seq: pubs[0].Seq})
+
+	var gaps []messageloop.CatchUpGap
+	broker.SetGapHandler(func(gap messageloop.CatchUpGap) { gaps = append(gaps, gap) })
+
+	// XDEL the seq=3 entry: the replay reads seq 2 and 4, a middle hole.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := broker.client.XDel(ctx, broker.opts.StreamPrefix+ch, streamIDOf(t, broker, ch, 2)).Result()
+	require.NoError(t, err)
+
+	broker.catchUpMissed(context.Background())
+	require.EqualValues(t, 1, broker.catchUpGaps.Load(), "detection semantics are unchanged")
+	require.Len(t, gaps, 1, "exactly one gap notification per channel per catch-up")
+	require.Equal(t, ch, gaps[0].Channel)
+	require.Equal(t, messageloop.HistoryGapMiddle, gaps[0].Reason)
+	require.EqualValues(t, 2, gaps[0].LastGoodSeq, "the last continuous entry before the hole is seq 2")
+	require.Equal(t, pubs[1].Offset, gaps[0].LastGoodOffset, "its offset is the last-known-good position")
+}
+
+// streamIDOf returns the stream entry ID of the i-th entry (0-based) of ch.
+func streamIDOf(t *testing.T, broker *redisBroker, ch string, i int) string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	msgs, err := broker.client.XRangeN(ctx, broker.opts.StreamPrefix+ch, "-", "+", 100).Result()
+	require.NoError(t, err)
+	require.Greater(t, len(msgs), i)
+	return msgs[i].ID
+}
+
+// TestRedisBroker_CatchUpMissed_ReplayTruncatedNotified verifies C6: when the
+// replay batch is capped below the missed range and the stream still holds
+// newer entries, the handler is called once with
+// HistoryGapReplayTruncated and the delivered tail as the last-known-good
+// offset. Detection itself is unchanged: the counter still goes up by one.
+func TestRedisBroker_CatchUpMissed_ReplayTruncatedNotified(t *testing.T) {
+	redisCfg := requireCommandBusRedis(t)
+	broker := New(redisCfg).(*redisBroker)
+	t.Cleanup(func() { _ = broker.client.Close() })
+
+	ch := "catchup-truncated-notify"
+	require.NoError(t, broker.Subscribe(ch))
+
+	// Four entries with dense seqs 1..4, published with the default cap.
+	pubs := publishGapTestEntries(t, broker, ch, 4)
+
+	// Delivery baseline: the first entry was delivered live.
+	broker.handler = func(_ string, pub *messageloop.Publication) error { return nil }
+	broker.deliverOnce(ch, &messageloop.Publication{Channel: ch, Offset: pubs[0].Offset, Seq: pubs[0].Seq})
+
+	var gaps []messageloop.CatchUpGap
+	broker.SetGapHandler(func(gap messageloop.CatchUpGap) { gaps = append(gaps, gap) })
+
+	// Shrink the catch-up window after publishing so the replay reads only
+	// seqs 2..3 while seq 4 is still in the stream.
+	originalMaxLen := broker.opts.StreamMaxLength
+	broker.opts.StreamMaxLength = 2
+	t.Cleanup(func() { broker.opts.StreamMaxLength = originalMaxLen })
+
+	broker.catchUpMissed(context.Background())
+	require.EqualValues(t, 1, broker.catchUpGaps.Load(), "the truncated tail is still detected and counted")
+	require.Len(t, gaps, 1)
+	require.Equal(t, ch, gaps[0].Channel)
+	require.Equal(t, messageloop.HistoryGapReplayTruncated, gaps[0].Reason)
+	require.Equal(t, pubs[2].Offset, gaps[0].LastGoodOffset, "the last replayed entry is the last-known-good position")
+}
+
+// TestRedisBroker_CatchUpMissed_OneNoticePerChannelPerCatchUp verifies the
+// C6 cap: when one catch-up pass detects both a middle hole and a truncated
+// tail for the same channel, both are counted but only the first hole
+// notifies the handler.
+func TestRedisBroker_CatchUpMissed_OneNoticePerChannelPerCatchUp(t *testing.T) {
+	redisCfg := requireCommandBusRedis(t)
+	broker := New(redisCfg).(*redisBroker)
+	t.Cleanup(func() { _ = broker.client.Close() })
+
+	ch := "catchup-one-notice"
+	require.NoError(t, broker.Subscribe(ch))
+
+	// Six entries with dense seqs 1..6; XDEL seq 3.
+	pubs := publishGapTestEntries(t, broker, ch, 6)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := broker.client.XDel(ctx, broker.opts.StreamPrefix+ch, streamIDOf(t, broker, ch, 2)).Result()
+	require.NoError(t, err)
+
+	// Delivery baseline: the first entry was delivered live.
+	broker.handler = func(_ string, pub *messageloop.Publication) error { return nil }
+	broker.deliverOnce(ch, &messageloop.Publication{Channel: ch, Offset: pubs[0].Offset, Seq: pubs[0].Seq})
+
+	var gaps []messageloop.CatchUpGap
+	broker.SetGapHandler(func(gap messageloop.CatchUpGap) { gaps = append(gaps, gap) })
+
+	// Replay cap 2: the replay reads seqs 2 and 4 — a middle hole — while
+	// seqs 5..6 remain beyond the delivered tail: a truncated tail too.
+	originalMaxLen := broker.opts.StreamMaxLength
+	broker.opts.StreamMaxLength = 2
+	t.Cleanup(func() { broker.opts.StreamMaxLength = originalMaxLen })
+
+	broker.catchUpMissed(context.Background())
+	require.EqualValues(t, 2, broker.catchUpGaps.Load(), "both holes are detected and counted")
+	require.Len(t, gaps, 1, "at most one notification per channel per catch-up pass")
+	require.Equal(t, messageloop.HistoryGapMiddle, gaps[0].Reason, "the first detected hole wins")
+}
+
+// TestRedisBroker_CatchUpMissed_GapHandlerPanicContained verifies C6: a
+// panicking gap handler is recovered and logged; catch-up completes, the
+// counter still advances, and the missed entries are still replayed.
+func TestRedisBroker_CatchUpMissed_GapHandlerPanicContained(t *testing.T) {
+	redisCfg := requireCommandBusRedis(t)
+	broker := New(redisCfg).(*redisBroker)
+	t.Cleanup(func() { _ = broker.client.Close() })
+
+	ch := "catchup-gap-panic"
+	require.NoError(t, broker.Subscribe(ch))
+
+	pubs := publishGapTestEntries(t, broker, ch, 4)
+
+	var delivered []uint64
+	broker.handler = func(_ string, pub *messageloop.Publication) error {
+		delivered = append(delivered, pub.Seq)
+		return nil
+	}
+	broker.deliverOnce(ch, &messageloop.Publication{Channel: ch, Offset: pubs[0].Offset, Seq: pubs[0].Seq})
+	require.Equal(t, []uint64{1}, delivered)
+
+	broker.SetGapHandler(func(messageloop.CatchUpGap) { panic("boom") })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := broker.client.XDel(ctx, broker.opts.StreamPrefix+ch, streamIDOf(t, broker, ch, 2)).Result()
+	require.NoError(t, err)
+
+	require.NotPanics(t, func() { broker.catchUpMissed(context.Background()) })
+	require.Equal(t, []uint64{1, 2, 4}, delivered, "the surviving missed entries are still replayed")
+	require.EqualValues(t, 1, broker.catchUpGaps.Load())
+}
+
+// TestRedisBroker_CatchUpMissed_LegacyBaselineNoNotification verifies the C6
+// half of the legacy no-libel rule: without a dense-seq baseline the hole is
+// undetectable, so the handler is never called even when registered.
+func TestRedisBroker_CatchUpMissed_LegacyBaselineNoNotification(t *testing.T) {
+	redisCfg := requireCommandBusRedis(t)
+	broker := New(redisCfg).(*redisBroker)
+	t.Cleanup(func() { _ = broker.client.Close() })
+
+	ch := "catchup-legacy-no-notify"
+	require.NoError(t, broker.Subscribe(ch))
+
+	pubs := publishGapTestEntries(t, broker, ch, 3)
+
+	// Baseline with an offset only, no dense seq (legacy bookkeeping).
+	broker.handler = func(_ string, pub *messageloop.Publication) error { return nil }
+	broker.deliverOnce(ch, &messageloop.Publication{Channel: ch, Offset: pubs[0].Offset})
+
+	var gaps []messageloop.CatchUpGap
+	broker.SetGapHandler(func(gap messageloop.CatchUpGap) { gaps = append(gaps, gap) })
+
+	// Delete the middle missed entry; without a seq baseline the hole is not
+	// detectable and must not be notified.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := broker.client.XDel(ctx, broker.opts.StreamPrefix+ch, streamIDOf(t, broker, ch, 1)).Result()
+	require.NoError(t, err)
+
+	broker.catchUpMissed(context.Background())
+	require.EqualValues(t, 0, broker.catchUpGaps.Load())
+	require.Empty(t, gaps, "a legacy (seq-less) baseline must never produce a gap notification")
+}

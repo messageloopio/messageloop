@@ -490,7 +490,9 @@ func (b *redisBroker) runPubSub(ctx context.Context) error {
 // patterns cannot be mapped to a stream and are not caught up (documented
 // limitation). When the replayed range is truncated or the stream no longer
 // holds the baseline, the missing entries cannot be replayed: the gap is
-// detected and surfaced (warning + counter) instead of failing silently.
+// detected and surfaced (warning + counter, plus one GapHandler notification
+// per channel per catch-up pass when a handler is registered, C6) instead of
+// failing silently.
 func (b *redisBroker) catchUpMissed(ctx context.Context) {
 	b.subMu.RLock()
 	channels := make([]string, 0, len(b.subscribed))
@@ -533,33 +535,70 @@ func (b *redisBroker) catchUpMissed(ctx context.Context) {
 			pub.Seq = streamEntrySeq(m)
 			b.deliverOnce(ch, pub)
 		}
-		b.checkCatchUpSeqGap(ctx, ch, msgs, seqs[ch])
-		b.checkCatchUpGap(ctx, ch, msgs, last)
+		notified := b.checkCatchUpSeqGap(ctx, ch, msgs, seqs[ch], last)
+		b.checkCatchUpGap(ctx, ch, msgs, last, notified)
 	}
+}
+
+// notifyGap invokes the registered catch-up gap handler (C6), if any. A nil
+// handler is a no-op (detection counters and warnings are unaffected), and a
+// handler panic is recovered and logged so it can never break catch-up.
+func (b *redisBroker) notifyGap(gap messageloop.CatchUpGap) {
+	b.gapHandlerMu.RLock()
+	handler := b.gapHandler
+	b.gapHandlerMu.RUnlock()
+	if handler == nil {
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			log.ErrorContext(context.Background(), "panic in catch-up gap handler",
+				fmt.Errorf("panic: %v, channel: %s", r, gap.Channel))
+		}
+	}()
+	handler(gap)
 }
 
 // checkCatchUpSeqGap detects middle holes inside the replayed catch-up range
 // using the dense per-channel seq (C4): the baseline is the last delivered
 // seq, and every consecutive known pair must differ by exactly one. Detected
-// holes are counted and logged, never pushed to clients (a client-facing live
-// gap envelope is future work). A legacy baseline or a legacy entry (seq 0)
-// breaks the evidence chain and skips the corresponding check — rather miss
-// than libel.
-func (b *redisBroker) checkCatchUpSeqGap(ctx context.Context, ch string, msgs []redis.XMessage, baseline uint64) {
+// holes are counted and logged, and the first hole per catch-up pass is
+// reported to the gap handler (C6) with the last continuous entry before the
+// hole as the last-known-good position. A legacy baseline or a legacy entry
+// (seq 0) breaks the evidence chain and skips the corresponding check —
+// rather miss than libel. baselineOffset is the delivery baseline's offset
+// (the last-good offset when the hole opens right after the baseline).
+// It reports whether a gap notification was emitted, so the caller can cap
+// notifications at one per channel per catch-up pass.
+func (b *redisBroker) checkCatchUpSeqGap(ctx context.Context, ch string, msgs []redis.XMessage, baseline uint64, baselineOffset uint64) bool {
 	prev := baseline
+	prevOffset := baselineOffset
+	notified := false
 	for _, m := range msgs {
 		seq := streamEntrySeq(m)
 		if seq == 0 {
 			prev = 0
+			prevOffset = 0
 			continue
 		}
 		if prev > 0 && seq != prev+1 {
 			b.catchUpGaps.Add(1)
 			log.WarnContext(ctx, "catch-up middle gap detected: dense seq discontinuity in replayed range",
 				"channel", ch, "prev_seq", prev, "entry_seq", seq)
+			if !notified {
+				notified = true
+				b.notifyGap(messageloop.CatchUpGap{
+					Channel:        ch,
+					Reason:         messageloop.HistoryGapMiddle,
+					LastGoodSeq:    prev,
+					LastGoodOffset: prevOffset,
+				})
+			}
 		}
 		prev = seq
+		prevOffset = parseStreamOffset(m.ID)
 	}
+	return notified
 }
 
 // checkCatchUpGap detects catch-up ranges that could not be replayed in
@@ -567,11 +606,12 @@ func (b *redisBroker) checkCatchUpSeqGap(ctx context.Context, ch string, msgs []
 // StreamMaxLength entries, so a full XRangeN batch is not proof that the
 // newest entry was reached: when the newest stream offset is beyond the last
 // replayed one, the truncated tail cannot be replayed and the gap is
-// surfaced as a warning + counter instead of failing silently. Middle holes
+// surfaced as a warning + counter, plus one GapHandler notification with
+// HistoryGapReplayTruncated (C6) unless this channel already notified in the
+// current catch-up pass (see the Broker contract in broker.go). Middle holes
 // inside the replayed range are detected separately via the dense
-// per-channel seq (checkCatchUpSeqGap, C4). A client-facing gap envelope is
-// future work (see the Broker contract in broker.go).
-func (b *redisBroker) checkCatchUpGap(ctx context.Context, ch string, msgs []redis.XMessage, last uint64) {
+// per-channel seq (checkCatchUpSeqGap, C4).
+func (b *redisBroker) checkCatchUpGap(ctx context.Context, ch string, msgs []redis.XMessage, last uint64, alreadyNotified bool) {
 	if len(msgs) < int(b.opts.StreamMaxLength) {
 		// The range was not truncated: nothing newer was missed.
 		return
@@ -589,6 +629,13 @@ func (b *redisBroker) checkCatchUpGap(ctx context.Context, ch string, msgs []red
 		b.catchUpGaps.Add(1)
 		log.WarnContext(ctx, "catch-up gap detected: stream entries newer than the replayed tail were not delivered",
 			"channel", ch, "last_replayed_offset", deliveredTail, "newest_stream_offset", newest)
+		if !alreadyNotified {
+			b.notifyGap(messageloop.CatchUpGap{
+				Channel:        ch,
+				Reason:         messageloop.HistoryGapReplayTruncated,
+				LastGoodOffset: deliveredTail,
+			})
+		}
 	}
 }
 

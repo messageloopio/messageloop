@@ -708,6 +708,7 @@ func outboundFrameClass(msg proto.Message) bool {
 		*clientpb.OutboundMessage_UnsubscribeAck,
 		*clientpb.OutboundMessage_Connected,
 		*clientpb.OutboundMessage_RecoverComplete,
+		*clientpb.OutboundMessage_GapNotice,
 		*clientpb.OutboundMessage_Error,
 		*clientpb.OutboundMessage_SubRefreshAck:
 		return true

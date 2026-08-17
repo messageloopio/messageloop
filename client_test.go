@@ -1284,6 +1284,7 @@ func (f *fakeHistoryBroker) PublishOccupancy(ch string, evt OccupancyEvent) erro
 }
 
 func (f *fakeHistoryBroker) SetOccupancyHandler(OccupancyHandler) error { return nil }
+func (f *fakeHistoryBroker) SetGapHandler(GapHandler)                   {}
 
 func (f *fakeHistoryBroker) History(ch string, sinceOffset uint64, limit int) (*HistoryPage, error) {
 	result := make([]*Publication, 0, len(f.pubs))

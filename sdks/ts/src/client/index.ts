@@ -7,5 +7,6 @@ export type {
   PresenceEvent,
   PresenceSnapshot,
   SurveyAnswer,
+  GapNotice,
 } from "./types";
 export { MessageLoopClient } from "./client";

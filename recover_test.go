@@ -52,6 +52,7 @@ func (g *gapHistoryBroker) Publish(ch string, pub *Publication) (uint64, error) 
 func (g *gapHistoryBroker) PublishTransient(ch string, pub *Publication) error { return nil }
 func (g *gapHistoryBroker) PublishOccupancy(string, OccupancyEvent) error      { return nil }
 func (g *gapHistoryBroker) SetOccupancyHandler(OccupancyHandler) error         { return nil }
+func (g *gapHistoryBroker) SetGapHandler(GapHandler)                           {}
 
 func (g *gapHistoryBroker) History(ch string, sinceOffset uint64, limit int) (*HistoryPage, error) {
 	return &HistoryPage{Gap: true, GapReason: g.reason}, nil
@@ -78,6 +79,7 @@ func (b *trimmedHistoryBroker) Publish(ch string, pub *Publication) (uint64, err
 func (b *trimmedHistoryBroker) PublishTransient(ch string, pub *Publication) error { return nil }
 func (b *trimmedHistoryBroker) PublishOccupancy(string, OccupancyEvent) error      { return nil }
 func (b *trimmedHistoryBroker) SetOccupancyHandler(OccupancyHandler) error         { return nil }
+func (b *trimmedHistoryBroker) SetGapHandler(GapHandler)                           {}
 
 func (b *trimmedHistoryBroker) History(ch string, sinceOffset uint64, limit int) (*HistoryPage, error) {
 	page := &HistoryPage{FirstRetained: b.firstRetained}
