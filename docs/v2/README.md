@@ -15,5 +15,6 @@
 | [PR-KA-B2 实现规格](tasks/pr-ka-b2-occupancy.md) | Accepted | Occupancy 只走 LiveBus + OccupancyGen；[prompt](tasks/pr-ka-b2-prompt.md) |
 | [PR-KA-B3 实现规格](tasks/pr-ka-b3-recover.md) | Accepted | 流式恢复、client v2 信封、SDK 一条消费路径；[prompt](tasks/pr-ka-b3-prompt.md) |
 | [PR-KA-B4 实现规格](tasks/pr-ka-b4-noderpc.md) | Accepted | NodeRPC HMAC、拒绝未签名、repair 合一、范围化 `internal/cluster`；[prompt](tasks/pr-ka-b4-prompt.md) |
+| [PR-KA-C1 实现规格](tasks/pr-ka-c1-sim.md) | Ready | 确定性 fencing 模拟（KD-K20）；[prompt](tasks/pr-ka-c1-prompt.md) |
 
 第三方实现：复制对应 `tasks/pr-ka-*-prompt.md` 围栏全文；规格与靶心冲突时以该步规格为准。

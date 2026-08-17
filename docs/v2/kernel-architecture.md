@@ -649,8 +649,9 @@ Session 与 Stream 同区域。**跨区域 Directory Bind 直接禁止。** 只�
 | **B2** | Occupancy 只走 LiveBus + OccupancyGen。规格：[pr-ka-b2-occupancy.md](tasks/pr-ka-b2-occupancy.md) | 无 `Hub.node`、无 `cluster_emit` |
 | **B3** | 流式恢复（写队列已在）。规格：[pr-ka-b3-recover.md](tasks/pr-ka-b3-recover.md) | SDK 一条消费路径 |
 | **B4** | NodeRPC HMAC（现有 Pub/Sub 总线）；repair 合一；范围化 `internal/cluster`。规格：[pr-ka-b4-noderpc.md](tasks/pr-ka-b4-noderpc.md) | 无盲写、无未签名命令 |
+| **C1** | 确定性 fencing 模拟。规格：[pr-ka-c1-sim.md](tasks/pr-ka-c1-sim.md) | 无 Redis、无 Sleep；B 抢权后 A ping 不得写回；丢 Evict 无双活 |
 
-确定性模拟（KD-K20）在 B4 之后单独做。
+确定性模拟（KD-K20）= C1。`node_epoch` INCR（KD-K27）、命令总线换 Stream、稠密 seq（Q8）仍是后续独立刀。
 
 A0–A4 可在仍叫 `*Client` 的代码上先改合同；B1 再改对象名。不必等「旧 RC」。
 
