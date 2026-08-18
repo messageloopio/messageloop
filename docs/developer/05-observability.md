@@ -84,7 +84,10 @@ curl -s http://127.0.0.1:8080/metrics | grep '^messageloop_'
 | `messageloop_messages_published_total` | counter | 无 | 发布成功累计数。`Node.Publish` 与 `Node.PublishTransient`（presence 事件等）成功时 +1 |
 | `messageloop_messages_delivered_total` | counter | 无 | 实时投递给订阅者成功累计数（`hub.go` 广播路径）。注意：**不计入历史恢复（recovery）投递**，仅统计实时广播 |
 | `messageloop_delivery_failures_total` | counter | 无 | 投递失败累计数（死信）。广播时 `Client.Send` 返回错误即 +1（`hub.go`） |
-| `messageloop_live_drop_total` | counter | 无 | LiveBus 实时投递丢失累计数：live publication 的稠密 seq 相对投递基线前跳时，按跳过的条数累加（go-redis 1024 缓冲满时静默丢弃的 publication 由此被计数，`pkg/redisbroker/pubsub.go` `noteLiveSeqGap`）；legacy（Seq==0）与重连基线重置后的首条不计 |
+| `messageloop_live_drop_total` | counter | 无 | LiveBus 实时投递丢失累计数：live publication 的稠密 seq 相对投递基线前跳时，按跳过的条数累加（go-redis 1024 缓冲满时静默丢弃的 publication 由此被计数，`pkg/redisbroker/pubsub.go` `noteLiveSeqGap`）；legacy（Seq==0）与重连基线重置后的首条不计。投递受压（worker 队列满）时被非阻塞丢弃的 occupancy 事件同样 +1/条（`dispatchOccupancy`，D4）——两类丢弃互不重叠，无双计 |
+| `messageloop_live_degraded_channels` | gauge | 无 | 当前处于降级状态的频道数（D4）：频道因 occupancy 投递队列满被丢、或检出 publication 稠密 seq 跳变（缓冲溢出证据）时置位；该频道下一次成功入队（occupancy 或 publication）时清除；pub/sub 重连时整体清空 |
+
+**缓冲满语义（D4 落地，架构 :409 合同）**：投递 worker 队列（16 workers × 256 深）满时，occupancy 事件优先被非阻塞丢弃——计数 + Warn 日志 + 频道降级标记，状态由下一 occupancy 快照/事件自愈；publication 保持阻塞发送（反压到消费循环），最终由 go-redis 1024 缓冲溢出兜底并经 seq 跳变检测计数。降级标记仅用于指标与日志，不反向影响 Interest 或发布判定。
 
 ### 3.3 时长直方图
 

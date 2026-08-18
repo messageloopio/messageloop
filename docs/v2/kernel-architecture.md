@@ -406,7 +406,7 @@ LiveBus
 
 第一适配器 **standalone Redis**。Redis Cluster + sharded PUB/SUB **没有** pattern subscribe，列为非目标。Cluster 上的通配要么拒绝，要么「收该前缀所在平面 + 本地过滤」——另开里程碑，不得声称「加节点后入站 ≈ 本节点兴趣」已在 Cluster 上成立。
 
-缓冲满：指标 `live_drop_total`；该节点对该频道标降级；**禁止静默丢而不计数**。满时优先丢 Occupancy 事件（可靠下一快照补），业务 Publication 满则对该节点 Interest 视为短暂失败（不否定 Append）。
+缓冲满：指标 `live_drop_total`；该节点对该频道标降级（gauge `live_degraded_channels`,D4 已落地）；**禁止静默丢而不计数**。满时优先丢 Occupancy 事件（可靠下一快照补；D4 已落地为 worker 队列满时非阻塞丢弃 + 计数 + Warn + 降级标记，频道下一次成功入队清除、重连整体清空），业务 Publication 满则对该节点 Interest 视为短暂失败（不否定 Append;publication 保持阻塞反压，go-redis 缓冲溢出由 seq 跳变检测计数，D3 已落地）。
 
 ### Occupancy
 
@@ -762,3 +762,4 @@ A0–A4 可在仍叫 `*Client` 的代码上先改合同；B1 再改对象名。�
 | 2026-08-16 | A0 / A1 第三方规格与 prompt：`docs/v2/tasks/pr-ka-a0-*`、`pr-ka-a1-*` |
 | 2026-08-16 | 文档迁至 `docs/v2/` |
 | 2026-08-17 | A0–C6 全部落地（规格与实现见 tasks/）；三把时钟键形同步 ml2:（C5） |
+| 2026-08-18 | D4 落地：LiveBus 缓冲满语义——occupancy 优先丢（非阻塞 + 计数 + Warn）+ 频道降级标记（`live_degraded_channels`） |

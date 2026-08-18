@@ -323,25 +323,101 @@ func deliveryWorkerIndex(channel string) int {
 	return int(h % deliveryWorkers)
 }
 
-// dispatch hands the publication to the worker owning its channel. Before
-// Start (unit tests, no worker pool) the handler runs inline.
+// dispatch hands the publication to the worker owning its channel. The send
+// blocks when the worker queue is full, applying backpressure to the consumer
+// loop (D4: publications are never dropped here — a full go-redis buffer is
+// the bounded loss point, counted via the dense-seq jump detection in
+// noteLiveSeqGap). A completed enqueue clears the channel's degraded mark.
+// Before Start (unit tests, no worker pool) the handler runs inline.
 func (b *redisBroker) dispatch(channel string, pub *messageloop.Publication) {
 	if b.deliveryActive.Load() {
 		b.deliverChans[deliveryWorkerIndex(channel)] <- delivery{channel: channel, pub: pub}
+		b.clearDegraded(channel)
 		return
 	}
 	b.deliver(channel, pub)
 }
 
 // dispatchOccupancy hands an occupancy event to the worker owning its
-// channel, preserving per-channel ordering with publications. Before Start
-// the occupancy handler runs inline.
+// channel, preserving per-channel ordering with publications. Under delivery
+// pressure occupancy is dropped first (D4, the buffer-full contract): when
+// the worker queue is full the event is discarded instead of blocking the
+// consumer loop — the next occupancy snapshot/event heals the state (B2) and
+// occupancy gens are monotonic, so dropping an intermediate event cannot
+// break convergence. Each drop is counted (live_drop_total), logged, and
+// marks the channel degraded; a successful enqueue clears the mark. Before
+// Start the occupancy handler runs inline (unchanged semantics: no queue, no
+// drop, no degraded bookkeeping).
 func (b *redisBroker) dispatchOccupancy(channel string, occ *messageloop.OccupancyEvent) {
 	if b.deliveryActive.Load() {
-		b.deliverChans[deliveryWorkerIndex(channel)] <- delivery{channel: channel, occ: occ}
+		select {
+		case b.deliverChans[deliveryWorkerIndex(channel)] <- delivery{channel: channel, occ: occ}:
+			b.clearDegraded(channel)
+		default:
+			if metrics := b.getMetrics(); metrics != nil {
+				metrics.LiveDropTotal.Add(1)
+			}
+			b.markDegraded(channel, "occupancy_dropped_queue_full")
+			log.WarnContext(context.Background(), "live bus: dropped occupancy event: delivery queue full",
+				"channel", channel)
+		}
 		return
 	}
 	b.deliverOccupancy(channel, *occ)
+}
+
+// markDegraded flags channel as degraded (D4). Only the false→true transition
+// updates the gauge and logs. Never called for the control channel: it
+// carries no occupancy/publication traffic.
+func (b *redisBroker) markDegraded(channel string, reason string) {
+	b.degradedMu.Lock()
+	if _, ok := b.degraded[channel]; ok {
+		b.degradedMu.Unlock()
+		return
+	}
+	b.degraded[channel] = struct{}{}
+	if metrics := b.getMetrics(); metrics != nil {
+		metrics.LiveDegradedChannels.Set(float64(len(b.degraded)))
+	}
+	b.degradedMu.Unlock()
+	log.InfoContext(context.Background(), "live bus: channel marked degraded",
+		"channel", channel, "reason", reason)
+}
+
+// clearDegraded removes channel's degraded mark on its next successful
+// enqueue (D4). Only the true→false transition updates the gauge and logs.
+func (b *redisBroker) clearDegraded(channel string) {
+	b.degradedMu.Lock()
+	if _, ok := b.degraded[channel]; !ok {
+		b.degradedMu.Unlock()
+		return
+	}
+	delete(b.degraded, channel)
+	if metrics := b.getMetrics(); metrics != nil {
+		metrics.LiveDegradedChannels.Set(float64(len(b.degraded)))
+	}
+	b.degradedMu.Unlock()
+	log.InfoContext(context.Background(), "live bus: channel recovered from degraded state",
+		"channel", channel)
+}
+
+// clearAllDegraded resets the degraded set on reconnect (D4): a fresh
+// connection re-derives all delivery state, so pressure evidence from the
+// previous connection must not linger.
+func (b *redisBroker) clearAllDegraded() {
+	b.degradedMu.Lock()
+	n := len(b.degraded)
+	if n == 0 {
+		b.degradedMu.Unlock()
+		return
+	}
+	b.degraded = make(map[string]struct{})
+	if metrics := b.getMetrics(); metrics != nil {
+		metrics.LiveDegradedChannels.Set(0)
+	}
+	b.degradedMu.Unlock()
+	log.InfoContext(context.Background(), "live bus: degraded channels reset on reconnect",
+		"count", n)
 }
 
 // runPubSubWithRetry wraps runPubSub with exponential backoff reconnection.
@@ -656,12 +732,13 @@ func (b *redisBroker) newestStreamOffset(ctx context.Context, stream string) (ui
 // noteLiveSeqGap counts live publications lost between the delivery baseline
 // and the incoming dense seq (D3): when the go-redis live buffer
 // (pubsubBufferSize) is full, publications are dropped silently, so the
-// resulting seq jump is counted here instead of vanishing. It runs on the
-// live publication path only, right before deliverOnce advances the same
-// lastSeqs baseline (C4), serialized by deliverMu — no new lock. Legacy
-// payloads (Seq 0, the C4 break-chain semantics) and the first sequenced
-// publication after a baseline reset (lastSeqs 0, e.g. right after a
-// reconnect catch-up) never count. A nil metrics object disables counting.
+// resulting seq jump is counted here instead of vanishing. A detected jump is
+// buffer-overflow evidence, so it also marks the channel degraded (D4). It
+// runs on the live publication path only, right before deliverOnce advances
+// the same lastSeqs baseline (C4), serialized by deliverMu — no new lock.
+// Legacy payloads (Seq 0, the C4 break-chain semantics) and the first
+// sequenced publication after a baseline reset (lastSeqs 0, e.g. right after
+// a reconnect catch-up) never count. A nil metrics object disables counting.
 func (b *redisBroker) noteLiveSeqGap(channel string, seq uint64) {
 	if seq == 0 {
 		return
@@ -677,6 +754,7 @@ func (b *redisBroker) noteLiveSeqGap(channel string, seq uint64) {
 	b.deliverMu.Unlock()
 	if last > 0 && seq > last+1 {
 		metrics.LiveDropTotal.Add(float64(seq - last - 1))
+		b.markDegraded(channel, "publication_seq_gap")
 	}
 }
 
@@ -785,12 +863,15 @@ func messageToPublication(channelName string, redisMsg *redisMessage, offset uin
 
 // setActivePubSub records the live pub/sub subscription (used by tests to
 // simulate a disconnect) and resets the active-name mirror: every connection
-// starts from an empty subscription set, rebuilt in runPubSub.
+// starts from an empty subscription set, rebuilt in runPubSub. The degraded
+// set is reset wholesale as well (D4): pressure evidence belongs to the
+// previous connection.
 func (b *redisBroker) setActivePubSub(pubsub *redis.PubSub) {
 	b.pubsubMu.Lock()
 	b.activePubSub = pubsub
 	b.liveActive = make(map[string]struct{})
 	b.pubsubMu.Unlock()
+	b.clearAllDegraded()
 }
 
 // clearActivePubSub clears the recorded subscription when it is no longer

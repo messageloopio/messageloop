@@ -70,6 +70,20 @@ type redisBroker struct {
 	// this lock (see deliverOnce/dispatch).
 	deliverMu sync.Mutex
 
+	// degraded tracks the channels with live delivery-pressure evidence
+	// (D4): an occupancy event dropped because its worker queue was full, or
+	// a publication dense-seq jump detected by noteLiveSeqGap. A channel is
+	// flagged on the transition only, cleared on its next successful enqueue
+	// (dispatch/dispatchOccupancy), and the whole set is reset on every
+	// reconnect (setActivePubSub). The set has no consumers beyond the
+	// live_degraded_channels gauge and logs: it never feeds back into
+	// interest or publish decisions. Guarded by degradedMu, a leaf lock: it
+	// is never held while acquiring deliverMu/subMu/pubsubMu (at most
+	// metricsMu, which itself never reaches back), so the established
+	// deliverMu → subMu order is untouched.
+	degradedMu sync.Mutex
+	degraded   map[string]struct{}
+
 	// deliveryActive is true once the handler worker pool is running (see
 	// startDeliveryWorkers). Before Start, deliverOnce dispatches inline.
 	deliveryActive atomic.Bool
@@ -136,6 +150,7 @@ func New(cfg config.RedisConfig) messageloop.Broker {
 		readyCh:        make(chan struct{}),
 		lastOffsets:    make(map[string]uint64),
 		lastSeqs:       make(map[string]uint64),
+		degraded:       make(map[string]struct{}),
 		liveOps:        make(chan liveOp, liveOpsBufferSize),
 		liveDesired:    make(map[string]struct{}),
 		liveActive:     make(map[string]struct{}),

@@ -51,6 +51,7 @@ type Metrics struct {
 	SessionDualActivationSeconds    prometheus.Histogram
 	OccupancyGenDiscards            prometheus.Counter
 	LiveDropTotal                   prometheus.Counter
+	LiveDegradedChannels            prometheus.Gauge
 }
 
 // NewMetrics creates and registers all Prometheus metrics.
@@ -221,6 +222,11 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name:      "live_drop_total",
 			Help:      "Total number of live publications lost to dense-seq discontinuities (e.g. a full pub/sub buffer dropping messages silently).",
 		}),
+		LiveDegradedChannels: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: "messageloop",
+			Name:      "live_degraded_channels",
+			Help:      "Current number of channels marked degraded by live delivery pressure: an occupancy event dropped on a full delivery queue, or a publication dense-seq jump. Cleared on the channel's next successful enqueue and reset on reconnect.",
+		}),
 	}
 	reg.MustRegister(
 		m.ConnectionsTotal,
@@ -254,6 +260,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.SessionDualActivationSeconds,
 		m.OccupancyGenDiscards,
 		m.LiveDropTotal,
+		m.LiveDegradedChannels,
 	)
 	return m
 }

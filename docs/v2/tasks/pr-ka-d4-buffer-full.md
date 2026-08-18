@@ -3,7 +3,7 @@
 | 字段 | 值 |
 | --- | --- |
 | 标题 | `redisbroker: drop occupancy first under delivery pressure and mark degraded channels` |
-| 状态 | **Ready**（待实现） |
+| 状态 | **Accepted**（2026-08-18 主 agent 终验通过，尚未 commit） |
 | 依赖 | D3 已合（`daf22a8`,`live_drop_total` 已由 seq 跳变检测覆盖 publication)。在 `v2` 分支上做 |
 | 设计来源 | [kernel-architecture.md](../kernel-architecture.md) LiveBus 缓冲满合同（:409)；转正评审架构覆盖路 |
 | 验收人 | 主 agent |
@@ -89,4 +89,34 @@ grep -n "缓冲满" docs/v2/kernel-architecture.md   # :409 行已是落地表�
 
 ## 8. 实现备注（实现方填）
 
-（空）
+实现于 2026-08-18,v2 分支，工作区改动（未 commit)。
+
+### 降级集合与锁（`pkg/redisbroker/redis.go` / `pubsub.go`)
+
+- `redisBroker` 新增 `degradedMu sync.Mutex` + `degraded map[string]struct{}`。**新锁论证**:`degradedMu` 是叶子锁——`markDegraded`/`clearDegraded`/`clearAllDegraded` 持有它时最多再取 `metricsMu`（`getMetrics`，纯叶子，无任何路径在持有 `metricsMu` 时反向获取 `degradedMu`)，从不持它获取 `deliverMu`/`subMu`/`pubsubMu`;`noteLiveSeqGap` 在 `deliverMu → subMu` 临界区**结束之后**才调 `markDegraded`,`setActivePubSub` 在释放 `pubsubMu` 之后才调 `clearAllDegraded`。既有 `deliverMu → subMu` 锁序零改动，无反向获取路径。未复用 `subMu` 的原因：`noteLiveSeqGap` 只持 `subMu.RLock`，置位需要写锁却无法升级，拆成独立叶子锁比「放锁再抢写锁」更简单且无排序约束。
+- gauge 同步在 `degradedMu` 临界区内完成（转换点读取 `len(b.degraded)` 后 `Set`)，并发转换不会写出过期值。生产路径上 dispatch/dispatchOccupancy/noteLiveSeqGap 均由单一 runPubSub 消费 goroutine 驱动，本无并发。
+- `clearDegraded` 走快速路径：不在集合内时一次 map 查找即返回，对 publication 热路径只加一次无竞争互斥。
+- 未做降级标记的消费方：集合只喂 `live_degraded_channels` gauge 与日志，不回喂 Interest/发布判定。
+
+### 丢弃与无双计
+
+- `dispatchOccupancy` 仅在 `deliveryActive=true`(worker 池）路径非阻塞化：`select/default` 满则 `LiveDropTotal.Add(1)` + Warn + `markDegraded("occupancy_dropped_queue_full")`；入队成功则 `clearDegraded`。未 Start 的内联路径原样直调 `deliverOccupancy`，语义不变（有测试锁定）。
+- `dispatch`(publication）阻塞发送逐字未动，仅在其**完成之后**追加 `clearDegraded`——这是 §1.3「publication 阻塞发送完成」的清除点，不是新丢弃点。
+- 无双计：occupancy 无 seq，永不进入 `noteLiveSeqGap`;publication 在 dispatch 点永不丢，只有 `noteLiveSeqGap` 的 seq 跳变计数并置位降级（`markDegraded("publication_seq_gap")`)。
+- 检测门槛沿用 D3:`metrics == nil` 时 `noteLiveSeqGap` 整体不工作（宁可漏报），seq 跳变置位降级同样只在 metrics 已接线时发生；`dispatchOccupancy` 的丢弃计数 nil-tolerant，但降级标记与 metrics 无关、始终置位。
+- 真实运行中 seq 跳变置位的降级标记寿命很短：同一条 publication 随后成功入队即清除——符合 §1.3「下一次成功入队清除」的字面语义，单测（内联路径无清除）锁定置位行为。
+
+### 测试（`pkg/redisbroker/pubsub_test.go`)
+
+- 新增 `newBlockedWorkerBroker` 辅助：真实启动 worker 池（`startDeliveryWorkers`)，用 gate channel 卡住目标频道的 worker 后精确灌满 256 深队列——无固定长 Sleep，全部用 channel 同步 / `require.Eventually` / 100ms 短超时非完成断言（规格 §4 明文允许）。
+- Warn 断言用 `slog.SetDefault` 换捕获 handler(`lynx-go/x/log` 无 ctx logger 时回落 `slog.Default()`)，测试串行无并发冲突，cleanup 恢复。
+- 覆盖：满则丢（不阻塞/计数/降级/gauge/Warn×2/二次丢不重复转换 gauge)、publication 反压保持（满队列阻塞，腾空后完成并清除降级）、occupancy 成功入队清除、`noteLiveSeqGap` 跳变置位（扩 D3 单测）、`setActivePubSub` 重连清空（含空集幂等）、内联路径不变、gauge 注册（`metrics_test.go` 既有合同测试扩展）。
+
+### 文档
+
+- `docs/developer/05-observability.md` §3.2：补 `live_degraded_channels` 行、`live_drop_total` 行补 occupancy 丢弃口径（无双计说明）、表后缓冲满语义段落。
+- `docs/v2/kernel-architecture.md` :409 改落地表述 + Document History 追加 2026-08-18 行。
+
+### 格式 churn 说明
+
+改动文件均为 CRLF 行尾，`gofmt -l` 在改动**前**即列出这 5 个 Go 文件（仓库现状，全文件换行符差异）；本 PR 未做 gofmt 重写，`git diff --numstat` 显示改动严格限于 §2 允许路径。

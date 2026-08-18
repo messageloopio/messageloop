@@ -3,7 +3,9 @@ package redisbroker
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -29,6 +31,7 @@ func newTestRedisBroker() *redisBroker {
 		matcher:        topics.NewCSTrieMatcher(),
 		lastOffsets:    make(map[string]uint64),
 		lastSeqs:       make(map[string]uint64),
+		degraded:       make(map[string]struct{}),
 		liveOps:        make(chan liveOp, liveOpsBufferSize),
 		liveDesired:    make(map[string]struct{}),
 		liveActive:     make(map[string]struct{}),
@@ -1052,19 +1055,25 @@ func TestRedisBroker_NoteLiveSeqGap(t *testing.T) {
 	// No dense-seq baseline yet: rather miss than libel.
 	b.noteLiveSeqGap("ch", 9)
 	require.Equal(t, float64(0), testutil.ToFloat64(metrics.LiveDropTotal))
+	require.False(t, isDegraded(b, "ch"), "no baseline, no jump evidence: must not mark degraded")
 
 	b.deliverOnce("ch", &messageloop.Publication{Offset: 1, Seq: 2})
 	b.noteLiveSeqGap("ch", 3) // contiguous: no drop
 	require.Equal(t, float64(0), testutil.ToFloat64(metrics.LiveDropTotal))
+	require.False(t, isDegraded(b, "ch"))
 	b.deliverOnce("ch", &messageloop.Publication{Offset: 2, Seq: 3})
 
 	b.noteLiveSeqGap("ch", 7) // skipped seqs 4..6
 	require.Equal(t, float64(3), testutil.ToFloat64(metrics.LiveDropTotal))
+	require.True(t, isDegraded(b, "ch"), "a detected live seq jump is buffer-overflow evidence: must mark the channel degraded (D4)")
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.LiveDegradedChannels))
 	b.deliverOnce("ch", &messageloop.Publication{Offset: 3, Seq: 7})
 
 	b.noteLiveSeqGap("ch", 0) // legacy payload: never counted
 	b.noteLiveSeqGap("ch", 9) // skipped seq 8
 	require.Equal(t, float64(4), testutil.ToFloat64(metrics.LiveDropTotal))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.LiveDegradedChannels),
+		"an already-degraded channel must not double-transition the gauge")
 }
 
 // TestRedisBroker_LiveDrop_SeqGapCounted verifies D3 against a real Redis:
@@ -1130,4 +1139,242 @@ func TestRedisBroker_LiveDrop_SeqGapCounted(t *testing.T) {
 	require.NoError(t, broker.PublishTransient(ch, &messageloop.Publication{Payload: []byte("legacy"), Kind: messageloop.PayloadKindBinary}))
 	require.Eventually(t, func() bool { return deliveredCount() == 5 }, 2*time.Second, 10*time.Millisecond)
 	require.Equal(t, float64(7), testutil.ToFloat64(metrics.LiveDropTotal), "legacy Seq==0 publications must not count")
+}
+
+// --- PR-KA-D4: buffer-full semantics (occupancy dropped first + degraded marks) ---
+
+// captureSlogHandler records slog records so tests can assert on log output
+// (the broker logs through lynx-go/x/log, which falls back to slog.Default).
+type captureSlogHandler struct {
+	mu      sync.Mutex
+	records []slog.Record
+}
+
+func (h *captureSlogHandler) Enabled(context.Context, slog.Level) bool { return true }
+
+func (h *captureSlogHandler) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.records = append(h.records, r.Clone())
+	return nil
+}
+
+func (h *captureSlogHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *captureSlogHandler) WithGroup(string) slog.Handler      { return h }
+
+func (h *captureSlogHandler) count(level slog.Level, msgSubstr string) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	n := 0
+	for _, r := range h.records {
+		if r.Level == level && strings.Contains(r.Message, msgSubstr) {
+			n++
+		}
+	}
+	return n
+}
+
+// captureSlog swaps the default slog logger for a recording one until the
+// test ends. Package tests run serially, so the global swap is safe.
+func captureSlog(t *testing.T) *captureSlogHandler {
+	t.Helper()
+	h := &captureSlogHandler{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(h))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return h
+}
+
+// isDegraded reports whether ch is currently in the broker's degraded set.
+func isDegraded(b *redisBroker, ch string) bool {
+	b.degradedMu.Lock()
+	defer b.degradedMu.Unlock()
+	_, ok := b.degraded[ch]
+	return ok
+}
+
+// newBlockedWorkerBroker builds a broker with the delivery worker pool
+// running and the publication handler blocked on gate: the first dispatched
+// publication occupies the channel's worker until gate is closed, so the
+// test can fill the worker queue deterministically. Closing gate (via the
+// returned func or cleanup) unblocks every handler call.
+func newBlockedWorkerBroker(t *testing.T, metrics *messageloop.Metrics) (b *redisBroker, ch string, release func()) {
+	t.Helper()
+	b = newTestRedisBroker()
+	b.SetMetrics(metrics)
+	gate := make(chan struct{})
+	entered := make(chan struct{}, 1)
+	b.handler = func(string, *messageloop.Publication) error {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		<-gate
+		return nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	b.startDeliveryWorkers(ctx)
+	var once sync.Once
+	release = func() { once.Do(func() { close(gate) }) }
+	t.Cleanup(func() {
+		release()
+		cancel()
+	})
+
+	ch = "d4-buffer-full"
+	// Occupy the channel's worker so the queue below stays full.
+	b.dispatch(ch, &messageloop.Publication{Channel: ch, Offset: 1})
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("worker did not pick up the blocking publication")
+	}
+	for i := 0; i < deliveryQueueSize; i++ {
+		b.dispatch(ch, &messageloop.Publication{Channel: ch, Offset: uint64(i + 2)})
+	}
+	require.Equal(t, deliveryQueueSize, len(b.deliverChans[deliveryWorkerIndex(ch)]),
+		"the channel's worker queue must be full for buffer-full semantics to trigger")
+	return b, ch, release
+}
+
+// TestRedisBroker_DispatchOccupancy_DropsWhenQueueFull verifies the D4
+// buffer-full contract: with the channel's worker queue full, an occupancy
+// event is dropped without blocking (counted in live_drop_total, Warn-logged,
+// channel marked degraded, gauge synced), while a publication on the same
+// channel keeps its blocking backpressure semantics and clears the degraded
+// mark once its enqueue completes.
+func TestRedisBroker_DispatchOccupancy_DropsWhenQueueFull(t *testing.T) {
+	logs := captureSlog(t)
+	metrics := messageloop.NewMetrics(prometheus.NewRegistry())
+	b, ch, release := newBlockedWorkerBroker(t, metrics)
+	idx := deliveryWorkerIndex(ch)
+
+	// Occupancy on a full queue: the dispatch must return immediately.
+	dropped := make(chan struct{})
+	go func() {
+		b.dispatchOccupancy(ch, &messageloop.OccupancyEvent{Gen: 1})
+		close(dropped)
+	}()
+	select {
+	case <-dropped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("dispatchOccupancy must not block on a full worker queue")
+	}
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.LiveDropTotal))
+	require.True(t, isDegraded(b, ch), "a dropped occupancy event must mark the channel degraded")
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.LiveDegradedChannels))
+	require.Equal(t, 1, logs.count(slog.LevelWarn, "dropped occupancy event"), "each occupancy drop must log a Warn")
+
+	// A second drop while already degraded: counted and Warn-logged again, but
+	// the gauge does not double-transition.
+	b.dispatchOccupancy(ch, &messageloop.OccupancyEvent{Gen: 2})
+	require.Equal(t, float64(2), testutil.ToFloat64(metrics.LiveDropTotal))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.LiveDegradedChannels))
+	require.Equal(t, 2, logs.count(slog.LevelWarn, "dropped occupancy event"))
+
+	// Publications are never dropped at the dispatch point: with the queue
+	// still full, the blocking send must not complete.
+	pubDone := make(chan struct{})
+	go func() {
+		b.dispatch(ch, &messageloop.Publication{Channel: ch, Offset: deliveryQueueSize + 2})
+		close(pubDone)
+	}()
+	select {
+	case <-pubDone:
+		t.Fatal("publication dispatch must keep blocking backpressure semantics on a full queue")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	// Drain the worker: the blocked enqueue completes and the channel's next
+	// successful enqueue clears the degraded mark.
+	release()
+	require.Eventually(t, func() bool {
+		select {
+		case <-pubDone:
+			return true
+		default:
+			return false
+		}
+	}, 2*time.Second, 10*time.Millisecond, "the blocked publication must enqueue once the queue drains")
+	require.False(t, isDegraded(b, ch), "a successful publication enqueue must clear the degraded mark")
+	require.Equal(t, float64(0), testutil.ToFloat64(metrics.LiveDegradedChannels))
+	require.Eventually(t, func() bool { return len(b.deliverChans[idx]) == 0 }, 2*time.Second, 10*time.Millisecond)
+}
+
+// TestRedisBroker_DegradedClearedOnOccupancyEnqueue verifies the D4 clearing
+// trigger on the occupancy path: after a drop marks the channel degraded, the
+// next occupancy event that successfully enters the worker queue clears the
+// mark and returns the gauge to zero.
+func TestRedisBroker_DegradedClearedOnOccupancyEnqueue(t *testing.T) {
+	metrics := messageloop.NewMetrics(prometheus.NewRegistry())
+	b, ch, release := newBlockedWorkerBroker(t, metrics)
+	var occMu sync.Mutex
+	var occDelivered int
+	b.occHandler = func(string, messageloop.OccupancyEvent) error {
+		occMu.Lock()
+		occDelivered++
+		occMu.Unlock()
+		return nil
+	}
+	idx := deliveryWorkerIndex(ch)
+
+	b.dispatchOccupancy(ch, &messageloop.OccupancyEvent{Gen: 1})
+	require.True(t, isDegraded(b, ch))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.LiveDegradedChannels))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.LiveDropTotal))
+
+	release()
+	require.Eventually(t, func() bool { return len(b.deliverChans[idx]) == 0 }, 2*time.Second, 10*time.Millisecond)
+
+	// The queue has room again: this occupancy event enqueues successfully,
+	// clears the mark, and is delivered normally.
+	b.dispatchOccupancy(ch, &messageloop.OccupancyEvent{Gen: 2})
+	require.False(t, isDegraded(b, ch))
+	require.Equal(t, float64(0), testutil.ToFloat64(metrics.LiveDegradedChannels))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.LiveDropTotal), "a successful enqueue must not count as a drop")
+	require.Eventually(t, func() bool {
+		occMu.Lock()
+		defer occMu.Unlock()
+		return occDelivered == 1
+	}, 2*time.Second, 10*time.Millisecond, "the enqueued occupancy event must be delivered")
+}
+
+// TestRedisBroker_SetActivePubSub_ClearsDegraded verifies D4 reconnect
+// semantics: a new pub/sub connection resets the whole degraded set and the
+// gauge, and the reset is idempotent on an empty set.
+func TestRedisBroker_SetActivePubSub_ClearsDegraded(t *testing.T) {
+	b := newTestRedisBroker()
+	metrics := messageloop.NewMetrics(prometheus.NewRegistry())
+	b.SetMetrics(metrics)
+
+	b.markDegraded("ch-a", "test")
+	b.markDegraded("ch-b", "test")
+	require.Equal(t, float64(2), testutil.ToFloat64(metrics.LiveDegradedChannels))
+
+	b.setActivePubSub(nil)
+	require.False(t, isDegraded(b, "ch-a"))
+	require.False(t, isDegraded(b, "ch-b"))
+	require.Equal(t, float64(0), testutil.ToFloat64(metrics.LiveDegradedChannels))
+
+	b.setActivePubSub(nil)
+	require.Equal(t, float64(0), testutil.ToFloat64(metrics.LiveDegradedChannels))
+}
+
+// TestRedisBroker_DispatchOccupancy_InlinePathUnchanged verifies D4 leaves
+// the pre-Start (no worker pool) inline path untouched: the occupancy handler
+// runs inline, nothing is dropped, counted, or marked.
+func TestRedisBroker_DispatchOccupancy_InlinePathUnchanged(t *testing.T) {
+	b := newTestRedisBroker()
+	metrics := messageloop.NewMetrics(prometheus.NewRegistry())
+	b.SetMetrics(metrics)
+	var delivered int
+	b.occHandler = func(string, messageloop.OccupancyEvent) error {
+		delivered++
+		return nil
+	}
+
+	b.dispatchOccupancy("ch", &messageloop.OccupancyEvent{Gen: 1})
+	require.Equal(t, 1, delivered)
+	require.Equal(t, float64(0), testutil.ToFloat64(metrics.LiveDropTotal))
+	require.False(t, isDegraded(b, "ch"))
 }

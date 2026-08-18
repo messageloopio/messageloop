@@ -263,9 +263,9 @@ func TestMetrics_LiveGapNoticeRegistered(t *testing.T) {
 		"messageloop_live_gap_notice_total must be registered")
 }
 
-// TestMetrics_ContractObservabilityRegistered verifies PR-KA-D3: the six
+// TestMetrics_ContractObservabilityRegistered verifies PR-KA-D3/D4: the
 // contract observability metrics from the kernel architecture observability
-// section are registered under their exact names and accept Inc/Observe
+// section are registered under their exact names and accept Inc/Observe/Set
 // through the metrics object.
 func TestMetrics_ContractObservabilityRegistered(t *testing.T) {
 	reg := prometheus.NewRegistry()
@@ -277,11 +277,13 @@ func TestMetrics_ContractObservabilityRegistered(t *testing.T) {
 	metrics.SessionDualActivationSeconds.Observe(1.5)
 	metrics.OccupancyGenDiscards.Inc()
 	metrics.LiveDropTotal.Add(3)
+	metrics.LiveDegradedChannels.Set(2)
 
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.BindFencedTotal))
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.BindRefreshFailTotal))
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.OccupancyGenDiscards))
 	require.Equal(t, float64(3), testutil.ToFloat64(metrics.LiveDropTotal))
+	require.Equal(t, float64(2), testutil.ToFloat64(metrics.LiveDegradedChannels))
 
 	families, err := reg.Gather()
 	require.NoError(t, err)
@@ -296,6 +298,7 @@ func TestMetrics_ContractObservabilityRegistered(t *testing.T) {
 		"messageloop_session_dual_activation_seconds",
 		"messageloop_occupancy_gen_discard_total",
 		"messageloop_live_drop_total",
+		"messageloop_live_degraded_channels",
 	} {
 		require.True(t, names[name], "%s must be registered", name)
 	}
