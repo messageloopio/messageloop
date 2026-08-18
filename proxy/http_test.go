@@ -14,8 +14,8 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v1"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
 func newTestHTTPProxy(t *testing.T, server *httptest.Server) *HTTPProxy {
@@ -41,7 +41,7 @@ func TestHTTPProxy_NotificationMethods_PassThroughBackendError(t *testing.T) {
 	p := newTestHTTPProxy(t, server)
 	ctx := context.Background()
 
-	assertBackendError := func(t *testing.T, err *sharedpb.Error) {
+	assertBackendError := func(t *testing.T, err *sharedv2.Error) {
 		t.Helper()
 		require.NotNil(t, err, "backend Error field must not be swallowed")
 		assert.Equal(t, "NOTIFY_REJECTED", err.Code)
@@ -163,15 +163,15 @@ func TestHTTPProxy_PublishAcl_RequestCarriesUserAndSession(t *testing.T) {
 }
 
 // TestHTTPProxy_RPC_PayloadRoundTrip is the regression test for P1-B1: the
-// sharedpb.Payload oneof must survive the HTTP round trip. Before the fix the
+// sharedv2.Payload oneof must survive the HTTP round trip. Before the fix the
 // payload was serialized with encoding/json, which drops the oneof Data field,
 // so the backend never received any actual payload.
 func TestHTTPProxy_RPC_PayloadRoundTrip(t *testing.T) {
 	// The backend decodes the request with protojson, checks the payload
 	// arrived, and echoes it back.
 	type backendResult struct {
-		reqPayload     *sharedpb.Payload
-		reqMetadata    *sharedpb.Metadata
+		reqPayload     *sharedv2.Payload
+		reqMetadata    *sharedv2.Metadata
 		protoReqParsed bool
 	}
 	resultCh := make(chan backendResult, 1)
@@ -207,11 +207,11 @@ func TestHTTPProxy_RPC_PayloadRoundTrip(t *testing.T) {
 
 	cases := []struct {
 		name    string
-		payload *sharedpb.Payload
+		payload *sharedv2.Payload
 	}{
-		{"json", &sharedpb.Payload{Data: &sharedpb.Payload_Json{Json: mustStruct(t, map[string]any{"input": "data", "n": 42})}}},
-		{"text", &sharedpb.Payload{Data: &sharedpb.Payload_Text{Text: "hello proxy"}}},
-		{"binary", &sharedpb.Payload{Data: &sharedpb.Payload_Binary{Binary: []byte{0xde, 0xad, 0xbe, 0xef}}}},
+		{"json", &sharedv2.Payload{Data: &sharedv2.Payload_Json{Json: mustStruct(t, map[string]any{"input": "data", "n": 42})}}},
+		{"text", &sharedv2.Payload{Data: &sharedv2.Payload_Text{Text: "hello proxy"}}},
+		{"binary", &sharedv2.Payload{Data: &sharedv2.Payload_Binary{Binary: []byte{0xde, 0xad, 0xbe, 0xef}}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -245,7 +245,7 @@ func TestHTTPProxy_RPC_PayloadRoundTrip(t *testing.T) {
 }
 
 // TestHTTPProxy_RPC_NonOKStructuredError verifies that a non-200 response
-// carrying a structured sharedpb.Error body surfaces as HTTPStatusError with
+// carrying a structured sharedv2.Error body surfaces as HTTPStatusError with
 // the structured error preserved (P1-B5).
 func TestHTTPProxy_RPC_NonOKStructuredError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -296,7 +296,7 @@ func TestHTTPProxy_RPC_NonOKFallbackTextError(t *testing.T) {
 
 // TestHTTPProxy_RPC_NonOKStructuredErrorProtoJSONContract verifies that a
 // non-200 error body emitted per the proto3 JSON contract (protojson
-// encoding) parses into a structured sharedpb.Error: exact camelCase field
+// encoding) parses into a structured sharedv2.Error: exact camelCase field
 // names, a metadata Struct with nested values, tolerated unknown fields
 // inside the error object, and an unrelated top-level member (A4).
 func TestHTTPProxy_RPC_NonOKStructuredErrorProtoJSONContract(t *testing.T) {

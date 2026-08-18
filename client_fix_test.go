@@ -12,7 +12,6 @@ import (
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/proxy"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -303,7 +302,7 @@ func (m *denyingACLProxyStub) Authenticate(context.Context, *proxy.AuthenticateP
 
 func (m *denyingACLProxyStub) SubscribeAcl(context.Context, *proxy.SubscribeAclProxyRequest) (*proxy.SubscribeAclProxyResponse, error) {
 	return &proxy.SubscribeAclProxyResponse{
-		Error: &sharedpb.Error{Code: "RPC_GATE_DENIED", Type: "acl_error", Message: "denied by gate"},
+		Error: &sharedv2.Error{Code: "RPC_GATE_DENIED", Type: "acl_error", Message: "denied by gate"},
 	}, nil
 }
 
@@ -330,6 +329,70 @@ func (m *denyingACLProxyStub) OnDisconnected(context.Context, *proxy.OnDisconnec
 func (m *denyingACLProxyStub) Name() string { return "denying-acl-stub" }
 
 func (m *denyingACLProxyStub) Close() error { return nil }
+
+// --- PR-KA-D5: proxy error metadata passthrough ---
+
+// errorMetadataProxyStub answers every RPC with an Error that carries
+// metadata. Before D5 the sharedErrorV2 bridge rebuilt the error field by
+// field and silently dropped field 4 (metadata).
+type errorMetadataProxyStub struct {
+	denyingACLProxyStub
+	metadata *structpb.Struct
+}
+
+func (m *errorMetadataProxyStub) RPC(context.Context, *proxy.RPCProxyRequest) (*proxy.RPCProxyResponse, error) {
+	return &proxy.RPCProxyResponse{
+		Error: &sharedv2.Error{
+			Code:     "BACKEND_REFUSED",
+			Type:     "proxy_error",
+			Message:  "backend refused the call",
+			Metadata: m.metadata,
+		},
+	}, nil
+}
+
+func (m *errorMetadataProxyStub) Name() string { return "error-metadata-stub" }
+
+// TestClientSession_RPC_ProxyErrorMetadataPassthrough verifies that an Error
+// returned by the RPC proxy reaches the client with its metadata intact now
+// that the RPC path passes the proxy/v2 error straight through.
+func TestClientSession_RPC_ProxyErrorMetadataPassthrough(t *testing.T) {
+	ctx := context.Background()
+	node := NewNode(nil)
+
+	md, err := structpb.NewStruct(map[string]any{"attempt": 3, "reason": "rate_limited"})
+	require.NoError(t, err)
+	require.NoError(t, node.AddProxy(&errorMetadataProxyStub{metadata: md}, "rpc.meta", "*"))
+
+	transport := &capturingTransport{}
+	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
+	require.NoError(t, err)
+
+	// Simulate authenticated client (same pattern as rpc_timeout_test.go).
+	client.mu.Lock()
+	client.authenticated = true
+	client.client = "test-client"
+	client.mu.Unlock()
+	require.NoError(t, client.Attach(client.attachment))
+	transport.messages = nil
+
+	require.NoError(t, client.handleRPC(ctx, &clientpb.InboundMessage{Id: "rpc-1"}, &clientpb.RpcRequest{
+		Channel: "rpc.meta",
+		Method:  "boom",
+	}))
+
+	require.Equal(t, 1, transport.getMessageCount(), "one error frame for the refused RPC")
+	var out clientpb.OutboundMessage
+	require.NoError(t, (JSONMarshaler{}).Unmarshal(transport.getMessage(0), &out))
+	errObj := out.GetError()
+	require.NotNil(t, errObj)
+	assert.Equal(t, "BACKEND_REFUSED", errObj.Code)
+	assert.Equal(t, "proxy_error", errObj.Type)
+	gotMd := errObj.GetMetadata()
+	require.NotNil(t, gotMd, "proxy error metadata must pass through (the dropped-bridge regression)")
+	assert.Equal(t, 3.0, gotMd.GetFields()["attempt"].GetNumberValue())
+	assert.Equal(t, "rate_limited", gotMd.GetFields()["reason"].GetStringValue())
+}
 
 // --- P0-5: per-client subscription limit on connect ---
 

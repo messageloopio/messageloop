@@ -130,18 +130,16 @@ breaking:
 
 执行 `task generate-protocol`（即 `buf generate`）后：
 
-- **Go 代码**生成在 `shared/genproto/{shared,client,event,server,proxy}/v1/`（`.pb.go`、`*_grpc.pb.go`、`.swagger.json`）。Go 侧导入路径为 `github.com/messageloopio/messageloop/shared/genproto/<pkg>/v1`，包别名见[代码风格与约定](#代码风格与约定)。
-- **TypeScript 代码**生成在 `sdks/ts/src/proto/{client,server,shared,event,proxy}/v1/`，使用 bufbuild/es 远程插件（仓库未安装 `@bufbuild/protoc-gen-es`）。
+- **Go 代码**生成在 `shared/genproto/<pkg>/<version>/`（`.pb.go`、`*_grpc.pb.go`、`.swagger.json`），如 `client/v2`、`proxy/v2`、`server/v1`+`server/v2`、`shared/v1`+`shared/v2`。Go 侧导入路径为 `github.com/messageloopio/messageloop/shared/genproto/<pkg>/<version>`，包别名见[代码风格与约定](#代码风格与约定)。
+- **TypeScript 代码**生成在 `sdks/ts/src/proto/<pkg>/<version>/`，使用 bufbuild/es 远程插件（仓库未安装 `@bufbuild/protoc-gen-es`）。
 
 ### 新增协议消息或字段的流程
 
-1. 编辑 `protocol/<domain>/v1/xxx.proto`，保持字段编号向后兼容（`buf breaking` 按 `FILE` 级别检查）。
+1. 编辑 `protocol/<domain>/<version>/xxx.proto`，保持字段编号向后兼容（`buf breaking` 按 `FILE` 级别检查）。
 2. 运行 `task generate-protocol`。
 3. 检查 `shared/genproto` 下 Git diff，确认 Go 生成代码与 Swagger 文件符合预期。
 4. 检查 `sdks/ts/src/proto` 下 TS 生成代码 diff；若 SDK 需暴露新类型，更新 `sdks/ts/src/` 中的手写封装并补充测试。
 5. `buf build` 本地通过 lint 校验（`buf lint`、`buf breaking --against .git` 可按需执行）。
-
-注意：`sdks/ts/src/proto/v1/service_pb.ts` 是历史遗留的过时生成文件，仓库中没有任何代码引用它（TS 侧统一从 `src/proto/client/v1/service_pb` 导入）；重新生成不会更新该文件，可忽略或删除。
 
 ## 代码风格与约定
 
@@ -151,13 +149,11 @@ breaking:
 
 导入按三组排列，组间空行分隔：标准库、第三方依赖、本地（本项目）导入。Protobuf 包统一使用短别名，与各 proto 文件 `go_package` 选项的包短名一致：
 
-- `clientpb`：`github.com/messageloopio/messageloop/shared/genproto/client/v1`
+- `clientpb`：`github.com/messageloopio/messageloop/shared/genproto/client/v2`
 - `serverpb`：`github.com/messageloopio/messageloop/shared/genproto/server/v1`
 - `sharedpb`：`github.com/messageloopio/messageloop/shared/genproto/shared/v1`
-- `eventpb`：`github.com/messageloopio/messageloop/shared/genproto/event/v1`
-- `proxypb`：`github.com/messageloopio/messageloop/shared/genproto/proxy/v1`
-
-（`eventpb` 当前仅存在于生成代码中，Go 源码尚未直接引用。）
+- `sharedv2`：`github.com/messageloopio/messageloop/shared/genproto/shared/v2`
+- `proxypb`：`github.com/messageloopio/messageloop/shared/genproto/proxy/v2`
 
 ### 命名
 

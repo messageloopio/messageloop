@@ -6,9 +6,8 @@ import (
 	"errors"
 	"testing"
 
-	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v1"
+	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v2"
 	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -21,13 +20,6 @@ func newTestTextPayload(t *testing.T, s string) *sharedv2.Payload {
 		t.Fatalf("ToPayload: %v", err)
 	}
 	return p
-}
-
-// newProxyTestTextPayload builds a shared.v1 text payload for the proxy-wire
-// types (protocol/proxy/v1 still speaks shared.v1).
-func newProxyTestTextPayload(t *testing.T, s string) *sharedpb.Payload {
-	t.Helper()
-	return payloadV2toV1(newTestTextPayload(t, s))
 }
 
 // TestHandlerImplRPCOverride verifies P1-11: a custom RPC handler injected
@@ -45,7 +37,7 @@ func TestHandlerImplRPCOverride(t *testing.T) {
 		Id:      "req-1",
 		Channel: "svc",
 		Method:  "echo",
-		Payload: newProxyTestTextPayload(t, "hello"),
+		Payload: newTestTextPayload(t, "hello"),
 	})
 	if err != nil {
 		t.Fatalf("RPC failed: %v", err)

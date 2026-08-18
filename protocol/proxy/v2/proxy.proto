@@ -1,0 +1,122 @@
+syntax = "proto3";
+
+// buf:lint:ignore PACKAGE_DIRECTORY_MATCH
+package messageloop.proxy.v2;
+
+import "shared/v2/errors.proto";
+import "shared/v2/types.proto";
+
+option go_package = "github.com/messageloopio/messageloop/shared/genproto/proxy/v2;proxyv2pb";
+
+service ProxyService {
+  // RPC 调用
+  rpc RPC(RPCRequest) returns (RPCResponse);
+  // 认证
+  rpc Authenticate(AuthenticateRequest) returns (AuthenticateResponse);
+  // 订阅权限校验
+  rpc SubscribeAcl(SubscribeAclRequest) returns (SubscribeAclResponse);
+  // 发布权限校验
+  rpc PublishAcl(PublishAclRequest) returns (PublishAclResponse);
+  // 生命周期钩子
+  rpc OnConnected(OnConnectedRequest) returns (OnConnectedResponse);
+  rpc OnSubscribed(OnSubscribedRequest) returns (OnSubscribedResponse);
+  rpc OnUnsubscribed(OnUnsubscribedRequest) returns (OnUnsubscribedResponse);
+  rpc OnDisconnected(OnDisconnectedRequest) returns (OnDisconnectedResponse);
+}
+
+// --- RPC ---
+
+message RPCRequest {
+  string id = 1;
+  string channel = 2;
+  string method = 3;
+  messageloop.shared.v2.Payload payload = 4;
+  messageloop.shared.v2.Metadata metadata = 5;
+}
+
+message RPCResponse {
+  string id = 1;
+  messageloop.shared.v2.Payload payload = 2;
+  messageloop.shared.v2.Metadata metadata = 3;
+  messageloop.shared.v2.Error error = 4;
+}
+
+// --- Authenticate ---
+
+message AuthenticateRequest {
+  string client_id = 1;
+  string token = 2;
+  string client_type = 3;
+  string session_id = 4;
+  string remote_addr = 5;
+}
+
+message AuthenticateResponse {
+  messageloop.shared.v2.Error error = 1;
+  UserInfo user_info = 2;
+}
+
+message UserInfo {
+  string id = 1;
+  string username = 2;
+  string token = 3;
+  string client_type = 4;
+  string client_id = 5;
+}
+
+// --- SubscribeAcl ---
+
+message SubscribeAclRequest {
+  string channel = 1;
+  string token = 2;
+  string user_id = 3;
+  string session_id = 4;
+}
+
+message SubscribeAclResponse {
+  messageloop.shared.v2.Error error = 1;
+}
+
+// --- PublishAcl ---
+
+message PublishAclRequest {
+  string channel = 1;
+  string token = 2;
+  string user_id = 3;
+  string session_id = 4;
+}
+
+message PublishAclResponse {
+  messageloop.shared.v2.Error error = 1;
+}
+
+// --- 生命周期钩子 ---
+
+message OnConnectedRequest {
+  string session_id = 1;
+  string username = 2;
+}
+
+message OnConnectedResponse {}
+
+message OnSubscribedRequest {
+  string session_id = 1;
+  string channel = 2;
+  string username = 3;
+}
+
+message OnSubscribedResponse {}
+
+message OnUnsubscribedRequest {
+  string session_id = 1;
+  string channel = 2;
+  string username = 3;
+}
+
+message OnUnsubscribedResponse {}
+
+message OnDisconnectedRequest {
+  string session_id = 1;
+  string username = 2;
+}
+message OnDisconnectedResponse {}

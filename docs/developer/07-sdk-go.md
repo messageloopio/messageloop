@@ -352,9 +352,9 @@ log.Printf("RPC response: %s", resp.String())
 
 ### 代理（proxy）后端
 
-RPC 的业务实现位于代理后端：服务端把客户端 RPC 请求转发到后端 gRPC 服务（`proxy/v1` 的 `ProxyService`），后端处理后返回。SDK 的 `proxy.go` 提供整套后端实现骨架：
+RPC 的业务实现位于代理后端：服务端把客户端 RPC 请求转发到后端 gRPC 服务（`proxy/v2` 的 `ProxyService`），后端处理后返回。SDK 的 `proxy.go` 提供整套后端实现骨架：
 
-- `RPCHandler` 接口：`HandleRPC(ctx context.Context, req *RPCRequest) (*RPCResponse, error)`，其中 `RPCRequest{ID, Channel, Method, Payload *Message}`、`RPCResponse{Payload *Message, Error *sharedpb.Error}`；
+- `RPCHandler` 接口：`HandleRPC(ctx context.Context, req *RPCRequest) (*RPCResponse, error)`，其中 `RPCRequest{ID, Channel, Method, Payload *Message}`、`RPCResponse{Payload *Message, Error *sharedv2.Error}`；
 - `AuthHandler`：`Authenticate(ctx, *AuthenticateRequest) (*AuthenticateResponse, error)`，配合 `UserInfo` 返回用户信息；
 - `ACLHandler`：`CheckSubscribeACL(ctx, channel, token string) error` 与 `CheckPublishACL(ctx, channel, token string) error`；
 - `LifecycleHandler`：`OnConnected` / `OnDisconnected`（携带 sessionID 与 username）/ `OnSubscribed` / `OnUnsubscribed` 生命周期钩子；

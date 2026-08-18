@@ -53,23 +53,12 @@
         }
       }
     },
-    "v1AuthenticateResponse": {
-      "type": "object",
-      "properties": {
-        "error": {
-          "$ref": "#/definitions/v1Error"
-        },
-        "userInfo": {
-          "$ref": "#/definitions/v1UserInfo"
-        }
-      }
-    },
-    "v1Error": {
+    "sharedv2Error": {
       "type": "object",
       "properties": {
         "code": {
           "type": "string",
-          "description": "Well-known string codes (not an enum): AUTH_REQUIRED, AUTH_ERROR,\r\nACL_DENIED, ACL_ERROR, RATE_LIMITED, RPC_TIMEOUT, PROXY_ERROR,\r\nBAD_REQUEST, PERMISSION_DENIED, POLICY_DENIED,\r\nRECOVER_FAILED, RECOVER_SKIPPED."
+          "description": "Well-known string codes (not an enum): AUTH_REQUIRED, AUTH_ERROR,\nRATE_LIMITED, RPC_TIMEOUT, PROXY_ERROR, NO_PROXY, BAD_REQUEST,\nPERMISSION_DENIED, POLICY_DENIED, RECOVER_FAILED, RECOVER_SKIPPED,\nSURVEY_DISABLED, SURVEY_TOO_MANY_SUBSCRIBERS, PATTERN_NOT_ROUTABLE,\nVERSION_UNSUPPORTED."
         },
         "type": {
           "type": "string"
@@ -82,7 +71,7 @@
         }
       }
     },
-    "v1Metadata": {
+    "sharedv2Metadata": {
       "type": "object",
       "properties": {
         "entries": {
@@ -94,19 +83,7 @@
       },
       "title": "统一的元数据类型"
     },
-    "v1OnConnectedResponse": {
-      "type": "object"
-    },
-    "v1OnDisconnectedResponse": {
-      "type": "object"
-    },
-    "v1OnSubscribedResponse": {
-      "type": "object"
-    },
-    "v1OnUnsubscribedResponse": {
-      "type": "object"
-    },
-    "v1Payload": {
+    "sharedv2Payload": {
       "type": "object",
       "properties": {
         "contentType": {
@@ -129,40 +106,63 @@
       },
       "title": "统一的数据载荷类型"
     },
-    "v1PublishAclResponse": {
+    "v2AuthenticateResponse": {
       "type": "object",
       "properties": {
         "error": {
-          "$ref": "#/definitions/v1Error"
+          "$ref": "#/definitions/sharedv2Error"
+        },
+        "userInfo": {
+          "$ref": "#/definitions/v2UserInfo"
         }
       }
     },
-    "v1RPCResponse": {
+    "v2OnConnectedResponse": {
+      "type": "object"
+    },
+    "v2OnDisconnectedResponse": {
+      "type": "object"
+    },
+    "v2OnSubscribedResponse": {
+      "type": "object"
+    },
+    "v2OnUnsubscribedResponse": {
+      "type": "object"
+    },
+    "v2PublishAclResponse": {
+      "type": "object",
+      "properties": {
+        "error": {
+          "$ref": "#/definitions/sharedv2Error"
+        }
+      }
+    },
+    "v2RPCResponse": {
       "type": "object",
       "properties": {
         "id": {
           "type": "string"
         },
         "payload": {
-          "$ref": "#/definitions/v1Payload"
+          "$ref": "#/definitions/sharedv2Payload"
         },
         "metadata": {
-          "$ref": "#/definitions/v1Metadata"
+          "$ref": "#/definitions/sharedv2Metadata"
         },
         "error": {
-          "$ref": "#/definitions/v1Error"
+          "$ref": "#/definitions/sharedv2Error"
         }
       }
     },
-    "v1SubscribeAclResponse": {
+    "v2SubscribeAclResponse": {
       "type": "object",
       "properties": {
         "error": {
-          "$ref": "#/definitions/v1Error"
+          "$ref": "#/definitions/sharedv2Error"
         }
       }
     },
-    "v1UserInfo": {
+    "v2UserInfo": {
       "type": "object",
       "properties": {
         "id": {

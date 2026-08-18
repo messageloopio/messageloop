@@ -166,7 +166,7 @@ The system abstracts connection handling via the **Transport** interface (`trans
 
 ### Protocol
 
-Client protocol messages defined in `shared/genproto/client/v1/`:
+Client protocol messages defined in `shared/genproto/client/v2/`:
 - `InboundMessage` - Client-to-server with oneof envelope: Connect, Subscribe, Publish, RpcRequest, Survey, Ping, etc.
 - `OutboundMessage` - Server-to-client with oneof envelope: Connected, SubscribeAck, PublishAck, Publication, RpcReply, SurveyResult, etc.
 - `Message` - Wrapper containing Channel, Id, Offset, and Payload
@@ -177,7 +177,7 @@ The `marshaler.go` re-exports shared marshalers from `shared/marshaler.go`:
 - `ProtobufMarshaler{}` - Protobuf binary encoding
 - `ProtoJSONMarshaler` - Protobuf JSON encoding
 
-**Import convention:** Generated protobuf packages use short aliases: `clientpb`, `sharedpb`, `eventpb`, `serverpb`, `proxypb`.
+**Import convention:** Generated protobuf packages use short aliases: `clientpb`, `sharedpb`, `sharedv2`, `serverpb`, `proxypb`.
 
 ### Topic Matching
 

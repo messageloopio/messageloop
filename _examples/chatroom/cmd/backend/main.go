@@ -21,7 +21,7 @@ import (
 
 	"github.com/messageloopio/messageloop/_examples/chatroom/internal/chatroom"
 	messageloopgo "github.com/messageloopio/messageloop/sdks/go"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -74,7 +74,7 @@ type authService struct{}
 func (s *authService) Authenticate(ctx context.Context, req *messageloopgo.AuthenticateRequest) (*messageloopgo.AuthenticateResponse, error) {
 	if req.Token == "" {
 		return &messageloopgo.AuthenticateResponse{
-			Error: &sharedpb.Error{
+			Error: &sharedv2.Error{
 				Code:    "INVALID_CREDENTIALS",
 				Type:    "auth_error",
 				Message: "token is required",
@@ -84,7 +84,7 @@ func (s *authService) Authenticate(ctx context.Context, req *messageloopgo.Authe
 	user, ok := chatroom.LookupByToken(req.Token)
 	if !ok {
 		return &messageloopgo.AuthenticateResponse{
-			Error: &sharedpb.Error{
+			Error: &sharedv2.Error{
 				Code:    "INVALID_CREDENTIALS",
 				Type:    "auth_error",
 				Message: "unknown token: " + req.Token,
@@ -253,10 +253,10 @@ func (s *rpcService) handleWhoami(ctx context.Context, req *messageloopgo.RPCReq
 	}, nil
 }
 
-// rpcError builds an RPC response carrying a sharedpb.Error.
+// rpcError builds an RPC response carrying a sharedv2.Error.
 func rpcError(code, message string) *messageloopgo.RPCResponse {
 	return &messageloopgo.RPCResponse{
-		Error: &sharedpb.Error{Code: code, Type: "rpc_error", Message: message},
+		Error: &sharedv2.Error{Code: code, Type: "rpc_error", Message: message},
 	}
 }
 

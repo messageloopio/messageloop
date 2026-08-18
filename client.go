@@ -15,7 +15,6 @@ import (
 	"github.com/messageloopio/messageloop/pkg/topics"
 	"github.com/messageloopio/messageloop/proxy"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"github.com/samber/lo"
 	"golang.org/x/time/rate"
@@ -358,7 +357,7 @@ func (c *Session) handleConnect(ctx context.Context, in *clientpb.InboundMessage
 			log.WarnContext(ctx, "proxy authentication returned error", "error", authResp.Error)
 			_ = c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 				out.Envelope = &clientpb.OutboundMessage_Error{
-					Error: sharedErrorV2(authResp.Error),
+					Error: authResp.Error,
 				}
 			}))
 			return DisconnectInvalidToken
@@ -790,7 +789,7 @@ func (c *Session) checkSubscribeACL(ctx context.Context, in *clientpb.InboundMes
 		}
 		if aclResp.Error != nil {
 			log.WarnContext(ctx, "proxy subscribe ACL returned error", "channel", ch.Channel, "error", aclResp.Error)
-			return sharedErrorV2(aclResp.Error)
+			return aclResp.Error
 		}
 	}
 	return nil
@@ -810,56 +809,6 @@ func MakeOutboundMessage(in *clientpb.InboundMessage, bodyFunc func(out *clientp
 		}
 	}
 	bodyFunc(out)
-	return out
-}
-
-// sharedErrorV2 converts a shared.v1 error (auth/ACL proxies still speak
-// protocol/proxy/v1) into the client-v2 wire error the runtime now emits.
-func sharedErrorV2(e *sharedpb.Error) *sharedv2.Error {
-	if e == nil {
-		return nil
-	}
-	return &sharedv2.Error{
-		Code:    e.GetCode(),
-		Type:    e.GetType(),
-		Message: e.GetMessage(),
-	}
-}
-
-// payloadV2toV1 converts a client-v2 payload into the shared.v1 payload the
-// proxy RPC path still consumes. The shapes are identical except for the
-// package path.
-func payloadV2toV1(p *sharedv2.Payload) *sharedpb.Payload {
-	if p == nil {
-		return nil
-	}
-	out := &sharedpb.Payload{ContentType: p.GetContentType()}
-	switch d := p.Data.(type) {
-	case *sharedv2.Payload_Json:
-		out.Data = &sharedpb.Payload_Json{Json: d.Json}
-	case *sharedv2.Payload_Binary:
-		out.Data = &sharedpb.Payload_Binary{Binary: d.Binary}
-	case *sharedv2.Payload_Text:
-		out.Data = &sharedpb.Payload_Text{Text: d.Text}
-	}
-	return out
-}
-
-// payloadV1toV2 converts a shared.v1 payload (proxy / admin responses) into
-// the client-v2 payload the runtime now emits.
-func payloadV1toV2(p *sharedpb.Payload) *sharedv2.Payload {
-	if p == nil {
-		return nil
-	}
-	out := &sharedv2.Payload{ContentType: p.GetContentType()}
-	switch d := p.Data.(type) {
-	case *sharedpb.Payload_Json:
-		out.Data = &sharedv2.Payload_Json{Json: d.Json}
-	case *sharedpb.Payload_Binary:
-		out.Data = &sharedv2.Payload_Binary{Binary: d.Binary}
-	case *sharedpb.Payload_Text:
-		out.Data = &sharedv2.Payload_Text{Text: d.Text}
-	}
 	return out
 }
 
@@ -919,9 +868,7 @@ func (c *Session) handleRPC(ctx context.Context, in *clientpb.InboundMessage, rp
 		UserID:    c.user,
 		Channel:   channel,
 		Method:    method,
-		// The proxy protocol (protocol/proxy/v1) still speaks shared.v1, so
-		// the client-v2 request payload is bridged before invoking it.
-		Payload:   payloadV2toV1(rpcReq.Payload),
+		Payload:   rpcReq.Payload,
 		Meta:      meta,
 	}
 
@@ -995,13 +942,13 @@ func (c *Session) handleRPC(ctx context.Context, in *clientpb.InboundMessage, rp
 	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 		if proxyResp.Error != nil {
 			out.Envelope = &clientpb.OutboundMessage_Error{
-				Error: sharedErrorV2(proxyResp.Error),
+				Error: proxyResp.Error,
 			}
 		} else {
 			out.Envelope = &clientpb.OutboundMessage_RpcReply{
 				RpcReply: &clientpb.RpcReply{
 					RequestId: in.Id,
-					Payload:   payloadV1toV2(proxyResp.Payload),
+					Payload:   proxyResp.Payload,
 					Metadata:  &sharedv2.Metadata{Entries: proxyResp.Meta},
 				},
 			}
@@ -1076,7 +1023,7 @@ func (c *Session) handlePublish(ctx context.Context, in *clientpb.InboundMessage
 			log.WarnContext(ctx, "proxy publish ACL returned error", "channel", channel, "error", aclResp.Error)
 			return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 				out.Envelope = &clientpb.OutboundMessage_Error{
-					Error: sharedErrorV2(aclResp.Error),
+					Error: aclResp.Error,
 				}
 			}))
 		}

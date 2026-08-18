@@ -15,8 +15,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v1"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
 func TestNewHTTPProxy(t *testing.T) {
@@ -83,8 +83,8 @@ func TestHTTPProxy_RPC(t *testing.T) {
 		ID:      "req-123",
 		Channel: "test.channel",
 		Method:  "testMethod",
-		Payload: &sharedpb.Payload{
-			Data: &sharedpb.Payload_Json{
+		Payload: &sharedv2.Payload{
+			Data: &sharedv2.Payload_Json{
 				Json: s,
 			},
 		},
@@ -120,8 +120,8 @@ func TestHTTPProxy_Timeout(t *testing.T) {
 		ID:      "req-timeout",
 		Channel: "test",
 		Method:  "test",
-		Payload: &sharedpb.Payload{
-			Data: &sharedpb.Payload_Json{
+		Payload: &sharedv2.Payload{
+			Data: &sharedv2.Payload_Json{
 				Json: s,
 			},
 		},
@@ -174,8 +174,8 @@ func TestGRPCProxy_RPC(t *testing.T) {
 
 			return &proxypb.RPCResponse{
 				Id: req.Id,
-				Payload: &sharedpb.Payload{
-					Data: &sharedpb.Payload_Json{
+				Payload: &sharedv2.Payload{
+					Data: &sharedv2.Payload_Json{
 						Json: s,
 					},
 				},
@@ -208,8 +208,8 @@ func TestGRPCProxy_RPC(t *testing.T) {
 		ID:      "req-grpc-123",
 		Channel: "grpc.channel",
 		Method:  "grpcMethod",
-		Payload: &sharedpb.Payload{
-			Data: &sharedpb.Payload_Json{
+		Payload: &sharedv2.Payload{
+			Data: &sharedv2.Payload_Json{
 				Json: reqPayload,
 			},
 		},
@@ -274,8 +274,8 @@ func TestRPCProxyRequest_ToProtoRequest(t *testing.T) {
 		UserID:    "user-1",
 		Channel:   "test.channel",
 		Method:    "testMethod",
-		Payload: &sharedpb.Payload{
-			Data: &sharedpb.Payload_Json{
+		Payload: &sharedv2.Payload{
+			Data: &sharedv2.Payload_Json{
 				Json: s,
 			},
 		},
@@ -298,8 +298,8 @@ func TestFromProtoReply(t *testing.T) {
 
 	reply := &proxypb.RPCResponse{
 		Id: "reply-id",
-		Payload: &sharedpb.Payload{
-			Data: &sharedpb.Payload_Json{
+		Payload: &sharedv2.Payload{
+			Data: &sharedv2.Payload_Json{
 				Json: s,
 			},
 		},

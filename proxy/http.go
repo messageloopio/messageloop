@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/lynx-go/x/log"
-	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v1"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
@@ -21,16 +21,16 @@ import (
 // The protobuf notification response messages carry no fields, so the optional
 // backend error must be parsed from the raw JSON body.
 type notificationErrorResponse struct {
-	Error *sharedpb.Error `json:"error"`
+	Error *sharedv2.Error `json:"error"`
 }
 
 // HTTPStatusError is returned by the HTTP proxy when the backend answers with
-// a non-200 status. When the body carries a structured sharedpb.Error it is
+// a non-200 status. When the body carries a structured sharedv2.Error it is
 // preserved in Err; otherwise the raw body text is kept in Body. Callers may
 // use errors.As to inspect the structured error.
 type HTTPStatusError struct {
 	StatusCode int
-	Err        *sharedpb.Error
+	Err        *sharedv2.Error
 	Body       []byte
 }
 
@@ -105,7 +105,7 @@ func (p *HTTPProxy) RPC(ctx context.Context, req *RPCProxyRequest) (*RPCProxyRes
 		return nil, fmt.Errorf("failed to convert request: %w", err)
 	}
 	// Marshal the payload-bearing request with protojson: encoding/json cannot
-	// round-trip the sharedpb.Payload oneof, which silently drops the Data
+	// round-trip the sharedv2.Payload oneof, which silently drops the Data
 	// field. protojson matches the proto3 JSON contract of the gRPC path and
 	// carries the request metadata through.
 	body, err := protojson.Marshal(protoReq)
@@ -411,7 +411,7 @@ func (p *HTTPProxy) doRequest(ctx context.Context, httpReq *http.Request, method
 
 	// Check status code
 	if resp.StatusCode != http.StatusOK {
-		// Prefer a structured sharedpb.Error from the body (same JSON shape as
+		// Prefer a structured sharedv2.Error from the body (same JSON shape as
 		// notification responses); fall back to raw body text. The error
 		// member is parsed with protojson to match the proto3 JSON contract
 		// (exact field names, metadata Struct), tolerating unknown fields like
@@ -420,7 +420,7 @@ func (p *HTTPProxy) doRequest(ctx context.Context, httpReq *http.Request, method
 			Error json.RawMessage `json:"error"`
 		}
 		if json.Unmarshal(respBody, &envelope) == nil && len(envelope.Error) > 0 {
-			var structured sharedpb.Error
+			var structured sharedv2.Error
 			opts := protojson.UnmarshalOptions{DiscardUnknown: true}
 			if err := opts.Unmarshal(envelope.Error, &structured); err == nil {
 				return nil, &HTTPStatusError{StatusCode: resp.StatusCode, Err: &structured, Body: respBody}

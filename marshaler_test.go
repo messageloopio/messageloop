@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
 func TestJSONMarshaler_Name(t *testing.T) {
@@ -276,7 +276,7 @@ func TestProtoJSONMarshaler_DiscardUnknown(t *testing.T) {
 }
 
 func TestProtoJSONMarshaler_UseProtoNames(t *testing.T) {
-	msg := &sharedpb.Error{
+	msg := &sharedv2.Error{
 		Code:    "TEST_ERROR",
 		Type:    "test_type",
 		Message: "test error message",

@@ -10,7 +10,6 @@ import (
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/proxy"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -512,8 +511,8 @@ func TestNode_RPC_WithProxy(t *testing.T) {
 	s, _ := structpb.NewStruct(map[string]interface{}{"id": "response-1"})
 	mockProxy := &mockRPCProxy{
 		response: &proxy.RPCProxyResponse{
-			Payload: &sharedpb.Payload{
-				Data: &sharedpb.Payload_Json{
+			Payload: &sharedv2.Payload{
+				Data: &sharedv2.Payload_Json{
 					Json: s,
 				},
 			},

@@ -6,8 +6,7 @@ import (
 	"log/slog"
 	"net"
 
-	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v1"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v2"
 	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -75,57 +74,6 @@ func (u *UserInfo) ToProto() *proxypb.UserInfo {
 		Token:      u.Token,
 		ClientType: u.ClientType,
 		ClientId:   u.ClientID,
-	}
-}
-
-// payloadV1toV2 converts a proxy-wire shared.v1 payload into the SDK's
-// shared.v2 payload type. The shapes are identical except for the package
-// path: the proxy protocol (protocol/proxy/v1) still speaks shared.v1 while
-// the SDK's data types are v2.
-func payloadV1toV2(p *sharedpb.Payload) *sharedv2.Payload {
-	if p == nil {
-		return nil
-	}
-	out := &sharedv2.Payload{ContentType: p.GetContentType()}
-	switch d := p.Data.(type) {
-	case *sharedpb.Payload_Json:
-		out.Data = &sharedv2.Payload_Json{Json: d.Json}
-	case *sharedpb.Payload_Binary:
-		out.Data = &sharedv2.Payload_Binary{Binary: d.Binary}
-	case *sharedpb.Payload_Text:
-		out.Data = &sharedv2.Payload_Text{Text: d.Text}
-	}
-	return out
-}
-
-// payloadV2toV1 converts an SDK shared.v2 payload back into the shared.v1
-// payload the proxy wire carries.
-func payloadV2toV1(p *sharedv2.Payload) *sharedpb.Payload {
-	if p == nil {
-		return nil
-	}
-	out := &sharedpb.Payload{ContentType: p.GetContentType()}
-	switch d := p.Data.(type) {
-	case *sharedv2.Payload_Json:
-		out.Data = &sharedpb.Payload_Json{Json: d.Json}
-	case *sharedv2.Payload_Binary:
-		out.Data = &sharedpb.Payload_Binary{Binary: d.Binary}
-	case *sharedv2.Payload_Text:
-		out.Data = &sharedpb.Payload_Text{Text: d.Text}
-	}
-	return out
-}
-
-// errorV2toV1 converts an SDK shared.v2 error into the shared.v1 error the
-// proxy wire carries.
-func errorV2toV1(e *sharedv2.Error) *sharedpb.Error {
-	if e == nil {
-		return nil
-	}
-	return &sharedpb.Error{
-		Code:    e.GetCode(),
-		Type:    e.GetType(),
-		Message: e.GetMessage(),
 	}
 }
 
@@ -272,7 +220,7 @@ func (h *HandlerImpl) RPC(ctx context.Context, req *proxypb.RPCRequest) (*proxyp
 	// Convert Payload to Message
 	var payload *Message
 	if pbPayload := req.GetPayload(); pbPayload != nil {
-		payload = PayloadToMessage(payloadV1toV2(pbPayload), "")
+		payload = PayloadToMessage(pbPayload, "")
 	}
 
 	rpcReq := &RPCRequest{
@@ -287,7 +235,7 @@ func (h *HandlerImpl) RPC(ctx context.Context, req *proxypb.RPCRequest) (*proxyp
 		slog.ErrorContext(ctx, "RPC handler failed", "error", err)
 		return &proxypb.RPCResponse{
 			Id: req.Id,
-			Error: &sharedpb.Error{
+			Error: &sharedv2.Error{
 				Code:    "INTERNAL_ERROR",
 				Type:    "server_error",
 				Message: err.Error(),
@@ -310,21 +258,20 @@ func (h *HandlerImpl) RPC(ctx context.Context, req *proxypb.RPCRequest) (*proxyp
 		)
 	}
 
-	// Convert Message to Payload (bridging the SDK's v2 payload to the v1
-	// proxy wire).
-	var respPayload *sharedpb.Payload
+	// Convert Message to Payload
+	var respPayload *sharedv2.Payload
 	if resp.Payload != nil {
 		p, err := resp.Payload.ToPayload()
 		if err != nil {
 			slog.ErrorContext(ctx, "failed to convert response payload", "error", err)
 			return nil, status.Error(codes.Internal, fmt.Sprintf("failed to convert response payload: %v", err))
 		}
-		respPayload = payloadV2toV1(p)
+		respPayload = p
 	}
 
 	return &proxypb.RPCResponse{
 		Id:      req.Id,
-		Error:   errorV2toV1(resp.Error),
+		Error:   resp.Error,
 		Payload: respPayload,
 	}, nil
 }
@@ -346,7 +293,7 @@ func (h *HandlerImpl) Authenticate(ctx context.Context, req *proxypb.Authenticat
 	if err != nil {
 		slog.ErrorContext(ctx, "auth handler failed", "error", err)
 		return &proxypb.AuthenticateResponse{
-			Error: &sharedpb.Error{
+			Error: &sharedv2.Error{
 				Code:    "AUTH_ERROR",
 				Type:    "auth_error",
 				Message: err.Error(),
@@ -362,7 +309,7 @@ func (h *HandlerImpl) Authenticate(ctx context.Context, req *proxypb.Authenticat
 	}
 
 	return &proxypb.AuthenticateResponse{
-		Error:    errorV2toV1(resp.Error),
+		Error:    resp.Error,
 		UserInfo: resp.UserInfo.ToProto(),
 	}, nil
 }

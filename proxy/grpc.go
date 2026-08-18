@@ -11,7 +11,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/lynx-go/x/log"
-	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v1"
+	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v2"
 )
 
 // GRPCProxy implements Proxy using gRPC transport.

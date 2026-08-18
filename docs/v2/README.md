@@ -25,6 +25,6 @@
 | [PR-KA-D2 实现规格](tasks/pr-ka-d2-version-gate.md) | Accepted | 握手版本门：Connect.version 世代校验 + SDK 默认 2.0.0；[prompt](tasks/pr-ka-d2-prompt.md) |
 | [PR-KA-D3 实现规格](tasks/pr-ka-d3-observability.md) | Accepted | 观测面补齐：六个合同指标（纯仪表）；[prompt](tasks/pr-ka-d3-prompt.md) |
 | [PR-KA-D4 实现规格](tasks/pr-ka-d4-buffer-full.md) | Accepted | LiveBus 缓冲满：occupancy 优先丢 + 频道降级标记；[prompt](tasks/pr-ka-d4-prompt.md) |
-| [PR-KA-D5 实现规格](tasks/pr-ka-d5-proxy-v2.md) | Ready | proxy 升 v2 + 拆 v1 桥 + 删死 v1 proto；[prompt](tasks/pr-ka-d5-prompt.md) |
+| [PR-KA-D5 实现规格](tasks/pr-ka-d5-proxy-v2.md) | Accepted | proxy 升 v2 + 拆 v1 桥 + 删死 v1 proto；[prompt](tasks/pr-ka-d5-prompt.md) |
 
 第三方实现：复制对应 `tasks/pr-ka-*-prompt.md` 围栏全文；规格与靶心冲突时以该步规格为准。

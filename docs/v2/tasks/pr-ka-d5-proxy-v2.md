@@ -3,7 +3,7 @@
 | 字段 | 值 |
 | --- | --- |
 | 标题 | `proxy: rev proxy protocol to v2 (shared/v2 types), drop the v1 payload bridge, delete dead v1 protos` |
-| 状态 | **Ready**（待实现） |
+| 状态 | **Accepted**（2026-08-18 主 agent 终验通过，尚未 commit） |
 | 依赖 | D4 已合（`f021ebe`）。在 `v2` 分支上做。后续 D6:admin 切 server/v2 + 删 server/v1/shared/v1 |
 | 设计来源 | 转正评审协议/SDK 路（移除 v1 面）;KD-K31 |
 | 验收人 | 主 agent |
@@ -101,4 +101,16 @@ grep -rn "genproto/shared/v1" --include="*.go" . | grep -v genproto   # 只剩 a
 
 ## 8. 实现备注（实现方填）
 
-（空）
+实现于 `v2` 分支（基线 `3834c0d`），未做 git commit/tag/push。
+
+- **proto**:`protocol/proxy/v2/proxy.proto` 为 `proxy/v1` 的逐字段复刻，已用 `diff` 校验：除 `package`、两条 `import`、`go_package` 及消息内 `messageloop.shared.v1.`→`v2.` 类型引用外零差异（含 `buf:lint:ignore PACKAGE_DIRECTORY_MATCH` 注释原样保留）。`protocol/client/v1`、`protocol/event/v1`、`protocol/proxy/v1` 整目录 `git rm`。
+- **codegen**:`task generate-protocol`(buf 1.65.0 remote plugins）产出 `shared/genproto/proxy/v2/{proxy.pb.go,proxy_grpc.pb.go,proxy.swagger.json}`（包名 `proxyv2pb`）与 `sdks/ts/src/proto/proxy/v2/proxy_pb.ts`;buf 不清理过期输出，旧生成物（`shared/genproto/{client/v1,event,proxy/v1}`、`sdks/ts/src/proto/{client/v1,event,proxy/v1}`）手动 `git rm`。churn 还原：`client/v2/service.swagger.json`、`server/v1/api.swagger.json` 为纯定义排序 churn(471 行对称增删），照 D2 先例 `git checkout --` 还原；`client/v2/service.pb.go`、`shared/v2/{errors,types}.pb.go` 仅 stat-dirty(diff 为空），一并还原。
+- **服务端**:`proxy/{proxy,http,grpc}.go` 切 `proxy/v2`+`shared/v2`（别名沿用 `proxypb`;`sharedpb.`→`sharedv2.` 纯机械替换，含注释中的类型名）。`client.go` 删 `sharedErrorV2`/`payloadV2toV1`/`payloadV1toV2` 三桥，5 个调用点（:361 auth、:793/:1079 ACL、:924 RPC 请求、:998/:1004 RPC 应答）全部直通，`sharedpb` import 随之删除。**行为变化（有意）**:proxy 返回的 `Error.metadata`(field 4）现在透传给客户端——旧桥逐字段重建时丢弃。
+- **新测试**:`client_fix_test.go` 增 `TestClientSession_RPC_ProxyErrorMetadataPassthrough`(stub proxy 返回带 `metadata` 的 Error，断言客户端收到的 Error 含同一 metadata；拆桥前会丢）。
+- **SDK**:`sdks/go/proxy.go` 切 `proxy/v2`，删 `payloadV1toV2`/`payloadV2toV1`/`errorV2toV1`(`RPCResponse.Error`/`AuthenticateResponse.Error` 本就是 `*sharedv2.Error`，直通后 SDK 侧 Error.metadata 同样透传）;`proxy_test.go` 删 `newProxyTestTextPayload` 桥 helper;`fix_regression_test.go`、`example/proxyserver` 跟随（删三个 `example*` 桥函数）。
+- **chatroom**:`_examples/chatroom/cmd/backend/main.go` 三处 `sharedpb.Error`→`sharedv2.Error`（修好的恰是切 SDK 响应类型后留下的编译错误）。`_examples/chatroom/internal/chatroom/admin.go` 走 admin(server/v1)API，属 D6 白名单，未动。`_examples/chatroom/cmd/e2e` 的 `WithRecover` 编译错误为 D5 之前就存在的既有问题（已核对于基线），不在本 PR 范围。
+- **shared/v1 残留**（grep 实测）：仅 `broker.go`、`publication.go`(+`publication_test.go` 测其 v1 twin)、`pkg/grpcstream/{api_handler,api_handler_test,integration_test}.go`、生成物 `server/v1/api.pb.go`、`_examples/chatroom/internal/chatroom/admin.go`(admin client)——全部 admin 路径，D6 清。§5 门禁第三条命令里的 `grep -v genproto` 会把 import 行自身（路径含 "genproto"）全部滤掉，实际以不加该过滤的结果为准，如上所列。
+- **文档**:`docs/developer/06-development.md` codegen 路径/别名表更新（删 eventpb、:144 死链注记删除）;`docs/developer/07-sdk-go.md` proxy 节 `proxy/v1`→`proxy/v2`、`sharedpb.Error`→`sharedv2.Error`;`CLAUDE.md` client 协议路径 v1→v2、别名表删 `eventpb`。
+- **行尾**：机械替换过程中经 `sed` 触碰的 5 个 `proxy/*.go` 已恢复仓库约定的 CRLF worktree 形式；`git diff --numstat` 与 `--ignore-all-space --ignore-cr-at-eol --numstat` 输出逐行一致（无空白 churn)。
+- **测试**:`go build ./...`、`go test -count=1 ./proxy ./pkg/grpcstream .`、`go test -count=1 ./...`（真实 Redis 127.0.0.1:6379 DB14；首轮 `TestRedisBroker_LiveSubscription_OccupancyNotInterested` 一次负载相关 flake，单跑 1.04s 通过，与本 PR 无涉——redisbroker 不引用任何被改类型；复跑两轮全量均 exit 0)、`sdks/go go test -count=1 ./...`、`sdks/ts npx jest`(6 suites / 83 tests）全绿。TS SDK 非生成物零改动（`sdks/ts/dist/` 为 gitignore 的构建产物，不在范围）。
+

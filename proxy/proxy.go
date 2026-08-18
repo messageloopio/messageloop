@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v1"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
 // Proxy defines the interface for proxying RPC requests to backend services.
@@ -49,22 +49,22 @@ type RPCProxyRequest struct {
 	UserID    string
 	Channel   string
 	Method    string
-	Payload   *sharedpb.Payload
+	Payload   *sharedv2.Payload
 	Meta      map[string]string
 }
 
 // RPCProxyResponse represents a response from the proxy backend.
 type RPCProxyResponse struct {
-	Payload *sharedpb.Payload
+	Payload *sharedv2.Payload
 	Meta    map[string]string
-	Error   *sharedpb.Error
+	Error   *sharedv2.Error
 }
 
 // ToProtoRequest converts an RPCProxyRequest to the protobuf RPCRequest.
 func (r *RPCProxyRequest) ToProtoRequest() (*proxypb.RPCRequest, error) {
-	var metadata *sharedpb.Metadata
+	var metadata *sharedv2.Metadata
 	if r.Meta != nil {
-		metadata = &sharedpb.Metadata{Entries: r.Meta}
+		metadata = &sharedv2.Metadata{Entries: r.Meta}
 	}
 	return &proxypb.RPCRequest{
 		Id:       r.ID,
@@ -185,7 +185,7 @@ func (r *AuthenticateProxyRequest) ToProtoRequest() *proxypb.AuthenticateRequest
 
 // AuthenticateProxyResponse represents an authentication response from the proxy backend.
 type AuthenticateProxyResponse struct {
-	Error    *sharedpb.Error
+	Error    *sharedv2.Error
 	UserInfo *UserInfo
 }
 
@@ -239,7 +239,7 @@ func (r *SubscribeAclProxyRequest) ToProtoRequest() *proxypb.SubscribeAclRequest
 
 // SubscribeAclProxyResponse represents a subscription ACL response from the proxy backend.
 type SubscribeAclProxyResponse struct {
-	Error *sharedpb.Error
+	Error *sharedv2.Error
 }
 
 // FromProtoResponse creates a SubscribeAclProxyResponse from the protobuf SubscribeAclResponse.
@@ -270,7 +270,7 @@ func (r *PublishAclProxyRequest) ToProtoRequest() *proxypb.PublishAclRequest {
 
 // PublishAclProxyResponse represents a publish ACL response from the proxy backend.
 type PublishAclProxyResponse struct {
-	Error *sharedpb.Error
+	Error *sharedv2.Error
 }
 
 // FromProtoPublishAclResponse creates a PublishAclProxyResponse from the protobuf PublishAclResponse.
@@ -297,7 +297,7 @@ func (r *OnConnectedProxyRequest) ToProtoRequest() *proxypb.OnConnectedRequest {
 
 // OnConnectedProxyResponse represents a response from the OnConnected notification.
 type OnConnectedProxyResponse struct {
-	Error *sharedpb.Error
+	Error *sharedv2.Error
 }
 
 // FromProtoResponse creates an OnConnectedProxyResponse from the protobuf OnConnectedResponse.
@@ -326,7 +326,7 @@ func (r *OnSubscribedProxyRequest) ToProtoRequest() *proxypb.OnSubscribedRequest
 
 // OnSubscribedProxyResponse represents a response from the OnSubscribed notification.
 type OnSubscribedProxyResponse struct {
-	Error *sharedpb.Error
+	Error *sharedv2.Error
 }
 
 // FromProtoResponse creates an OnSubscribedProxyResponse from the protobuf OnSubscribedResponse.
@@ -355,7 +355,7 @@ func (r *OnUnsubscribedProxyRequest) ToProtoRequest() *proxypb.OnUnsubscribedReq
 
 // OnUnsubscribedProxyResponse represents a response from the OnUnsubscribed notification.
 type OnUnsubscribedProxyResponse struct {
-	Error *sharedpb.Error
+	Error *sharedv2.Error
 }
 
 // FromProtoResponse creates an OnUnsubscribedProxyResponse from the protobuf OnUnsubscribedResponse.
@@ -382,7 +382,7 @@ func (r *OnDisconnectedProxyRequest) ToProtoRequest() *proxypb.OnDisconnectedReq
 
 // OnDisconnectedProxyResponse represents a response from the OnDisconnected notification.
 type OnDisconnectedProxyResponse struct {
-	Error *sharedpb.Error
+	Error *sharedv2.Error
 }
 
 // FromProtoResponse creates an OnDisconnectedProxyResponse from the protobuf OnDisconnectedResponse.

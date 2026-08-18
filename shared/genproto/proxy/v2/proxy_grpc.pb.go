@@ -2,11 +2,11 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.0
 // - protoc             (unknown)
-// source: proxy/v1/proxy.proto
+// source: proxy/v2/proxy.proto
 
 // buf:lint:ignore PACKAGE_DIRECTORY_MATCH
 
-package proxypb
+package proxyv2pb
 
 import (
 	context "context"
@@ -21,14 +21,14 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ProxyService_RPC_FullMethodName            = "/messageloop.proxy.v1.ProxyService/RPC"
-	ProxyService_Authenticate_FullMethodName   = "/messageloop.proxy.v1.ProxyService/Authenticate"
-	ProxyService_SubscribeAcl_FullMethodName   = "/messageloop.proxy.v1.ProxyService/SubscribeAcl"
-	ProxyService_PublishAcl_FullMethodName     = "/messageloop.proxy.v1.ProxyService/PublishAcl"
-	ProxyService_OnConnected_FullMethodName    = "/messageloop.proxy.v1.ProxyService/OnConnected"
-	ProxyService_OnSubscribed_FullMethodName   = "/messageloop.proxy.v1.ProxyService/OnSubscribed"
-	ProxyService_OnUnsubscribed_FullMethodName = "/messageloop.proxy.v1.ProxyService/OnUnsubscribed"
-	ProxyService_OnDisconnected_FullMethodName = "/messageloop.proxy.v1.ProxyService/OnDisconnected"
+	ProxyService_RPC_FullMethodName            = "/messageloop.proxy.v2.ProxyService/RPC"
+	ProxyService_Authenticate_FullMethodName   = "/messageloop.proxy.v2.ProxyService/Authenticate"
+	ProxyService_SubscribeAcl_FullMethodName   = "/messageloop.proxy.v2.ProxyService/SubscribeAcl"
+	ProxyService_PublishAcl_FullMethodName     = "/messageloop.proxy.v2.ProxyService/PublishAcl"
+	ProxyService_OnConnected_FullMethodName    = "/messageloop.proxy.v2.ProxyService/OnConnected"
+	ProxyService_OnSubscribed_FullMethodName   = "/messageloop.proxy.v2.ProxyService/OnSubscribed"
+	ProxyService_OnUnsubscribed_FullMethodName = "/messageloop.proxy.v2.ProxyService/OnUnsubscribed"
+	ProxyService_OnDisconnected_FullMethodName = "/messageloop.proxy.v2.ProxyService/OnDisconnected"
 )
 
 // ProxyServiceClient is the client API for ProxyService service.
@@ -358,7 +358,7 @@ func _ProxyService_OnDisconnected_Handler(srv interface{}, ctx context.Context, 
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var ProxyService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "messageloop.proxy.v1.ProxyService",
+	ServiceName: "messageloop.proxy.v2.ProxyService",
 	HandlerType: (*ProxyServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
@@ -395,5 +395,5 @@ var ProxyService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "proxy/v1/proxy.proto",
+	Metadata: "proxy/v2/proxy.proto",
 }

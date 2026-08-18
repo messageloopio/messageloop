@@ -8,7 +8,6 @@ import (
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/proxy"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -28,8 +27,8 @@ func (m *MockSlowProxy) RPC(ctx context.Context, req *proxy.RPCProxyRequest) (*p
 			"type":   req.Method,
 		})
 		return &proxy.RPCProxyResponse{
-			Payload: &sharedpb.Payload{
-				Data: &sharedpb.Payload_Json{
+			Payload: &sharedv2.Payload{
+				Data: &sharedv2.Payload_Json{
 					Json: s,
 				},
 			},
