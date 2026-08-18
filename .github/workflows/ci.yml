@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, v2]
   pull_request:
-    branches: [main]
+    branches: [main, v2]
 
 permissions:
   contents: read
@@ -12,6 +12,13 @@ permissions:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    services:
+      # Integration tests (pkg/redisbroker, cluster redis) default to
+      # 127.0.0.1:6379 with no password and skip when Redis is absent.
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
     steps:
       - uses: actions/checkout@v4
 
@@ -25,14 +32,28 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      # buf version pinned here and in Taskfile.yml (init) must stay in sync.
       - name: Check generated protocol code is up to date
         run: |
-          go install github.com/bufbuild/buf/cmd/buf@v1.63.0
+          go install github.com/bufbuild/buf/cmd/buf@v1.65.0
           buf generate
           git diff --exit-code
 
       - name: Test with race detector
         run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Test shared module
+        working-directory: shared
+        run: go test ./...
+
+      - name: Test Go SDK module
+        working-directory: sdks/go
+        run: go test ./...
+
+      # Chatroom e2e needs a running server; CI only builds it.
+      - name: Build chatroom example
+        working-directory: _examples/chatroom
+        run: go build ./...
 
       - name: Upload coverage
         if: github.event_name == 'pull_request'
@@ -40,6 +61,29 @@ jobs:
         with:
           name: coverage
           path: coverage.out
+
+  ts-sdk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdks/ts
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.11.1
+          cache: npm
+          cache-dependency-path: sdks/ts/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npx jest
 
   lint:
     runs-on: ubuntu-latest

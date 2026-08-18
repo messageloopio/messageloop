@@ -53,12 +53,24 @@
         }
       }
     },
-    "sharedv2Error": {
+    "v2AuthenticateResponse": {
+      "type": "object",
+      "properties": {
+        "error": {
+          "$ref": "#/definitions/v2Error"
+        },
+        "userInfo": {
+          "$ref": "#/definitions/v2UserInfo"
+        }
+      }
+    },
+    "v2Error": {
       "type": "object",
       "properties": {
         "code": {
           "type": "string",
-          "description": "Well-known string codes (not an enum): AUTH_REQUIRED, AUTH_ERROR,\nRATE_LIMITED, RPC_TIMEOUT, PROXY_ERROR, NO_PROXY, BAD_REQUEST,\nPERMISSION_DENIED, POLICY_DENIED, RECOVER_FAILED, RECOVER_SKIPPED,\nSURVEY_DISABLED, SURVEY_TOO_MANY_SUBSCRIBERS, PATTERN_NOT_ROUTABLE,\nVERSION_UNSUPPORTED."
+          "description": "authentication/version:\n    AUTH_REQUIRED (auth_error), AUTH_ERROR (auth_error),\n    VERSION_UNSUPPORTED (version_error)\n  request/permission:\n    BAD_REQUEST (client_error for undecodable frames, request_error for\n    invalid requests), PERMISSION_DENIED (acl_error),\n    POLICY_DENIED (policy_error), PATTERN_NOT_ROUTABLE (request_error),\n    RATE_LIMITED (rate_limit)\n  proxy/RPC:\n    NO_PROXY (request_error), PROXY_ERROR (proxy_error),\n    RPC_TIMEOUT (timeout)\n  recovery:\n    RECOVER_FAILED (recover_error), RECOVER_SKIPPED (recover_error)\n  survey top-level:\n    SURVEY_DISABLED (policy_error),\n    SURVEY_TOO_MANY_SUBSCRIBERS (survey_error)\n  survey per-answer:\n    SURVEY_FAILED (survey_error),\n    SURVEY_ANSWER_TOO_LARGE (survey_error)\n  server/transport:\n    INTERNAL_ERROR (server_error), DISCONNECT_ERROR (transport_error)",
+          "title": "Well-known string codes (not an enum). This is the single code table;\nthe Error Codes section of docs/protocol.md mirrors it and must stay in\nsync. Grouped:"
         },
         "type": {
           "type": "string"
@@ -71,7 +83,7 @@
         }
       }
     },
-    "sharedv2Metadata": {
+    "v2Metadata": {
       "type": "object",
       "properties": {
         "entries": {
@@ -83,7 +95,19 @@
       },
       "title": "统一的元数据类型"
     },
-    "sharedv2Payload": {
+    "v2OnConnectedResponse": {
+      "type": "object"
+    },
+    "v2OnDisconnectedResponse": {
+      "type": "object"
+    },
+    "v2OnSubscribedResponse": {
+      "type": "object"
+    },
+    "v2OnUnsubscribedResponse": {
+      "type": "object"
+    },
+    "v2Payload": {
       "type": "object",
       "properties": {
         "contentType": {
@@ -106,34 +130,11 @@
       },
       "title": "统一的数据载荷类型"
     },
-    "v2AuthenticateResponse": {
-      "type": "object",
-      "properties": {
-        "error": {
-          "$ref": "#/definitions/sharedv2Error"
-        },
-        "userInfo": {
-          "$ref": "#/definitions/v2UserInfo"
-        }
-      }
-    },
-    "v2OnConnectedResponse": {
-      "type": "object"
-    },
-    "v2OnDisconnectedResponse": {
-      "type": "object"
-    },
-    "v2OnSubscribedResponse": {
-      "type": "object"
-    },
-    "v2OnUnsubscribedResponse": {
-      "type": "object"
-    },
     "v2PublishAclResponse": {
       "type": "object",
       "properties": {
         "error": {
-          "$ref": "#/definitions/sharedv2Error"
+          "$ref": "#/definitions/v2Error"
         }
       }
     },
@@ -144,13 +145,13 @@
           "type": "string"
         },
         "payload": {
-          "$ref": "#/definitions/sharedv2Payload"
+          "$ref": "#/definitions/v2Payload"
         },
         "metadata": {
-          "$ref": "#/definitions/sharedv2Metadata"
+          "$ref": "#/definitions/v2Metadata"
         },
         "error": {
-          "$ref": "#/definitions/sharedv2Error"
+          "$ref": "#/definitions/v2Error"
         }
       }
     },
@@ -158,7 +159,7 @@
       "type": "object",
       "properties": {
         "error": {
-          "$ref": "#/definitions/sharedv2Error"
+          "$ref": "#/definitions/v2Error"
         }
       }
     },

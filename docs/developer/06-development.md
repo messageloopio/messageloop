@@ -6,7 +6,7 @@
 
 - **Go 1.26.5**：根模块的 `go.mod` 声明 `go 1.26.5`。`shared/` 与 `sdks/go/` 两个子模块声明 `go 1.25.5`。CI 通过 `actions/setup-go@v5` 的 `go-version-file: go.mod` 解析根模块声明的版本，建议本地安装同版本或更新的工具链。
 - **task**：任务自动化使用 [Task](https://taskfile.dev)。安装方式：`go install github.com/go-task/task/v3/cmd/task@latest`。
-- **buf 与 protoc-gen-go**：运行 `task init` 安装 `google.golang.org/protobuf/cmd/protoc-gen-go@latest` 与 `github.com/bufbuild/buf/cmd/buf@v1.63.0`（版本由 Taskfile.yml 固定）。仅在修改协议文件、需要重新生成代码时使用。
+- **buf 与 protoc-gen-go**：运行 `task init` 安装 `google.golang.org/protobuf/cmd/protoc-gen-go@latest` 与 `github.com/bufbuild/buf/cmd/buf@v1.65.0`（版本由 Taskfile.yml 固定，并与 `.github/workflows/ci.yml` 中钉的版本保持一致）。仅在修改协议文件、需要重新生成代码时使用。
 - **Node.js >= 18**：TypeScript SDK（`sdks/ts/package.json` 的 `engines.node`）开发需要；测试使用 Jest。
 - **Redis**：可选。运行 Redis broker 相关集成测试时需要本地 Redis（默认地址 `127.0.0.1:6379`），详见[构建与测试](#构建与测试)一节；内存 broker 模式不需要。
 - **golangci-lint**：`task lint` 依赖 golangci-lint 可执行文件，需自行安装。
@@ -94,12 +94,13 @@ task vet   # go vet ./...
 task lint  # golangci-lint run
 ```
 
-CI（`.github/workflows/ci.yml`）在 push/PR 到 `main` 时运行两个 job：
+CI（`.github/workflows/ci.yml`）在 push/PR 到 `main` 与 `v2` 时运行三个 job：
 
-- `build-and-test`：`go build ./...`、`go vet ./...`、`go test -race -coverprofile=coverage.out -covermode=atomic ./...`，PR 场景上传覆盖率产物。
-- `lint`：`golangci/golangci-lint-action@v6`（`version: latest`）。
+- `build-and-test`：挂 `redis:7` service（`127.0.0.1:6379`，无密码，供 Redis 集成测试真实运行），随后 `go build ./...`、`go vet ./...`、以钉版 buf（`v1.65.0`）执行 `buf generate` 并用 `git diff --exit-code` 校验生成物为最新、`go test -race -coverprofile=coverage.out -covermode=atomic ./...`，再依次跑子模块 `shared`/`sdks/go` 的 `go test ./...` 与 `_examples/chatroom` 的 `go build ./...`；PR 场景上传覆盖率产物。
+- `ts-sdk`：`actions/setup-node@v4`（Node 24.11.1）后在 `sdks/ts` 执行 `npm ci`、`npm run build`、`npx jest`。
+- `lint`：`golangci/golangci-lint-action@v6`（version 固定为 `v2.12.2`）。
 
-CI 不执行 `buf generate`，协议代码变更必须本地生成后随提交进入仓库。
+CI 会以钉版 buf 执行 `buf generate` 并校验零 diff；协议代码变更必须本地用同一版本（`task init` 安装）重新生成后随提交进入仓库。
 
 ## Protobuf 工作流
 

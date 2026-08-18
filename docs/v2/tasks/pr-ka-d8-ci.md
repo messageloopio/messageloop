@@ -3,7 +3,7 @@
 | 字段 | 值 |
 | --- | --- |
 | 标题 | `ci: cover the v2 branch, real Redis, submodules and TS SDK` |
-| 状态 | **Ready**（待实现） |
+| 状态 | **Accepted**（2026-08-18 主 agent 终验通过，尚未 commit；push 后 `gh run watch` 实跑计入验收收尾） |
 | 依赖 | D7 已合（`2635cf1`)。在 `v2` 分支上做 |
 | 设计来源 | 转正评审 backlog D8；D7 终验残留（swagger 旧码表，根因是 buf 工具链未固定） |
 | 验收人 | 主 agent |
@@ -96,4 +96,18 @@ npx --yes actionlint -oneline .github/workflows/ci.yml || python -c "import yaml
 
 ## 8. 实现备注（实现方填）
 
-（留空）
+- **§1.5 决策走了「重新生成」分支**：`go run github.com/bufbuild/buf/cmd/buf@v1.63.0 generate` 对工作树产生真实 diff（`service.swagger.json` 675 行、`api.swagger.json` 213 行、`proxy.swagger.json` 65 行变更；两个 `.pb.go` 为纯 EOL 漂移），非零 diff，故按规则改用本机 **v1.65.0** 全量重生成。两个版本的 swagger 输出 blob 一致（proxy.swagger.json 均得 `1a3a51d`），说明 diff 全部来自 D7 的 swagger 旧码表残留而非版本行为差。钉版定为 **v1.65.0**（CI 与 Taskfile `init` 同步）。
+- 重生成产物：三个 swagger 的内嵌码表刷新为 19 码定稿（`SURVEY_FAILED` 已在三个 swagger 中各出现 1 次）；`sdks/ts/src/proto` 无变化；`service.pb.go`/`types.pb.go` 为 LF/CRLF 行尾漂移，内容经 git 规范化后与 HEAD 相同，已 `git checkout --` 还原以守住仓库 CRLF 工作树约定（`.gitattributes`: `*.go text eol=crlf`）。
+- 钉版可复现性：本机 `buf generate`（1.65.0）二次运行 sha256 逐字节一致（幂等）；CI 的 `buf generate && git diff --exit-code` 在产物入库后零 diff。
+- workflow 结构：`build-and-test` 挂 `redis:7` service（`ports: 6379:6379`，无密码，与 `requireCommandBusRedis` 默认 `127.0.0.1:6379`/空密码/DB14 直接吻合）；子模块三件套以 `working-directory` 分步执行；TS 独立 `ts-sdk` job（setup-node@v4，Node 24.11.1，npm cache 指向 `sdks/ts/package-lock.json`），`npm ci`/`npm run build`/`npx jest` 经 job 级 `defaults.run.working-directory: sdks/ts` 执行；lint job 未动。
+- 本地复跑（§5）全部通过，集成测试 `-v` 输出为 `--- PASS` 而非 SKIP（证据见完成报告）。
+- 未触碰任何 Go 源码 / proto / 测试 / SDK 手写代码；无 git 写操作。
+
+
+### 主 agent 终验备注（2026-08-18）
+
+- §1.5 决策亲验：`go run buf@v1.63.0 generate` 对实现方刷新后的三个 swagger 逐字节一致（sha256 校验 OK）——证实 diff 源自 D7 残留而非版本行为差，钉 v1.65.0 结论成立。
+- pb.go「修改」幻影查明：`service.pb.go`/`types.pb.go` 在 regen 后 `git status` 显示 M 但 `git diff` 为空（EOL stat 缓存假象，blob 本为 LF）；对 CI 的 `git diff --exit-code` 无影响。
+- 三个 swagger 已含 19 码定稿（`SURVEY_FAILED` 各 1 次，`ACL_DENIED` 零命中），D7 残留关闭。
+- 主 agent 亲跑全绿：build/vet、全量 `go test -race ./...` 11/11（真实 Redis）、shared/sdks-go 模块测试、TS npm ci/build/jest 83/83、chatroom build、workflow YAML 解析（三 job）。
+- 收尾项：push 后 `gh run watch` 验证 v2 上真实运行，红了按 §3.5 fix-forward。
