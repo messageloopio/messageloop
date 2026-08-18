@@ -46,11 +46,6 @@ type Attachment struct {
 const (
 	sendQueueControlDepth = 32
 	sendQueueDataDepth    = 256
-	// attachProbeTimeout bounds the Attach readiness probe. The probe is a
-	// zero-frame WriteMany: transports that track their closed state fail it
-	// synchronously, so a resume does not hand a dead attachment to the
-	// session and only learn about it on the first write.
-	attachProbeTimeout = 10 * time.Second
 )
 
 var (
@@ -249,36 +244,6 @@ func (q *sendQueue) dequeue() (frame *queuedFrame, ok bool) {
 	q.data[0] = nil
 	q.data = q.data[1:]
 	return frame, true
-}
-
-// tryDequeue returns a pending frame without blocking (used by the writer
-// readiness probe and tests).
-func (q *sendQueue) tryDequeue() (*queuedFrame, bool) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	if q.closed {
-		return nil, false
-	}
-	if len(q.control) > 0 {
-		frame := q.control[0]
-		q.control[0] = nil
-		q.control = q.control[1:]
-		return frame, true
-	}
-	if len(q.data) > 0 {
-		frame := q.data[0]
-		q.data[0] = nil
-		q.data = q.data[1:]
-		return frame, true
-	}
-	return nil, false
-}
-
-// pending returns the number of queued frames (control + data).
-func (q *sendQueue) pending() int {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	return len(q.control) + len(q.data)
 }
 
 // close wakes the writer and fails every pending frame with

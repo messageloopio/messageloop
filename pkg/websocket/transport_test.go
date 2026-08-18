@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -25,7 +24,7 @@ import (
 func TestTransport_CloseClosesFDWhenPeerRST(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 
 	// A raw peer socket that answers the WebSocket client handshake so
 	// gorilla's NewClient returns a usable *websocket.Conn.
@@ -46,9 +45,17 @@ func TestTransport_CloseClosesFDWhenPeerRST(t *testing.T) {
 	t.Cleanup(func() { _ = clientSide.Close() })
 	peer := <-accepted
 
-	// NewClient sends the upgrade request and blocks for the 101; the peer
-	// goroutine answers it concurrently.
-	wsConn, _, err := websocket.NewClient(clientSide, &url.URL{Scheme: "ws", Host: "localhost"}, nil, 1024, 1024)
+	// Dial sends the upgrade request and blocks for the 101; the peer
+	// goroutine answers it concurrently. The dialer runs over the already
+	// connected socket so the test keeps the raw fd for the final assertion.
+	dialer := websocket.Dialer{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+		NetDial: func(network, addr string) (net.Conn, error) {
+			return clientSide, nil
+		},
+	}
+	wsConn, _, err := dialer.Dial("ws://localhost/", nil)
 	require.NoError(t, err)
 	require.NoError(t, <-peerErr)
 	transport := newTransport(wsConn, websocket.TextMessage, time.Second)
@@ -159,7 +166,7 @@ func TestTransport_WriteTimesOutWhenPeerStopsReading(t *testing.T) {
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
 	clientConn, _, err := dialer.Dial(wsURL, nil)
 	require.NoError(t, err)
-	defer clientConn.Close()
+	defer func() { _ = clientConn.Close() }()
 	// Never read from clientConn: the peer stops reading.
 
 	// The server transport must observe the write deadline and return an

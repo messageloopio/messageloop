@@ -153,18 +153,6 @@ func (c *Client) armPingDeadline(timeout time.Duration) {
 	c.mu.Unlock()
 }
 
-// stopPingDeadline disarms the pending ping deadline. Called on every
-// inbound frame: any traffic proves the connection is alive, so a pong is
-// not the only way to answer a server ping.
-func (c *Client) stopPingDeadline() {
-	c.mu.Lock()
-	if c.pingDeadline != nil {
-		c.pingDeadline.Stop()
-		c.pingDeadline = nil
-	}
-	c.mu.Unlock()
-}
-
 // disconnectHeartbeatTimeout closes the client with DisconnectIdleTimeout
 // (3511) and counts the disconnect in heartbeat_idle_disconnects_total. The
 // CAS guard ensures that when the ping deadline and the idle ticker race

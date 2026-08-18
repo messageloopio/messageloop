@@ -24,7 +24,7 @@ func startPreparedServer(t *testing.T, server *grpcstream.Server) {
 		_ = server.Start(context.Background())
 	}()
 	t.Cleanup(func() {
-		server.Stop(context.Background())
+		_ = server.Stop(context.Background())
 	})
 }
 

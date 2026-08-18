@@ -2,6 +2,7 @@ package redisbroker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -193,7 +194,9 @@ func (b *redisBroker) Start(ctx context.Context, handler messageloop.Publication
 func (b *redisBroker) initEpoch(ctx context.Context) error {
 	c, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	if _, err := b.client.SetNX(c, b.opts.EpochKey, uuid.NewString(), 0).Result(); err != nil {
+	// Set with NX replaces the deprecated SetNX; a Nil reply means the key
+	// already existed (another node won the race), which is not a failure.
+	if _, err := b.client.SetArgs(c, b.opts.EpochKey, uuid.NewString(), redis.SetArgs{Mode: "NX"}).Result(); err != nil && !errors.Is(err, redis.Nil) {
 		return err
 	}
 	epoch, err := b.client.Get(c, b.opts.EpochKey).Result()

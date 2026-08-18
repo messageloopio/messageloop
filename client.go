@@ -455,7 +455,7 @@ func (c *Session) handleConnect(ctx context.Context, in *clientpb.InboundMessage
 			}
 			c.mu.Unlock()
 
-			return existing.finishConnect(ctx, in, connect, resumed, true, nil, p, authUser)
+			return existing.finishConnect(ctx, in, connect, resumed, resumedLocal, nil, p, authUser)
 		} else {
 			var err error
 			resumeSnapshot, resumed, err = c.node.resumeRemoteSession(ctx, c, connect.SessionId)

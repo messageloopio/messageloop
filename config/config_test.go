@@ -288,9 +288,8 @@ func TestProxyConfig_ToProxyConfig_InvalidTimeout(t *testing.T) {
 	assert.ErrorContains(t, err, "invalid timeout")
 }
 
-func boolPtr(v bool) *bool    { return &v }
-func intPtr(v int) *int       { return &v }
-func strPtr(v string) *string { return &v }
+func boolPtr(v bool) *bool { return &v }
+func intPtr(v int) *int    { return &v }
 
 // TestValidate_AuthorizerHistoryTTL verifies PR-KA-A4: an unparsable
 // history_ttl on an authorizer rule fails Validate().

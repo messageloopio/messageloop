@@ -473,7 +473,7 @@ func TestAPIServiceHandler_PublishSessionWithAddHistoryStaysSession(t *testing.T
 	transport := &captureTransport{}
 	client, closeFn, err := messageloop.NewClient(ctx, node, transport, messageloop.JSONMarshaler{})
 	require.NoError(t, err)
-	defer closeFn()
+	defer func() { _ = closeFn() }()
 	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
 		Id: "connect-1",
 		Envelope: &clientpb.InboundMessage_Connect{

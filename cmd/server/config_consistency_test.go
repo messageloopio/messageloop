@@ -29,6 +29,12 @@ func TestRepositoryConfigsValidateAndPrebind(t *testing.T) {
 	for _, file := range files {
 		t.Run(file, func(t *testing.T) {
 			data, err := os.ReadFile(file)
+			if os.IsNotExist(err) {
+				// Local-only configs (e.g. a developer's own config.yaml or
+				// cluster node files) are not shipped in the repository; the
+				// guard applies to tracked configs only.
+				t.Skipf("%s not present in this checkout (untracked local config)", file)
+			}
 			require.NoError(t, err)
 
 			cfg := &config.Config{}

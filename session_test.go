@@ -218,8 +218,13 @@ func TestSession_SendQueue_DataFullClosesSlowConsumer(t *testing.T) {
 
 	// The session must be closed with DisconnectSlowConsumer (3512) — "Data
 	// 满 → 3512，关 Session" (§7) — and the blocked writer must not double
-	// close (its attachment was already cleared by Close).
-	require.Eventually(t, func() bool { return sess.State() == SessionClosed }, 5*time.Second, time.Millisecond)
+	// close (its attachment was already cleared by Close). Close flips the
+	// state under the lock and closes the transport only after hub cleanup
+	// (session.go), so the sync point must wait for both the state and the
+	// recorded transport close (no fixed sleeps).
+	require.Eventually(t, func() bool {
+		return sess.State() == SessionClosed && len(transport.record()) > 0
+	}, 5*time.Second, time.Millisecond)
 	reasons := transport.record()
 	require.NotEmpty(t, reasons, "the transport must be closed")
 	assert.Equal(t, DisconnectSlowConsumer.Code, reasons[0].Code, "Data-lane full must close with 3512")
@@ -259,7 +264,11 @@ func TestSession_SendQueue_ControlFullClosesSlowConsumer(t *testing.T) {
 		go func(ch chan<- error) { ch <- sess.Send(ctx, controlMsg) }(results[i])
 	}
 
-	require.Eventually(t, func() bool { return sess.State() == SessionClosed }, 5*time.Second, time.Millisecond)
+	// As above: Close flips the state before closing the transport, so wait
+	// for both the state and the recorded transport close.
+	require.Eventually(t, func() bool {
+		return sess.State() == SessionClosed && len(transport.record()) > 0
+	}, 5*time.Second, time.Millisecond)
 	reasons := transport.record()
 	require.NotEmpty(t, reasons)
 	assert.Equal(t, DisconnectSlowConsumer.Code, reasons[0].Code, "Control-lane full must close with 3512")

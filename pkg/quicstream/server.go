@@ -90,9 +90,12 @@ func (s *Server) Name() string {
 }
 
 func (s *Server) Addr() string {
+	if s == nil {
+		return ""
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s == nil || s.ln == nil {
+	if s.ln == nil {
 		return ""
 	}
 	return s.ln.Addr().String()

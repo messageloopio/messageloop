@@ -104,7 +104,7 @@ func validTopic(topic string) bool {
 			return false
 		}
 		if strings.Contains(constituent, multiWildcard) &&
-			!(i == last && constituent == multiWildcard) {
+			(i != last || constituent != multiWildcard) {
 			return false
 		}
 	}

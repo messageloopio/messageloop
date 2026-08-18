@@ -402,9 +402,13 @@ func clusterComponentName(component ClusterLifecycle) string {
 		return "command_bus"
 	case ClusterQueryStore:
 		return "query_store"
-	case ClusterNodeLeaseManager:
+	// ClusterNodeLeaseManager and ClusterRepairer are structurally identical
+	// marker interfaces (both are a bare ClusterLifecycle), so an interface
+	// case cannot tell them apart; match the concrete types the constructors
+	// produce instead.
+	case *clusterNodeLeaseManager, *noopClusterNodeLeaseManager:
 		return "node_lease_manager"
-	case ClusterRepairer:
+	case *clusterRepairer, *noopClusterRepairer:
 		return "repairer"
 	default:
 		return fmt.Sprintf("%T", component)

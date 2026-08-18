@@ -142,22 +142,6 @@ func subscribeAckMsgs(t *testing.T, client *Client, transport *capturingTranspor
 	return ack, msgs
 }
 
-// subscribeAck connects a fresh client and sends one Subscribe request,
-// returning the SubscribeAck envelope (first frame).
-func subscribeAck(t *testing.T, node *Node, subscriptions []*clientpb.Subscription) *clientpb.SubscribeAck {
-	t.Helper()
-	ctx := context.Background()
-	transport := &capturingTransport{}
-	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
-	require.NoError(t, err)
-	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
-		Id:       "connect-1",
-		Envelope: &clientpb.InboundMessage_Connect{Connect: &clientpb.Connect{Version: testProtocolVersion, ClientId: "client-1"}},
-	}))
-	ack, _ := subscribeAckMsgs(t, client, transport, "sub-1", subscriptions)
-	return ack
-}
-
 // mustPosOffset reads the required offset of a Position, failing the test.
 func mustPosOffset(t *testing.T, p *sharedv2.Position) uint64 {
 	t.Helper()

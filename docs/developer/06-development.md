@@ -98,7 +98,7 @@ CI（`.github/workflows/ci.yml`）在 push/PR 到 `main` 与 `v2` 时运行三�
 
 - `build-and-test`：挂 `redis:7` service（`127.0.0.1:6379`，无密码，供 Redis 集成测试真实运行），随后 `go build ./...`、`go vet ./...`、以钉版 buf（`v1.65.0`）执行 `buf generate` 并用 `git diff --exit-code` 校验生成物为最新、`go test -race -coverprofile=coverage.out -covermode=atomic ./...`，再依次跑子模块 `shared`/`sdks/go` 的 `go test ./...` 与 `_examples/chatroom` 的 `go build ./...`；PR 场景上传覆盖率产物。
 - `ts-sdk`：`actions/setup-node@v4`（Node 24.11.1）后在 `sdks/ts` 执行 `npm ci`、`npm run build`、`npx jest`。
-- `lint`：`golangci/golangci-lint-action@v6`（version 固定为 `v2.12.2`）。
+- `lint`：`golangci/golangci-lint-action@v7`（version 固定为 `v2.12.2`）。
 
 CI 会以钉版 buf 执行 `buf generate` 并校验零 diff；协议代码变更必须本地用同一版本（`task init` 安装）重新生成后随提交进入仓库。
 

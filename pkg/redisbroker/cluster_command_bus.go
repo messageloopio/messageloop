@@ -195,8 +195,10 @@ func (b *redisClusterCommandBus) Start(ctx context.Context) error {
 		defer b.readerWG.Done()
 		// runCommandReaderWithRetry reports the first consumer-group creation
 		// outcome on confirmed itself; later outcomes are absorbed by the
-		// retry loop.
-		b.runCommandReaderWithRetry(busCtx, sem, confirmed)
+		// retry loop. Its only non-nil return is that same first-creation
+		// error, already delivered on confirmed and acted on by the Start
+		// select below, so the return value carries nothing new here.
+		_ = b.runCommandReaderWithRetry(busCtx, sem, confirmed)
 	}()
 
 	// The reader reports the outcome of the first consumer-group creation so
@@ -247,7 +249,6 @@ func (b *redisClusterCommandBus) runCommandReaderWithRetry(ctx context.Context, 
 				return nil
 			}
 		} else if first {
-			first = false
 			confirmed <- err
 			return err
 		}

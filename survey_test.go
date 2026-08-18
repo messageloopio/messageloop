@@ -1184,7 +1184,7 @@ type recordingSurveyCommandBus struct {
 
 func (r *recordingSurveyCommandBus) BroadcastCommand(ctx context.Context, cmd *ClusterCommand) ([]*ClusterCommandResult, error) {
 	r.broadcasts = append(r.broadcasts, cmd)
-	return r.fakeClusterCommandBus.broadcastResults, r.fakeClusterCommandBus.broadcastErr
+	return r.broadcastResults, r.broadcastErr
 }
 
 // TestClientSurvey_CountOnlyCluster: with a cluster, the client survey
