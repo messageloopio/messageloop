@@ -659,6 +659,7 @@ Session 与 Stream 同区域。**跨区域 Directory Bind 直接禁止。** 只�
 | **D1** | 转正收口：公共文档对齐 v2（protocol.md / README / 配置文档 / 集群示例 / 键形残留）+ 删死代码。规格：[pr-ka-d1-graduation-docs.md](tasks/pr-ka-d1-graduation-docs.md) | 文档与 v2 行为一致；无死代码、无格式 churn |
 | **D2** | 握手版本门：`Connect.version` 世代校验（fail-closed），SDK 默认 2.0.0。规格：[pr-ka-d2-version-gate.md](tasks/pr-ka-d2-version-gate.md) | 空/旧世代连接收到 `VERSION_UNSUPPORTED` + 3514；全测试显式带 v2 版本 |
 | **D3** | 观测面补齐：`bind_fenced_total` / `bind_refresh_fail_total` / `evict_lag` / `session_dual_activation_seconds` / `occupancy_gen_discard_total` / `live_drop_total`（纯仪表）。规格：[pr-ka-d3-observability.md](tasks/pr-ka-d3-observability.md) | 六指标有埋点有测试；缓冲满 publication 丢弃被计数 |
+| **D4** | LiveBus 缓冲满语义：满时优先丢 occupancy（计数+降级标记），publication 保持反压。规格：[pr-ka-d4-buffer-full.md](tasks/pr-ka-d4-buffer-full.md) | occupancy 丢弃计数+降级置位/恢复有测试；无静默丢 |
 
 A0–A4 可在仍叫 `*Client` 的代码上先改合同；B1 再改对象名。不必等「旧 RC」。
 
