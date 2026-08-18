@@ -662,6 +662,11 @@ Session 与 Stream 同区域。**跨区域 Directory Bind 直接禁止。** 只�
 | **D4** | LiveBus 缓冲满语义：满时优先丢 occupancy（计数+降级标记），publication 保持反压。规格：[pr-ka-d4-buffer-full.md](tasks/pr-ka-d4-buffer-full.md) | occupancy 丢弃计数+降级置位/恢复有测试；无静默丢 |
 | **D5** | 移除 v1 第一步：proxy 合约升 v2（wire 兼容复刻）、拆 client.go/SDK 的 v1↔v2 桥、删死 `client/v1`、`event/v1`。规格：[pr-ka-d5-proxy-v2.md](tasks/pr-ka-d5-proxy-v2.md) | shared/v1 只剩 admin 白名单；Error.metadata 透传 |
 | **D6** | 移除 v1 收尾：admin 切 server/v2（presence/history 形状重做）、删 server/v1 + shared/v1 + admin 桥 twin;backlog 两条（chatroom e2e 编译、occupancy flake)。规格：[pr-ka-d6-admin-v2.md](tasks/pr-ka-d6-admin-v2.md) | 全仓零 v1 proto |
+| **D7** | 错误码收口：ACL_* 换名入表 + errors.proto 19 码定稿 + 守护测试。规格：[pr-ka-d7-error-codes.md](tasks/pr-ka-d7-error-codes.md) | 全仓一份码表;普查测试守住 emission site |
+| **D8** | CI 修复:v2 分支触发 + Redis service + 子模块/TS job + buf 工具链固定 + lint 清零。规格：[pr-ka-d8-ci.md](tasks/pr-ka-d8-ci.md) | 三 job 实跑绿;buf 钉 v1.65.0 |
+| **D9** | 双进程黑盒 e2e：真 cmd/server 子进程 × 真 Go SDK。规格：[pr-ka-d9-e2e.md](tasks/pr-ka-d9-e2e.md) | 真实进程/真实网络接线被测 |
+| **D10** | Hydrate 去 saga（逐频道软失败 + RECOVER_FAILED 信封）+ lease CAS 与 snapshot 原子写（Lua）+ 同节点旧世代跳过 takeover。规格：[pr-ka-d10-hydrate.md](tasks/pr-ka-d10-hydrate.md) | 无删库回滚、无 3502;CAS+snapshot 一步;C1 语义不变 |
+| **D11** | KD-K26 阶段一:叶子契约下沉 internal/{protocol,channel,occupancy,stream} + 根 alias 过渡 + redisbroker 改引。规格：[pr-ka-d11-packages.md](tasks/pr-ka-d11-packages.md) | 零行为变化;接口形状逐字节等价;alias 单点过渡 |
 
 A0–A4 可在仍叫 `*Client` 的代码上先改合同；B1 再改对象名。不必等「旧 RC」。
 
