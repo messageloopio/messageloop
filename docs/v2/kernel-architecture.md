@@ -661,7 +661,7 @@ Session 与 Stream 同区域。**跨区域 Directory Bind 直接禁止。** 只�
 | **D3** | 观测面补齐：`bind_fenced_total` / `bind_refresh_fail_total` / `evict_lag` / `session_dual_activation_seconds` / `occupancy_gen_discard_total` / `live_drop_total`（纯仪表）。规格：[pr-ka-d3-observability.md](tasks/pr-ka-d3-observability.md) | 六指标有埋点有测试；缓冲满 publication 丢弃被计数 |
 | **D4** | LiveBus 缓冲满语义：满时优先丢 occupancy（计数+降级标记），publication 保持反压。规格：[pr-ka-d4-buffer-full.md](tasks/pr-ka-d4-buffer-full.md) | occupancy 丢弃计数+降级置位/恢复有测试；无静默丢 |
 | **D5** | 移除 v1 第一步：proxy 合约升 v2（wire 兼容复刻）、拆 client.go/SDK 的 v1↔v2 桥、删死 `client/v1`、`event/v1`。规格：[pr-ka-d5-proxy-v2.md](tasks/pr-ka-d5-proxy-v2.md) | shared/v1 只剩 admin 白名单；Error.metadata 透传 |
-| **D6** | 移除 v1 收尾：admin 切 server/v2（presence/history 形状重做）、删 server/v1 + shared/v1 + admin 桥 twin。规格待写 | 全仓零 v1 proto |
+| **D6** | 移除 v1 收尾：admin 切 server/v2（presence/history 形状重做）、删 server/v1 + shared/v1 + admin 桥 twin;backlog 两条（chatroom e2e 编译、occupancy flake)。规格：[pr-ka-d6-admin-v2.md](tasks/pr-ka-d6-admin-v2.md) | 全仓零 v1 proto |
 
 A0–A4 可在仍叫 `*Client` 的代码上先改合同；B1 再改对象名。不必等「旧 RC」。
 
