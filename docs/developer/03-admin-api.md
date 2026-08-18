@@ -4,10 +4,10 @@
 
 管理 API（Admin API）是 MessageLoop 服务端对外提供的 gRPC 管理接口，用于以服务端身份执行发布、断连、订阅管理、在线状态查询、历史消息查询等操作。它与客户端协议（见 [../protocol.md](../protocol.md)）面向不同的使用方：客户端协议是客户端通过 WebSocket 或 gRPC 流式通道与服务器通信的协议；管理 API 则是运维工具、内部服务与 SDK 后端集成使用的独立 gRPC 服务。
 
-管理 API 定义于 `protocol/server/v1/api.proto`，服务名为 `APIService`，完整限定名（fully-qualified name）为：
+管理 API 定义于 `protocol/server/v2/api.proto`，服务名为 `APIService`，完整限定名（fully-qualified name）为：
 
 ```
-messageloop.server.v1.APIService
+messageloop.server.v2.APIService
 ```
 
 所有 RPC 均为普通一元调用（unary call），不涉及流式传输。管理 API 监听在独立的端口上，地址由配置项 `server.grpc_admin.addr` 指定（见[《配置参考》](02-configuration.md)）。在进程内部，管理 API 的处理器与客户端流共享同一个 `Node` 实例，因此管理操作直接作用于在线客户端会话。
@@ -65,21 +65,21 @@ authorization: Bearer <token>
 ```bash
 grpcurl \
   -import-path ./protocol \
-  -proto server/v1/api.proto \
+  -proto server/v2/api.proto \
   -H "authorization: Bearer <token>" \
   -plaintext \
   -d '{"channel": "chat.general"}' \
   127.0.0.1:9091 \
-  messageloop.server.v1.APIService/GetPresence
+  messageloop.server.v2.APIService/GetPresence
 ```
 
-- `-import-path ./protocol` 指向 `protocol/` 目录，使 `server/v1/api.proto` 中的 `shared/v1/errors.proto`、`shared/v1/types.proto` 等 import 可以解析；
+- `-import-path ./protocol` 指向 `protocol/` 目录，使 `server/v2/api.proto` 中的 `shared/v2/errors.proto`、`shared/v2/types.proto` 等 import 可以解析；
 - 启用 TLS 时去掉 `-plaintext`，并按需传入 `-cacert <ca.pem>`（使用自签证书时也可用 `-insecure`）；
 - 请求体使用 proto3 JSON 映射，字段名为 lowerCamelCase（例如 `request_id` → `requestId`、`timeout_ms` → `timeoutMs`）。
 
 ## RPC 参考
 
-以下各节按 `protocol/server/v1/api.proto` 中的声明顺序逐一说明。请求/响应消息的字段名一律采用 proto 中的原始名称。
+以下各节按 `protocol/server/v2/api.proto` 中的声明顺序逐一说明。请求/响应消息的字段名一律采用 proto 中的原始名称。
 
 ### Publish
 
@@ -99,8 +99,8 @@ grpcurl \
 | `id` | `string` | 出版物标识；会话投递时作为消息的 `id` 透传给客户端 |
 | `destination` | `Destination` | 投递目标：`sessions`（会话 ID 列表）、`channels`（频道列表）或 `users`（用户 ID 列表），可以同时指定 |
 | `options` | `Options` | 投递选项，目前仅声明 `add_history` |
-| `payload` | `shared.v1.Payload` | 消息载荷，支持 `text`、`binary`、`json` 三种形式 |
-| `metadata` | `shared.v1.Metadata` | 已声明但当前处理器未使用，会被忽略 |
+| `payload` | `shared.v2.Payload` | 消息载荷，支持 `text`、`binary`、`json` 三种形式 |
+| `metadata` | `shared.v2.Metadata` | 已声明但当前处理器未使用，会被忽略 |
 
 `Publication.Options.add_history`：控制频道发布是否写入历史。
 - `true`：写入 broker 历史，后续可通过 `GetHistory` 补拉。
@@ -222,8 +222,8 @@ grpcurl \
 | --- | --- | --- |
 | `request_id` | `string` | 请求标识，原样回显在响应中 |
 | `channel` | `string` | 目标频道；所有订阅者都会收到调查 |
-| `payload` | `shared.v1.Payload` | 调查载荷，支持 `text`、`binary`、`json`；发送给客户端时封装为二进制载荷 |
-| `metadata` | `shared.v1.Metadata` | 已声明但当前处理器未使用，会被忽略 |
+| `payload` | `shared.v2.Payload` | 调查载荷，支持 `text`、`binary`、`json`；发送给客户端时封装为二进制载荷 |
+| `metadata` | `shared.v2.Metadata` | 已声明但当前处理器未使用，会被忽略 |
 | `timeout_ms` | `int32` | 收集应答的等待时长（毫秒）；`<= 0` 时使用默认等待时长 5 秒 |
 
 响应消息 `SurveyResponse`：
@@ -238,9 +238,9 @@ grpcurl \
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `session_id` | `string` | 应答来源会话 ID |
-| `payload` | `shared.v1.Payload` | 应答载荷，统一以二进制形式返回 |
-| `metadata` | `shared.v1.Metadata` | 附加元数据；集群模式下可能包含 `node_id` 与 `incarnation_id` 条目（见 [集群感知行为](#集群感知行为)） |
-| `error` | `shared.v1.Error` | 该会话应答失败时的错误信息 |
+| `payload` | `shared.v2.Payload` | 应答载荷，统一以二进制形式返回 |
+| `metadata` | `shared.v2.Metadata` | 附加元数据；集群模式下可能包含 `node_id` 与 `incarnation_id` 条目（见 [集群感知行为](#集群感知行为)） |
+| `error` | `shared.v2.Error` | 该会话应答失败时的错误信息 |
 
 语义：
 
@@ -276,8 +276,9 @@ grpcurl \
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `client_id` | `string` | 客户端标识；当前实现中即会话 ID（session ID），与映射键一致 |
+| `session_id` | `string` | 会话 ID，与映射键一致；旧版 Redis 记录缺少该字段时回退为记录中的 `client_id` 键 |
 | `user_id` | `string` | 连接时声明的用户 ID，可为空 |
+| `client_id` | `string` | Connect 的 `client_id`（设备/端标识），**不是**会话 ID；未声明时为空 |
 | `connected_at` | `int64` | 该客户端在频道中登记的 Unix 毫秒时间戳 |
 
 语义：
@@ -296,7 +297,7 @@ grpcurl \
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `channel` | `string` | 目标频道 |
-| `since_offset` | `uint64` | 起始偏移（offset），语义见下文 |
+| `since` | `shared.v2.Position` | 起始位置（`stream_epoch` + 可选 `offset`），语义见下文；缺省（nil）表示从头读取 |
 | `limit` | `int32` | 返回条数上限；`<= 0` 时使用默认上限 1000 |
 
 响应消息 `GetHistoryResponse`：
@@ -309,17 +310,19 @@ grpcurl \
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `offset` | `uint64` | 该条消息在频道历史中的偏移 |
-| `payload` | `shared.v1.Payload` | 消息载荷；文本消息以 `text` 返回，其余以 `binary` 返回 |
-| `is_text` | `bool` | 是否文本消息 |
+| `position` | `shared.v2.Position` | 该条消息在频道历史中的位置（`stream_epoch` + `offset`） |
+| `payload` | `shared.v2.Payload` | 消息载荷；按原始 oneof 变体返回（`text` / `binary` / `json`），不再有单独的 `is_text` 标志 |
 | `time` | `int64` | 消息时间（Unix 毫秒） |
+| `id` | `string` | 发布方提供的消息标识，可为空 |
+| `metadata` | `shared.v2.Metadata` | 发布方提供的元数据，无元数据时缺省 |
 
 语义：
 
-- 查询直接落到 broker 的历史存储。两种实现下 `since_offset` 均为**包含（inclusive）**语义：返回 `offset >= since_offset` 的消息（`Broker.History` 契约，`broker.go:105-108`；内存实现与 Redis 实现一致）。
+- 查询直接落到 broker 的历史存储。`since` 缺省（nil）表示从头读取（`limit` 以内）；`since.offset` 有值时从该偏移继续，两种实现下均为**包含（inclusive）**语义：返回 `offset >= since.offset` 的消息（`Broker.History` 契约；内存实现与 Redis 实现一致）。
+- `since.stream_epoch` 非空时会与 broker 当前的 epoch 比对：不匹配说明调用方的游标属于上一代日志，RPC 返回 `FailedPrecondition`（`stream epoch mismatch: history belongs to a previous log generation`），且不读取 broker。
 
 - 两种实现下，`limit <= 0` 都使用默认上限 `DefaultHistoryLimit`（1000 条）。
-- 没有分页游标：`limit` 就是单次返回的硬上限，`since_offset` 是唯一的前进指针。
+- 没有分页游标：`limit` 就是单次返回的硬上限，`since` 是唯一的前进指针。
 - 历史被禁用（transient 消息）或频道无历史时返回空列表，不报错。
 
 集群感知：见 [集群感知行为](#集群感知行为)。
@@ -349,9 +352,9 @@ grpcurl \
 
 管理 API 的错误分两层：协议层错误消息与 gRPC 状态码。
 
-### 错误消息（`messageloop.shared.v1.Error`）
+### 错误消息（`messageloop.shared.v2.Error`）
 
-`protocol/shared/v1/errors.proto` 中只声明了一个消息类型：
+`protocol/shared/v2/errors.proto` 中只声明了一个消息类型：
 
 ```protobuf
 message Error {
@@ -374,14 +377,15 @@ message Error {
 | --- | --- |
 | `Unauthenticated` | 鉴权拦截器判定失败：缺少 `authorization` 元数据、格式不是 `Bearer <token>`、或令牌不匹配 |
 | `InvalidArgument` | 按 user 字段中出现空字符串（`destination.users`、`Disconnect.users` 的空条目，或 `Subscribe`/`Unsubscribe` 的 `session_id` 与 `user_id` 同时为空）——**不做任何扫描** |
+| `FailedPrecondition` | `GetHistory` 的 `since.stream_epoch` 与 broker 当前 epoch 不匹配（游标属于上一代日志） |
 | `Internal` | `Publish` 请求中的所有投递尝试全部失败 |
 | `Unknown` | 其余错误：来自 Node 内部方法的错误（例如 `Survey` 调查注册表已满、presence/history 存储错误）原样透传，gRPC 框架将其映射为 `Unknown` |
 
-管理 API 不定义自定义状态码（自定义 code 仅存在于 `shared.v1.Error` 的自由字符串 `code` 字段中）。调用方应同时处理 gRPC 状态码（区分错误类别）与 `SurveyResult.error`（区分单个会话的失败）。
+管理 API 不定义自定义状态码（自定义 code 仅存在于 `shared.v2.Error` 的自由字符串 `code` 字段中）。调用方应同时处理 gRPC 状态码（区分错误类别）与 `SurveyResult.error`（区分单个会话的失败）。
 
 ## 示例
 
-以下示例假设管理端口监听在 `127.0.0.1:9091`，且已配置 `auth_token`（示例中用 `<token>` 占位）。服务器未注册 gRPC 反射，所有命令都必须携带 `-import-path ./protocol -proto server/v1/api.proto`。JSON 载荷使用 proto3 JSON 映射的 lowerCamelCase 字段名；`binary` 载荷在 JSON 中以 base64 表示。
+以下示例假设管理端口监听在 `127.0.0.1:9091`，且已配置 `auth_token`（示例中用 `<token>` 占位）。服务器未注册 gRPC 反射，所有命令都必须携带 `-import-path ./protocol -proto server/v2/api.proto`。JSON 载荷使用 proto3 JSON 映射的 lowerCamelCase 字段名；`binary` 载荷在 JSON 中以 base64 表示。
 
 ### Publish
 
@@ -390,7 +394,7 @@ message Error {
 ```bash
 grpcurl \
   -import-path ./protocol \
-  -proto server/v1/api.proto \
+  -proto server/v2/api.proto \
   -H "authorization: Bearer <token>" \
   -plaintext \
   -d '{
@@ -402,7 +406,7 @@ grpcurl \
     }]
   }' \
   127.0.0.1:9091 \
-  messageloop.server.v1.APIService/Publish
+  messageloop.server.v2.APIService/Publish
 ```
 
 发布到指定会话（JSON 载荷会按文本发送）：
@@ -410,7 +414,7 @@ grpcurl \
 ```bash
 grpcurl \
   -import-path ./protocol \
-  -proto server/v1/api.proto \
+  -proto server/v2/api.proto \
   -H "authorization: Bearer <token>" \
   -plaintext \
   -d '{
@@ -421,7 +425,7 @@ grpcurl \
     }]
   }' \
   127.0.0.1:9091 \
-  messageloop.server.v1.APIService/Publish
+  messageloop.server.v2.APIService/Publish
 ```
 
 按用户发布（只填 `users`，投递给该用户的全部 session）：
@@ -429,7 +433,7 @@ grpcurl \
 ```bash
 grpcurl \
   -import-path ./protocol \
-  -proto server/v1/api.proto \
+  -proto server/v2/api.proto \
   -H "authorization: Bearer <token>" \
   -plaintext \
   -d '{
@@ -440,7 +444,7 @@ grpcurl \
     }]
   }' \
   127.0.0.1:9091 \
-  messageloop.server.v1.APIService/Publish
+  messageloop.server.v2.APIService/Publish
 ```
 
 ### Survey
@@ -448,7 +452,7 @@ grpcurl \
 ```bash
 grpcurl \
   -import-path ./protocol \
-  -proto server/v1/api.proto \
+  -proto server/v2/api.proto \
   -H "authorization: Bearer <token>" \
   -plaintext \
   -d '{
@@ -458,7 +462,7 @@ grpcurl \
     "timeoutMs": 3000
   }' \
   127.0.0.1:9091 \
-  messageloop.server.v1.APIService/Survey
+  messageloop.server.v2.APIService/Survey
 ```
 
 ### Disconnect
@@ -468,7 +472,7 @@ grpcurl \
 ```bash
 grpcurl \
   -import-path ./protocol \
-  -proto server/v1/api.proto \
+  -proto server/v2/api.proto \
   -H "authorization: Bearer <token>" \
   -plaintext \
   -d '{
@@ -477,7 +481,7 @@ grpcurl \
     "reason": "scheduled maintenance"
   }' \
   127.0.0.1:9091 \
-  messageloop.server.v1.APIService/Disconnect
+  messageloop.server.v2.APIService/Disconnect
 ```
 
 响应示例（按会话返回结果）：
@@ -495,7 +499,7 @@ grpcurl \
 ```bash
 grpcurl \
   -import-path ./protocol \
-  -proto server/v1/api.proto \
+  -proto server/v2/api.proto \
   -H "authorization: Bearer <token>" \
   -plaintext \
   -d '{
@@ -503,7 +507,7 @@ grpcurl \
     "channels": ["chat.general", "notifications"]
   }' \
   127.0.0.1:9091 \
-  messageloop.server.v1.APIService/Subscribe
+  messageloop.server.v2.APIService/Subscribe
 ```
 
 ### Unsubscribe
@@ -511,7 +515,7 @@ grpcurl \
 ```bash
 grpcurl \
   -import-path ./protocol \
-  -proto server/v1/api.proto \
+  -proto server/v2/api.proto \
   -H "authorization: Bearer <token>" \
   -plaintext \
   -d '{
@@ -519,7 +523,7 @@ grpcurl \
     "channels": ["chat.general"]
   }' \
   127.0.0.1:9091 \
-  messageloop.server.v1.APIService/Unsubscribe
+  messageloop.server.v2.APIService/Unsubscribe
 ```
 
 ### GetPresence
@@ -527,12 +531,12 @@ grpcurl \
 ```bash
 grpcurl \
   -import-path ./protocol \
-  -proto server/v1/api.proto \
+  -proto server/v2/api.proto \
   -H "authorization: Bearer <token>" \
   -plaintext \
   -d '{"channel": "chat.general"}' \
   127.0.0.1:9091 \
-  messageloop.server.v1.APIService/GetPresence
+  messageloop.server.v2.APIService/GetPresence
 ```
 
 ### GetHistory
@@ -540,12 +544,12 @@ grpcurl \
 ```bash
 grpcurl \
   -import-path ./protocol \
-  -proto server/v1/api.proto \
+  -proto server/v2/api.proto \
   -H "authorization: Bearer <token>" \
   -plaintext \
-  -d '{"channel": "chat.general", "sinceOffset": 42, "limit": 100}' \
+  -d '{"channel": "chat.general", "since": {"offset": 42}, "limit": 100}' \
   127.0.0.1:9091 \
-  messageloop.server.v1.APIService/GetHistory
+  messageloop.server.v2.APIService/GetHistory
 ```
 
 ### GetChannels
@@ -555,12 +559,12 @@ grpcurl \
 ```bash
 grpcurl \
   -import-path ./protocol \
-  -proto server/v1/api.proto \
+  -proto server/v2/api.proto \
   -H "authorization: Bearer <token>" \
   -plaintext \
   -d '{}' \
   127.0.0.1:9091 \
-  messageloop.server.v1.APIService/GetChannels
+  messageloop.server.v2.APIService/GetChannels
 ```
 
 ## 集群感知行为
@@ -575,7 +579,7 @@ grpcurl \
 | `Survey` | 除本地调查外，还会通过命令总线向集群内所有其他节点广播调查请求（排除自身，`exclude_self`），聚合各节点的应答后统一排序返回；每个 `SurveyResult` 会附带 `node_id` 与 `incarnation_id` 元数据，标识应答来源节点；集群中某个节点执行调查失败时，该节点会以一条带 `error` 的 `SurveyResult` 表示（`code` 为 `SURVEY_FAILED`） |
 | `GetChannels` | 不再查询本地 hub，而是读取集群共享的频道投影（query store），返回全集群的活跃频道与订阅者数量 |
 | `GetPresence` | 在线状态存储在集群模式下替换为 Redis 支撑的存储，查询返回全集群的在线客户端 |
-| `GetHistory` | 从共享的 Redis Stream 读取历史，`since_offset` 为包含（inclusive）语义，数据跨节点一致 |
+| `GetHistory` | 从共享的 Redis Stream 读取历史，`since.offset` 为包含（inclusive）语义，`since.stream_epoch` 不匹配时返回 `FailedPrecondition`，数据跨节点一致 |
 
 非集群模式下，会话定向操作只作用于本节点（未知会话返回 `false`），`Survey` 只调查本节点订阅者，`GetChannels` 与 `GetPresence` 只反映本节点状态。
 
@@ -586,5 +590,5 @@ grpcurl \
 - **RawCodec**：两个 gRPC 服务器都通过 `grpc.ForceServerCodec` 装配名为 `messageloop-proto` 的 `RawCodec`（`pkg/grpcstream/codec.go`）。该 codec 对普通 proto 消息仍使用标准 `proto.Marshal`/`proto.Unmarshal`，因此管理 API 的线上编码与标准 protobuf gRPC 完全兼容（这是 `grpcurl -proto` 方式可以正常调用的原因）；流式路径额外支持免二次编解码的原始帧（raw frame）优化。codec 按服务器注册而不是全局注册，避免覆盖进程内其他 gRPC 连接的默认 codec。
 - **压缩**：gRPC 的 gzip 压缩编解码器已在服务器侧注册，客户端可在请求中声明 `grpc-accept-encoding: gzip`。
 - **管理服务器未设置 `MaxRecvMsgSize`**：管理服务器使用 gRPC 默认的最大接收消息大小（4 MiB）；客户端流服务器则应用 `limits.max_message_size`（默认 64 KiB，见[《配置参考》](02-configuration.md)）。
-- **调用方客户端**：Go SDK 的后端集成通过本管理 API 与服务端通信（见[《Go SDK 指南》](07-sdk-go.md)）；TypeScript SDK 是纯 WebSocket 客户端，不包含管理 API 客户端。Go SDK 生成的桩代码依赖 `server/v1/api.proto`，调用前请确保协议版本与服务器一致。
+- **调用方客户端**：Go SDK 的后端集成通过本管理 API 与服务端通信（见[《Go SDK 指南》](07-sdk-go.md)）；TypeScript SDK 是纯 WebSocket 客户端，不包含管理 API 客户端。Go SDK 生成的桩代码依赖 `server/v2/api.proto`，调用前请确保协议版本与服务器一致。
 - **运维**：健康检查与指标走独立的 HTTP 管理面（`server.http.addr`），不属于本 API 范围（见[《可观测性指南》](05-observability.md)）。

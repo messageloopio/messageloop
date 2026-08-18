@@ -8,7 +8,7 @@ import (
 	"github.com/messageloopio/messageloop"
 	"github.com/messageloopio/messageloop/pkg/grpcstream"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	serverpb "github.com/messageloopio/messageloop/shared/genproto/server/v1"
+	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -108,8 +108,8 @@ func TestGRPC_AdminPort_DisconnectsSharedClientSession(t *testing.T) {
 	stream, connected := connectClientStream(t, clientConn, "grpc-admin-target")
 
 	adminConn := dialPreparedServer(t, adminServer.Addr())
-	api := serverpb.NewAPIServiceClient(adminConn)
-	resp, err := api.Disconnect(context.Background(), &serverpb.DisconnectRequest{
+	api := serverv2.NewAPIServiceClient(adminConn)
+	resp, err := api.Disconnect(context.Background(), &serverv2.DisconnectRequest{
 		Sessions: []string{connected.GetSessionId()},
 		Code:     3001,
 		Reason:   "admin test",
@@ -136,8 +136,8 @@ func TestGRPC_ClientPort_DoesNotExposeAdminAPI(t *testing.T) {
 	startPreparedServer(t, clientServer)
 
 	conn := dialPreparedServer(t, clientServer.Addr())
-	api := serverpb.NewAPIServiceClient(conn)
-	_, err = api.GetChannels(context.Background(), &serverpb.GetChannelsRequest{}, grpc.WaitForReady(false))
+	api := serverv2.NewAPIServiceClient(conn)
+	_, err = api.GetChannels(context.Background(), &serverv2.GetChannelsRequest{}, grpc.WaitForReady(false))
 	require.Error(t, err)
 	st, ok := status.FromError(err)
 	require.True(t, ok)
@@ -184,12 +184,12 @@ func TestGRPC_AdminPort_ServesUnaryAPI(t *testing.T) {
 	startPreparedServer(t, adminServer)
 
 	conn := dialPreparedServer(t, adminServer.Addr())
-	api := serverpb.NewAPIServiceClient(conn)
-	_, err = api.GetChannels(context.Background(), &serverpb.GetChannelsRequest{})
+	api := serverv2.NewAPIServiceClient(conn)
+	_, err = api.GetChannels(context.Background(), &serverv2.GetChannelsRequest{})
 	require.NoError(t, err)
 
 	// Sanity check that the admin port remains unary-capable after the split.
-	_, err = api.GetPresence(context.Background(), &serverpb.GetPresenceRequest{Channel: "chat"})
+	_, err = api.GetPresence(context.Background(), &serverv2.GetPresenceRequest{Channel: "chat"})
 	require.NoError(t, err)
 
 	_ = emptypb.Empty{}

@@ -12,8 +12,8 @@ import (
 	"github.com/messageloopio/messageloop"
 	"github.com/messageloopio/messageloop/config"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	serverpb "github.com/messageloopio/messageloop/shared/genproto/server/v1"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -186,16 +186,16 @@ func TestAPIServiceHandler_AddHistoryDeniedByPolicy(t *testing.T) {
 	node.SetBroker(probe)
 	handler := NewAPIServiceHandler(node)
 
-	req := &serverpb.PublishRequest{
+	req := &serverv2.PublishRequest{
 		RequestId: uuid.NewString(),
-		Publications: []*serverpb.Publication{
+		Publications: []*serverv2.Publication{
 			{
 				Id: "admin-tick",
-				Destination: &serverpb.Publication_Destination{
+				Destination: &serverv2.Publication_Destination{
 					Channels: []string{"ok-channel", "game.tick.fps", "no-history.ch"},
 				},
-				Payload: &sharedpb.Payload{Data: &sharedpb.Payload_Text{Text: "x"}},
-				Options: &serverpb.Publication_Options{AddHistory: true},
+				Payload: &sharedv2.Payload{Data: &sharedv2.Payload_Text{Text: "x"}},
+				Options: &serverv2.Publication_Options{AddHistory: true},
 			},
 		},
 	}
@@ -219,16 +219,16 @@ func TestAPIServiceHandler_AddHistoryDeniedByPolicy(t *testing.T) {
 	})
 	node2.SetBroker(probe2)
 	handler2 := NewAPIServiceHandler(node2)
-	_, err = handler2.Publish(ctx, &serverpb.PublishRequest{
+	_, err = handler2.Publish(ctx, &serverv2.PublishRequest{
 		RequestId: uuid.NewString(),
-		Publications: []*serverpb.Publication{
+		Publications: []*serverv2.Publication{
 			{
 				Id: "admin-tick-only",
-				Destination: &serverpb.Publication_Destination{
+				Destination: &serverv2.Publication_Destination{
 					Channels: []string{"game.tick.fps"},
 				},
-				Payload: &sharedpb.Payload{Data: &sharedpb.Payload_Text{Text: "x"}},
-				Options: &serverpb.Publication_Options{AddHistory: true},
+				Payload: &sharedv2.Payload{Data: &sharedv2.Payload_Text{Text: "x"}},
+				Options: &serverv2.Publication_Options{AddHistory: true},
 			},
 		},
 	})
@@ -253,15 +253,15 @@ func TestAPIServiceHandler_PublishToChannelsWithoutAddHistoryOnDisabledChannel(t
 	node.SetBroker(probe)
 	handler := NewAPIServiceHandler(node)
 
-	resp, err := handler.Publish(ctx, &serverpb.PublishRequest{
+	resp, err := handler.Publish(ctx, &serverv2.PublishRequest{
 		RequestId: uuid.NewString(),
-		Publications: []*serverpb.Publication{
+		Publications: []*serverv2.Publication{
 			{
 				Id: "admin-tick-transient",
-				Destination: &serverpb.Publication_Destination{
+				Destination: &serverv2.Publication_Destination{
 					Channels: []string{"game.tick.fps"},
 				},
-				Payload: &sharedpb.Payload{Data: &sharedpb.Payload_Text{Text: "x"}},
+				Payload: &sharedv2.Payload{Data: &sharedv2.Payload_Text{Text: "x"}},
 			},
 		},
 	})
@@ -288,16 +288,16 @@ func TestAPIServiceHandler_PublishToSessions(t *testing.T) {
 	s, _ := structpb.NewStruct(map[string]interface{}{"message": "test payload"})
 
 	// Test publishing to the session
-	req := &serverpb.PublishRequest{
+	req := &serverv2.PublishRequest{
 		RequestId: uuid.NewString(),
-		Publications: []*serverpb.Publication{
+		Publications: []*serverv2.Publication{
 			{
 				Id: uuid.NewString(),
-				Destination: &serverpb.Publication_Destination{
+				Destination: &serverv2.Publication_Destination{
 					Sessions: []string{client.SessionID()},
 				},
-				Payload: &sharedpb.Payload{
-					Data: &sharedpb.Payload_Json{
+				Payload: &sharedv2.Payload{
+					Data: &sharedv2.Payload_Json{
 						Json: s,
 					},
 				},
@@ -319,16 +319,16 @@ func TestAPIServiceHandler_PublishToNonExistentSession(t *testing.T) {
 	s, _ := structpb.NewStruct(map[string]interface{}{"message": "test payload"})
 
 	// Test publishing to a non-existent session - should not error
-	req := &serverpb.PublishRequest{
+	req := &serverv2.PublishRequest{
 		RequestId: uuid.NewString(),
-		Publications: []*serverpb.Publication{
+		Publications: []*serverv2.Publication{
 			{
 				Id: uuid.NewString(),
-				Destination: &serverpb.Publication_Destination{
+				Destination: &serverv2.Publication_Destination{
 					Sessions: []string{"non-existent-session-id"},
 				},
-				Payload: &sharedpb.Payload{
-					Data: &sharedpb.Payload_Json{
+				Payload: &sharedv2.Payload{
+					Data: &sharedv2.Payload_Json{
 						Json: s,
 					},
 				},
@@ -349,16 +349,16 @@ func TestAPIServiceHandler_PublishToChannels(t *testing.T) {
 
 	// Create payload with binary data
 	// Test publishing to channels
-	req := &serverpb.PublishRequest{
+	req := &serverv2.PublishRequest{
 		RequestId: uuid.NewString(),
-		Publications: []*serverpb.Publication{
+		Publications: []*serverv2.Publication{
 			{
 				Id: uuid.NewString(),
-				Destination: &serverpb.Publication_Destination{
+				Destination: &serverv2.Publication_Destination{
 					Channels: []string{"test-channel-1", "test-channel-2"},
 				},
-				Payload: &sharedpb.Payload{
-					Data: &sharedpb.Payload_Binary{
+				Payload: &sharedv2.Payload{
+					Data: &sharedv2.Payload_Binary{
 						Binary: []byte("test payload"),
 					},
 				},
@@ -377,16 +377,16 @@ func TestAPIServiceHandler_PublishAddHistory(t *testing.T) {
 	_ = node.Run(ctx)
 	handler := NewAPIServiceHandler(node)
 
-	req := &serverpb.PublishRequest{
+	req := &serverv2.PublishRequest{
 		RequestId: uuid.NewString(),
-		Publications: []*serverpb.Publication{
+		Publications: []*serverv2.Publication{
 			{
 				Id: "admin-history-msg",
-				Destination: &serverpb.Publication_Destination{
+				Destination: &serverv2.Publication_Destination{
 					Channels: []string{"history-channel"},
 				},
-				Payload: &sharedpb.Payload{Data: &sharedpb.Payload_Text{Text: "hello history"}},
-				Options: &serverpb.Publication_Options{AddHistory: true},
+				Payload: &sharedv2.Payload{Data: &sharedv2.Payload_Text{Text: "hello history"}},
+				Options: &serverv2.Publication_Options{AddHistory: true},
 			},
 		},
 	}
@@ -395,7 +395,7 @@ func TestAPIServiceHandler_PublishAddHistory(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
-	history, err := handler.GetHistory(ctx, &serverpb.GetHistoryRequest{Channel: "history-channel"})
+	history, err := handler.GetHistory(ctx, &serverv2.GetHistoryRequest{Channel: "history-channel"})
 	require.NoError(t, err)
 	require.Len(t, history.Publications, 1)
 	require.Equal(t, "hello history", history.Publications[0].Payload.GetText())
@@ -407,15 +407,15 @@ func TestAPIServiceHandler_PublishWithoutAddHistoryNotInHistory(t *testing.T) {
 	_ = node.Run(ctx)
 	handler := NewAPIServiceHandler(node)
 
-	req := &serverpb.PublishRequest{
+	req := &serverv2.PublishRequest{
 		RequestId: uuid.NewString(),
-		Publications: []*serverpb.Publication{
+		Publications: []*serverv2.Publication{
 			{
 				Id: "admin-transient-msg",
-				Destination: &serverpb.Publication_Destination{
+				Destination: &serverv2.Publication_Destination{
 					Channels: []string{"no-history-channel"},
 				},
-				Payload: &sharedpb.Payload{Data: &sharedpb.Payload_Text{Text: "hello transient"}},
+				Payload: &sharedv2.Payload{Data: &sharedv2.Payload_Text{Text: "hello transient"}},
 			},
 		},
 	}
@@ -424,7 +424,7 @@ func TestAPIServiceHandler_PublishWithoutAddHistoryNotInHistory(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
-	history, err := handler.GetHistory(ctx, &serverpb.GetHistoryRequest{Channel: "no-history-channel"})
+	history, err := handler.GetHistory(ctx, &serverv2.GetHistoryRequest{Channel: "no-history-channel"})
 	require.NoError(t, err)
 	require.Len(t, history.Publications, 0)
 }
@@ -437,16 +437,16 @@ func TestAPIServiceHandler_PublishExplicitFalseAddHistoryNotInHistory(t *testing
 	_ = node.Run(ctx)
 	handler := NewAPIServiceHandler(node)
 
-	req := &serverpb.PublishRequest{
+	req := &serverv2.PublishRequest{
 		RequestId: uuid.NewString(),
-		Publications: []*serverpb.Publication{
+		Publications: []*serverv2.Publication{
 			{
 				Id: "admin-explicit-transient-msg",
-				Destination: &serverpb.Publication_Destination{
+				Destination: &serverv2.Publication_Destination{
 					Channels: []string{"explicit-no-history-channel"},
 				},
-				Payload: &sharedpb.Payload{Data: &sharedpb.Payload_Text{Text: "hello explicit transient"}},
-				Options: &serverpb.Publication_Options{AddHistory: false},
+				Payload: &sharedv2.Payload{Data: &sharedv2.Payload_Text{Text: "hello explicit transient"}},
+				Options: &serverv2.Publication_Options{AddHistory: false},
 			},
 		},
 	}
@@ -455,7 +455,7 @@ func TestAPIServiceHandler_PublishExplicitFalseAddHistoryNotInHistory(t *testing
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
-	history, err := handler.GetHistory(ctx, &serverpb.GetHistoryRequest{Channel: "explicit-no-history-channel"})
+	history, err := handler.GetHistory(ctx, &serverv2.GetHistoryRequest{Channel: "explicit-no-history-channel"})
 	require.NoError(t, err)
 	require.Len(t, history.Publications, 0)
 }
@@ -483,16 +483,16 @@ func TestAPIServiceHandler_PublishSessionWithAddHistoryStaysSession(t *testing.T
 	sessionID := client.SessionID()
 	require.NotEmpty(t, sessionID)
 
-	req := &serverpb.PublishRequest{
+	req := &serverv2.PublishRequest{
 		RequestId: uuid.NewString(),
-		Publications: []*serverpb.Publication{
+		Publications: []*serverv2.Publication{
 			{
 				Id: "session-history-msg",
-				Destination: &serverpb.Publication_Destination{
+				Destination: &serverv2.Publication_Destination{
 					Sessions: []string{sessionID},
 				},
-				Payload: &sharedpb.Payload{Data: &sharedpb.Payload_Text{Text: "session hello"}},
-				Options: &serverpb.Publication_Options{AddHistory: true},
+				Payload: &sharedv2.Payload{Data: &sharedv2.Payload_Text{Text: "session hello"}},
+				Options: &serverv2.Publication_Options{AddHistory: true},
 			},
 		},
 	}
@@ -512,7 +512,7 @@ func TestAPIServiceHandler_PublishSessionWithAddHistoryStaysSession(t *testing.T
 	}, 2*time.Second, 20*time.Millisecond, "session must receive the publication")
 
 	// add_history 对 session 目标无效：不写频道历史
-	history, err := handler.GetHistory(ctx, &serverpb.GetHistoryRequest{Channel: ""})
+	history, err := handler.GetHistory(ctx, &serverv2.GetHistoryRequest{Channel: ""})
 	require.NoError(t, err)
 	require.Len(t, history.Publications, 0)
 }
@@ -523,18 +523,18 @@ func TestAPIServiceHandler_PublishBrokerFailureReturnsError(t *testing.T) {
 	node.SetBroker(&failPublishBroker{})
 	handler := NewAPIServiceHandler(node)
 
-	req := &serverpb.PublishRequest{
+	req := &serverv2.PublishRequest{
 		RequestId: uuid.NewString(),
-		Publications: []*serverpb.Publication{
+		Publications: []*serverv2.Publication{
 			{
 				Id: uuid.NewString(),
-				Destination: &serverpb.Publication_Destination{
+				Destination: &serverv2.Publication_Destination{
 					Channels: []string{"broken-channel"},
 				},
-				Payload: &sharedpb.Payload{
-					Data: &sharedpb.Payload_Text{Text: "hello"},
+				Payload: &sharedv2.Payload{
+					Data: &sharedv2.Payload_Text{Text: "hello"},
 				},
-				Options: &serverpb.Publication_Options{AddHistory: true},
+				Options: &serverv2.Publication_Options{AddHistory: true},
 			},
 		},
 	}
@@ -551,18 +551,18 @@ func TestAPIServiceHandler_PublishPartialFailureSucceeds(t *testing.T) {
 	node.SetBroker(&failPublishBroker{failChannel: "broken-channel"})
 	handler := NewAPIServiceHandler(node)
 
-	req := &serverpb.PublishRequest{
+	req := &serverv2.PublishRequest{
 		RequestId: uuid.NewString(),
-		Publications: []*serverpb.Publication{
+		Publications: []*serverv2.Publication{
 			{
 				Id: uuid.NewString(),
-				Destination: &serverpb.Publication_Destination{
+				Destination: &serverv2.Publication_Destination{
 					Channels: []string{"ok-channel", "broken-channel"},
 				},
-				Payload: &sharedpb.Payload{
-					Data: &sharedpb.Payload_Text{Text: "hello"},
+				Payload: &sharedv2.Payload{
+					Data: &sharedv2.Payload_Text{Text: "hello"},
 				},
-				Options: &serverpb.Publication_Options{AddHistory: true},
+				Options: &serverv2.Publication_Options{AddHistory: true},
 			},
 		},
 	}
@@ -586,7 +586,7 @@ func TestAPIServiceHandler_Disconnect(t *testing.T) {
 	_ = node.AddClient(client)
 
 	// Test disconnecting the session
-	req := &serverpb.DisconnectRequest{
+	req := &serverv2.DisconnectRequest{
 		Sessions: []string{client.SessionID()},
 		Code:     3500,
 		Reason:   "test disconnect",
@@ -605,7 +605,7 @@ func TestAPIServiceHandler_DisconnectNonExistentSession(t *testing.T) {
 	handler := NewAPIServiceHandler(node)
 
 	// Test disconnecting a non-existent session
-	req := &serverpb.DisconnectRequest{
+	req := &serverv2.DisconnectRequest{
 		Sessions: []string{"non-existent-session-id"},
 		Code:     3500,
 		Reason:   "test disconnect",
@@ -632,7 +632,7 @@ func TestAPIServiceHandler_Subscribe(t *testing.T) {
 	_ = node.AddClient(client)
 
 	// Test subscribing to channels
-	req := &serverpb.SubscribeRequest{
+	req := &serverv2.SubscribeRequest{
 		SessionId: client.SessionID(),
 		Channels:  []string{"test-channel-1", "test-channel-2"},
 	}
@@ -650,7 +650,7 @@ func TestAPIServiceHandler_SubscribeNonExistentSession(t *testing.T) {
 	handler := NewAPIServiceHandler(node)
 
 	// Test subscribing with a non-existent session
-	req := &serverpb.SubscribeRequest{
+	req := &serverv2.SubscribeRequest{
 		SessionId: "non-existent-session-id",
 		Channels:  []string{"test-channel-1"},
 	}
@@ -676,7 +676,7 @@ func TestAPIServiceHandler_Unsubscribe(t *testing.T) {
 	_ = node.AddClient(client)
 
 	// First subscribe to a channel
-	subReq := &serverpb.SubscribeRequest{
+	subReq := &serverv2.SubscribeRequest{
 		SessionId: client.SessionID(),
 		Channels:  []string{"test-channel-1"},
 	}
@@ -684,7 +684,7 @@ func TestAPIServiceHandler_Unsubscribe(t *testing.T) {
 	require.NoError(t, err)
 
 	// Then unsubscribe
-	req := &serverpb.UnsubscribeRequest{
+	req := &serverv2.UnsubscribeRequest{
 		SessionId: client.SessionID(),
 		Channels:  []string{"test-channel-1"},
 	}
@@ -701,7 +701,7 @@ func TestAPIServiceHandler_UnsubscribeNonExistentSession(t *testing.T) {
 	handler := NewAPIServiceHandler(node)
 
 	// Test unsubscribing with a non-existent session
-	req := &serverpb.UnsubscribeRequest{
+	req := &serverv2.UnsubscribeRequest{
 		SessionId: "non-existent-session-id",
 		Channels:  []string{"test-channel-1"},
 	}
@@ -720,36 +720,104 @@ func TestAPIServiceHandler_GetHistory_ReturnsContentTypeAndId(t *testing.T) {
 	_ = node.Run(ctx) // Start broker
 	handler := NewAPIServiceHandler(node)
 
-	req := &serverpb.PublishRequest{
+	req := &serverv2.PublishRequest{
 		RequestId: uuid.NewString(),
-		Publications: []*serverpb.Publication{
+		Publications: []*serverv2.Publication{
 			{
 				Id: "admin-m-1",
-				Destination: &serverpb.Publication_Destination{
+				Destination: &serverv2.Publication_Destination{
 					Channels: []string{"history-meta"},
 				},
-				Payload: &sharedpb.Payload{
+				Payload: &sharedv2.Payload{
 					ContentType: "application/json",
-					Data:        &sharedpb.Payload_Text{Text: `{"k":"v"}`},
+					Data:        &sharedv2.Payload_Text{Text: `{"k":"v"}`},
 				},
-				Metadata: &sharedpb.Metadata{Entries: map[string]string{"origin": "admin"}},
-				Options:  &serverpb.Publication_Options{AddHistory: true},
+				Metadata: &sharedv2.Metadata{Entries: map[string]string{"origin": "admin"}},
+				Options:  &serverv2.Publication_Options{AddHistory: true},
 			},
 		},
 	}
 	_, err := handler.Publish(ctx, req)
 	require.NoError(t, err)
 
-	resp, err := handler.GetHistory(ctx, &serverpb.GetHistoryRequest{Channel: "history-meta"})
+	resp, err := handler.GetHistory(ctx, &serverv2.GetHistoryRequest{Channel: "history-meta"})
 	require.NoError(t, err)
 	require.Len(t, resp.Publications, 1)
 	p := resp.Publications[0]
 	require.Equal(t, "admin-m-1", p.Id)
-	require.Equal(t, map[string]string{"origin": "admin"}, p.Metadata)
+	require.Equal(t, map[string]string{"origin": "admin"}, p.Metadata.GetEntries())
 	require.NotNil(t, p.Payload)
 	require.Equal(t, "application/json", p.Payload.ContentType)
 	require.Equal(t, `{"k":"v"}`, p.Payload.GetText())
 	require.NotZero(t, p.Time)
+	require.NotNil(t, p.Position)
+	require.Equal(t, uint64(1), p.Position.GetOffset())
+	require.NotEmpty(t, p.Position.GetStreamEpoch())
+}
+
+// TestAdmin_GetHistorySincePosition covers the server.v2 GetHistoryRequest.since
+// Position semantics (D6): nil reads from the head, an offset-only position
+// resumes from that offset, a matching stream_epoch reads, and a stale epoch
+// fails with FailedPrecondition before the broker is read.
+func TestAdmin_GetHistorySincePosition(t *testing.T) {
+	ctx := context.Background()
+	node := messageloop.NewNode(nil)
+	require.NoError(t, node.Run(ctx))
+	handler := NewAPIServiceHandler(node)
+
+	for _, text := range []string{"m1", "m2", "m3"} {
+		_, err := node.Publish("pos.ch", &messageloop.Publication{Payload: []byte(text), Kind: messageloop.PayloadKindText})
+		require.NoError(t, err)
+	}
+	epoch := node.Broker().(interface{ Epoch() string }).Epoch()
+	require.NotEmpty(t, epoch)
+
+	// since == nil: from the head within the limit.
+	resp, err := handler.GetHistory(ctx, &serverv2.GetHistoryRequest{Channel: "pos.ch", Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, resp.Publications, 3)
+
+	// offset-only position: resumes from that offset.
+	off := uint64(2)
+	resp, err = handler.GetHistory(ctx, &serverv2.GetHistoryRequest{
+		Channel: "pos.ch",
+		Since:   &sharedv2.Position{Offset: &off},
+		Limit:   10,
+	})
+	require.NoError(t, err)
+	require.Len(t, resp.Publications, 2)
+	require.Equal(t, "m2", resp.Publications[0].Payload.GetText())
+	require.Equal(t, uint64(2), resp.Publications[0].Position.GetOffset())
+
+	// matching epoch: reads normally.
+	resp, err = handler.GetHistory(ctx, &serverv2.GetHistoryRequest{
+		Channel: "pos.ch",
+		Since:   &sharedv2.Position{StreamEpoch: epoch, Offset: &off},
+		Limit:   10,
+	})
+	require.NoError(t, err)
+	require.Len(t, resp.Publications, 2)
+
+	// stale epoch: FailedPrecondition, broker History never reached (probe).
+	probe := &probeBroker{}
+	probeNode := messageloop.NewNode(nil)
+	probeNode.SetBroker(probe)
+	probeHandler := NewAPIServiceHandler(probeNode)
+	_, err = probeHandler.GetHistory(ctx, &serverv2.GetHistoryRequest{
+		Channel: "pos.ch",
+		Since:   &sharedv2.Position{StreamEpoch: "stale-epoch"},
+		Limit:   10,
+	})
+	require.Equal(t, codes.FailedPrecondition, status.Code(err))
+	require.Zero(t, probe.historyCalls, "epoch mismatch must fail before the broker is read")
+
+	// the memory broker itself rejects a stale epoch too.
+	_, err = handler.GetHistory(ctx, &serverv2.GetHistoryRequest{
+		Channel: "pos.ch",
+		Since:   &sharedv2.Position{StreamEpoch: "stale-epoch"},
+		Limit:   10,
+	})
+	require.Equal(t, codes.FailedPrecondition, status.Code(err))
 }
 
 // Task 13a: admin subscribe/publish must respect the authorizer rules.
@@ -764,7 +832,7 @@ func TestAPIServiceHandler_Subscribe_ACLDenied(t *testing.T) {
 	})
 	handler := NewAPIServiceHandler(node)
 
-	resp, err := handler.Subscribe(ctx, &serverpb.SubscribeRequest{
+	resp, err := handler.Subscribe(ctx, &serverv2.SubscribeRequest{
 		SessionId: "sess-1",
 		Channels:  []string{"private.room"},
 	})
@@ -774,7 +842,7 @@ func TestAPIServiceHandler_Subscribe_ACLDenied(t *testing.T) {
 	// Without ACL rules the admin operation proceeds (session not found).
 	openNode := messageloop.NewNode(nil)
 	openHandler := NewAPIServiceHandler(openNode)
-	openResp, err := openHandler.Subscribe(ctx, &serverpb.SubscribeRequest{
+	openResp, err := openHandler.Subscribe(ctx, &serverv2.SubscribeRequest{
 		SessionId: "sess-1",
 		Channels:  []string{"open.room"},
 	})
@@ -793,24 +861,24 @@ func TestAPIServiceHandler_Publish_ACLDenied(t *testing.T) {
 	})
 	handler := NewAPIServiceHandler(node)
 
-	_, err := handler.Publish(ctx, &serverpb.PublishRequest{
+	_, err := handler.Publish(ctx, &serverv2.PublishRequest{
 		RequestId: uuid.NewString(),
-		Publications: []*serverpb.Publication{
+		Publications: []*serverv2.Publication{
 			{
 				Id: "admin-pub",
-				Destination: &serverpb.Publication_Destination{
+				Destination: &serverv2.Publication_Destination{
 					Channels: []string{"private.room"},
 				},
-				Payload: &sharedpb.Payload{Data: &sharedpb.Payload_Text{Text: "x"}},
+				Payload: &sharedv2.Payload{Data: &sharedv2.Payload_Text{Text: "x"}},
 			},
 		},
 	})
 	require.Error(t, err, "admin publish to an ACL-denied channel must fail")
 }
 
-// TestAdmin_GetPresenceFillsNewFields verifies PR-04a: the admin GetPresence
-// response carries session_id (falling back to the legacy client_id key) and
-// connect_client_id alongside the compatibility client_id == session.
+// TestAdmin_GetPresenceFillsNewFields verifies the server.v2 PresenceInfo
+// semantics (D6): session_id is the formal session ID (falling back to the
+// legacy client_id key) and client_id is the Connect.client_id.
 func TestAdmin_GetPresenceFillsNewFields(t *testing.T) {
 	ctx := context.Background()
 	node := messageloop.NewNode(nil)
@@ -839,19 +907,20 @@ func TestAdmin_GetPresenceFillsNewFields(t *testing.T) {
 	require.NoError(t, client.HandleMessage(ctx, sub))
 
 	handler := NewAPIServiceHandler(node)
-	resp, err := handler.GetPresence(ctx, &serverpb.GetPresenceRequest{Channel: "admin.presence.ch"})
+	resp, err := handler.GetPresence(ctx, &serverv2.GetPresenceRequest{Channel: "admin.presence.ch"})
 	require.NoError(t, err)
 
 	info, ok := resp.GetClients()[client.SessionID()]
 	require.True(t, ok, "the subscribed session must be present")
-	require.Equal(t, client.SessionID(), info.GetClientId(), "client_id stays the session ID for compatibility")
 	require.Equal(t, client.SessionID(), info.GetSessionId(), "session_id is the formal session ID")
-	require.Equal(t, "device-42", info.GetConnectClientId(), "connect_client_id is the Connect.client_id")
+	require.Equal(t, "device-42", info.GetClientId(), "client_id is the Connect.client_id (device endpoint)")
+	require.NotZero(t, info.GetConnectedAt())
 }
 
 // TestAdmin_GetPresence_LegacyKeyFallsBackToClientID verifies that a store
 // record written without the new fields (legacy Redis JSON) still reports a
-// session_id derived from client_id and an empty connect_client_id.
+// session_id derived from client_id and an empty client_id (no
+// Connect.client_id was recorded).
 func TestAdmin_GetPresence_LegacyKeyFallsBackToClientID(t *testing.T) {
 	ctx := context.Background()
 	node := messageloop.NewNode(nil)
@@ -867,12 +936,12 @@ func TestAdmin_GetPresence_LegacyKeyFallsBackToClientID(t *testing.T) {
 	}))
 
 	handler := NewAPIServiceHandler(node)
-	resp, err := handler.GetPresence(ctx, &serverpb.GetPresenceRequest{Channel: "legacy.ch"})
+	resp, err := handler.GetPresence(ctx, &serverv2.GetPresenceRequest{Channel: "legacy.ch"})
 	require.NoError(t, err)
 	info, ok := resp.GetClients()["legacy-session"]
 	require.True(t, ok)
 	require.Equal(t, "legacy-session", info.GetSessionId(), "session_id falls back to the legacy client_id key")
-	require.Empty(t, info.GetConnectClientId())
+	require.Empty(t, info.GetClientId(), "no Connect.client_id was recorded for the legacy record")
 }
 
 // --- PR-06: Admin publish/disconnect/subscribe by user_id ---
@@ -892,13 +961,13 @@ func TestAdmin_PublishDestinationUsers(t *testing.T) {
 	clientB := newUserTestClient(t, node, transportB, "sess-user-a-2", "U")
 	newUserTestClient(t, node, otherTransport, "sess-other-user", "other-user")
 
-	resp, err := handler.Publish(ctx, &serverpb.PublishRequest{
+	resp, err := handler.Publish(ctx, &serverv2.PublishRequest{
 		RequestId: uuid.NewString(),
-		Publications: []*serverpb.Publication{
+		Publications: []*serverv2.Publication{
 			{
 				Id:          "user-fanout-pub",
-				Destination: &serverpb.Publication_Destination{Users: []string{"U"}},
-				Payload:     &sharedpb.Payload{Data: &sharedpb.Payload_Text{Text: "hello user fanout"}},
+				Destination: &serverv2.Publication_Destination{Users: []string{"U"}},
+				Payload:     &sharedv2.Payload{Data: &sharedv2.Payload_Text{Text: "hello user fanout"}},
 			},
 		},
 	})
@@ -924,13 +993,13 @@ func TestAdmin_PublishUsersNoCluster(t *testing.T) {
 	transport := &captureTransport{}
 	client := newUserTestClient(t, node, transport, "sess-nocluster", "U")
 
-	resp, err := handler.Publish(ctx, &serverpb.PublishRequest{
+	resp, err := handler.Publish(ctx, &serverv2.PublishRequest{
 		RequestId: uuid.NewString(),
-		Publications: []*serverpb.Publication{
+		Publications: []*serverv2.Publication{
 			{
 				Id:          "nocluster-pub",
-				Destination: &serverpb.Publication_Destination{Users: []string{"U"}},
-				Payload:     &sharedpb.Payload{Data: &sharedpb.Payload_Text{Text: "local only"}},
+				Destination: &serverv2.Publication_Destination{Users: []string{"U"}},
+				Payload:     &sharedv2.Payload{Data: &sharedv2.Payload_Text{Text: "local only"}},
 			},
 		},
 	})
@@ -953,7 +1022,7 @@ func TestAdmin_DisconnectUsers(t *testing.T) {
 	clientB := newUserTestClient(t, node, transportB, "sess-disc-b", "U")
 	newUserTestClient(t, node, &mockTransport{}, "sess-disc-other", "other-user")
 
-	resp, err := handler.Disconnect(ctx, &serverpb.DisconnectRequest{
+	resp, err := handler.Disconnect(ctx, &serverv2.DisconnectRequest{
 		Users:  []string{"U"},
 		Code:   3500,
 		Reason: "admin user disconnect",
@@ -978,25 +1047,25 @@ func TestAdmin_EmptyUserInvalidArgument(t *testing.T) {
 	transport := &mockTransport{}
 	client := newUserTestClient(t, node, transport, "sess-no-scan", "U")
 
-	_, err := handler.Publish(ctx, &serverpb.PublishRequest{
+	_, err := handler.Publish(ctx, &serverv2.PublishRequest{
 		RequestId: uuid.NewString(),
-		Publications: []*serverpb.Publication{
+		Publications: []*serverv2.Publication{
 			{
 				Id:          "bad-user-pub",
-				Destination: &serverpb.Publication_Destination{Users: []string{""}},
-				Payload:     &sharedpb.Payload{Data: &sharedpb.Payload_Text{Text: "x"}},
+				Destination: &serverv2.Publication_Destination{Users: []string{""}},
+				Payload:     &sharedv2.Payload{Data: &sharedv2.Payload_Text{Text: "x"}},
 			},
 		},
 	})
 	require.Equal(t, codes.InvalidArgument, status.Code(err), "empty users entry must be InvalidArgument")
 
-	_, err = handler.Disconnect(ctx, &serverpb.DisconnectRequest{Users: []string{""}})
+	_, err = handler.Disconnect(ctx, &serverv2.DisconnectRequest{Users: []string{""}})
 	require.Equal(t, codes.InvalidArgument, status.Code(err), "empty users entry must be InvalidArgument")
 
-	_, err = handler.Subscribe(ctx, &serverpb.SubscribeRequest{Channels: []string{"ch"}})
+	_, err = handler.Subscribe(ctx, &serverv2.SubscribeRequest{Channels: []string{"ch"}})
 	require.Equal(t, codes.InvalidArgument, status.Code(err), "empty session_id and user_id must be InvalidArgument")
 
-	_, err = handler.Unsubscribe(ctx, &serverpb.UnsubscribeRequest{Channels: []string{"ch"}})
+	_, err = handler.Unsubscribe(ctx, &serverv2.UnsubscribeRequest{Channels: []string{"ch"}})
 	require.Equal(t, codes.InvalidArgument, status.Code(err), "empty session_id and user_id must be InvalidArgument")
 
 	// No scanning side effects: the registered session is still connected.
@@ -1015,7 +1084,7 @@ func TestAdmin_SubscribeByUser(t *testing.T) {
 	newUserTestClient(t, node, &mockTransport{}, "sess-sub-user", "U")
 	newUserTestClient(t, node, &mockTransport{}, "sess-sub-other", "other-user")
 
-	resp, err := handler.Subscribe(ctx, &serverpb.SubscribeRequest{
+	resp, err := handler.Subscribe(ctx, &serverv2.SubscribeRequest{
 		UserId:   "U",
 		Channels: []string{"user.sub.channel"},
 	})
@@ -1025,7 +1094,7 @@ func TestAdmin_SubscribeByUser(t *testing.T) {
 		"only the user's session may be subscribed, not other users")
 
 	// Unsubscribe by user works symmetrically.
-	unsubResp, err := handler.Unsubscribe(ctx, &serverpb.UnsubscribeRequest{
+	unsubResp, err := handler.Unsubscribe(ctx, &serverv2.UnsubscribeRequest{
 		UserId:   "U",
 		Channels: []string{"user.sub.channel"},
 	})
@@ -1048,7 +1117,7 @@ func TestAdmin_GetHistoryRequiresCapability(t *testing.T) {
 	node.SetBroker(probe)
 	handler := NewAPIServiceHandler(node)
 
-	_, err := handler.GetHistory(ctx, &serverpb.GetHistoryRequest{Channel: "cap.history.ch"})
+	_, err := handler.GetHistory(ctx, &serverv2.GetHistoryRequest{Channel: "cap.history.ch"})
 	require.Equal(t, codes.PermissionDenied, status.Code(err), "missing history.read must fail softly")
 	require.Zero(t, probe.historyCalls, "the broker must never be touched without history.read")
 }
@@ -1062,7 +1131,7 @@ func TestAdmin_GetHistoryDefaultCapabilities(t *testing.T) {
 	node.SetBroker(probe)
 	handler := NewAPIServiceHandler(node)
 
-	resp, err := handler.GetHistory(ctx, &serverpb.GetHistoryRequest{Channel: "cap.history.ch"})
+	resp, err := handler.GetHistory(ctx, &serverv2.GetHistoryRequest{Channel: "cap.history.ch"})
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	require.Equal(t, 1, probe.historyCalls, "the default bits must include history.read")
@@ -1080,14 +1149,14 @@ func TestAdmin_GetHistoryExplicitEmptyCapabilities(t *testing.T) {
 	node.SetBroker(probe)
 	handler := NewAPIServiceHandler(node)
 
-	_, err := handler.GetHistory(ctx, &serverpb.GetHistoryRequest{Channel: "cap.history.ch"})
+	_, err := handler.GetHistory(ctx, &serverv2.GetHistoryRequest{Channel: "cap.history.ch"})
 	require.Equal(t, codes.PermissionDenied, status.Code(err))
 	require.Zero(t, probe.historyCalls)
 
 	// GetPresence / GetChannels are locked too.
-	_, err = handler.GetPresence(ctx, &serverpb.GetPresenceRequest{Channel: "cap.presence.ch"})
+	_, err = handler.GetPresence(ctx, &serverv2.GetPresenceRequest{Channel: "cap.presence.ch"})
 	require.Equal(t, codes.PermissionDenied, status.Code(err), "presence.read missing")
-	_, err = handler.GetChannels(ctx, &serverpb.GetChannelsRequest{})
+	_, err = handler.GetChannels(ctx, &serverv2.GetChannelsRequest{})
 	require.Equal(t, codes.PermissionDenied, status.Code(err), "channels.list missing")
 }
 
@@ -1105,12 +1174,12 @@ func TestAdmin_GetHistoryDecideDenied(t *testing.T) {
 	node.SetBroker(probe)
 	handler := NewAPIServiceHandler(node)
 
-	_, err := handler.GetHistory(ctx, &serverpb.GetHistoryRequest{Channel: "secret.room"})
+	_, err := handler.GetHistory(ctx, &serverv2.GetHistoryRequest{Channel: "secret.room"})
 	require.Equal(t, codes.PermissionDenied, status.Code(err))
 	require.Zero(t, probe.historyCalls, "deny_all must fail GetHistory before the broker is read")
 
 	// A non-denied channel is served.
-	resp, err := handler.GetHistory(ctx, &serverpb.GetHistoryRequest{Channel: "open.room"})
+	resp, err := handler.GetHistory(ctx, &serverv2.GetHistoryRequest{Channel: "open.room"})
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	require.Equal(t, 1, probe.historyCalls)
@@ -1131,9 +1200,9 @@ func TestAdmin_GetPresenceDecideDenied(t *testing.T) {
 	})
 	handler := NewAPIServiceHandler(node)
 
-	_, err := handler.GetPresence(ctx, &serverpb.GetPresenceRequest{Channel: "secret.room"})
+	_, err := handler.GetPresence(ctx, &serverv2.GetPresenceRequest{Channel: "secret.room"})
 	require.Equal(t, codes.PermissionDenied, status.Code(err), "deny_all must fail GetPresence")
-	_, err = handler.GetPresence(ctx, &serverpb.GetPresenceRequest{Channel: "nopres.room"})
+	_, err = handler.GetPresence(ctx, &serverv2.GetPresenceRequest{Channel: "nopres.room"})
 	require.Equal(t, codes.PermissionDenied, status.Code(err), "presence=false must fail GetPresence")
 }
 
@@ -1146,30 +1215,30 @@ func TestAdmin_PublishSessionRequiresCapability(t *testing.T) {
 	})
 	handler := NewAPIServiceHandler(node)
 
-	_, err := handler.Publish(ctx, &serverpb.PublishRequest{
+	_, err := handler.Publish(ctx, &serverv2.PublishRequest{
 		RequestId: uuid.NewString(),
-		Publications: []*serverpb.Publication{
+		Publications: []*serverv2.Publication{
 			{
 				Id: "no-session-act",
-				Destination: &serverpb.Publication_Destination{
+				Destination: &serverv2.Publication_Destination{
 					Sessions: []string{"sess-x"},
 				},
-				Payload: &sharedpb.Payload{Data: &sharedpb.Payload_Text{Text: "x"}},
+				Payload: &sharedv2.Payload{Data: &sharedv2.Payload_Text{Text: "x"}},
 			},
 		},
 	})
 	require.Equal(t, codes.PermissionDenied, status.Code(err), "session publish requires session.act")
 
 	// user.fanout without session.act is not enough for user destinations.
-	_, err = handler.Publish(ctx, &serverpb.PublishRequest{
+	_, err = handler.Publish(ctx, &serverv2.PublishRequest{
 		RequestId: uuid.NewString(),
-		Publications: []*serverpb.Publication{
+		Publications: []*serverv2.Publication{
 			{
 				Id: "no-session-act-user",
-				Destination: &serverpb.Publication_Destination{
+				Destination: &serverv2.Publication_Destination{
 					Users: []string{"U"},
 				},
-				Payload: &sharedpb.Payload{Data: &sharedpb.Payload_Text{Text: "x"}},
+				Payload: &sharedv2.Payload{Data: &sharedv2.Payload_Text{Text: "x"}},
 			},
 		},
 	})

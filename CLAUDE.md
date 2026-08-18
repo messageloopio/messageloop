@@ -67,7 +67,7 @@ The server exposes four required listeners plus an optional QUIC listener:
 - `transport.websocket.addr` — WebSocket client traffic (`:9080`, path `/ws`)
 - `transport.grpc.addr` — Client gRPC streaming (`:9090`)
 - `transport.quic.addr` — Optional QUIC client traffic (`:4433`, UDP; empty disables)
-- `server.grpc_admin.addr` — Server-side gRPC admin API (`127.0.0.1:9091`, exposes `messageloop.server.v1.APIService`)
+- `server.grpc_admin.addr` — Server-side gRPC admin API (`127.0.0.1:9091`, exposes `messageloop.server.v2.APIService`)
 - `server.http.addr` — Health check and Prometheus metrics (`127.0.0.1:8080`)
 
 ## Configuration

@@ -3,7 +3,7 @@
 | 字段 | 值 |
 | --- | --- |
 | 标题 | `admin: serve APIService from server/v2, delete server/v1 and shared/v1` |
-| 状态 | **Ready**（待实现） |
+| 状态 | **Accepted**（2026-08-18 主 agent 终验通过，尚未 commit） |
 | 依赖 | D5 已合（`847c32a`,proxy 已升 v2、桥已拆）。在 `v2` 分支上做 |
 | 设计来源 | 转正评审协议/SDK 路（admin 面二选一决策：切 server/v2);KD-K31 |
 | 验收人 | 主 agent |
@@ -105,4 +105,17 @@ ls protocol/ shared/genproto/ sdks/ts/src/proto/          # 无 v1 目录
 
 ## 8. 实现备注（实现方填）
 
-（空）
+实现日期：2026-08-18（v2 分支，基于 D5 `847c32a` + 本规格 `07c43b0`）。
+
+1. **admin 切 server/v2**:`pkg/grpcstream/api_handler.go`/`admin_server.go` 全量换 `serverv2`/`sharedv2`。三处形状重做按 §1.1 落地：
+   - `PresenceInfo`:`SessionId = firstNonEmpty(info.SessionID, info.ClientID)`(legacy 回退保留）,`ClientId = info.ConnectClientID`（语义修正为 Connect.client_id),`connect_client_id` 兜底字段消失。
+   - `GetHistoryRequest.since`:nil → 从头（limit 内）;`offset` 有值 → `History(channel, offset, limit)`;`stream_epoch` 非空时按 `recover.go:90-94` 同款 type-assert(`interface{ Epoch() string }`，作用在 `h.node.Broker()` 上）取当前 epoch 比对，不匹配（含 broker 不暴露 epoch 的保守情形）→ `codes.FailedPrecondition`,**先于** broker.History 调用。
+   - `HistoryPublication`:`Position{StreamEpoch: pub.Epoch, Offset: &pub.Offset}`,`Payload = pub.PayloadProtoV2()`,`metadata` 非空时包 `sharedv2.Metadata{Entries: ...}`;`is_text` 消失。
+2. **桥与 twin 删除**:`adminPayloadV2` 删除（Publish 会话投递直通 `pub.Payload`);`payloadBytes` 切 `sharedv2` + `PublicationFromPayloadV2`;`broker.go` `PayloadProto` 与 `publication.go` `PublicationFromPayload` 删除。
+3. **publication_test.go 处理说明**:§1.4 说「v2 twin 已有覆盖」，实测并不存在 v2 直接单测；为不丢变体级覆盖，将原 v1 用例机械改写为 `PublicationFromPayloadV2` 用例（测试函数改名 `TestPublicationFromPayloadV2_*`)，效果等同「v1 用例删除」且保住覆盖。
+4. **flake 根因（与 §3.5 猜测不同，不是固定窗口等待未到达）**:Redis 经典 PUBLISH/SUBSCRIBE 是**实例级**的，不按逻辑 DB 隔离；`go test ./...` 并行跑包时，根包集群 e2e(`cluster_v1_e2e_test.go` 的 `TestPresence_OccupancyWildcardAcrossNodes`,client-c 加入 `chat.1`）会向 `ml2:pubsub:chat.1` 发布合法 occupancy join。本测试 brokerA 恰订阅 `chat.1`,handler 丢弃 channel 形参、任何到达事件都 `t.Fatalf`——外来事件几乎即刻到达，表现为 ~0.04s 快速失败。**修复不动 pubsub.go 生产代码**（根因在测试）：改用测试独占频道名 `d6noi.chat.1`/`d6noi.im.room.1`，外来流量无法匹配 brokerA 订阅，负向断言恢复严格语义。单跑 5 连过；全量负载验证见 §5 全链。
+5. **chatroom e2e**:`WithRecover(0, "")` → `WithFresh()`（语义对齐：dave 是新订阅者，需要从头回放；`WithRecover(nil)` 会因无服务端记录位置而跳过回放）。**偏离 §2 一处**:`_examples/chatroom/cmd/backend/main.go` 不在 §2 清单，但 `pub.Offset` 引用了被删字段，属切换的必要编译跟随，改为 `pub.GetPosition().GetOffset()`（两处），否则 chatroom 模块 build 不达标。
+6. **生成物**:`task generate-protocol`(buf 1.65.0）后 v2 既有产物仅有行尾 churn，照 D5 先例 `git checkout --` 还原；v1 目录（proto/genproto/swagger/TS）随删除走。
+7. **文档**:§6.6 四处已同步；另 §5 grep 门禁（未排除的根级文档）命中的现状描述一并做最小单行修正：`CLAUDE.md:70`、`AGENTS.md:63-65`(import 示例顺便把 D5 已删的 `client/v1` 一并改成 v2)、`README.md:220`、`.github/copilot-instructions.md:23`、`docs/developer/06-development.md:25/133/153-154`。`docs/developer/05-observability.md` 无 v1 提及，未动。**遗留命中一处**:`docs/superpowers/specs/2026-04-17-grpc-port-split-design.md`（两处 `server.v1`）是带日期的历史设计稿（性质同 docs/archive，且不在 §2 允许清单），未改；§5 grep 未排除该目录，验收时请注意。`sdks/ts/dist/` 为 gitignore 构建产物（D5 已声明不在范围），未动。
+8. **行尾**:本仓 `.go` 工作区约定 CRLF(git i/lf + eol=crlf)，所有改动文件已核对 `git ls-files --eol` 为 `w/crlf`(`publication.go`/`publication_test.go` 改动前即为 `w/lf`，保持原状）;.md 按各文件既有 EOL 保持（`docs/protocol.md` 及根级 md 为 CRLF,`docs/developer/*.md` 为 LF)，终验 `git diff --numstat` 与 `--ignore-all-space --ignore-cr-at-eol` 一致、无格式 churn。
+9. **未碰禁项**:capability 门禁（`requireAdminCaps`/`AdminDecide`)、`Broker.History` 签名、`client.go`/`node.go`/`hub.go`/`session.go` 零改动；无 proto 改动；无 commit/tag/push。

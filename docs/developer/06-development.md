@@ -22,7 +22,7 @@
 | `subscription_saga.go` | 订阅状态机（订阅/退订的可靠交付） |
 | `cmd/server/` | 服务端入口 `main.go` 与 gRPC 启动预检 `runtime.go`，基于 `lynx` 框架 |
 | `config/` | 配置结构体定义与校验（`config.go`、`config_test.go`） |
-| `protocol/` | Protobuf 源文件（单一 buf module），下分 `shared/v1/`、`client/v1/`、`event/v1/`、`server/v1/`、`proxy/v1/` |
+| `protocol/` | Protobuf 源文件（单一 buf module），下分 `shared/v2/`、`client/v2/`、`server/v2/`、`proxy/v2/`（v1 已于 D6 删尽） |
 | `shared/` | 独立 Go 模块 `github.com/messageloopio/messageloop/shared`；`genproto/` 为生成代码，`marshaler.go` 为 JSON/Protobuf 序列化器 |
 | `pkg/websocket/` | WebSocket 传输实现（含集成测试） |
 | `pkg/grpcstream/` | gRPC 流式传输（客户端流 `client_server.go`、管理 API `admin_server.go`、公共准备逻辑 `server.go`） |
@@ -130,7 +130,7 @@ breaking:
 
 执行 `task generate-protocol`（即 `buf generate`）后：
 
-- **Go 代码**生成在 `shared/genproto/<pkg>/<version>/`（`.pb.go`、`*_grpc.pb.go`、`.swagger.json`），如 `client/v2`、`proxy/v2`、`server/v1`+`server/v2`、`shared/v1`+`shared/v2`。Go 侧导入路径为 `github.com/messageloopio/messageloop/shared/genproto/<pkg>/<version>`，包别名见[代码风格与约定](#代码风格与约定)。
+- **Go 代码**生成在 `shared/genproto/<pkg>/<version>/`（`.pb.go`、`*_grpc.pb.go`、`.swagger.json`），如 `client/v2`、`proxy/v2`、`server/v2`、`shared/v2`。Go 侧导入路径为 `github.com/messageloopio/messageloop/shared/genproto/<pkg>/<version>`，包别名见[代码风格与约定](#代码风格与约定)。
 - **TypeScript 代码**生成在 `sdks/ts/src/proto/<pkg>/<version>/`，使用 bufbuild/es 远程插件（仓库未安装 `@bufbuild/protoc-gen-es`）。
 
 ### 新增协议消息或字段的流程
@@ -150,8 +150,7 @@ breaking:
 导入按三组排列，组间空行分隔：标准库、第三方依赖、本地（本项目）导入。Protobuf 包统一使用短别名，与各 proto 文件 `go_package` 选项的包短名一致：
 
 - `clientpb`：`github.com/messageloopio/messageloop/shared/genproto/client/v2`
-- `serverpb`：`github.com/messageloopio/messageloop/shared/genproto/server/v1`
-- `sharedpb`：`github.com/messageloopio/messageloop/shared/genproto/shared/v1`
+- `serverv2`：`github.com/messageloopio/messageloop/shared/genproto/server/v2`
 - `sharedv2`：`github.com/messageloopio/messageloop/shared/genproto/shared/v2`
 - `proxypb`：`github.com/messageloopio/messageloop/shared/genproto/proxy/v2`
 

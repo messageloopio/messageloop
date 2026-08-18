@@ -393,7 +393,7 @@ hash 的字段是频道名、值是本节点在该频道的订阅者计数。增
 
 ## 11. 管理 API 的集群感知行为
 
-管理 API（`messageloop.server.v1.APIService`，详见[《管理 API 参考》](03-admin-api.md)）在集群模式下行为变化，概览如下：
+管理 API（`messageloop.server.v2.APIService`，详见[《管理 API 参考》](03-admin-api.md)）在集群模式下行为变化，概览如下：
 
 | 操作 | 集群模式下的行为 |
 | --- | --- |

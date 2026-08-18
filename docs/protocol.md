@@ -1,6 +1,6 @@
 # Client Protocol Reference
 
-This document describes the client protocol of the current standalone version (KD-K31); envelope definitions live in `protocol/client/v2`. The server-side admin gRPC API remains `server.v1` (an explicitly accepted decision, PR-KA-B3).
+This document describes the client protocol of the current standalone version (KD-K31); envelope definitions live in `protocol/client/v2`. The server-side admin gRPC API is likewise `server.v2` (switched in PR-KA-D6; the earlier B3 keep-v1 decision is reversed).
 
 MessageLoop uses a bidirectional message protocol over WebSocket, gRPC streaming, or QUIC. All messages are wrapped in `InboundMessage` (client → server) and `OutboundMessage` (server → client) envelopes.
 
@@ -562,7 +562,7 @@ Presence state is also served via the admin `GetPresence` API (backed by the pre
 
 ## Server-Side Admin API
 
-The gRPC admin API (`messageloop.server.v1.APIService`) provides server-side management. The admin surface remains `server.v1` by explicit decision (PR-KA-B3), not by omission:
+The gRPC admin API (`messageloop.server.v2.APIService`) provides server-side management. The admin surface is `server.v2` (PR-KA-D6; the earlier B3 keep-v1 decision is reversed):
 
 | RPC | Description |
 | --- | --- |

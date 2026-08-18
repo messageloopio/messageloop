@@ -60,9 +60,9 @@ import (
     "sync"
     "time"
 
-    serverpb "github.com/messageloopio/messageloop/shared/genproto/server/v1"
-    sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
-    clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v1"
+    serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
+    sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
+    clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
     "github.com/messageloopio/messageloop/proxy"
     "github.com/lynx-go/x/log"
     "github.com/samber/lo"

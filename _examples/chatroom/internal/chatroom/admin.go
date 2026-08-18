@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	serverpb "github.com/messageloopio/messageloop/shared/genproto/server/v1"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
@@ -20,7 +20,7 @@ const DefaultAdminAddr = "127.0.0.1:19091"
 // it to publish system messages, kick users, and inspect state.
 type AdminClient struct {
 	conn   *grpc.ClientConn
-	client serverpb.APIServiceClient
+	client serverv2.APIServiceClient
 	token  string
 }
 
@@ -34,7 +34,7 @@ func NewAdminClient(ctx context.Context, addr, token string) (*AdminClient, erro
 	}
 	return &AdminClient{
 		conn:   conn,
-		client: serverpb.NewAPIServiceClient(conn),
+		client: serverv2.NewAPIServiceClient(conn),
 		token:  token,
 	}, nil
 }
@@ -56,14 +56,14 @@ func (a *AdminClient) PublishToChannel(ctx context.Context, channel, id string, 
 	if err != nil {
 		return err
 	}
-	req := &serverpb.PublishRequest{
+	req := &serverv2.PublishRequest{
 		RequestId: "admin-" + id,
-		Publications: []*serverpb.Publication{{
+		Publications: []*serverv2.Publication{{
 			Id: id,
-			Destination: &serverpb.Publication_Destination{
+			Destination: &serverv2.Publication_Destination{
 				Channels: []string{channel},
 			},
-			Options: &serverpb.Publication_Options{AddHistory: addHistory},
+			Options: &serverv2.Publication_Options{AddHistory: addHistory},
 			Payload: payload,
 		}},
 	}
@@ -73,7 +73,7 @@ func (a *AdminClient) PublishToChannel(ctx context.Context, channel, id string, 
 
 // DisconnectUser force-disconnects every session of a user (admin Disconnect).
 func (a *AdminClient) DisconnectUser(ctx context.Context, userID string, code uint32, reason string) (map[string]bool, error) {
-	resp, err := a.client.Disconnect(a.ctxAuth(ctx), &serverpb.DisconnectRequest{
+	resp, err := a.client.Disconnect(a.ctxAuth(ctx), &serverv2.DisconnectRequest{
 		Users:  []string{userID},
 		Code:   code,
 		Reason: reason,
@@ -85,8 +85,8 @@ func (a *AdminClient) DisconnectUser(ctx context.Context, userID string, code ui
 }
 
 // Channels lists the currently active channels (admin GetChannels).
-func (a *AdminClient) Channels(ctx context.Context) ([]*serverpb.ChannelInfo, error) {
-	resp, err := a.client.GetChannels(a.ctxAuth(ctx), &serverpb.GetChannelsRequest{})
+func (a *AdminClient) Channels(ctx context.Context) ([]*serverv2.ChannelInfo, error) {
+	resp, err := a.client.GetChannels(a.ctxAuth(ctx), &serverv2.GetChannelsRequest{})
 	if err != nil {
 		return nil, err
 	}
@@ -94,8 +94,8 @@ func (a *AdminClient) Channels(ctx context.Context) ([]*serverpb.ChannelInfo, er
 }
 
 // Presence returns the presence snapshot of a channel (admin GetPresence).
-func (a *AdminClient) Presence(ctx context.Context, channel string) (map[string]*serverpb.PresenceInfo, error) {
-	resp, err := a.client.GetPresence(a.ctxAuth(ctx), &serverpb.GetPresenceRequest{Channel: channel})
+func (a *AdminClient) Presence(ctx context.Context, channel string) (map[string]*serverv2.PresenceInfo, error) {
+	resp, err := a.client.GetPresence(a.ctxAuth(ctx), &serverv2.GetPresenceRequest{Channel: channel})
 	if err != nil {
 		return nil, err
 	}
@@ -103,11 +103,16 @@ func (a *AdminClient) Presence(ctx context.Context, channel string) (map[string]
 }
 
 // History returns the persisted history of a channel (admin GetHistory).
-func (a *AdminClient) History(ctx context.Context, channel string, since uint64, limit int) ([]*serverpb.HistoryPublication, error) {
-	resp, err := a.client.GetHistory(a.ctxAuth(ctx), &serverpb.GetHistoryRequest{
-		Channel:    channel,
-		SinceOffset: since,
-		Limit:      int32(limit),
+// A since offset of 0 reads from the head; a positive offset resumes from it.
+func (a *AdminClient) History(ctx context.Context, channel string, since uint64, limit int) ([]*serverv2.HistoryPublication, error) {
+	var sincePos *sharedv2.Position
+	if since > 0 {
+		sincePos = &sharedv2.Position{Offset: &since}
+	}
+	resp, err := a.client.GetHistory(a.ctxAuth(ctx), &serverv2.GetHistoryRequest{
+		Channel: channel,
+		Since:   sincePos,
+		Limit:   int32(limit),
 	})
 	if err != nil {
 		return nil, err
@@ -116,14 +121,14 @@ func (a *AdminClient) History(ctx context.Context, channel string, since uint64,
 }
 
 // JSONPayload builds a shared Payload holding the JSON-encoded chat message.
-func JSONPayload(msg *ChatMessage) (*sharedpb.Payload, error) {
+func JSONPayload(msg *ChatMessage) (*sharedv2.Payload, error) {
 	jsonBytes, err := marshalJSON(msg)
 	if err != nil {
 		return nil, err
 	}
-	return &sharedpb.Payload{
+	return &sharedv2.Payload{
 		ContentType: "application/json",
-		Data:        &sharedpb.Payload_Json{Json: mustStruct(jsonBytes)},
+		Data:        &sharedv2.Payload_Json{Json: mustStruct(jsonBytes)},
 	}, nil
 }
 

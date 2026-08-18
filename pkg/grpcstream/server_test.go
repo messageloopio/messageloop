@@ -6,7 +6,7 @@ import (
 
 	"github.com/messageloopio/messageloop"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	serverpb "github.com/messageloopio/messageloop/shared/genproto/server/v1"
+	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -22,7 +22,7 @@ func TestPrepareClientServer_RegistersOnlyMessageLoopService(t *testing.T) {
 
 	serviceInfo := server.grpc.GetServiceInfo()
 	require.Contains(t, serviceInfo, clientpb.MessageLoopService_ServiceDesc.ServiceName)
-	require.NotContains(t, serviceInfo, serverpb.APIService_ServiceDesc.ServiceName)
+	require.NotContains(t, serviceInfo, serverv2.APIService_ServiceDesc.ServiceName)
 }
 
 func TestPrepareAdminServer_RegistersOnlyAPIService(t *testing.T) {
@@ -32,7 +32,7 @@ func TestPrepareAdminServer_RegistersOnlyAPIService(t *testing.T) {
 	t.Cleanup(func() { _ = server.Close() })
 
 	serviceInfo := server.grpc.GetServiceInfo()
-	require.Contains(t, serviceInfo, serverpb.APIService_ServiceDesc.ServiceName)
+	require.Contains(t, serviceInfo, serverv2.APIService_ServiceDesc.ServiceName)
 	require.NotContains(t, serviceInfo, clientpb.MessageLoopService_ServiceDesc.ServiceName)
 }
 

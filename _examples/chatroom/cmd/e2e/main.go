@@ -435,7 +435,7 @@ func runPhase07Recovery(ctx context.Context) {
 	}
 	check(true, "dave (ws) connected")
 
-	if err := dave.client.SubscribeWith(chatroom.Lobby, messageloopgo.WithRecover(0, "")); err != nil {
+	if err := dave.client.SubscribeWith(chatroom.Lobby, messageloopgo.WithFresh()); err != nil {
 		check(false, "dave subscribe with recover: %v", err)
 		return
 	}

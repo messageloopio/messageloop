@@ -17,7 +17,7 @@ import (
 	"github.com/messageloopio/messageloop/pkg/redisbroker"
 	"github.com/messageloopio/messageloop/proxy"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	serverpb "github.com/messageloopio/messageloop/shared/genproto/server/v1"
+	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
@@ -735,7 +735,7 @@ func TestAdmin_DisconnectUsersAcrossNodes(t *testing.T) {
 	// Admin Disconnect with users=[U] from nodeA: the remote session is
 	// resolved via the index + lease, then routed through the command bus.
 	handler := grpcstream.NewAPIServiceHandler(nodeA)
-	resp, err := handler.Disconnect(ctx, &serverpb.DisconnectRequest{
+	resp, err := handler.Disconnect(ctx, &serverv2.DisconnectRequest{
 		Users:  []string{userID},
 		Code:   3009,
 		Reason: "cross-node user disconnect",

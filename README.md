@@ -217,7 +217,7 @@ The client protocol supports these core flows:
 
 ### Server-Side gRPC Admin API
 
-The admin gRPC listener exposed by `server.grpc_admin.addr` serves `messageloop.server.v1.APIService`, including:
+The admin gRPC listener exposed by `server.grpc_admin.addr` serves `messageloop.server.v2.APIService`, including:
 
 - `Publish`
 - `Survey`

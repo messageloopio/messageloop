@@ -20,7 +20,7 @@
 - **Transports**: Pluggable connection handling abstraction:
   - `WebSocket`: Handles HTTP upgrades and negotiates encoding (json/proto).
   - `gRPC client streaming`: Handles bidirectional client sessions with custom `RawCodec` to avoid double-encoding.
-  - `gRPC admin API`: Exposes `messageloop.server.v1.APIService` on a separate listener.
+  - `gRPC admin API`: Exposes `messageloop.server.v2.APIService` on a separate listener.
 - **Protocol**: Protobuf-defined client envelopes and shared payloads.
   - `InboundMessage`/`OutboundMessage` contain operations such as Connect, Publish, Subscribe, RPC, and Survey.
   - `sharedpb.Payload` supports Binary, Text, or JSON data fields.

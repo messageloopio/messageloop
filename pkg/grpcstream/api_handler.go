@@ -8,23 +8,22 @@ import (
 	"github.com/lynx-go/x/log"
 	"github.com/messageloopio/messageloop"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	serverpb "github.com/messageloopio/messageloop/shared/genproto/server/v1"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
 	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
 type apiServiceHandler struct {
-	serverpb.UnimplementedAPIServiceServer
+	serverv2.UnimplementedAPIServiceServer
 	node *messageloop.Node
 }
 
-func NewAPIServiceHandler(node *messageloop.Node) serverpb.APIServiceServer {
+func NewAPIServiceHandler(node *messageloop.Node) serverv2.APIServiceServer {
 	return &apiServiceHandler{node: node}
 }
 
-func (h *apiServiceHandler) Publish(ctx context.Context, req *serverpb.PublishRequest) (*serverpb.PublishResponse, error) {
+func (h *apiServiceHandler) Publish(ctx context.Context, req *serverv2.PublishRequest) (*serverv2.PublishResponse, error) {
 	log.InfoContext(ctx, "server side API Publish", "request_id", req.RequestId)
 
 	// Capability gates (PR-KA-A4 §7): per-session delivery needs session.act;
@@ -65,7 +64,7 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverpb.PublishRe
 	failed := 0
 	for _, pub := range req.Publications {
 		// Extract data from Payload, preserving the original oneof variant.
-		brokerPub, err := messageloop.PublicationFromPayload(pub.Id, pub.GetMetadata().GetEntries(), pub.GetPayload())
+		brokerPub, err := messageloop.PublicationFromPayloadV2(pub.Id, pub.GetMetadata().GetEntries(), pub.GetPayload())
 		if err != nil {
 			log.ErrorContext(ctx, "failed to marshal JSON payload", err, "publication_id", pub.Id)
 			attempted++
@@ -87,12 +86,12 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverpb.PublishRe
 		// with every user's expanded sessions.
 		for _, sessionID := range h.unionSessions(ctx, dest.Sessions, dest.Users, "publish") {
 			attempted++
-			// The session now speaks client.v2: bridge the admin's shared.v1
-			// payload into the v2 wire payload for the targeted session.
+			// The admin wire payload is already shared.v2 — the same shape
+			// the client.v2 session consumes, so it passes through directly.
 			msg := &clientpb.Message{
 				Channel: "", // Session-based, no channel
 				Id:      pub.Id,
-				Payload: adminPayloadV2(pub.Payload),
+				Payload: pub.Payload,
 			}
 
 			ok, err := h.node.PublishToSession(ctx, sessionID, msg)
@@ -147,10 +146,10 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverpb.PublishRe
 	if attempted > 0 && failed == attempted {
 		return nil, status.Errorf(codes.Internal, "all %d delivery attempt(s) failed", failed)
 	}
-	return &serverpb.PublishResponse{}, nil
+	return &serverv2.PublishResponse{}, nil
 }
 
-func (h *apiServiceHandler) Survey(ctx context.Context, req *serverpb.SurveyRequest) (*serverpb.SurveyResponse, error) {
+func (h *apiServiceHandler) Survey(ctx context.Context, req *serverv2.SurveyRequest) (*serverv2.SurveyResponse, error) {
 	log.InfoContext(ctx, "server side API Survey", "channel", req.Channel, "request_id", req.RequestId)
 
 	// Without survey.bypass_gate the Admin survey runs through the same
@@ -180,14 +179,14 @@ func (h *apiServiceHandler) Survey(ctx context.Context, req *serverpb.SurveyRequ
 		return nil, err
 	}
 
-	response := &serverpb.SurveyResponse{
+	response := &serverv2.SurveyResponse{
 		RequestId: req.RequestId,
-		Results:   make([]*serverpb.SurveyResult, 0, len(results)),
+		Results:   make([]*serverv2.SurveyResult, 0, len(results)),
 	}
 	for _, result := range results {
-		item := &serverpb.SurveyResult{SessionId: result.SessionID}
+		item := &serverv2.SurveyResult{SessionId: result.SessionID}
 		if len(result.Payload) > 0 {
-			item.Payload = &sharedpb.Payload{Data: &sharedpb.Payload_Binary{Binary: result.Payload}}
+			item.Payload = &sharedv2.Payload{Data: &sharedv2.Payload_Binary{Binary: result.Payload}}
 		}
 		metadata := make(map[string]string)
 		if result.NodeID != "" {
@@ -197,10 +196,10 @@ func (h *apiServiceHandler) Survey(ctx context.Context, req *serverpb.SurveyRequ
 			metadata["incarnation_id"] = result.IncarnationID
 		}
 		if len(metadata) > 0 {
-			item.Metadata = &sharedpb.Metadata{Entries: metadata}
+			item.Metadata = &sharedv2.Metadata{Entries: metadata}
 		}
 		if result.Error != nil {
-			item.Error = &sharedpb.Error{Code: "SURVEY_FAILED", Message: result.Error.Error()}
+			item.Error = &sharedv2.Error{Code: "SURVEY_FAILED", Message: result.Error.Error()}
 		}
 		response.Results = append(response.Results, item)
 	}
@@ -208,7 +207,7 @@ func (h *apiServiceHandler) Survey(ctx context.Context, req *serverpb.SurveyRequ
 	return response, nil
 }
 
-func (h *apiServiceHandler) Disconnect(ctx context.Context, req *serverpb.DisconnectRequest) (*serverpb.DisconnectResponse, error) {
+func (h *apiServiceHandler) Disconnect(ctx context.Context, req *serverv2.DisconnectRequest) (*serverv2.DisconnectResponse, error) {
 	log.InfoContext(ctx, "server side API Disconnect", "sessions", req.Sessions, "users", req.Users, "code", req.Code, "reason", req.Reason)
 
 	// Capability gates (PR-KA-A4 §7).
@@ -247,10 +246,10 @@ func (h *apiServiceHandler) Disconnect(ctx context.Context, req *serverpb.Discon
 		}
 	}
 
-	return &serverpb.DisconnectResponse{Results: results}, nil
+	return &serverv2.DisconnectResponse{Results: results}, nil
 }
 
-func (h *apiServiceHandler) Subscribe(ctx context.Context, req *serverpb.SubscribeRequest) (*serverpb.SubscribeResponse, error) {
+func (h *apiServiceHandler) Subscribe(ctx context.Context, req *serverv2.SubscribeRequest) (*serverv2.SubscribeResponse, error) {
 	log.InfoContext(ctx, "server side API Subscribe", "session_id", req.SessionId, "user_id", req.UserId, "channels", req.Channels)
 
 	if req.SessionId == "" && req.UserId == "" {
@@ -290,10 +289,10 @@ func (h *apiServiceHandler) Subscribe(ctx context.Context, req *serverpb.Subscri
 		results[ch] = ok
 	}
 
-	return &serverpb.SubscribeResponse{Results: results}, nil
+	return &serverv2.SubscribeResponse{Results: results}, nil
 }
 
-func (h *apiServiceHandler) Unsubscribe(ctx context.Context, req *serverpb.UnsubscribeRequest) (*serverpb.UnsubscribeResponse, error) {
+func (h *apiServiceHandler) Unsubscribe(ctx context.Context, req *serverv2.UnsubscribeRequest) (*serverv2.UnsubscribeResponse, error) {
 	log.InfoContext(ctx, "server side API Unsubscribe", "session_id", req.SessionId, "user_id", req.UserId, "channels", req.Channels)
 
 	if req.SessionId == "" && req.UserId == "" {
@@ -332,7 +331,7 @@ func (h *apiServiceHandler) Unsubscribe(ctx context.Context, req *serverpb.Unsub
 		results[ch] = ok
 	}
 
-	return &serverpb.UnsubscribeResponse{Results: results}, nil
+	return &serverv2.UnsubscribeResponse{Results: results}, nil
 }
 
 // unionSessions expands the users list into session IDs (via the node's
@@ -363,7 +362,7 @@ func (h *apiServiceHandler) unionSessions(ctx context.Context, explicit []string
 	return result
 }
 
-func (h *apiServiceHandler) GetPresence(ctx context.Context, req *serverpb.GetPresenceRequest) (*serverpb.GetPresenceResponse, error) {
+func (h *apiServiceHandler) GetPresence(ctx context.Context, req *serverv2.GetPresenceRequest) (*serverv2.GetPresenceResponse, error) {
 	log.InfoContext(ctx, "server side API GetPresence", "channel", req.Channel)
 
 	// Capability + Decide gates (PR-KA-A4 §7): presence.read is required and
@@ -380,16 +379,17 @@ func (h *apiServiceHandler) GetPresence(ctx context.Context, req *serverpb.GetPr
 		return nil, err
 	}
 
-	clients := make(map[string]*serverpb.PresenceInfo, len(presenceMap))
+	clients := make(map[string]*serverv2.PresenceInfo, len(presenceMap))
 	for id, info := range presenceMap {
-		clients[id] = &serverpb.PresenceInfo{
-			ClientId:    info.ClientID,
-			UserId:      info.UserID,
-			ConnectedAt: info.ConnectedAt,
+		clients[id] = &serverv2.PresenceInfo{
 			// SessionId falls back to the legacy client_id key so old
 			// Redis records without the new field still report it.
-			SessionId:       firstNonEmpty(info.SessionID, info.ClientID),
-			ConnectClientId: info.ConnectClientID,
+			SessionId: firstNonEmpty(info.SessionID, info.ClientID),
+			UserId:    info.UserID,
+			// ClientId is the Connect.client_id (device endpoint), not the
+			// session ID (D6 semantic fix).
+			ClientId:    info.ConnectClientID,
+			ConnectedAt: info.ConnectedAt,
 		}
 	}
 
@@ -413,7 +413,7 @@ func (h *apiServiceHandler) GetPresence(ctx context.Context, req *serverpb.GetPr
 		}
 	}
 
-	return &serverpb.GetPresenceResponse{Clients: clients}, nil
+	return &serverv2.GetPresenceResponse{Clients: clients}, nil
 }
 
 func firstNonEmpty(values ...string) string {
@@ -425,8 +425,8 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func (h *apiServiceHandler) GetHistory(ctx context.Context, req *serverpb.GetHistoryRequest) (*serverpb.GetHistoryResponse, error) {
-	log.InfoContext(ctx, "server side API GetHistory", "channel", req.Channel, "since_offset", req.SinceOffset, "limit", req.Limit)
+func (h *apiServiceHandler) GetHistory(ctx context.Context, req *serverv2.GetHistoryRequest) (*serverv2.GetHistoryResponse, error) {
+	log.InfoContext(ctx, "server side API GetHistory", "channel", req.Channel, "since", req.Since, "limit", req.Limit)
 
 	// Capability + Decide gates (PR-KA-A4 §7): history.read is required and
 	// the channel must allow Recover for the admin principal (Effects.Recover
@@ -439,32 +439,49 @@ func (h *apiServiceHandler) GetHistory(ctx context.Context, req *serverpb.GetHis
 		return nil, status.Error(codes.PermissionDenied, "history denied by ACL rule")
 	}
 
-	page, err := h.node.Broker().History(req.Channel, req.SinceOffset, int(req.Limit))
+	// since is the resume position: nil reads from the head (within limit);
+	// an offset-only position resumes from that offset. A non-empty
+	// stream_epoch must match the broker's current epoch — a mismatch means
+	// the caller's cursor belongs to a previous log generation.
+	var sinceOffset uint64
+	if since := req.Since; since != nil {
+		if epoch := since.GetStreamEpoch(); epoch != "" {
+			current := ""
+			if epocher, ok := h.node.Broker().(interface{ Epoch() string }); ok {
+				current = epocher.Epoch()
+			}
+			if current != epoch {
+				return nil, status.Error(codes.FailedPrecondition, "stream epoch mismatch: history belongs to a previous log generation")
+			}
+		}
+		sinceOffset = since.GetOffset()
+	}
+
+	page, err := h.node.Broker().History(req.Channel, sinceOffset, int(req.Limit))
 	if err != nil {
 		return nil, err
 	}
 	pubs := page.Pubs()
 
-	result := make([]*serverpb.HistoryPublication, 0, len(pubs))
+	result := make([]*serverv2.HistoryPublication, 0, len(pubs))
 	for _, pub := range pubs {
-		metadata := pub.Metadata
-		if len(metadata) == 0 {
-			metadata = nil
+		var metadata *sharedv2.Metadata
+		if len(pub.Metadata) > 0 {
+			metadata = &sharedv2.Metadata{Entries: pub.Metadata}
 		}
-		result = append(result, &serverpb.HistoryPublication{
-			Offset:   pub.Offset,
-			Payload:  pub.PayloadProto(),
-			IsText:   pub.Kind == messageloop.PayloadKindText || pub.Kind == messageloop.PayloadKindJSON,
+		result = append(result, &serverv2.HistoryPublication{
+			Position: &sharedv2.Position{StreamEpoch: pub.Epoch, Offset: &pub.Offset},
+			Payload:  pub.PayloadProtoV2(),
 			Time:     pub.Time,
 			Id:       pub.Id,
 			Metadata: metadata,
 		})
 	}
 
-	return &serverpb.GetHistoryResponse{Publications: result}, nil
+	return &serverv2.GetHistoryResponse{Publications: result}, nil
 }
 
-func (h *apiServiceHandler) GetChannels(ctx context.Context, req *serverpb.GetChannelsRequest) (*serverpb.GetChannelsResponse, error) {
+func (h *apiServiceHandler) GetChannels(ctx context.Context, req *serverv2.GetChannelsRequest) (*serverv2.GetChannelsResponse, error) {
 	log.InfoContext(ctx, "server side API GetChannels")
 
 	// Capability gate (PR-KA-A4 §7): channels.list is required.
@@ -476,38 +493,19 @@ func (h *apiServiceHandler) GetChannels(ctx context.Context, req *serverpb.GetCh
 	if err != nil {
 		return nil, err
 	}
-	channels := make([]*serverpb.ChannelInfo, 0, len(activeChannels))
+	channels := make([]*serverv2.ChannelInfo, 0, len(activeChannels))
 	for _, ch := range activeChannels {
-		channels = append(channels, &serverpb.ChannelInfo{
+		channels = append(channels, &serverv2.ChannelInfo{
 			Name:        ch.Name,
 			Subscribers: int32(ch.Subscribers),
 		})
 	}
 
-	return &serverpb.GetChannelsResponse{Channels: channels}, nil
+	return &serverv2.GetChannelsResponse{Channels: channels}, nil
 }
 
-// adminPayloadV2 bridges an admin (shared.v1) payload into the client-v2
-// wire payload delivered to a targeted session. The oneof variants are the
-// same protobuf structs; only the enclosing package differs.
-func adminPayloadV2(p *sharedpb.Payload) *sharedv2.Payload {
-	if p == nil {
-		return nil
-	}
-	out := &sharedv2.Payload{ContentType: p.GetContentType()}
-	switch d := p.Data.(type) {
-	case *sharedpb.Payload_Json:
-		out.Data = &sharedv2.Payload_Json{Json: d.Json}
-	case *sharedpb.Payload_Binary:
-		out.Data = &sharedv2.Payload_Binary{Binary: d.Binary}
-	case *sharedpb.Payload_Text:
-		out.Data = &sharedv2.Payload_Text{Text: d.Text}
-	}
-	return out
-}
-
-func payloadBytes(payload *sharedpb.Payload) ([]byte, error) {
-	pub, err := messageloop.PublicationFromPayload("", nil, payload)
+func payloadBytes(payload *sharedv2.Payload) ([]byte, error) {
+	pub, err := messageloop.PublicationFromPayloadV2("", nil, payload)
 	if err != nil {
 		return nil, err
 	}

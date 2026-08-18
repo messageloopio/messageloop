@@ -176,7 +176,7 @@ func (s *rpcService) handleStats(ctx context.Context, req *messageloopgo.RPCRequ
 	if history, herr := s.admin.History(ctx, s.room, 0, 5); herr == nil {
 		b.WriteString(fmt.Sprintf("last %d messages in %s:\n", len(history), s.room))
 		for _, pub := range history {
-			b.WriteString(fmt.Sprintf("  #%d %s\n", pub.Offset, pub.Id))
+			b.WriteString(fmt.Sprintf("  #%d %s\n", pub.GetPosition().GetOffset(), pub.Id))
 		}
 	}
 	return &messageloopgo.RPCResponse{
@@ -202,7 +202,7 @@ func (s *rpcService) handleHistory(ctx context.Context, req *messageloopgo.RPCRe
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("history of %s (%d entries):\n", s.room, len(history)))
 	for _, pub := range history {
-		b.WriteString(fmt.Sprintf("  #%d %s\n", pub.Offset, pub.Id))
+		b.WriteString(fmt.Sprintf("  #%d %s\n", pub.GetPosition().GetOffset(), pub.Id))
 	}
 	return &messageloopgo.RPCResponse{
 		Payload: messageloopgo.NewMessageWithData("chat.history.response",

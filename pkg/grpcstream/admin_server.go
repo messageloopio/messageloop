@@ -5,7 +5,7 @@ import (
 
 	"github.com/lynx-go/x/log"
 	"github.com/messageloopio/messageloop"
-	serverpb "github.com/messageloopio/messageloop/shared/genproto/server/v1"
+	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
 	"google.golang.org/grpc"
 )
 
@@ -18,6 +18,6 @@ func PrepareAdminServer(opts Options, node *messageloop.Node) (*Server, error) {
 		log.WarnContext(context.Background(), "admin gRPC running WITHOUT authentication (allow_insecure)")
 	}
 	return prepareServer("grpc-admin-server", opts, func(grpcServer *grpc.Server) {
-		serverpb.RegisterAPIServiceServer(grpcServer, NewAPIServiceHandler(node))
+		serverv2.RegisterAPIServiceServer(grpcServer, NewAPIServiceHandler(node))
 	}, extraOpts...)
 }

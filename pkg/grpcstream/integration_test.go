@@ -9,8 +9,8 @@ import (
 
 	"github.com/messageloopio/messageloop"
 	"github.com/messageloopio/messageloop/pkg/grpcstream"
-	serverpb "github.com/messageloopio/messageloop/shared/genproto/server/v1"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
+	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -20,12 +20,12 @@ import (
 
 const bufSize = 1024 * 1024
 
-func startTestGRPCServer(t *testing.T, node *messageloop.Node) serverpb.APIServiceClient {
+func startTestGRPCServer(t *testing.T, node *messageloop.Node) serverv2.APIServiceClient {
 	t.Helper()
 
 	lis := bufconn.Listen(bufSize)
 	s := grpc.NewServer()
-	serverpb.RegisterAPIServiceServer(s, grpcstream.NewAPIServiceHandler(node))
+	serverv2.RegisterAPIServiceServer(s, grpcstream.NewAPIServiceHandler(node))
 	go func() { _ = s.Serve(lis) }()
 	t.Cleanup(s.GracefulStop)
 
@@ -38,7 +38,7 @@ func startTestGRPCServer(t *testing.T, node *messageloop.Node) serverpb.APIServi
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })
 
-	return serverpb.NewAPIServiceClient(conn)
+	return serverv2.NewAPIServiceClient(conn)
 }
 
 // mockTransport is a minimal no-op transport for test clients.
@@ -73,18 +73,18 @@ func TestGRPC_AdminAPI_PublishAndDisconnect(t *testing.T) {
 	require.NoError(t, node.AddSubscription(ctx, "chat", messageloop.NewSubscriber(client, false)))
 
 	// Publish via API
-	_, err := api.Publish(ctx, &serverpb.PublishRequest{
+	_, err := api.Publish(ctx, &serverv2.PublishRequest{
 		RequestId: "req-1",
-		Publications: []*serverpb.Publication{{
+		Publications: []*serverv2.Publication{{
 			Id:          "pub-1",
-			Destination: &serverpb.Publication_Destination{Channels: []string{"chat"}},
-			Payload:     &sharedpb.Payload{Data: &sharedpb.Payload_Text{Text: "hello"}},
+			Destination: &serverv2.Publication_Destination{Channels: []string{"chat"}},
+			Payload:     &sharedv2.Payload{Data: &sharedv2.Payload_Text{Text: "hello"}},
 		}},
 	})
 	require.NoError(t, err)
 
 	// Disconnect via API
-	resp, err := api.Disconnect(ctx, &serverpb.DisconnectRequest{
+	resp, err := api.Disconnect(ctx, &serverv2.DisconnectRequest{
 		Sessions: []string{"sess-1"},
 		Code:     3000,
 		Reason:   "test disconnect",
@@ -102,7 +102,7 @@ func TestGRPC_AdminAPI_SubscribeUnsubscribe(t *testing.T) {
 	_ = addTestClient(t, node, "sess-2", "user-2")
 
 	// Subscribe via API
-	subResp, err := api.Subscribe(ctx, &serverpb.SubscribeRequest{
+	subResp, err := api.Subscribe(ctx, &serverv2.SubscribeRequest{
 		SessionId: "sess-2",
 		Channels:  []string{"news", "sports"},
 	})
@@ -111,7 +111,7 @@ func TestGRPC_AdminAPI_SubscribeUnsubscribe(t *testing.T) {
 	require.True(t, subResp.Results["sports"])
 
 	// GetChannels — should show the subscribed channels
-	chResp, err := api.GetChannels(ctx, &serverpb.GetChannelsRequest{})
+	chResp, err := api.GetChannels(ctx, &serverv2.GetChannelsRequest{})
 	require.NoError(t, err)
 	channelNames := make(map[string]int32)
 	for _, ch := range chResp.Channels {
@@ -121,7 +121,7 @@ func TestGRPC_AdminAPI_SubscribeUnsubscribe(t *testing.T) {
 	require.Equal(t, int32(1), channelNames["sports"])
 
 	// Unsubscribe via API
-	unsubResp, err := api.Unsubscribe(ctx, &serverpb.UnsubscribeRequest{
+	unsubResp, err := api.Unsubscribe(ctx, &serverv2.UnsubscribeRequest{
 		SessionId: "sess-2",
 		Channels:  []string{"news"},
 	})
@@ -129,7 +129,7 @@ func TestGRPC_AdminAPI_SubscribeUnsubscribe(t *testing.T) {
 	require.True(t, unsubResp.Results["news"])
 
 	// GetChannels — "news" should be gone
-	chResp2, err := api.GetChannels(ctx, &serverpb.GetChannelsRequest{})
+	chResp2, err := api.GetChannels(ctx, &serverv2.GetChannelsRequest{})
 	require.NoError(t, err)
 	channelNames2 := make(map[string]int32)
 	for _, ch := range chResp2.Channels {
@@ -155,15 +155,14 @@ func TestGRPC_AdminAPI_GetHistory(t *testing.T) {
 	// Small delay for broker to process
 	time.Sleep(50 * time.Millisecond)
 
-	resp, err := api.GetHistory(ctx, &serverpb.GetHistoryRequest{
-		Channel:     "history-ch",
-		SinceOffset: 0,
-		Limit:       10,
+	resp, err := api.GetHistory(ctx, &serverv2.GetHistoryRequest{
+		Channel: "history-ch",
+		Limit:   10,
 	})
 	require.NoError(t, err)
 	require.Len(t, resp.Publications, 3)
-	require.Equal(t, uint64(1), resp.Publications[0].Offset)
-	require.Equal(t, uint64(3), resp.Publications[2].Offset)
+	require.Equal(t, uint64(1), resp.Publications[0].Position.GetOffset())
+	require.Equal(t, uint64(3), resp.Publications[2].Position.GetOffset())
 }
 
 // TestGRPC_AdminAPI_Publish_JSONPayload verifies that a Payload_Json published
@@ -181,13 +180,13 @@ func TestGRPC_AdminAPI_Publish_JSONPayload(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = api.Publish(ctx, &serverpb.PublishRequest{
+	_, err = api.Publish(ctx, &serverv2.PublishRequest{
 		RequestId: "req-1",
-		Publications: []*serverpb.Publication{{
+		Publications: []*serverv2.Publication{{
 			Id:          "pub-1",
-			Destination: &serverpb.Publication_Destination{Channels: []string{"json-admin"}},
-			Payload:     &sharedpb.Payload{Data: &sharedpb.Payload_Json{Json: payloadStruct}},
-			Options:     &serverpb.Publication_Options{AddHistory: true},
+			Destination: &serverv2.Publication_Destination{Channels: []string{"json-admin"}},
+			Payload:     &sharedv2.Payload{Data: &sharedv2.Payload_Json{Json: payloadStruct}},
+			Options:     &serverv2.Publication_Options{AddHistory: true},
 		}},
 	})
 	require.NoError(t, err)

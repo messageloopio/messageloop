@@ -674,6 +674,15 @@ func TestRedisBroker_LiveSubscription_OccupancyFollowsInterest(t *testing.T) {
 // TestRedisBroker_LiveSubscription_OccupancyNotInterested pins B2 §8.3: a
 // node subscribed only to chat.1 never invokes its occupancy handler for an
 // im.room.1 event, and its publication handler stays untouched.
+//
+// The channels are unique to this test (d6noi.*): classic Redis PUBLISH /
+// SUBSCRIBE is instance-global (it ignores the logical DB), and `go test
+// ./...` runs packages in parallel, so a foreign test subscribing a client to
+// a shared name like "chat.1" (e.g. the root-package cluster e2e) publishes a
+// legitimate occupancy join that this broker — being subscribed to chat.1 —
+// would receive, failing the negative assertion (observed as a ~0.04s flake:
+// the foreign event arrives almost immediately). Unique names keep the
+// negative window free of any legitimate traffic.
 func TestRedisBroker_LiveSubscription_OccupancyNotInterested(t *testing.T) {
 	redisCfg := requireCommandBusRedis(t)
 	brokerA := New(redisCfg).(*redisBroker)
@@ -697,16 +706,16 @@ func TestRedisBroker_LiveSubscription_OccupancyNotInterested(t *testing.T) {
 		}
 	})
 
-	require.NoError(t, brokerA.Subscribe("chat.1"))
-	waitLiveActive(t, brokerA, []string{brokerA.opts.PubSubPrefix + "chat.1"})
+	require.NoError(t, brokerA.Subscribe("d6noi.chat.1"))
+	waitLiveActive(t, brokerA, []string{brokerA.opts.PubSubPrefix + "d6noi.chat.1"})
 
-	require.NoError(t, brokerB.PublishOccupancy("im.room.1", messageloop.OccupancyEvent{
+	require.NoError(t, brokerB.PublishOccupancy("d6noi.im.room.1", messageloop.OccupancyEvent{
 		Gen:   3,
 		Event: &clientpb.PresenceEvent{Action: "join", Info: &clientpb.PresenceInfo{SessionId: "sess-y"}},
 	}))
 	select {
 	case evt := <-occA:
-		t.Fatalf("a node without im-tree interest must not receive im.room.1 occupancy (got gen %d)", evt.Gen)
+		t.Fatalf("a node without im-tree interest must not receive d6noi.im.room.1 occupancy (got gen %d)", evt.Gen)
 	case <-time.After(1 * time.Second):
 	}
 }

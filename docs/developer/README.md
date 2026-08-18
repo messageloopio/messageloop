@@ -23,7 +23,7 @@
 | --- | --- |
 | [架构指南](01-architecture.md) | 总体设计：Node/Hub/Client/Broker/Presence/Survey/ACL/Proxy 核心组件、传输层、主题匹配、消息流走查、断连模型、并发模型、模块布局 |
 | [配置参考](02-configuration.md) | 全部配置项逐字段参考：默认值、校验规则、内置 ACL 语义、代理路由与钩子、三层超时、完整示例走查 |
-| [管理 API 参考](03-admin-api.md) | 服务端 gRPC 管理接口（`messageloop.server.v1.APIService`）：鉴权、8 个 RPC 的字段与语义、错误模型、grpcurl 示例、集群感知行为 |
+| [管理 API 参考](03-admin-api.md) | 服务端 gRPC 管理接口（`messageloop.server.v2.APIService`）：鉴权、8 个 RPC 的字段与语义、错误模型、grpcurl 示例、集群感知行为 |
 | [分布式集群指南](04-cluster.md) | 多节点部署：Redis broker 与控制面的区别、节点租约、命令总线与去重、会话归属与远端接管、集群级 Survey、投影修复、Presence 聚合、故障与恢复 |
 | [可观测性指南](05-observability.md) | 健康检查、Prometheus 指标全集、日志、断连码参考、监控告警建议、故障排查 |
 | [开发指南](06-development.md) | 环境要求、仓库布局、构建/测试/lint、Protobuf 工作流、代码风格、发布流程 |

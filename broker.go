@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"time"
 
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v1"
 	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -49,45 +48,8 @@ type Publication struct {
 	HistoryTTL time.Duration
 }
 
-// PayloadProto rebuilds the shared Payload message from the publication,
-// preserving the original oneof variant (Binary/Text/JSON).
-func (p *Publication) PayloadProto() *sharedpb.Payload {
-	if p == nil || len(p.Payload) == 0 {
-		return nil
-	}
-	switch p.Kind {
-	case PayloadKindText:
-		return &sharedpb.Payload{
-			ContentType: p.ContentType,
-			Data:        &sharedpb.Payload_Text{Text: string(p.Payload)},
-		}
-	case PayloadKindJSON:
-		var object map[string]any
-		if err := json.Unmarshal(p.Payload, &object); err == nil {
-			if st, err := structpb.NewStruct(object); err == nil {
-				return &sharedpb.Payload{
-					ContentType: p.ContentType,
-					Data:        &sharedpb.Payload_Json{Json: st},
-				}
-			}
-		}
-// Not valid JSON after all: degrade to text and let the caller log.
-	return &sharedpb.Payload{
-		ContentType: p.ContentType,
-		Data:        &sharedpb.Payload_Text{Text: string(p.Payload)},
-	}
-	default:
-		return &sharedpb.Payload{
-			ContentType: p.ContentType,
-			Data:        &sharedpb.Payload_Binary{Binary: p.Payload},
-		}
-	}
-}
-
-// PayloadProtoV2 rebuilds the client-v2 shared Payload message from the
-// publication, preserving the original oneof variant (Binary/Text/JSON). The
-// v1 and v2 payload shapes are identical except for the package path, so the
-// conversion mirrors PayloadProto.
+// PayloadProtoV2 rebuilds the shared.v2 Payload message from the
+// publication, preserving the original oneof variant (Binary/Text/JSON).
 func (p *Publication) PayloadProtoV2() *sharedv2.Payload {
 	if p == nil || len(p.Payload) == 0 {
 		return nil
