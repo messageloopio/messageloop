@@ -26,11 +26,31 @@ const (
 
 type Error struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Well-known string codes (not an enum): AUTH_REQUIRED, AUTH_ERROR,
-	// RATE_LIMITED, RPC_TIMEOUT, PROXY_ERROR, NO_PROXY, BAD_REQUEST,
-	// PERMISSION_DENIED, POLICY_DENIED, RECOVER_FAILED, RECOVER_SKIPPED,
-	// SURVEY_DISABLED, SURVEY_TOO_MANY_SUBSCRIBERS, PATTERN_NOT_ROUTABLE,
-	// VERSION_UNSUPPORTED.
+	// Well-known string codes (not an enum). This is the single code table;
+	// the Error Codes section of docs/protocol.md mirrors it and must stay in
+	// sync. Grouped:
+	//
+	//	authentication/version:
+	//	  AUTH_REQUIRED (auth_error), AUTH_ERROR (auth_error),
+	//	  VERSION_UNSUPPORTED (version_error)
+	//	request/permission:
+	//	  BAD_REQUEST (client_error for undecodable frames, request_error for
+	//	  invalid requests), PERMISSION_DENIED (acl_error),
+	//	  POLICY_DENIED (policy_error), PATTERN_NOT_ROUTABLE (request_error),
+	//	  RATE_LIMITED (rate_limit)
+	//	proxy/RPC:
+	//	  NO_PROXY (request_error), PROXY_ERROR (proxy_error),
+	//	  RPC_TIMEOUT (timeout)
+	//	recovery:
+	//	  RECOVER_FAILED (recover_error), RECOVER_SKIPPED (recover_error)
+	//	survey top-level:
+	//	  SURVEY_DISABLED (policy_error),
+	//	  SURVEY_TOO_MANY_SUBSCRIBERS (survey_error)
+	//	survey per-answer:
+	//	  SURVEY_FAILED (survey_error),
+	//	  SURVEY_ANSWER_TOO_LARGE (survey_error)
+	//	server/transport:
+	//	  INTERNAL_ERROR (server_error), DISCONNECT_ERROR (transport_error)
 	Code          string           `protobuf:"bytes,1,opt,name=code,proto3" json:"code,omitempty"`
 	Type          string           `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
 	Message       string           `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`

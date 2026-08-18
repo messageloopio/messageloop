@@ -159,7 +159,7 @@ func TestWebSocket_ACL_SubscribeDenied(t *testing.T) {
 	msg := readJSON(t, conn, 2*time.Second)
 	if errObj, ok := msg["error"]; ok {
 		errMap := errObj.(map[string]any)
-		assert.Equal(t, "ACL_DENIED", errMap["code"])
+		assert.Equal(t, "PERMISSION_DENIED", errMap["code"])
 		// Read the subscribe_ack that follows.
 		msg = readJSON(t, conn, 2*time.Second)
 	}
@@ -215,7 +215,7 @@ func TestWebSocket_ACL_PublishDenied(t *testing.T) {
 	msg := readJSON(t, conn, 2*time.Second)
 	require.NotNil(t, msg["error"], "expected ACL error, got: %v", msg)
 	errMap := msg["error"].(map[string]any)
-	assert.Equal(t, "ACL_DENIED", errMap["code"])
+	assert.Equal(t, "PERMISSION_DENIED", errMap["code"])
 
 	// Connection should remain alive.
 	sendJSON(t, conn, map[string]any{

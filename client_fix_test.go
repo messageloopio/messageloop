@@ -181,7 +181,7 @@ func TestClientSession_HandleMessage_Connect_ACLDeniedSubscription(t *testing.T)
 	assert.Zero(t, node.Hub().NumSubscribers("private.secret"))
 	assert.Equal(t, 1, node.Hub().NumSubscribers("public.room"))
 
-	// The connection stays up: a per-channel ACL_DENIED error followed by the
+	// The connection stays up: a per-channel PERMISSION_DENIED error followed by the
 	// Connected envelope, then a separate presence snapshot for the allowed
 	// channel (v2 Presence is its own envelope).
 	require.False(t, transport.isClosed())
@@ -191,7 +191,7 @@ func TestClientSession_HandleMessage_Connect_ACLDeniedSubscription(t *testing.T)
 	require.NoError(t, JSONMarshaler{}.Unmarshal(transport.getMessage(0), &first))
 	errEnv := first.GetError()
 	require.NotNil(t, errEnv, "first message should be the ACL error")
-	assert.Equal(t, "ACL_DENIED", errEnv.Code)
+	assert.Equal(t, "PERMISSION_DENIED", errEnv.Code)
 
 	var connectedMsg clientpb.OutboundMessage
 	require.NoError(t, JSONMarshaler{}.Unmarshal(transport.getMessage(1), &connectedMsg))
@@ -211,7 +211,7 @@ func TestClientSession_HandleMessage_Connect_ACLDeniedSubscription(t *testing.T)
 
 // TestClientSession_Subscribe_ProxyAllowDoesNotBypassStaticDeny verifies
 // that a proxy which approves a subscription cannot punch a hole in a static
-// deny_all rule: the client still receives ACL_DENIED, nothing is subscribed
+// deny_all rule: the client still receives PERMISSION_DENIED, nothing is subscribed
 // and the connection stays up.
 func TestClientSession_Subscribe_ProxyAllowDoesNotBypassStaticDeny(t *testing.T) {
 	ctx := context.Background()
@@ -248,7 +248,7 @@ func TestClientSession_Subscribe_ProxyAllowDoesNotBypassStaticDeny(t *testing.T)
 	require.NoError(t, (JSONMarshaler{}).Unmarshal(transport.getMessage(0), &out))
 	errObj := out.GetError()
 	require.NotNil(t, errObj, "the proxy approval must not bypass the static deny")
-	assert.Equal(t, "ACL_DENIED", errObj.Code)
+	assert.Equal(t, "PERMISSION_DENIED", errObj.Code)
 	assert.Equal(t, "acl_error", errObj.Type)
 	assert.Zero(t, node.Hub().NumSubscribers("secret.1"), "the denied channel must not be subscribed")
 	require.False(t, transport.isClosed(), "a denied subscribe must not disconnect")

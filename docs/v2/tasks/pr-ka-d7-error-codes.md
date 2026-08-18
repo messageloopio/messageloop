@@ -3,7 +3,7 @@
 | 字段 | 值 |
 | --- | --- |
 | 标题 | `errors: fold off-table codes into one well-known table` |
-| 状态 | **Ready**（待实现） |
+| 状态 | **Accepted**（2026-08-18 主 agent 终验通过，尚未 commit） |
 | 依赖 | D6 已合（`e303c3d`，全仓零 v1 proto）。在 `v2` 分支上做 |
 | 设计来源 | 转正评审 backlog D7；`docs/v2/kernel-architecture.md:327`（一份码表、不保留 `ACL_DENIED`）；KD-K31 |
 | 验收人 | 主 agent |
@@ -127,4 +127,19 @@ git diff protocol/ | grep -E "^[+-][^+-]" | grep -v "^[+-]\s*//"   # proto 仅�
 
 ## 8. 实现备注（实现方填）
 
-（留空）
+实现日期：2026-08-18，基于 `v2` @ `98da5dd`（工作区起始干净，未触碰 stash 的崩溃会话半成品）。
+
+- §3 现状核对：行号零漂移，`client.go:764/785/990/1015` 四处发射点与规格完全一致；表外码 6 个、既有表内码清单一一对应。
+- 换名：4 处发射点已改（`ACL_DENIED`→`PERMISSION_DENIED` type 保持 `acl_error`；`ACL_ERROR`→`PROXY_ERROR` type 随改 `proxy_error`）。`node.go`/`api_handler.go` 的 `SURVEY_FAILED` 发射点、`hub.go`/`session.go`、capability 门禁均未动。
+- 码表定稿：errors.proto 注释扩为 19 码分组表，每码标注 type（取自实际发射点）；`docs/protocol.md` 错误码表重写为同 19 码、同 type、同分组顺序，脚本比对 proto 注释与文档表格的有序 `(code, type)` 对完全一致。示例与 `02-configuration.md:155` 同步改 `PERMISSION_DENIED`。
+- 生成物：`task generate-protocol` 后除 errors 三件套外还产生 `service.pb.go`/`types.pb.go` 及三个 swagger.json 的漂移 diff（与本次注释无关，其中 `errors.swagger.json` 本身无 diff——注释不进 swagger 输出），已按 §2 用 `git checkout --` 还原；最终生成物 diff 仅 `errors.pb.go` + `errors_pb.ts` 的注释 churn，wire 零变化（§5 末条 grep 零输出）。
+- 守护测试：新增根包 `error_codes_test.go`（`TestWellKnownErrorCodeTable`），硬编码 §3.1/§3.2 全量发射点码清单（含同步义务注释），从 errors.proto 的 `Error.code` 注释块抽取码表，断言每个生产码在表内且表内码数恰为 19。
+- 测试断言同步：`client_fix_test.go:194/251` 断言 + `:184/:214` 注释、`pkg/websocket/e2e_test.go:162/218`、`_examples/chatroom/cmd/e2e/main.go:518/520` 全部改完。
+- 验证：§5 全链绿（全仓 `go test ./...` 含真实 Redis 127.0.0.1:6379 DB 14、Go SDK、TS jest 83/83、chatroom build）。`git diff --numstat` 与 `--ignore-all-space --ignore-cr-at-eol` 输出一致，无格式 churn；新增 `error_codes_test.go` 按仓库约定为 CRLF。无 git commit/tag/push。
+- 偏离：无。
+
+### 主 agent 终验备注（2026-08-18）
+
+- 终验中修正一处码表注释失真：`BAD_REQUEST` 实际携带两种 type（transport 解码失败 `client_error`；请求校验失败如 presence query/坏 topic `request_error`，client.go:1620），proto 注释与 protocol.md 表已如实标注双 type。
+- 残留项（不阻塞）：`service/proxy/api` 三个 swagger.json 内嵌的 Error.code 描述仍是旧 15 码表——本机 buf 重新生成会引入大规模定义重排（工具链版本漂移），照 D5/D6 先例还原；待 D8 CI 固定工具链后统一刷新。
+- 终验全部由主 agent 亲跑：build、守护测试、定向三包、全量 `./...` 11/11、Go SDK、TS jest 83/83、chatroom build，全绿。

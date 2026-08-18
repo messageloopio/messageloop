@@ -515,9 +515,9 @@ func runPhase09ACL(ctx context.Context) {
 		return
 	}
 	waitFor(5*time.Second, "anonymous subscribe denied by ACL", func() bool {
-		return anon.hasErrorContaining("ACL_ERROR")
+		return anon.hasErrorContaining("PROXY_ERROR")
 	})
-	check(anon.hasErrorContaining("ACL_ERROR"), "anonymous subscribe denied (ACL_ERROR)")
+	check(anon.hasErrorContaining("PROXY_ERROR"), "anonymous subscribe denied (PROXY_ERROR)")
 	_ = anonClient.Close()
 
 	// An authenticated client with a per-subscription token is allowed.

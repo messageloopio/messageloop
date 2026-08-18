@@ -761,7 +761,7 @@ func (c *Session) checkSubscribeACL(ctx context.Context, in *clientpb.InboundMes
 	if dec := c.node.authorizer.Decide(c.node.userPrincipal(c.user), ActionSubscribePattern, ch.Channel); !dec.Allow {
 		log.WarnContext(ctx, "ACL denied subscribe", "channel", ch.Channel, "user", c.user, "reason", dec.Reason)
 		return &sharedv2.Error{
-			Code:    "ACL_DENIED",
+			Code:    "PERMISSION_DENIED",
 			Type:    "acl_error",
 			Message: "subscribe denied by ACL rule",
 		}
@@ -782,8 +782,8 @@ func (c *Session) checkSubscribeACL(ctx context.Context, in *clientpb.InboundMes
 		if err != nil {
 			log.WarnContext(ctx, "proxy subscribe ACL check failed", "channel", ch.Channel, "error", err)
 			return &sharedv2.Error{
-				Code:    "ACL_ERROR",
-				Type:    "acl_error",
+				Code:    "PROXY_ERROR",
+				Type:    "proxy_error",
 				Message: err.Error(),
 			}
 		}
@@ -987,7 +987,7 @@ func (c *Session) handlePublish(ctx context.Context, in *clientpb.InboundMessage
 		return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 			out.Envelope = &clientpb.OutboundMessage_Error{
 				Error: &sharedv2.Error{
-					Code:    "ACL_DENIED",
+					Code:    "PERMISSION_DENIED",
 					Type:    "acl_error",
 					Message: "publish denied by ACL rule",
 				},
@@ -1012,8 +1012,8 @@ func (c *Session) handlePublish(ctx context.Context, in *clientpb.InboundMessage
 			return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 				out.Envelope = &clientpb.OutboundMessage_Error{
 					Error: &sharedv2.Error{
-						Code:    "ACL_ERROR",
-						Type:    "acl_error",
+						Code:    "PROXY_ERROR",
+						Type:    "proxy_error",
 						Message: err.Error(),
 					},
 				}

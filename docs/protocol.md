@@ -489,30 +489,36 @@ Errors are returned as `Error` messages:
 ```json
 {
   "error": {
-    "code": "ACL_DENIED",
+    "code": "PERMISSION_DENIED",
     "type": "acl_error",
     "message": "publish denied by ACL rule"
   }
 }
 ```
 
-Common error codes:
+Common error codes (this table mirrors the `Error.code` comment in `protocol/shared/v2/errors.proto`; keep both in sync):
 
 | Code | Type | Description |
 | --- | --- | --- |
-| `ACL_DENIED` | `acl_error` | Operation blocked by ACL rule |
-| `ACL_ERROR` | `acl_error` | ACL proxy check failed |
-| `RATE_LIMITED` | `rate_limit` | Publish rate limit exceeded |
-| `RPC_TIMEOUT` | `timeout` | RPC forwarded to a proxy timed out |
-| `PROXY_ERROR` | `proxy_error` | Proxy call failed |
 | `AUTH_REQUIRED` | `auth_error` | Authentication required but no token (or no auth proxy) |
+| `AUTH_ERROR` | `auth_error` | Authentication failed (bad token, or auth proxy error) |
 | `VERSION_UNSUPPORTED` | `version_error` | Connect `version` generation is not supported (only generation 2 is accepted); followed by disconnect 3514 |
-| `INTERNAL_ERROR` | `server_error` | Internal server error while handling the request |
-| `BAD_REQUEST` | `client_error` | Frame could not be decoded |
-| `DISCONNECT_ERROR` | `transport_error` | Connection being terminated |
+| `BAD_REQUEST` | `client_error` / `request_error` | Frame could not be decoded (`client_error`), or the request itself is invalid, e.g. a malformed topic or a presence-query channel (`request_error`) |
+| `PERMISSION_DENIED` | `acl_error` | Operation blocked by ACL rule |
+| `POLICY_DENIED` | `policy_error` | Operation blocked by channel policy |
+| `PATTERN_NOT_ROUTABLE` | `request_error` | Subscription pattern is not routable |
+| `RATE_LIMITED` | `rate_limit` | Publish rate limit exceeded |
+| `NO_PROXY` | `request_error` | No proxy route matches the RPC method |
+| `PROXY_ERROR` | `proxy_error` | Proxy call failed |
+| `RPC_TIMEOUT` | `timeout` | RPC forwarded to a proxy timed out |
+| `RECOVER_FAILED` | `recover_error` | History recovery failed |
+| `RECOVER_SKIPPED` | `recover_error` | History recovery skipped |
 | `SURVEY_DISABLED` | `policy_error` | Client survey refused by channel policy (off by default) |
 | `SURVEY_TOO_MANY_SUBSCRIBERS` | `survey_error` | Client survey refused: subscriber count above the cap |
+| `SURVEY_FAILED` | `survey_error` | A survey answer could not be collected |
 | `SURVEY_ANSWER_TOO_LARGE` | `survey_error` | A survey answer (or result) exceeded the size cap and was truncated |
+| `INTERNAL_ERROR` | `server_error` | Internal server error while handling the request |
+| `DISCONNECT_ERROR` | `transport_error` | Connection being terminated |
 
 ## Disconnect Codes
 

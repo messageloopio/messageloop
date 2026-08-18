@@ -152,7 +152,7 @@ server:
 
 旧的 `server.acl`（last-write-wins、中段 `**`）与 `server.channels`（first-match 平行表）**已删除**：YAML 仍写这两个键会让 `Validate()` 失败（KD-K31，无兼容期）。所有授权与频道策略来自 `server.authorizer` 一张表，由根包 `Authorizer.Decide` / `Authorizer.Effects` 求值：
 
-- **订阅（SubscribePattern）**：默认放行。先做路由检查（`CompileInterest`，与 A3 同套规则）——不可路由的 pattern（`*.room`、裸 `**`）返回 `PATTERN_NOT_ROUTABLE`，先于 ACL；然后对该 principal 逐条 deny 规则（deny_all、空 allow 名单、不含该用户的名单）做**语言求交**，`L(p) ∩ L(d) ≠ ∅` → 拒绝（客户端信封 `ACL_DENIED`）。deny 不可被更具体的 allow 打洞（§9.2）。
+- **订阅（SubscribePattern）**：默认放行。先做路由检查（`CompileInterest`，与 A3 同套规则）——不可路由的 pattern（`*.room`、裸 `**`）返回 `PATTERN_NOT_ROUTABLE`，先于 ACL；然后对该 principal 逐条 deny 规则（deny_all、空 allow 名单、不含该用户的名单）做**语言求交**，`L(p) ∩ L(d) ≠ ∅` → 拒绝（客户端信封 `PERMISSION_DENIED`）。deny 不可被更具体的 allow 打洞（§9.2）。
 - **发布（Publish）**：精确频道，默认放行；`deny_all` 命中或 allow 名单未命中该用户 → 拒绝。**不要求 Coverage**（KD-K21）。
 - **Survey**：默认拒绝；`Effects.Survey==true` **且** 存在 `allow_survey` 命中该精确频道 **且** 无 deny 命中才放行。
 - **恢复（Recover）/ 在场（Presence）**：精确频道；默认跟随 `Effects(ch)`；`deny_all` 命中或通配频道 → 拒绝。
