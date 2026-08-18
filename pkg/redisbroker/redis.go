@@ -13,27 +13,31 @@ import (
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
 	"github.com/messageloopio/messageloop"
-	"github.com/messageloopio/messageloop/config"
-	"github.com/messageloopio/messageloop/pkg/topics"
 	"github.com/redis/go-redis/v9"
+
+	"github.com/messageloopio/messageloop/config"
+	"github.com/messageloopio/messageloop/internal/channel"
+	"github.com/messageloopio/messageloop/internal/occupancy"
+	"github.com/messageloopio/messageloop/internal/stream"
+	"github.com/messageloopio/messageloop/pkg/topics"
 )
 
-// redisBroker implements messageloop.Broker using Redis Streams (history)
+// redisBroker implements stream.Broker using Redis Streams (history)
 // and Redis Pub/Sub (real-time fan-out).
 type redisBroker struct {
 	client  *redis.Client
 	opts    *Options
-	handler messageloop.PublicationHandler
+	handler stream.PublicationHandler
 	// occHandler receives live occupancy events (B2). Set via
 	// SetOccupancyHandler before Start; never the publication handler.
-	occHandler messageloop.OccupancyHandler
+	occHandler stream.OccupancyHandler
 	// gapHandler receives catch-up gap notifications (C6). Set via
 	// SetGapHandler; nil disables client notification while detection
 	// counters/logging keep running. Written before Start and read on the
 	// catch-up path, so it is guarded by gapHandlerMu for tests that
 	// register it on a running broker.
 	gapHandlerMu sync.RWMutex
-	gapHandler   messageloop.GapHandler
+	gapHandler   stream.GapHandler
 	// epoch is set by initEpoch during Start and read concurrently by
 	// Publish/PublishTransient/Epoch, so it is guarded by atomic.Value.
 	epoch atomic.Value
@@ -139,7 +143,7 @@ type redisBroker struct {
 
 // New creates a new Redis-backed Broker.
 // Call go broker.Start(ctx, handler) to start processing events.
-func New(cfg config.RedisConfig) messageloop.Broker {
+func New(cfg config.RedisConfig) stream.Broker {
 	opts := NewOptions(cfg)
 	return &redisBroker{
 		client:         newRedisClient(opts),
@@ -170,7 +174,7 @@ func (b *redisBroker) Ready() <-chan struct{} {
 // starts the bounded delivery worker pool, and then runs the Pub/Sub
 // consumer loop until ctx is cancelled. Intended to be called as:
 // go broker.Start(ctx, handler).
-func (b *redisBroker) Start(ctx context.Context, handler messageloop.PublicationHandler) error {
+func (b *redisBroker) Start(ctx context.Context, handler stream.PublicationHandler) error {
 	b.handler = handler
 
 	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -223,7 +227,7 @@ func isWildcardChannel(ch string) bool {
 // Redis live-subscription change; the pub/sub consumer applies it without
 // holding subMu.
 func (b *redisBroker) Subscribe(ch string) error {
-	if _, err := messageloop.CompileInterest(ch); err != nil {
+	if _, err := channel.CompileInterest(ch); err != nil {
 		return err
 	}
 	var ops []liveOp
@@ -301,15 +305,15 @@ func (b *redisBroker) Unsubscribe(ch string) error {
 // Patterns are additionally verified with MatchAfterCompile so the Redis
 // glob over-match (Redis "*" crosses dots: "im.room.*" also covers
 // "im.room.a.b") is discarded before delivery (A3 §4).
-func (b *redisBroker) interested(channel string) bool {
+func (b *redisBroker) interested(ch string) bool {
 	b.subMu.RLock()
 	defer b.subMu.RUnlock()
-	if b.subscribed[channel] > 0 {
+	if b.subscribed[ch] > 0 {
 		return true
 	}
-	for _, pattern := range b.matcher.Lookup(channel) {
+	for _, pattern := range b.matcher.Lookup(ch) {
 		key, ok := pattern.(string)
-		if ok && messageloop.MatchAfterCompile(key, channel) {
+		if ok && channel.MatchAfterCompile(key, ch) {
 			return true
 		}
 	}
@@ -342,7 +346,7 @@ return {seq, id}
 
 // Publish writes payload to the Redis Stream (for history) and broadcasts via
 // Pub/Sub (for real-time delivery). Returns the stream offset assigned.
-func (b *redisBroker) Publish(ch string, pub *messageloop.Publication) (uint64, error) {
+func (b *redisBroker) Publish(ch string, pub *stream.Publication) (uint64, error) {
 	// Channels with explicit empty segments ("a.", ".a", "a..b") and the
 	// empty channel are rejected up front so malformed channels never reach
 	// Redis (B1).
@@ -461,7 +465,7 @@ func (b *redisBroker) updateFirstRetained(ctx context.Context, ch string, fallba
 // PublishTransient broadcasts via Pub/Sub only, without writing to the Redis
 // Stream, so the publication never appears in History. The offset is always
 // 0: no stream entry means there is no history offset to report.
-func (b *redisBroker) PublishTransient(ch string, pub *messageloop.Publication) error {
+func (b *redisBroker) PublishTransient(ch string, pub *stream.Publication) error {
 	if err := topics.ValidateTopic(ch); err != nil {
 		return err
 	}
@@ -488,14 +492,14 @@ func (b *redisBroker) PublishTransient(ch string, pub *messageloop.Publication) 
 
 // SetOccupancyHandler registers the live occupancy handler; it must be called
 // before Start. Occupancy events never reach the publication handler (B2).
-func (b *redisBroker) SetOccupancyHandler(handler messageloop.OccupancyHandler) error {
+func (b *redisBroker) SetOccupancyHandler(handler stream.OccupancyHandler) error {
 	b.occHandler = handler
 	return nil
 }
 
 // SetGapHandler registers the catch-up gap handler (C6); nil disables client
 // notification while detection counters and warnings keep running.
-func (b *redisBroker) SetGapHandler(handler messageloop.GapHandler) {
+func (b *redisBroker) SetGapHandler(handler stream.GapHandler) {
 	b.gapHandlerMu.Lock()
 	b.gapHandler = handler
 	b.gapHandlerMu.Unlock()
@@ -521,7 +525,7 @@ func (b *redisBroker) getMetrics() *messageloop.Metrics {
 // replayed by catch-up and never appears in History. The live envelope type
 // is not "pub": the consumer routes it to the occupancy handler instead of
 // the publication handler (B2 §5.2).
-func (b *redisBroker) PublishOccupancy(ch string, evt messageloop.OccupancyEvent) error {
+func (b *redisBroker) PublishOccupancy(ch string, evt occupancy.OccupancyEvent) error {
 	if err := topics.ValidateTopic(ch); err != nil {
 		return err
 	}
@@ -537,11 +541,11 @@ func (b *redisBroker) PublishOccupancy(ch string, evt messageloop.OccupancyEvent
 
 // History returns a page of publications stored for ch with offset >=
 // sinceOffset, plus gap metadata.
-func (b *redisBroker) History(ch string, sinceOffset uint64, limit int) (*messageloop.HistoryPage, error) {
+func (b *redisBroker) History(ch string, sinceOffset uint64, limit int) (*stream.HistoryPage, error) {
 	return b.getHistory(ch, sinceOffset, limit)
 }
 
-var _ messageloop.Broker = (*redisBroker)(nil)
+var _ stream.Broker = (*redisBroker)(nil)
 
 // Epoch returns the broker's epoch identifier. It is empty until Start has
 // initialized it; consumers treat an empty epoch conservatively (full

@@ -3,7 +3,7 @@
 | 字段 | 值 |
 | --- | --- |
 | 标题 | `refactor: sink leaf contracts into internal/{protocol,channel,occupancy,stream}` |
-| 状态 | **Ready**(待实现) |
+| 状态 | **Accepted**(2026-08-18 主 agent 终验通过,尚未 commit) |
 | 依赖 | D10 已合(`6f77006`)。在 `v2` 分支上做 |
 | 设计来源 | [kernel-architecture.md](../kernel-architecture.md) :173-191(目标包图)、KD-K26(包按 `internal/*` 重划,不强制 re-export 旧根包符号)、KD-K31(独立版本可破 import) |
 | 验收人 | 主 agent |
@@ -137,4 +137,48 @@ git diff --name-only -- cmd/ pkg/websocket pkg/quicstream pkg/grpcstream proxy c
 
 ## 9. 实现备注(实现方填)
 
-(留空)
+### 9.1 规格书 §3 漏报的三处入边(实现时的处置)
+
+摸底发现 §3.1「五组出边只出不进」漏报三处，均按 §1.2 已有模式处置，零行为变化:
+
+1. **`publication.go` → `MarshalJSONStruct`(定义在 `client.go:97`)**:`PublicationFromPayloadV2` 依赖它;`internal/stream` 引根包会经 aliases.go 成环。处置:`internal/stream/helpers.go` 新增同名同实现副本(3 行,`json.Marshal(s.AsMap())`),根 `client.go` 原定义不动(§2 未授权改 client.go)。`publication.go` 因此逐字节不变(仅 package 行)。
+2. **`node.go:1171/1172/1191/1192` → 未导出 `newPresenceEvent`/`marshalPresenceEvent`(presence_event.go)**:按 §1.2 对 `protocolGenerationOK` 的同款模式处置——搬出后导出为 `occupancy.NewPresenceEvent`/`occupancy.MarshalPresenceEvent`,根 aliases.go 保留同名未导出包装函数,node.go 零改动。
+3. **`broker_memory.go` → 未导出 `isWildcard`(定义在 `hub.go:75`)**:同上成环问题。处置:`internal/stream/helpers.go` 新增同实现副本(1 行),根 hub.go 不动。
+
+### 9.2 跨包引用的限定名替换(§4.1 的必然推论)
+
+`broker.go`/`broker_memory.go` 搬入 `internal/stream` 后,按 §1.1 依赖方向引 `internal/occupancy`/`internal/channel`,原同包裸引用改为限定名:`broker.go` 2 处(`OccupancyHandler`、`Broker.PublishOccupancy` 的 `OccupancyEvent` → `occupancy.OccupancyEvent`)、`broker_memory.go` 2 处(`CompileInterest` → `channel.CompileInterest`、`PublishOccupancy` 形参 `OccupancyEvent` → `occupancy.OccupancyEvent`)。类型经别名同源,接口形状逐字节等价(redis.go `var _ stream.Broker = (*redisBroker)(nil)` 编译通过即证)。`git diff HEAD -M` rename 相似度:broker.go R095、broker_memory.go R097、presence_event.go R064(导出名+注释)、version.go R085,其余 ≥R092。
+
+### 9.3 redisbroker 遮蔽修复(超出「仅限定名替换」的两处局部改名)
+
+- `pkg/redisbroker/history.go getHistory`:局部变量 `stream := b.opts.StreamPrefix + ch` 遮蔽包名 → 改名 `streamKey`(2 行)。
+- `pkg/redisbroker/redis.go interested(channel string)`:形参遮蔽包名 → 改名 `ch`(函数内 3 处引用随之改)。
+两处均为纯标识符改名,无语义变化。
+
+### 9.4 测试搬运判定(§3.3 逐个核对结果)
+
+| 测试文件 | 判定 | 理由 |
+| --- | --- | --- |
+| `disconnect_test.go` | **搬** → `internal/protocol` | 纯 Disconnect 码表测试,仅依赖被搬符号 |
+| `interest_test.go` | **搬** → `internal/channel` | 纯 CompileInterest/MatchAfterCompile 测试,仅依赖被搬符号 + pkg/topics |
+| `version_test.go` | **留根** | `TestVersionGate_*` 用 `NewNode`/`NewClient`/`capturingTransport`;`TestProtocolGenerationOK` 经根 alias 包装函数继续编译 |
+| `broker_memory_test.go` | **搬** → `internal/stream`(拆分) | 主体纯 memory broker 测试,但含 2 个 Node 集成测试(`TestMemoryBroker_IntegrationWithNode`/`TestMemoryBroker_Node_Run`)。拆分:主体随迁(`publishPub` helper 本地复制,`OccupancyEvent`/`DisconnectBadRequest`/`ErrPatternNotRoutable` 改限定名);2 个 Node 测试移入新增根文件 `broker_memory_node_test.go`,具体类型断言 `*memoryBroker` 改为 `reflect.TypeOf(...).String() == "*stream.memoryBroker"`(未导出类型根包不可名指) |
+| `presence_test.go` | **留根** | 引 `NewNode`/`newPresenceEventObserver`(client_fix_test.go),与 §3.3 预期一致 |
+| `occupancy_test.go` | **留根** | 引 Node,与 §3.3 预期一致 |
+| `authorizer_test.go` | **留根** | 引 Node,与 §3.3 预期一致 |
+| `error_codes_test.go` | **留根,零改动** | §3.4 预警的「硬编码文件路径」不存在:普查只读 `protocol/shared/v2/errors.proto`(仓内相对路径,不受搬家影响),码表断言不变,留根仍绿 |
+
+### 9.5 行尾
+
+工作区 .go 全部保持 CRLF(`.gitattributes`: `*.go text eol=crlf`);sed 批处理曾把 redisbroker 文件剥成 LF,已统一恢复,终验时逐文件 `file` 复查。
+
+## 10. 主 agent 终验备注(2026-08-18)
+
+**Verdict:Accepted**。终验动作(均主 agent 亲跑/亲核,未采信实现方自报):
+
+- diff 面:12 个 `git mv` 全部 R 识别;改动面只含根 4 文件(defaults/occupancy_test/aliases/broker_memory_node_test)+ internal 四新包 + redisbroker 13 文件;gate2(cmd、三 transport、grpcstream、proxy、config、shared、sdks、_examples、pkg/topics、internal/cluster)零 diff。`file` 复查 CRLF。
+- 三处偏离亲核成立:`internal/stream/helpers.go` 的 `MarshalJSONStruct`/`isWildcard` 与根原件(`client.go:97`、`hub.go:75`)逐字节一致;`NewPresenceEvent`/`MarshalPresenceEvent` 导出 + 根包装与 `protocolGenerationOK` 同款;`Disconnect` 码表原件即 `var`,alias 用 var 为逐形状转发。
+- alias 完整性由编译证明(根内全部引用点过 alias);`pkg/redisbroker/redis.go` 的 `var _ stream.Broker` 断言双向钉住接口形状;门禁 grep1(redisbroker 五组符号零根引用)为空。
+- 测试搬运判定表核对无误;`error_codes_test.go` 普查零改动(读 errors.proto,§3.4 预警未触发;实际适配的是 `occupancy_test.go` 一行相对路径,合理)。
+- 亲跑测试链(串行,真实 Redis):build;根包定向 15.1s;`./pkg/redisbroker ./internal/...` 全绿(四新包就位,occupancy 无测试文件为预期);全量 `go test -count=1 ./...` 15 项全 ok(根 71.2s / redisbroker 62.0s);`sdks/go` 4.9s;`sdks/ts` jest 全过;`_examples/chatroom` build ok;`golangci-lint run ./...` 0 issues。
+- 残留备注(不打回):`broker_memory_node_test.go` 用 `reflect.TypeOf(...).String()` 断言未导出类型,是未导出类型的合理代价;alias 的 const→var 形式与原件一致,无语义差。

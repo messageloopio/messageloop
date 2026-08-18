@@ -7,12 +7,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/messageloopio/messageloop"
 	"github.com/messageloopio/messageloop/config"
 	"github.com/redis/go-redis/v9"
+
+	"github.com/messageloopio/messageloop/internal/occupancy"
 )
 
-// redisPresenceStore implements messageloop.PresenceStore using one TTL key per
+// redisPresenceStore implements occupancy.PresenceStore using one TTL key per
 // (channel, client) membership plus a Redis set index per channel.
 type redisPresenceStore struct {
 	client *redis.Client
@@ -25,7 +26,7 @@ type redisPresenceStore struct {
 }
 
 // NewPresenceStore returns a Redis-backed PresenceStore.
-func NewPresenceStore(cfg config.RedisConfig) messageloop.PresenceStore {
+func NewPresenceStore(cfg config.RedisConfig) occupancy.PresenceStore {
 	opts := NewOptions(cfg)
 	return &redisPresenceStore{
 		client: newRedisClient(opts),
@@ -89,7 +90,7 @@ return 0
 // Add records or refreshes the client's presence with an independent TTL.
 // The index key shares the member TTL so stale indexes cannot outlive their
 // members.
-func (s *redisPresenceStore) Add(ctx context.Context, ch string, info *messageloop.PresenceInfo) error {
+func (s *redisPresenceStore) Add(ctx context.Context, ch string, info *occupancy.PresenceInfo) error {
 	data, err := json.Marshal(info)
 	if err != nil {
 		return err
@@ -115,7 +116,7 @@ func (s *redisPresenceStore) Remove(ctx context.Context, ch, clientID string) er
 }
 
 // Get returns all currently present clients in ch.
-func (s *redisPresenceStore) Get(ctx context.Context, ch string) (map[string]*messageloop.PresenceInfo, error) {
+func (s *redisPresenceStore) Get(ctx context.Context, ch string) (map[string]*occupancy.PresenceInfo, error) {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
@@ -123,7 +124,7 @@ func (s *redisPresenceStore) Get(ctx context.Context, ch string) (map[string]*me
 	if err != nil {
 		return nil, err
 	}
-	result := make(map[string]*messageloop.PresenceInfo, len(clientIDs))
+	result := make(map[string]*occupancy.PresenceInfo, len(clientIDs))
 	if len(clientIDs) == 0 {
 		return result, nil
 	}
@@ -148,7 +149,7 @@ func (s *redisPresenceStore) Get(ctx context.Context, ch string) (map[string]*me
 		if cmdErr != nil {
 			return nil, cmdErr
 		}
-		var info messageloop.PresenceInfo
+		var info occupancy.PresenceInfo
 		if err := json.Unmarshal([]byte(data), &info); err != nil {
 			staleClientIDs = append(staleClientIDs, clientID)
 			continue
@@ -172,4 +173,4 @@ func (s *redisPresenceStore) Get(ctx context.Context, ch string) (map[string]*me
 	return result, nil
 }
 
-var _ messageloop.PresenceStore = (*redisPresenceStore)(nil)
+var _ occupancy.PresenceStore = (*redisPresenceStore)(nil)

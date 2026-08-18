@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/messageloopio/messageloop"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	"google.golang.org/protobuf/encoding/protojson"
+
+	"github.com/messageloopio/messageloop/internal/occupancy"
+	"github.com/messageloopio/messageloop/internal/stream"
 )
 
 const (
@@ -18,7 +20,7 @@ const (
 )
 
 // redisMessage is the envelope format for publication messages stored in Redis.
-// Kind mirrors messageloop.PayloadKind; older entries without a kind field
+// Kind mirrors stream.PayloadKind; older entries without a kind field
 // are inferred from IsText during deserialization (rolling-upgrade safe).
 // Seq mirrors Offset: both are backfilled after the stream append and only
 // travel in the live pub/sub payload — the stream's data JSON carries
@@ -28,7 +30,7 @@ type redisMessage struct {
 	Channel     string            `json:"ch"`
 	Payload     []byte            `json:"p"`
 	IsText      bool              `json:"isText,omitempty"`
-	Kind        messageloop.PayloadKind `json:"kind,omitempty"`
+	Kind        stream.PayloadKind `json:"kind,omitempty"`
 	ContentType string            `json:"ct,omitempty"`
 	Id          string            `json:"id,omitempty"`
 	Metadata    map[string]string `json:"md,omitempty"`
@@ -53,9 +55,9 @@ func deserializeMessage(data []byte) (*redisMessage, error) {
 		// value, so re-assigning it is a no-op; only the text fallback is
 		// observable.
 		if msg.IsText {
-			msg.Kind = messageloop.PayloadKindText
+			msg.Kind = stream.PayloadKindText
 		} else {
-			msg.Kind = messageloop.PayloadKindBinary
+			msg.Kind = stream.PayloadKindBinary
 		}
 	}
 	return &msg, nil
@@ -71,7 +73,7 @@ type redisOccupancy struct {
 	Event   json.RawMessage `json:"evt"` // protojson(clientpb.PresenceEvent)
 }
 
-func serializeOccupancy(evt messageloop.OccupancyEvent) ([]byte, error) {
+func serializeOccupancy(evt occupancy.OccupancyEvent) ([]byte, error) {
 	if evt.Event == nil {
 		return nil, errors.New("occupancy event has nil presence event")
 	}
@@ -87,7 +89,7 @@ func serializeOccupancy(evt messageloop.OccupancyEvent) ([]byte, error) {
 	})
 }
 
-func deserializeOccupancy(data []byte) (*messageloop.OccupancyEvent, error) {
+func deserializeOccupancy(data []byte) (*occupancy.OccupancyEvent, error) {
 	var m redisOccupancy
 	if err := json.Unmarshal(data, &m); err != nil {
 		return nil, err
@@ -102,5 +104,5 @@ func deserializeOccupancy(data []byte) (*messageloop.OccupancyEvent, error) {
 	if m.Channel != "" && evt.Channel == "" {
 		evt.Channel = m.Channel
 	}
-	return &messageloop.OccupancyEvent{Event: evt, Gen: m.Gen}, nil
+	return &occupancy.OccupancyEvent{Event: evt, Gen: m.Gen}, nil
 }

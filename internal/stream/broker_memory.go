@@ -1,4 +1,4 @@
-package messageloop
+package stream
 
 import (
 	"context"
@@ -9,6 +9,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
+
+	"github.com/messageloopio/messageloop/internal/channel"
+	"github.com/messageloopio/messageloop/internal/occupancy"
 	"github.com/messageloopio/messageloop/pkg/topics"
 )
 
@@ -91,7 +94,7 @@ func (b *memoryBroker) Ready() <-chan struct{} {
 // patterns like "*.room", bare "*"/"**", malformed topics) are refused with
 // ErrPatternNotRoutable / ErrBadTopic before any state changes (A3).
 func (b *memoryBroker) Subscribe(ch string) error {
-	if _, err := CompileInterest(ch); err != nil {
+	if _, err := channel.CompileInterest(ch); err != nil {
 		return err
 	}
 	b.mu.Lock()
@@ -261,7 +264,7 @@ func (b *memoryBroker) SetGapHandler(handler GapHandler) {}
 // interested in ch (exact or wildcard match), mirroring PublishTransient's
 // interest gate. It never writes history. Synchronous by design (B2 §5.2);
 // the handler's error or panic is logged and never fails the Join/Leave.
-func (b *memoryBroker) PublishOccupancy(ch string, evt OccupancyEvent) error {
+func (b *memoryBroker) PublishOccupancy(ch string, evt occupancy.OccupancyEvent) error {
 	if err := topics.ValidateTopic(ch); err != nil {
 		return err
 	}

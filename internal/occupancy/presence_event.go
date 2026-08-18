@@ -1,4 +1,4 @@
-package messageloop
+package occupancy
 
 import (
 	"encoding/json"
@@ -26,7 +26,10 @@ type PresenceEvent struct {
 	Timestamp int64  `json:"timestamp"`
 }
 
-func newPresenceEvent(action, channel, clientID, userID string) *PresenceEvent {
+// NewPresenceEvent builds the legacy companion-channel presence envelope.
+// Exported in PR-KA-D11 (was newPresenceEvent) so the root package can keep
+// calling it through its transition wrapper in aliases.go.
+func NewPresenceEvent(action, channel, clientID, userID string) *PresenceEvent {
 	return &PresenceEvent{
 		Type:      "presence",
 		Action:    action,
@@ -37,6 +40,9 @@ func newPresenceEvent(action, channel, clientID, userID string) *PresenceEvent {
 	}
 }
 
-func marshalPresenceEvent(e *PresenceEvent) ([]byte, error) {
+// MarshalPresenceEvent encodes the legacy presence envelope as JSON.
+// Exported in PR-KA-D11 (was marshalPresenceEvent) so the root package can
+// keep calling it through its transition wrapper in aliases.go.
+func MarshalPresenceEvent(e *PresenceEvent) ([]byte, error) {
 	return json.Marshal(e)
 }

@@ -7,10 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/messageloopio/messageloop"
 	"github.com/messageloopio/messageloop/config"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
+
+	"github.com/messageloopio/messageloop/internal/stream"
 )
 
 // failPublishHook injects an error for every PUBLISH command.
@@ -40,7 +41,7 @@ func TestRedisBroker_Publish_PubSubFailureKeepsStream(t *testing.T) {
 	broker.client.AddHook(failPublishHook{})
 
 	ch := "publish-no-rollback"
-	pub := &messageloop.Publication{Payload: []byte("msg"), Kind: messageloop.PayloadKindBinary}
+	pub := &stream.Publication{Payload: []byte("msg"), Kind: stream.PayloadKindBinary}
 	offset, err := broker.Publish(ch, pub)
 	require.NoError(t, err, "a pub/sub delivery failure must not negate the publish")
 	require.NotZero(t, offset, "the assigned stream offset must be reported")
@@ -75,7 +76,7 @@ func TestRedisBroker_Publish_SeqKeyHygiene(t *testing.T) {
 	ctx := context.Background()
 
 	ch := "seq-key-hygiene"
-	_, err := broker.Publish(ch, &messageloop.Publication{Payload: []byte("m"), Kind: messageloop.PayloadKindBinary})
+	_, err := broker.Publish(ch, &stream.Publication{Payload: []byte("m"), Kind: stream.PayloadKindBinary})
 	require.NoError(t, err)
 
 	seqKey := broker.opts.StreamPrefix + "seq:" + ch
@@ -90,7 +91,7 @@ func TestRedisBroker_Publish_SeqKeyHygiene(t *testing.T) {
 	require.Equal(t, "1", val, "the seq counter starts at 1")
 
 	transientCh := "seq-key-transient"
-	err = broker.PublishTransient(transientCh, &messageloop.Publication{Payload: []byte("t"), Kind: messageloop.PayloadKindBinary})
+	err = broker.PublishTransient(transientCh, &stream.Publication{Payload: []byte("t"), Kind: stream.PayloadKindBinary})
 	require.NoError(t, err)
 	exists, err := broker.client.Exists(ctx, broker.opts.StreamPrefix+"seq:"+transientCh).Result()
 	require.NoError(t, err)
@@ -118,7 +119,7 @@ func TestRedisBroker_Ready_ClosesAfterSubscribe(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	started := make(chan error, 1)
-	go func() { started <- broker.Start(ctx, func(string, *messageloop.Publication) error { return nil }) }()
+	go func() { started <- broker.Start(ctx, func(string, *stream.Publication) error { return nil }) }()
 
 	select {
 	case <-broker.Ready():
@@ -149,7 +150,7 @@ func TestRedisBroker_Reconnect_CatchesUpMissedMessages(t *testing.T) {
 	defer cancel()
 	started := make(chan error, 1)
 	go func() {
-		started <- brokerA.Start(ctx, func(_ string, pub *messageloop.Publication) error {
+		started <- brokerA.Start(ctx, func(_ string, pub *stream.Publication) error {
 			mu.Lock()
 			received = append(received, pub.Offset)
 			mu.Unlock()
@@ -193,7 +194,7 @@ func TestRedisBroker_Reconnect_CatchesUpMissedMessages(t *testing.T) {
 	// Warm the subscription with three live messages.
 	var offsets []uint64
 	for i := 0; i < 3; i++ {
-		offset, err := brokerB.Publish("catchup-ch", &messageloop.Publication{Payload: []byte("live"), Kind: messageloop.PayloadKindBinary})
+		offset, err := brokerB.Publish("catchup-ch", &stream.Publication{Payload: []byte("live"), Kind: stream.PayloadKindBinary})
 		require.NoError(t, err)
 		offsets = append(offsets, offset)
 	}
@@ -218,7 +219,7 @@ func TestRedisBroker_Reconnect_CatchesUpMissedMessages(t *testing.T) {
 
 	// Publish two more messages while the consumer is disconnected.
 	for i := 0; i < 2; i++ {
-		offset, err := brokerB.Publish("catchup-ch", &messageloop.Publication{Payload: []byte("missed"), Kind: messageloop.PayloadKindBinary})
+		offset, err := brokerB.Publish("catchup-ch", &stream.Publication{Payload: []byte("missed"), Kind: stream.PayloadKindBinary})
 		require.NoError(t, err)
 		offsets = append(offsets, offset)
 	}
@@ -237,4 +238,4 @@ func TestRedisBroker_Reconnect_CatchesUpMissedMessages(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for catch-up, have %v want %v", received, offsets)
-}
+}

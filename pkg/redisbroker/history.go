@@ -9,8 +9,9 @@ import (
 	"time"
 
 	"github.com/lynx-go/x/log"
-	"github.com/messageloopio/messageloop"
 	"github.com/redis/go-redis/v9"
+
+	"github.com/messageloopio/messageloop/internal/stream"
 )
 
 // getHistory retrieves publications from the Redis Stream for ch with
@@ -21,27 +22,27 @@ import (
 // existed — false positives allowed); retained entries starting after
 // sinceOffset are HistoryGapHeadTrimmed. FirstRetained comes from the
 // first_retained marker, falling back to the first entry of this batch.
-func (b *redisBroker) getHistory(ch string, sinceOffset uint64, limit int) (*messageloop.HistoryPage, error) {
+func (b *redisBroker) getHistory(ch string, sinceOffset uint64, limit int) (*stream.HistoryPage, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	stream := b.opts.StreamPrefix + ch
-	page := &messageloop.HistoryPage{}
+	streamKey := b.opts.StreamPrefix + ch
+	page := &stream.HistoryPage{}
 
 	if limit <= 0 {
-		limit = messageloop.DefaultHistoryLimit
+		limit = stream.DefaultHistoryLimit
 	}
 
 	// Build start ID. Use the inclusive form "ts-seq" so the range starts AT
 	// sinceOffset: the Broker contract is offset >= sinceOffset.
 	start := streamStartID(sinceOffset)
 
-	messages, err := b.client.XRangeN(ctx, stream, start, "+", int64(limit)).Result()
+	messages, err := b.client.XRangeN(ctx, streamKey, start, "+", int64(limit)).Result()
 	if err != nil && !errors.Is(err, redis.Nil) {
 		return nil, err
 	}
 
-	pubs := make([]*messageloop.Publication, 0, len(messages))
+	pubs := make([]*stream.Publication, 0, len(messages))
 	for _, m := range messages {
 		data, ok := m.Values["data"].(string)
 		if !ok {
@@ -55,7 +56,7 @@ func (b *redisBroker) getHistory(ch string, sinceOffset uint64, limit int) (*mes
 		if pubTime == 0 {
 			pubTime = time.Now().UnixMilli()
 		}
-		pubs = append(pubs, &messageloop.Publication{
+		pubs = append(pubs, &stream.Publication{
 			Channel:     ch,
 			Offset:      parseStreamOffset(m.ID),
 			Seq:         streamEntrySeq(m),
@@ -89,10 +90,10 @@ func (b *redisBroker) getHistory(ch string, sinceOffset uint64, limit int) (*mes
 			// An empty batch with a positive cursor cannot be proven covered:
 			// the stream may have expired or never existed. Never claim None.
 			page.Gap = true
-			page.GapReason = messageloop.HistoryGapEmptyExpired
+			page.GapReason = stream.HistoryGapEmptyExpired
 		} else if firstRetained > sinceOffset {
 			page.Gap = true
-			page.GapReason = messageloop.HistoryGapHeadTrimmed
+			page.GapReason = stream.HistoryGapHeadTrimmed
 		}
 	}
 	if !page.Gap {
@@ -106,7 +107,7 @@ func (b *redisBroker) getHistory(ch string, sinceOffset uint64, limit int) (*mes
 			prev, cur := pubs[i-1].Seq, pubs[i].Seq
 			if prev > 0 && cur > 0 && cur != prev+1 {
 				page.Gap = true
-				page.GapReason = messageloop.HistoryGapMiddle
+				page.GapReason = stream.HistoryGapMiddle
 				break
 			}
 		}

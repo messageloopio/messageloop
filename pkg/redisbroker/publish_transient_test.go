@@ -3,8 +3,9 @@ package redisbroker
 import (
 	"testing"
 
-	"github.com/messageloopio/messageloop"
 	"github.com/stretchr/testify/require"
+
+	"github.com/messageloopio/messageloop/internal/stream"
 )
 
 // TestRedisBroker_PublishTransientSkipsHistory verifies P2-19: transient
@@ -18,14 +19,14 @@ func TestRedisBroker_PublishTransientSkipsHistory(t *testing.T) {
 
 	ch := "transient-hist"
 
-	err := broker.PublishTransient(ch, &messageloop.Publication{Payload: []byte("join"), Kind: messageloop.PayloadKindText})
+	err := broker.PublishTransient(ch, &stream.Publication{Payload: []byte("join"), Kind: stream.PayloadKindText})
 	require.NoError(t, err)
 
 	page, err := broker.History(ch, 0, 0)
 	require.NoError(t, err)
 	require.Empty(t, page.Pubs(), "transient publications must not appear in history")
 
-	offset, err := broker.Publish(ch, &messageloop.Publication{Payload: []byte("normal"), Kind: messageloop.PayloadKindText})
+	offset, err := broker.Publish(ch, &stream.Publication{Payload: []byte("normal"), Kind: stream.PayloadKindText})
 	require.NoError(t, err)
 	require.NotZero(t, offset)
 	page, err = broker.History(ch, 0, 0)

@@ -8,6 +8,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/messageloopio/messageloop"
 	"github.com/stretchr/testify/require"
+
+	"github.com/messageloopio/messageloop/internal/occupancy"
+	"github.com/messageloopio/messageloop/internal/stream"
 )
 
 // TestKeyPrefixGeneration_Ml2IsolatedFromLegacyMl pins KD-K31 (PR-KA-C5):
@@ -33,7 +36,7 @@ func TestKeyPrefixGeneration_Ml2IsolatedFromLegacyMl(t *testing.T) {
 	// marker (+ pub/sub delivery, which leaves no key).
 	broker := New(redisCfg).(*redisBroker)
 	t.Cleanup(func() { _ = broker.client.Close() })
-	_, err := broker.Publish(ch, &messageloop.Publication{
+	_, err := broker.Publish(ch, &stream.Publication{
 		Payload: []byte("c5-keyprefix-probe"),
 	})
 	require.NoError(t, err)
@@ -41,7 +44,7 @@ func TestKeyPrefixGeneration_Ml2IsolatedFromLegacyMl(t *testing.T) {
 	// Presence store: member key + channel index + occupancy generation.
 	presence := NewPresenceStore(redisCfg).(*redisPresenceStore)
 	t.Cleanup(func() { _ = presence.client.Close() })
-	require.NoError(t, presence.Add(ctx, ch, &messageloop.PresenceInfo{ClientID: clientID, UserID: "c5-user"}))
+	require.NoError(t, presence.Add(ctx, ch, &occupancy.PresenceInfo{ClientID: clientID, UserID: "c5-user"}))
 
 	// Cluster session directory: node_epoch counter (KD-K27).
 	directory := NewSessionDirectory(redisCfg)

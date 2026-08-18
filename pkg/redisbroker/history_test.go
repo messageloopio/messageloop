@@ -8,10 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/messageloopio/messageloop"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/messageloopio/messageloop/internal/stream"
 )
 
 func TestParseStreamOffsetRoundTrip(t *testing.T) {
@@ -50,9 +51,9 @@ func TestRedisBroker_PerPublishHistorySize(t *testing.T) {
 
 	ch := "per-pub-cap"
 	for i := 0; i < 5; i++ {
-		_, err := broker.Publish(ch, &messageloop.Publication{
+		_, err := broker.Publish(ch, &stream.Publication{
 			Payload:     []byte{byte('a' + i)},
-			Kind:        messageloop.PayloadKindBinary,
+			Kind:        stream.PayloadKindBinary,
 			HistorySize: 3,
 		})
 		require.NoError(t, err)
@@ -74,9 +75,9 @@ func TestRedisBroker_PerPublishHistoryTTL(t *testing.T) {
 	t.Cleanup(func() { _ = broker.client.Close() })
 
 	ch := "per-pub-ttl"
-	_, err := broker.Publish(ch, &messageloop.Publication{
+	_, err := broker.Publish(ch, &stream.Publication{
 		Payload:    []byte("msg"),
-		Kind:       messageloop.PayloadKindBinary,
+		Kind:       stream.PayloadKindBinary,
 		HistoryTTL: 10 * time.Second,
 	})
 	require.NoError(t, err)
@@ -151,7 +152,7 @@ func TestRedisBroker_History_InclusiveSinceOffset(t *testing.T) {
 	ch := "history-inclusive"
 	offsets := make([]uint64, 0, 3)
 	for i := 0; i < 3; i++ {
-		offset, err := broker.Publish(ch, &messageloop.Publication{Payload: []byte("msg-" + string(rune('a'+i))), Kind: messageloop.PayloadKindBinary})
+		offset, err := broker.Publish(ch, &stream.Publication{Payload: []byte("msg-" + string(rune('a'+i))), Kind: stream.PayloadKindBinary})
 		require.NoError(t, err)
 		require.NotZero(t, offset)
 		offsets = append(offsets, offset)
@@ -190,7 +191,7 @@ func TestRedisBroker_History_EmptyExpiredSince(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, page.Pubs())
 	require.True(t, page.Gap, "since>0 with no retained entries must never be HistoryGapNone")
-	require.Equal(t, messageloop.HistoryGapEmptyExpired, page.GapReason)
+	require.Equal(t, stream.HistoryGapEmptyExpired, page.GapReason)
 	require.Zero(t, page.FirstRetained)
 }
 
@@ -206,9 +207,9 @@ func TestRedisBroker_History_HeadTrimmed(t *testing.T) {
 	ch := "history-head-trimmed"
 	offsets := make([]uint64, 0, 3)
 	for i := 0; i < 3; i++ {
-		offset, err := broker.Publish(ch, &messageloop.Publication{
+		offset, err := broker.Publish(ch, &stream.Publication{
 			Payload:     []byte{byte('a' + i)},
-			Kind:        messageloop.PayloadKindBinary,
+			Kind:        stream.PayloadKindBinary,
 			HistorySize: 2,
 		})
 		require.NoError(t, err)
@@ -220,7 +221,7 @@ func TestRedisBroker_History_HeadTrimmed(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, page.Pubs(), 2, "entries o2 and o3 remain")
 	require.True(t, page.Gap, "the first entry was trimmed")
-	require.Equal(t, messageloop.HistoryGapHeadTrimmed, page.GapReason)
+	require.Equal(t, stream.HistoryGapHeadTrimmed, page.GapReason)
 	require.Greater(t, page.FirstRetained, o1, "FirstRetained must point past the trimmed entry")
 	require.LessOrEqual(t, page.FirstRetained, o3)
 }
@@ -235,7 +236,7 @@ func TestRedisBroker_History_NoGapAtHeadWithMarker(t *testing.T) {
 	ch := "history-no-gap"
 	offsets := make([]uint64, 0, 2)
 	for i := 0; i < 2; i++ {
-		offset, err := broker.Publish(ch, &messageloop.Publication{Payload: []byte("m"), Kind: messageloop.PayloadKindBinary})
+		offset, err := broker.Publish(ch, &stream.Publication{Payload: []byte("m"), Kind: stream.PayloadKindBinary})
 		require.NoError(t, err)
 		offsets = append(offsets, offset)
 	}
@@ -251,16 +252,16 @@ func TestRedisBroker_History_NoGapAtHeadWithMarker(t *testing.T) {
 func TestRedisBroker_Message_BackwardCompat(t *testing.T) {
 	textMsg, err := deserializeMessage([]byte(`{"t":"pub","ch":"x","p":"aGVsbG8=","isText":true,"off":5}`))
 	require.NoError(t, err)
-	require.Equal(t, messageloop.PayloadKindText, textMsg.Kind)
+	require.Equal(t, stream.PayloadKindText, textMsg.Kind)
 
 	binaryMsg, err := deserializeMessage([]byte(`{"t":"pub","ch":"x","p":"Ymlu","off":6}`))
 	require.NoError(t, err)
-	require.Equal(t, messageloop.PayloadKindBinary, binaryMsg.Kind)
+	require.Equal(t, stream.PayloadKindBinary, binaryMsg.Kind)
 
 	// New-format entries carry the kind explicitly.
 	jsonMsg, err := deserializeMessage([]byte(`{"t":"pub","ch":"x","p":"eyJhIjoxfQ==","kind":2,"ct":"application/json","id":"m-1","ts":1700000000000,"off":7}`))
 	require.NoError(t, err)
-	require.Equal(t, messageloop.PayloadKindJSON, jsonMsg.Kind)
+	require.Equal(t, stream.PayloadKindJSON, jsonMsg.Kind)
 	require.Equal(t, "application/json", jsonMsg.ContentType)
 	require.Equal(t, "m-1", jsonMsg.Id)
 	require.Equal(t, int64(1700000000000), jsonMsg.Time)
@@ -284,7 +285,7 @@ func TestRedisBroker_Publish_AtomicDenseSeq(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			pub := &messageloop.Publication{Payload: []byte(fmt.Sprintf("m-%d", i)), Kind: messageloop.PayloadKindBinary}
+			pub := &stream.Publication{Payload: []byte(fmt.Sprintf("m-%d", i)), Kind: stream.PayloadKindBinary}
 			offset, err := broker.Publish(ch, pub)
 			if err != nil {
 				t.Errorf("publish %d failed: %v", i, err)
@@ -348,7 +349,7 @@ func TestRedisBroker_History_MiddleGapDetected(t *testing.T) {
 	ch := "history-middle-gap"
 	offsets := make([]uint64, 0, 5)
 	for i := 0; i < 5; i++ {
-		pub := &messageloop.Publication{Payload: []byte{byte('a' + i)}, Kind: messageloop.PayloadKindBinary}
+		pub := &stream.Publication{Payload: []byte{byte('a' + i)}, Kind: stream.PayloadKindBinary}
 		offset, err := broker.Publish(ch, pub)
 		require.NoError(t, err)
 		require.Equal(t, uint64(i+1), pub.Seq)
@@ -370,13 +371,13 @@ func TestRedisBroker_History_MiddleGapDetected(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, page.Pubs(), 4, "the surviving entries must still be returned")
 	require.True(t, page.Gap)
-	require.Equal(t, messageloop.HistoryGapMiddle, page.GapReason)
+	require.Equal(t, stream.HistoryGapMiddle, page.GapReason)
 
 	// A from-head read exposes the same hole.
 	head, err := broker.History(ch, 0, 0)
 	require.NoError(t, err)
 	require.True(t, head.Gap)
-	require.Equal(t, messageloop.HistoryGapMiddle, head.GapReason)
+	require.Equal(t, stream.HistoryGapMiddle, head.GapReason)
 
 	// A contiguous page (the first two entries) reports no gap.
 	page2, err := broker.History(ch, offsets[0], 2)
@@ -401,7 +402,7 @@ func TestRedisBroker_History_LegacyEntriesBreakChain(t *testing.T) {
 			Type:    messageTypePublication,
 			Channel: ch,
 			Payload: []byte(payload),
-			Kind:    messageloop.PayloadKindBinary,
+			Kind:    stream.PayloadKindBinary,
 			Time:    time.Now().UnixMilli(),
 		})
 		require.NoError(t, err)
@@ -411,14 +412,14 @@ func TestRedisBroker_History_LegacyEntriesBreakChain(t *testing.T) {
 	// seq 1, then a legacy entry (no "s"), then seq 2: neither adjacent pair
 	// has both seqs known, so no middle gap may be asserted.
 	mixed := "history-legacy-mixed"
-	_, err := broker.Publish(mixed, &messageloop.Publication{Payload: []byte("s1"), Kind: messageloop.PayloadKindBinary})
+	_, err := broker.Publish(mixed, &stream.Publication{Payload: []byte("s1"), Kind: stream.PayloadKindBinary})
 	require.NoError(t, err)
 	_, err = broker.client.XAdd(ctx, &redis.XAddArgs{
 		Stream: broker.opts.StreamPrefix + mixed,
 		Values: map[string]interface{}{"data": legacyData(mixed, "legacy")},
 	}).Result()
 	require.NoError(t, err)
-	_, err = broker.Publish(mixed, &messageloop.Publication{Payload: []byte("s2"), Kind: messageloop.PayloadKindBinary})
+	_, err = broker.Publish(mixed, &stream.Publication{Payload: []byte("s2"), Kind: stream.PayloadKindBinary})
 	require.NoError(t, err)
 
 	page, err := broker.History(mixed, 0, 0)

@@ -31,6 +31,6 @@
 | [PR-KA-D8 实现规格](tasks/pr-ka-d8-ci.md) | Accepted | CI 修复：v2 触发 + Redis service + 子模块/TS + buf 工具链固定；[prompt](tasks/pr-ka-d8-prompt.md) |
 | [PR-KA-D9 实现规格](tasks/pr-ka-d9-e2e.md) | Accepted | 双进程黑盒 e2e：真 cmd/server 子进程 × 真 Go SDK；[prompt](tasks/pr-ka-d9-prompt.md) |
 | [PR-KA-D10 实现规格](tasks/pr-ka-d10-hydrate.md) | Accepted | Hydrate 去 saga + lease/snapshot 原子写 + epoch 接线；[prompt](tasks/pr-ka-d10-prompt.md) |
-| [PR-KA-D11 实现规格](tasks/pr-ka-d11-packages.md) | Ready | KD-K26 阶段一：叶子契约下沉 internal/* + 根 alias 过渡；[prompt](tasks/pr-ka-d11-prompt.md) |
+| [PR-KA-D11 实现规格](tasks/pr-ka-d11-packages.md) | Accepted | KD-K26 阶段一：叶子契约下沉 internal/* + 根 alias 过渡；[prompt](tasks/pr-ka-d11-prompt.md) |
 
 第三方实现：复制对应 `tasks/pr-ka-*-prompt.md` 围栏全文；规格与靶心冲突时以该步规格为准。

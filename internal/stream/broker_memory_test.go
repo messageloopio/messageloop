@@ -1,4 +1,4 @@
-package messageloop
+package stream
 
 import (
 	"context"
@@ -8,10 +8,26 @@ import (
 	"time"
 
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	"github.com/messageloopio/messageloop/pkg/topics"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/messageloopio/messageloop/internal/channel"
+	"github.com/messageloopio/messageloop/internal/occupancy"
+	"github.com/messageloopio/messageloop/internal/protocol"
+	"github.com/messageloopio/messageloop/pkg/topics"
 )
+
+// publishPub builds a Publication from the legacy (payload, isText) tuple so
+// tests keep their intent after the Publication model extension (Task 12).
+// Local copy of the root testhelpers_test.go helper: this file moved to
+// internal/stream in PR-KA-D11 and cannot import the root package.
+func publishPub(payload []byte, isText bool) *Publication {
+	kind := PayloadKindBinary
+	if isText {
+		kind = PayloadKindText
+	}
+	return &Publication{Payload: payload, Kind: kind}
+}
 
 // historyPubs fetches a history page and returns its publications, failing
 // the test on a storage error.
@@ -248,7 +264,7 @@ func TestMemoryBroker_Publish_HandlerError(t *testing.T) {
 	defer cancel()
 	require.NoError(t, b.Subscribe("ch"))
 
-	cp.err = DisconnectBadRequest
+	cp.err = protocol.DisconnectBadRequest
 	offset, err := b.Publish("ch", publishPub([]byte("x"), false))
 	require.NoError(t, err, "a handler error must not negate the publish")
 	require.NotZero(t, offset, "the assigned offset must still be reported")
@@ -523,7 +539,7 @@ func TestMemoryBroker_Publish_HandlerErrorKeepsHistory(t *testing.T) {
 	defer cancel()
 	require.NoError(t, b.Subscribe("ch"))
 
-	cp.err = DisconnectBadRequest
+	cp.err = protocol.DisconnectBadRequest
 	offset, err := b.Publish("ch", publishPub([]byte("x"), false))
 	require.NoError(t, err, "handler failure must not negate the publish")
 	require.NotZero(t, offset, "the assigned offset must be reported")
@@ -687,27 +703,6 @@ func offsetsOf(pubs []*Publication) []uint64 {
 	return offsets
 }
 
-// --- node integration ---
-
-func TestMemoryBroker_IntegrationWithNode(t *testing.T) {
-	node := NewNode(nil)
-	if node.Broker() == nil {
-		t.Fatal("Node should have a default broker")
-	}
-	if _, ok := node.Broker().(*memoryBroker); !ok {
-		t.Error("Node default broker should be *memoryBroker")
-	}
-}
-
-func TestMemoryBroker_Node_Run(t *testing.T) {
-	node := NewNode(nil)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	if err := node.Run(ctx); err != nil {
-		t.Fatalf("node.Run: %v", err)
-	}
-}
-
 // --- benchmarks ---
 
 func BenchmarkMemoryBroker_Publish(b *testing.B) {
@@ -776,7 +771,7 @@ func TestMemoryBroker_Subscribe_RejectsUnroutablePatterns(t *testing.T) {
 
 	for _, ch := range []string{"*.room", "**", "*", "im.*.tick"} {
 		err := b.Subscribe(ch)
-		require.ErrorIs(t, err, ErrPatternNotRoutable, "channel %q", ch)
+		require.ErrorIs(t, err, channel.ErrPatternNotRoutable, "channel %q", ch)
 	}
 
 	err := b.Subscribe("a..b")
@@ -810,8 +805,8 @@ func TestMemoryBroker_PublishOccupancy_InterestGate(t *testing.T) {
 	b := NewMemoryBroker(MemoryBrokerOptions{})
 
 	var occMu sync.Mutex
-	var occ []OccupancyEvent
-	require.NoError(t, b.SetOccupancyHandler(func(_ string, evt OccupancyEvent) error {
+	var occ []occupancy.OccupancyEvent
+	require.NoError(t, b.SetOccupancyHandler(func(_ string, evt occupancy.OccupancyEvent) error {
 		occMu.Lock()
 		defer occMu.Unlock()
 		occ = append(occ, evt)
@@ -821,12 +816,12 @@ func TestMemoryBroker_PublishOccupancy_InterestGate(t *testing.T) {
 	<-b.(interface{ Ready() <-chan struct{} }).Ready()
 
 	require.NoError(t, b.Subscribe("im.**"))
-	require.NoError(t, b.PublishOccupancy("im.room.1", OccupancyEvent{Gen: 1, Event: &clientpb.PresenceEvent{Action: "join"}}))
+	require.NoError(t, b.PublishOccupancy("im.room.1", occupancy.OccupancyEvent{Gen: 1, Event: &clientpb.PresenceEvent{Action: "join"}}))
 	occMu.Lock()
 	require.Len(t, occ, 1, "an im.** interest covers im.room.1 occupancy")
 	occMu.Unlock()
 
-	require.NoError(t, b.PublishOccupancy("stocks.1", OccupancyEvent{Gen: 2, Event: &clientpb.PresenceEvent{Action: "join"}}))
+	require.NoError(t, b.PublishOccupancy("stocks.1", occupancy.OccupancyEvent{Gen: 2, Event: &clientpb.PresenceEvent{Action: "join"}}))
 	occMu.Lock()
 	require.Len(t, occ, 1, "an unrelated channel must not reach the occupancy handler")
 	occMu.Unlock()
@@ -839,11 +834,11 @@ func TestMemoryBroker_PublishOccupancy_NeverPublication(t *testing.T) {
 	defer cancel()
 	b := NewMemoryBroker(MemoryBrokerOptions{})
 	mp := &collectedPubs{}
-	require.NoError(t, b.SetOccupancyHandler(func(string, OccupancyEvent) error { return nil }))
+	require.NoError(t, b.SetOccupancyHandler(func(string, occupancy.OccupancyEvent) error { return nil }))
 	go func() { _ = b.Start(ctx, mp.handle) }()
 	<-b.(interface{ Ready() <-chan struct{} }).Ready()
 
 	require.NoError(t, b.Subscribe("chat.1"))
-	require.NoError(t, b.PublishOccupancy("chat.1", OccupancyEvent{Gen: 1, Event: &clientpb.PresenceEvent{Action: "join"}}))
+	require.NoError(t, b.PublishOccupancy("chat.1", occupancy.OccupancyEvent{Gen: 1, Event: &clientpb.PresenceEvent{Action: "join"}}))
 	require.Zero(t, mp.count(), "the publication handler must never see occupancy")
 }

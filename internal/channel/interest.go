@@ -1,4 +1,8 @@
-package messageloop
+// Package channel holds the subscription-interest contract
+// (CompileInterest/CompiledInterest/MatchAfterCompile) sunk from the root
+// package in PR-KA-D11 (KD-K26 phase one; target layout:
+// docs/v2/kernel-architecture.md :173-191).
+package channel
 
 import (
 	"errors"

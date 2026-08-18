@@ -6,8 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/messageloopio/messageloop"
 	"github.com/stretchr/testify/require"
+
+	"github.com/messageloopio/messageloop/internal/occupancy"
 )
 
 // Task 13d: presence index TTL must match the member TTL, and Remove must
@@ -18,8 +19,8 @@ func TestRedisPresenceStore_IndexTTLAndCleanup(t *testing.T) {
 	t.Cleanup(func() { _ = store.client.Close() })
 
 	ch := "presence-metrics"
-	require.NoError(t, store.Add(context.Background(), ch, &messageloop.PresenceInfo{ClientID: "c1", UserID: "u1"}))
-	require.NoError(t, store.Add(context.Background(), ch, &messageloop.PresenceInfo{ClientID: "c2", UserID: "u2"}))
+	require.NoError(t, store.Add(context.Background(), ch, &occupancy.PresenceInfo{ClientID: "c1", UserID: "u1"}))
+	require.NoError(t, store.Add(context.Background(), ch, &occupancy.PresenceInfo{ClientID: "c2", UserID: "u2"}))
 
 	indexKey := store.indexKey(ch)
 	ttl, err := store.client.TTL(context.Background(), indexKey).Result()
@@ -67,7 +68,7 @@ func TestRedisPresenceStore_RemoveIsAtomic(t *testing.T) {
 					return
 				default:
 				}
-				_ = store.Add(ctx, ch, &messageloop.PresenceInfo{ClientID: "c-race", UserID: "u-race"})
+				_ = store.Add(ctx, ch, &occupancy.PresenceInfo{ClientID: "c-race", UserID: "u-race"})
 				_ = store.Remove(ctx, ch, "c-race")
 			}
 		}()
@@ -88,7 +89,7 @@ func TestRedisPresenceStore_RemoveIsAtomic(t *testing.T) {
 	}
 
 	// Final Add makes the member online; Get must see it.
-	require.NoError(t, store.Add(ctx, ch, &messageloop.PresenceInfo{ClientID: "c-race", UserID: "u-race"}))
+	require.NoError(t, store.Add(ctx, ch, &occupancy.PresenceInfo{ClientID: "c-race", UserID: "u-race"}))
 	present, err := store.Get(ctx, ch)
 	require.NoError(t, err)
 	require.Contains(t, present, "c-race", "online member must be visible after Add")
@@ -134,7 +135,7 @@ func TestRedisPresenceStore_SyntheticLeaveHookOnPrune(t *testing.T) {
 		}
 	})
 
-	require.NoError(t, store.Add(ctx, ch, &messageloop.PresenceInfo{ClientID: "ghost1", UserID: "u1"}))
+	require.NoError(t, store.Add(ctx, ch, &occupancy.PresenceInfo{ClientID: "ghost1", UserID: "u1"}))
 	// Fast-forward the member TTL so the next Get fast-forwards the expiry.
 	require.NoError(t, store.client.Expire(ctx, store.memberKey(ch, "ghost1"), 500*time.Millisecond).Err())
 

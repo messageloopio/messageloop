@@ -1,4 +1,4 @@
-package messageloop
+package channel
 
 import (
 	"errors"

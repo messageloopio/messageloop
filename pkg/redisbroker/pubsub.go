@@ -7,8 +7,11 @@ import (
 	"time"
 
 	"github.com/lynx-go/x/log"
-	"github.com/messageloopio/messageloop"
 	"github.com/redis/go-redis/v9"
+
+	"github.com/messageloopio/messageloop/internal/channel"
+	"github.com/messageloopio/messageloop/internal/occupancy"
+	"github.com/messageloopio/messageloop/internal/stream"
 )
 
 // pubsubBufferSize is the go-redis Go channel buffer for live publications.
@@ -197,7 +200,7 @@ func (b *redisBroker) liveDesiredLocked() map[string]struct{} {
 	desired := make(map[string]struct{})
 	add := func(name string) { desired[name] = struct{}{} }
 	for ch := range b.subscribed {
-		ci, err := messageloop.CompileInterest(ch)
+		ci, err := channel.CompileInterest(ch)
 		if err != nil {
 			continue
 		}
@@ -206,7 +209,7 @@ func (b *redisBroker) liveDesiredLocked() map[string]struct{} {
 		}
 	}
 	for key := range b.wcCounts {
-		ci, err := messageloop.CompileInterest(key)
+		ci, err := channel.CompileInterest(key)
 		if err != nil {
 			continue
 		}
@@ -282,8 +285,8 @@ func (b *redisBroker) rebuildLiveSubs(ctx context.Context, pubsub *redis.PubSub)
 // occupancy event (never both).
 type delivery struct {
 	channel string
-	pub     *messageloop.Publication
-	occ     *messageloop.OccupancyEvent
+	pub     *stream.Publication
+	occ     *occupancy.OccupancyEvent
 }
 
 // startDeliveryWorkers launches the bounded handler pool; workers exit when
@@ -329,7 +332,7 @@ func deliveryWorkerIndex(channel string) int {
 // the bounded loss point, counted via the dense-seq jump detection in
 // noteLiveSeqGap). A completed enqueue clears the channel's degraded mark.
 // Before Start (unit tests, no worker pool) the handler runs inline.
-func (b *redisBroker) dispatch(channel string, pub *messageloop.Publication) {
+func (b *redisBroker) dispatch(channel string, pub *stream.Publication) {
 	if b.deliveryActive.Load() {
 		b.deliverChans[deliveryWorkerIndex(channel)] <- delivery{channel: channel, pub: pub}
 		b.clearDegraded(channel)
@@ -348,7 +351,7 @@ func (b *redisBroker) dispatch(channel string, pub *messageloop.Publication) {
 // marks the channel degraded; a successful enqueue clears the mark. Before
 // Start the occupancy handler runs inline (unchanged semantics: no queue, no
 // drop, no degraded bookkeeping).
-func (b *redisBroker) dispatchOccupancy(channel string, occ *messageloop.OccupancyEvent) {
+func (b *redisBroker) dispatchOccupancy(channel string, occ *occupancy.OccupancyEvent) {
 	if b.deliveryActive.Load() {
 		select {
 		case b.deliverChans[deliveryWorkerIndex(channel)] <- delivery{channel: channel, occ: occ}:
@@ -620,7 +623,7 @@ func (b *redisBroker) catchUpMissed(ctx context.Context) {
 // notifyGap invokes the registered catch-up gap handler (C6), if any. A nil
 // handler is a no-op (detection counters and warnings are unaffected), and a
 // handler panic is recovered and logged so it can never break catch-up.
-func (b *redisBroker) notifyGap(gap messageloop.CatchUpGap) {
+func (b *redisBroker) notifyGap(gap stream.CatchUpGap) {
 	b.gapHandlerMu.RLock()
 	handler := b.gapHandler
 	b.gapHandlerMu.RUnlock()
@@ -664,9 +667,9 @@ func (b *redisBroker) checkCatchUpSeqGap(ctx context.Context, ch string, msgs []
 				"channel", ch, "prev_seq", prev, "entry_seq", seq)
 			if !notified {
 				notified = true
-				b.notifyGap(messageloop.CatchUpGap{
+				b.notifyGap(stream.CatchUpGap{
 					Channel:        ch,
-					Reason:         messageloop.HistoryGapMiddle,
+					Reason:         stream.HistoryGapMiddle,
 					LastGoodSeq:    prev,
 					LastGoodOffset: prevOffset,
 				})
@@ -707,9 +710,9 @@ func (b *redisBroker) checkCatchUpGap(ctx context.Context, ch string, msgs []red
 		log.WarnContext(ctx, "catch-up gap detected: stream entries newer than the replayed tail were not delivered",
 			"channel", ch, "last_replayed_offset", deliveredTail, "newest_stream_offset", newest)
 		if !alreadyNotified {
-			b.notifyGap(messageloop.CatchUpGap{
+			b.notifyGap(stream.CatchUpGap{
 				Channel:        ch,
-				Reason:         messageloop.HistoryGapReplayTruncated,
+				Reason:         stream.HistoryGapReplayTruncated,
 				LastGoodOffset: deliveredTail,
 			})
 		}
@@ -768,7 +771,7 @@ func (b *redisBroker) noteLiveSeqGap(channel string, seq uint64) {
 // outside the critical section, on a per-channel worker (see dispatch), so a
 // slow handler cannot serialize delivery across all channels or stall
 // catch-up.
-func (b *redisBroker) deliverOnce(channel string, pub *messageloop.Publication) {
+func (b *redisBroker) deliverOnce(channel string, pub *stream.Publication) {
 	if pub.Offset == 0 {
 		// Transient publications have no stream offset and cannot be
 		// deduplicated; deliver unconditionally.
@@ -799,7 +802,7 @@ func (b *redisBroker) deliverOnce(channel string, pub *messageloop.Publication) 
 // error so a misbehaving handler cannot take down the pub/sub consumer
 // goroutine. Delivery errors are logged and counted, never propagated to
 // Publish callers (see the Broker contract in broker.go).
-func (b *redisBroker) deliver(channel string, pub *messageloop.Publication) {
+func (b *redisBroker) deliver(channel string, pub *stream.Publication) {
 	if b.handler == nil {
 		return
 	}
@@ -819,7 +822,7 @@ func (b *redisBroker) deliver(channel string, pub *messageloop.Publication) {
 // deliverOccupancy invokes the occupancy handler, converting a panic into a
 // logged error so a misbehaving handler cannot take down a worker. Occupancy
 // handler errors are logged and counted, never propagated (KD-K14).
-func (b *redisBroker) deliverOccupancy(channel string, evt messageloop.OccupancyEvent) {
+func (b *redisBroker) deliverOccupancy(channel string, evt occupancy.OccupancyEvent) {
 	if b.occHandler == nil {
 		return
 	}
@@ -842,8 +845,8 @@ func (b *redisBroker) deliverOccupancy(channel string, evt messageloop.Occupancy
 // (catch-up) must derive it from the stream ID instead. The dense seq comes
 // from the envelope (live) or is backfilled by the caller from the stream
 // entry's "s" field (catch-up).
-func messageToPublication(channelName string, redisMsg *redisMessage, offset uint64) *messageloop.Publication {
-	pub := &messageloop.Publication{
+func messageToPublication(channelName string, redisMsg *redisMessage, offset uint64) *stream.Publication {
+	pub := &stream.Publication{
 		Channel:     channelName,
 		Offset:      offset,
 		Seq:         redisMsg.Seq,

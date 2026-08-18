@@ -1,4 +1,8 @@
-package messageloop
+// Package occupancy holds the presence/occupancy leaf contracts
+// (PresenceInfo/PresenceStore, PresenceEvent, OccupancyEvent and the
+// generation source contracts) sunk from the root package in PR-KA-D11
+// (KD-K26 phase one; target layout: docs/v2/kernel-architecture.md :173-191).
+package occupancy
 
 import (
 	"context"
@@ -40,4 +44,4 @@ type SyntheticLeaveReporter interface {
 	// member pruned by an existing Get/refresh path. Must be called before the
 	// store is used concurrently.
 	SetSyntheticLeaveHook(hook func(ctx context.Context, ch, clientID string))
-}
+}

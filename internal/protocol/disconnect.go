@@ -1,4 +1,8 @@
-package messageloop
+// Package protocol holds the leaf protocol contracts (the Disconnect type
+// and its 3000-3514 code table, plus the protocol-generation gate) sunk from
+// the root package in PR-KA-D11 (KD-K26 phase one; target layout:
+// docs/v2/kernel-architecture.md :173-191).
+package protocol
 
 import "fmt"
 

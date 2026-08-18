@@ -1,4 +1,8 @@
-package messageloop
+// Package stream holds the pub/sub broker leaf contracts
+// (Publication/PayloadKind, the Broker interface, history paging and the
+// in-process MemoryBroker) sunk from the root package in PR-KA-D11 (KD-K26
+// phase one; target layout: docs/v2/kernel-architecture.md :173-191).
+package stream
 
 import (
 	"context"
@@ -7,6 +11,8 @@ import (
 
 	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"google.golang.org/protobuf/types/known/structpb"
+
+	"github.com/messageloopio/messageloop/internal/occupancy"
 )
 
 // PayloadKind identifies the original Payload oneof variant of a publication.
@@ -90,7 +96,7 @@ type PublicationHandler func(ch string, pub *Publication) error
 // OccupancyHandler is invoked for live occupancy events. It must not be the
 // publication handler. Errors are logged; they never fail Join/Leave
 // (KD-K14).
-type OccupancyHandler func(channel string, evt OccupancyEvent) error
+type OccupancyHandler func(channel string, evt occupancy.OccupancyEvent) error
 
 // CatchUpGap describes one hole detected during reconnect catch-up (C6).
 type CatchUpGap struct {
@@ -205,7 +211,7 @@ type Broker interface {
 	// channel ch. It never writes Stream/history. Delivery follows Interest
 	// (exact or compiled pattern): only a node interested in ch invokes its
 	// occupancy handler. Handler errors do not fail the call (KD-K14).
-	PublishOccupancy(ch string, evt OccupancyEvent) error
+	PublishOccupancy(ch string, evt occupancy.OccupancyEvent) error
 
 	// SetOccupancyHandler registers the live occupancy handler; it must be
 	// called before Start. The publication handler never receives occupancy.

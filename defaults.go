@@ -10,10 +10,6 @@ const (
 	// DefaultHeartbeatIdleTimeout is the idle timeout before a client is disconnected.
 	DefaultHeartbeatIdleTimeout = 300 * time.Second
 
-	// DefaultHistoryLimit is the maximum number of publications returned by History
-	// when the caller does not specify a limit.
-	DefaultHistoryLimit = 1000
-
 	// MaxRecoveredPublications caps the total number of publications delivered
 	// during history recovery for a single Connect or Subscribe request
 	// (shared across all channels in that request). Exceeding publications are

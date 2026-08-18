@@ -5,8 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/messageloopio/messageloop"
 	"github.com/stretchr/testify/require"
+
+	"github.com/messageloopio/messageloop/internal/stream"
 )
 
 // TestRedisBroker_Epoch_SharedAcrossNodes verifies that brokers connected to
@@ -21,7 +22,7 @@ func TestRedisBroker_Epoch_SharedAcrossNodes(t *testing.T) {
 	ctxA, cancelA := context.WithCancel(context.Background())
 	defer cancelA()
 	startA := make(chan error, 1)
-	go func() { startA <- brokerA.Start(ctxA, func(string, *messageloop.Publication) error { return nil }) }()
+	go func() { startA <- brokerA.Start(ctxA, func(string, *stream.Publication) error { return nil }) }()
 	defer func() { cancelA() }()
 
 	// Wait until broker A has initialized its epoch (Start orders initEpoch
@@ -31,7 +32,7 @@ func TestRedisBroker_Epoch_SharedAcrossNodes(t *testing.T) {
 	ctxB, cancelB := context.WithCancel(context.Background())
 	defer cancelB()
 	startB := make(chan error, 1)
-	go func() { startB <- brokerB.Start(ctxB, func(string, *messageloop.Publication) error { return nil }) }()
+	go func() { startB <- brokerB.Start(ctxB, func(string, *stream.Publication) error { return nil }) }()
 	defer func() { cancelB() }()
 	waitForEpoch(t, brokerB)
 
@@ -47,7 +48,7 @@ func TestRedisBroker_Epoch_PersistedAcrossRestart(t *testing.T) {
 	ctxA, cancelA := context.WithCancel(context.Background())
 	brokerA := New(redisCfg).(*redisBroker)
 	startA := make(chan error, 1)
-	go func() { startA <- brokerA.Start(ctxA, func(string, *messageloop.Publication) error { return nil }) }()
+	go func() { startA <- brokerA.Start(ctxA, func(string, *stream.Publication) error { return nil }) }()
 	waitForEpoch(t, brokerA)
 	epochA := brokerA.Epoch()
 	require.NotEmpty(t, epochA)
@@ -65,7 +66,7 @@ func TestRedisBroker_Epoch_PersistedAcrossRestart(t *testing.T) {
 	defer cancelB()
 	brokerB := New(redisCfg).(*redisBroker)
 	startB := make(chan error, 1)
-	go func() { startB <- brokerB.Start(ctxB, func(string, *messageloop.Publication) error { return nil }) }()
+	go func() { startB <- brokerB.Start(ctxB, func(string, *stream.Publication) error { return nil }) }()
 	defer func() { cancelB() }()
 	waitForEpoch(t, brokerB)
 
@@ -106,7 +107,7 @@ func TestRedisBroker_Epoch_ConcurrentInit(t *testing.T) {
 	started := make(chan error, nodes)
 	for _, b := range brokers {
 		go func(b *redisBroker) {
-			started <- b.Start(ctx, func(string, *messageloop.Publication) error { return nil })
+			started <- b.Start(ctx, func(string, *stream.Publication) error { return nil })
 		}(b)
 	}
 	for _, b := range brokers {

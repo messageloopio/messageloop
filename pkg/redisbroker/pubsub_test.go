@@ -11,12 +11,16 @@ import (
 	"time"
 
 	"github.com/messageloopio/messageloop"
-	"github.com/messageloopio/messageloop/config"
-	"github.com/messageloopio/messageloop/pkg/topics"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
+
+	"github.com/messageloopio/messageloop/config"
+	"github.com/messageloopio/messageloop/internal/channel"
+	"github.com/messageloopio/messageloop/internal/occupancy"
+	"github.com/messageloopio/messageloop/internal/stream"
+	"github.com/messageloopio/messageloop/pkg/topics"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 )
 
 // newTestRedisBroker builds a redisBroker without any Redis connection; only
@@ -87,15 +91,15 @@ func TestRedisBroker_Subscribe_ExactRefCount(t *testing.T) {
 func TestRedisBroker_DeliverOnce_DeduplicatesByOffset(t *testing.T) {
 	b := newTestRedisBroker()
 	var delivered []uint64
-	b.handler = func(_ string, pub *messageloop.Publication) error {
+	b.handler = func(_ string, pub *stream.Publication) error {
 		delivered = append(delivered, pub.Offset)
 		return nil
 	}
 
-	b.deliverOnce("ch", &messageloop.Publication{Offset: 10})
-	b.deliverOnce("ch", &messageloop.Publication{Offset: 10})
-	b.deliverOnce("ch", &messageloop.Publication{Offset: 11})
-	b.deliverOnce("other", &messageloop.Publication{Offset: 10})
+	b.deliverOnce("ch", &stream.Publication{Offset: 10})
+	b.deliverOnce("ch", &stream.Publication{Offset: 10})
+	b.deliverOnce("ch", &stream.Publication{Offset: 11})
+	b.deliverOnce("other", &stream.Publication{Offset: 10})
 
 	require.Equal(t, []uint64{10, 11, 10}, delivered)
 	require.Equal(t, map[string]uint64{"ch": 11, "other": 10}, b.lastOffsets)
@@ -106,12 +110,12 @@ func TestRedisBroker_DeliverOnce_DeduplicatesByOffset(t *testing.T) {
 func TestRedisBroker_DeliverOnce_TransientDeliversUnconditionally(t *testing.T) {
 	b := newTestRedisBroker()
 	var delivered int
-	b.handler = func(string, *messageloop.Publication) error {
+	b.handler = func(string, *stream.Publication) error {
 		delivered++
 		return nil
 	}
 	for i := 0; i < 3; i++ {
-		b.deliverOnce("ch", &messageloop.Publication{Offset: 0})
+		b.deliverOnce("ch", &stream.Publication{Offset: 0})
 	}
 	require.Equal(t, 3, delivered)
 	require.NotContains(t, b.lastOffsets, "ch")
@@ -122,12 +126,12 @@ func TestRedisBroker_DeliverOnce_TransientDeliversUnconditionally(t *testing.T) 
 // down the pub/sub consumer goroutine.
 func TestRedisBroker_DeliverOnce_HandlerPanicIsContained(t *testing.T) {
 	b := newTestRedisBroker()
-	b.handler = func(string, *messageloop.Publication) error {
+	b.handler = func(string, *stream.Publication) error {
 		panic("injected panic")
 	}
 
 	require.NotPanics(t, func() {
-		b.deliverOnce("ch", &messageloop.Publication{Offset: 1})
+		b.deliverOnce("ch", &stream.Publication{Offset: 1})
 	})
 	require.EqualValues(t, 1, b.handlerFailures.Load())
 
@@ -141,12 +145,12 @@ func TestRedisBroker_DeliverOnce_HandlerPanicIsContained(t *testing.T) {
 // callers (the Redis broker is an asynchronous delivery implementation).
 func TestRedisBroker_DeliverOnce_HandlerErrorCountedNotPropagated(t *testing.T) {
 	b := newTestRedisBroker()
-	b.handler = func(string, *messageloop.Publication) error {
+	b.handler = func(string, *stream.Publication) error {
 		return errors.New("injected delivery error")
 	}
 
 	require.NotPanics(t, func() {
-		b.deliverOnce("ch", &messageloop.Publication{Offset: 5})
+		b.deliverOnce("ch", &stream.Publication{Offset: 5})
 	})
 	require.EqualValues(t, 1, b.handlerFailures.Load())
 }
@@ -155,8 +159,8 @@ func TestRedisBroker_DeliverOnce_HandlerErrorCountedNotPropagated(t *testing.T) 
 func TestRedisBroker_DeliverOnce_NilHandlerNoOp(t *testing.T) {
 	b := newTestRedisBroker()
 	require.NotPanics(t, func() {
-		b.deliverOnce("ch", &messageloop.Publication{Offset: 7})
-		b.deliverOnce("ch", &messageloop.Publication{Offset: 0})
+		b.deliverOnce("ch", &stream.Publication{Offset: 7})
+		b.deliverOnce("ch", &stream.Publication{Offset: 0})
 	})
 	require.EqualValues(t, 0, b.handlerFailures.Load())
 }
@@ -185,7 +189,7 @@ func TestRedisBroker_CrossChannelDeliveryNotSerialized(t *testing.T) {
 	defer cancel()
 	started := make(chan error, 1)
 	go func() {
-		started <- brokerA.Start(ctx, func(ch string, _ *messageloop.Publication) error {
+		started <- brokerA.Start(ctx, func(ch string, _ *stream.Publication) error {
 			if ch == slowCh {
 				select {
 				case slowEntered <- struct{}{}:
@@ -214,7 +218,7 @@ func TestRedisBroker_CrossChannelDeliveryNotSerialized(t *testing.T) {
 	}
 
 	// Enter a slow handler on the first channel.
-	_, err := brokerB.Publish(slowCh, &messageloop.Publication{Payload: []byte("slow"), Kind: messageloop.PayloadKindBinary})
+	_, err := brokerB.Publish(slowCh, &stream.Publication{Payload: []byte("slow"), Kind: stream.PayloadKindBinary})
 	require.NoError(t, err)
 	select {
 	case <-slowEntered:
@@ -225,7 +229,7 @@ func TestRedisBroker_CrossChannelDeliveryNotSerialized(t *testing.T) {
 	// A publication on a different channel must be delivered while the slow
 	// handler is still inside (previously it queued behind deliverMu).
 	startTime := time.Now()
-	_, err = brokerB.Publish(fastCh, &messageloop.Publication{Payload: []byte("fast"), Kind: messageloop.PayloadKindBinary})
+	_, err = brokerB.Publish(fastCh, &stream.Publication{Payload: []byte("fast"), Kind: stream.PayloadKindBinary})
 	require.NoError(t, err)
 	select {
 	case ch := <-delivered:
@@ -253,7 +257,7 @@ func TestRedisBroker_CatchUpGapDetected(t *testing.T) {
 	defer cancel()
 	started := make(chan error, 1)
 	go func() {
-		started <- brokerA.Start(ctx, func(string, *messageloop.Publication) error { return nil })
+		started <- brokerA.Start(ctx, func(string, *stream.Publication) error { return nil })
 	}()
 	t.Cleanup(func() {
 		cancel()
@@ -271,7 +275,7 @@ func TestRedisBroker_CatchUpGapDetected(t *testing.T) {
 	}
 
 	// Seed a delivery baseline.
-	_, err := brokerB.Publish("gap-ch", &messageloop.Publication{Payload: []byte("seed"), Kind: messageloop.PayloadKindBinary})
+	_, err := brokerB.Publish("gap-ch", &stream.Publication{Payload: []byte("seed"), Kind: stream.PayloadKindBinary})
 	require.NoError(t, err)
 	require.Eventually(t, func() bool {
 		brokerA.subMu.RLock()
@@ -299,7 +303,7 @@ func TestRedisBroker_CatchUpGapDetected(t *testing.T) {
 	}, 5*time.Second, 25*time.Millisecond)
 
 	for i := 0; i < 5; i++ {
-		_, err := brokerB.Publish("gap-ch", &messageloop.Publication{Payload: []byte("missed"), Kind: messageloop.PayloadKindBinary})
+		_, err := brokerB.Publish("gap-ch", &stream.Publication{Payload: []byte("missed"), Kind: stream.PayloadKindBinary})
 		require.NoError(t, err)
 	}
 
@@ -325,7 +329,7 @@ func TestRedisBroker_WildcardReceivesPublication_Redis(t *testing.T) {
 	defer cancel()
 	startErr := make(chan error, 1)
 	go func() {
-		startErr <- brokerA.Start(ctx, func(ch string, _ *messageloop.Publication) error {
+		startErr <- brokerA.Start(ctx, func(ch string, _ *stream.Publication) error {
 			received <- ch
 			return nil
 		})
@@ -346,7 +350,7 @@ func TestRedisBroker_WildcardReceivesPublication_Redis(t *testing.T) {
 	var first string
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		_, err := brokerB.Publish("forex.eur", &messageloop.Publication{Payload: []byte("tick-1"), Kind: messageloop.PayloadKindBinary})
+		_, err := brokerB.Publish("forex.eur", &stream.Publication{Payload: []byte("tick-1"), Kind: stream.PayloadKindBinary})
 		require.NoError(t, err)
 		select {
 		case first = <-received:
@@ -362,7 +366,7 @@ func TestRedisBroker_WildcardReceivesPublication_Redis(t *testing.T) {
 
 	// Unsubscribe once: refcount stays above zero, interest must remain.
 	require.NoError(t, brokerA.Unsubscribe("forex.*"))
-	_, err := brokerB.Publish("forex.eur", &messageloop.Publication{Payload: []byte("tick-2"), Kind: messageloop.PayloadKindBinary})
+	_, err := brokerB.Publish("forex.eur", &stream.Publication{Payload: []byte("tick-2"), Kind: stream.PayloadKindBinary})
 	require.NoError(t, err)
 	select {
 	case ch := <-received:
@@ -373,7 +377,7 @@ func TestRedisBroker_WildcardReceivesPublication_Redis(t *testing.T) {
 
 	// Unsubscribe again: refcount reaches zero, interest must be dropped.
 	require.NoError(t, brokerA.Unsubscribe("forex.*"))
-	_, err = brokerB.Publish("forex.eur", &messageloop.Publication{Payload: []byte("tick-3"), Kind: messageloop.PayloadKindBinary})
+	_, err = brokerB.Publish("forex.eur", &stream.Publication{Payload: []byte("tick-3"), Kind: stream.PayloadKindBinary})
 	require.NoError(t, err)
 	select {
 	case ch := <-received:
@@ -429,7 +433,7 @@ func startLiveTestBrokers(t *testing.T) (*redisBroker, *redisBroker, chan string
 	ctx, cancel := context.WithCancel(context.Background())
 	started := make(chan error, 1)
 	go func() {
-		started <- brokerA.Start(ctx, func(ch string, _ *messageloop.Publication) error {
+		started <- brokerA.Start(ctx, func(ch string, _ *stream.Publication) error {
 			received <- ch
 			return nil
 		})
@@ -484,14 +488,14 @@ func TestRedisBroker_LiveSubscription_CompiledOnly(t *testing.T) {
 	}
 
 	// chat.1 is delivered...
-	_, err := brokerB.Publish("chat.1", &messageloop.Publication{Payload: []byte("m1"), Kind: messageloop.PayloadKindBinary})
+	_, err := brokerB.Publish("chat.1", &stream.Publication{Payload: []byte("m1"), Kind: stream.PayloadKindBinary})
 	require.NoError(t, err)
 	expectReceived(t, received, "chat.1")
 
 	// ...while a publish on an unsubscribed channel never reaches the handler
 	// (previously it arrived via PSubscribe(prefix+"*") and was dropped only
 	// after receipt).
-	_, err = brokerB.Publish("stocks.1", &messageloop.Publication{Payload: []byte("m2"), Kind: messageloop.PayloadKindBinary})
+	_, err = brokerB.Publish("stocks.1", &stream.Publication{Payload: []byte("m2"), Kind: stream.PayloadKindBinary})
 	require.NoError(t, err)
 	expectNoDelivery(t, received, 1500*time.Millisecond)
 }
@@ -509,19 +513,19 @@ func TestRedisBroker_LiveSubscription_ImDoubleStar(t *testing.T) {
 		brokerA.opts.PubSubPrefix + "im.*",
 	})
 
-	_, err := brokerB.Publish("im", &messageloop.Publication{Payload: []byte("z"), Kind: messageloop.PayloadKindBinary})
+	_, err := brokerB.Publish("im", &stream.Publication{Payload: []byte("z"), Kind: stream.PayloadKindBinary})
 	require.NoError(t, err)
 	expectReceived(t, received, "im")
 
-	_, err = brokerB.Publish("im.x", &messageloop.Publication{Payload: []byte("x"), Kind: messageloop.PayloadKindBinary})
+	_, err = brokerB.Publish("im.x", &stream.Publication{Payload: []byte("x"), Kind: stream.PayloadKindBinary})
 	require.NoError(t, err)
 	expectReceived(t, received, "im.x")
 
-	_, err = brokerB.Publish("im.a.b.c", &messageloop.Publication{Payload: []byte("d"), Kind: messageloop.PayloadKindBinary})
+	_, err = brokerB.Publish("im.a.b.c", &stream.Publication{Payload: []byte("d"), Kind: stream.PayloadKindBinary})
 	require.NoError(t, err)
 	expectReceived(t, received, "im.a.b.c")
 
-	_, err = brokerB.Publish("stocks", &messageloop.Publication{Payload: []byte("s"), Kind: messageloop.PayloadKindBinary})
+	_, err = brokerB.Publish("stocks", &stream.Publication{Payload: []byte("s"), Kind: stream.PayloadKindBinary})
 	require.NoError(t, err)
 	expectNoDelivery(t, received, 1500*time.Millisecond)
 }
@@ -536,15 +540,15 @@ func TestRedisBroker_LiveSubscription_ImRoomStarLocalMatch(t *testing.T) {
 	require.NoError(t, brokerA.Subscribe("im.room.*"))
 	waitLiveActive(t, brokerA, []string{brokerA.opts.PubSubPrefix + "im.room.*"})
 
-	_, err := brokerB.Publish("im.room.a", &messageloop.Publication{Payload: []byte("a"), Kind: messageloop.PayloadKindBinary})
+	_, err := brokerB.Publish("im.room.a", &stream.Publication{Payload: []byte("a"), Kind: stream.PayloadKindBinary})
 	require.NoError(t, err)
 	expectReceived(t, received, "im.room.a")
 
-	_, err = brokerB.Publish("im.room.a.b", &messageloop.Publication{Payload: []byte("b"), Kind: messageloop.PayloadKindBinary})
+	_, err = brokerB.Publish("im.room.a.b", &stream.Publication{Payload: []byte("b"), Kind: stream.PayloadKindBinary})
 	require.NoError(t, err)
 	expectNoDelivery(t, received, 1500*time.Millisecond)
 
-	_, err = brokerB.Publish("im.other.a", &messageloop.Publication{Payload: []byte("o"), Kind: messageloop.PayloadKindBinary})
+	_, err = brokerB.Publish("im.other.a", &stream.Publication{Payload: []byte("o"), Kind: stream.PayloadKindBinary})
 	require.NoError(t, err)
 	expectNoDelivery(t, received, 500*time.Millisecond)
 }
@@ -585,11 +589,11 @@ func TestRedisBroker_LiveSubscription_ReconnectRebuildsInterest(t *testing.T) {
 			"rebuilt live set must never contain the bare wildcard subscription")
 	}
 
-	_, err := brokerB.Publish("im.x", &messageloop.Publication{Payload: []byte("x"), Kind: messageloop.PayloadKindBinary})
+	_, err := brokerB.Publish("im.x", &stream.Publication{Payload: []byte("x"), Kind: stream.PayloadKindBinary})
 	require.NoError(t, err)
 	expectReceived(t, received, "im.x")
 
-	_, err = brokerB.Publish("stocks", &messageloop.Publication{Payload: []byte("s"), Kind: messageloop.PayloadKindBinary})
+	_, err = brokerB.Publish("stocks", &stream.Publication{Payload: []byte("s"), Kind: stream.PayloadKindBinary})
 	require.NoError(t, err)
 	expectNoDelivery(t, received, 1500*time.Millisecond)
 }
@@ -609,7 +613,7 @@ func TestRedisBroker_LiveSubscription_DynamicRemove(t *testing.T) {
 	require.NoError(t, brokerA.Unsubscribe("im.**"))
 	waitLiveActive(t, brokerA, nil)
 
-	_, err := brokerB.Publish("im.x", &messageloop.Publication{Payload: []byte("x"), Kind: messageloop.PayloadKindBinary})
+	_, err := brokerB.Publish("im.x", &stream.Publication{Payload: []byte("x"), Kind: stream.PayloadKindBinary})
 	require.NoError(t, err)
 	expectNoDelivery(t, received, 1500*time.Millisecond)
 }
@@ -625,17 +629,17 @@ func TestRedisBroker_LiveSubscription_OccupancyFollowsInterest(t *testing.T) {
 	brokerB := New(redisCfg).(*redisBroker)
 	t.Cleanup(func() { _ = brokerB.client.Close() })
 
-	occA := make(chan messageloop.OccupancyEvent, 8)
+	occA := make(chan occupancy.OccupancyEvent, 8)
 	pubA := make(chan string, 8)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	started := make(chan error, 1)
-	require.NoError(t, brokerA.SetOccupancyHandler(func(_ string, evt messageloop.OccupancyEvent) error {
+	require.NoError(t, brokerA.SetOccupancyHandler(func(_ string, evt occupancy.OccupancyEvent) error {
 		occA <- evt
 		return nil
 	}))
 	go func() {
-		started <- brokerA.Start(ctx, func(ch string, _ *messageloop.Publication) error {
+		started <- brokerA.Start(ctx, func(ch string, _ *stream.Publication) error {
 			pubA <- ch
 			return nil
 		})
@@ -652,12 +656,12 @@ func TestRedisBroker_LiveSubscription_OccupancyFollowsInterest(t *testing.T) {
 	waitLiveActive(t, brokerA, []string{brokerA.opts.PubSubPrefix + "im", brokerA.opts.PubSubPrefix + "im.*"})
 
 	// A real publication still reaches the publication handler.
-	_, err := brokerB.Publish("im.room.1", &messageloop.Publication{Payload: []byte("m1"), Kind: messageloop.PayloadKindBinary})
+	_, err := brokerB.Publish("im.room.1", &stream.Publication{Payload: []byte("m1"), Kind: stream.PayloadKindBinary})
 	require.NoError(t, err)
 	expectReceived(t, pubA, "im.room.1")
 
 	// A live occupancy event reaches only the occupancy handler, gen intact.
-	require.NoError(t, brokerB.PublishOccupancy("im.room.1", messageloop.OccupancyEvent{
+	require.NoError(t, brokerB.PublishOccupancy("im.room.1", occupancy.OccupancyEvent{
 		Gen:   7,
 		Event: &clientpb.PresenceEvent{Action: "join", Info: &clientpb.PresenceInfo{SessionId: "sess-x"}},
 	}))
@@ -689,15 +693,15 @@ func TestRedisBroker_LiveSubscription_OccupancyNotInterested(t *testing.T) {
 	brokerB := New(redisCfg).(*redisBroker)
 	t.Cleanup(func() { _ = brokerB.client.Close() })
 
-	occA := make(chan messageloop.OccupancyEvent, 8)
+	occA := make(chan occupancy.OccupancyEvent, 8)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	started := make(chan error, 1)
-	require.NoError(t, brokerA.SetOccupancyHandler(func(_ string, evt messageloop.OccupancyEvent) error {
+	require.NoError(t, brokerA.SetOccupancyHandler(func(_ string, evt occupancy.OccupancyEvent) error {
 		occA <- evt
 		return nil
 	}))
-	go func() { started <- brokerA.Start(ctx, func(string, *messageloop.Publication) error { return nil }) }()
+	go func() { started <- brokerA.Start(ctx, func(string, *stream.Publication) error { return nil }) }()
 	t.Cleanup(func() {
 		cancel()
 		select {
@@ -709,7 +713,7 @@ func TestRedisBroker_LiveSubscription_OccupancyNotInterested(t *testing.T) {
 	require.NoError(t, brokerA.Subscribe("d6noi.chat.1"))
 	waitLiveActive(t, brokerA, []string{brokerA.opts.PubSubPrefix + "d6noi.chat.1"})
 
-	require.NoError(t, brokerB.PublishOccupancy("d6noi.im.room.1", messageloop.OccupancyEvent{
+	require.NoError(t, brokerB.PublishOccupancy("d6noi.im.room.1", occupancy.OccupancyEvent{
 		Gen:   3,
 		Event: &clientpb.PresenceEvent{Action: "join", Info: &clientpb.PresenceInfo{SessionId: "sess-y"}},
 	}))
@@ -727,7 +731,7 @@ func TestRedisBroker_Subscribe_RejectsUnroutable(t *testing.T) {
 	b := newTestRedisBroker()
 	for _, ch := range []string{"*.room", "**", "*", "im.*.tick"} {
 		err := b.Subscribe(ch)
-		require.ErrorIs(t, err, messageloop.ErrPatternNotRoutable, "channel %q", ch)
+		require.ErrorIs(t, err, channel.ErrPatternNotRoutable, "channel %q", ch)
 	}
 	err := b.Subscribe("a..b")
 	require.ErrorIs(t, err, topics.ErrBadTopic)
@@ -742,10 +746,10 @@ func TestRedisBroker_DeliverOnce_RecordsDenseSeqBaseline(t *testing.T) {
 	b := newTestRedisBroker()
 	require.NoError(t, b.Subscribe("ch"))
 
-	b.deliverOnce("ch", &messageloop.Publication{Offset: 10, Seq: 3})
-	b.deliverOnce("ch", &messageloop.Publication{Offset: 11, Seq: 4})
+	b.deliverOnce("ch", &stream.Publication{Offset: 10, Seq: 3})
+	b.deliverOnce("ch", &stream.Publication{Offset: 11, Seq: 4})
 	// A legacy publication (no dense seq) advances only the offset baseline.
-	b.deliverOnce("ch", &messageloop.Publication{Offset: 12})
+	b.deliverOnce("ch", &stream.Publication{Offset: 12})
 	require.Equal(t, map[string]uint64{"ch": 12}, b.lastOffsets)
 	require.Equal(t, map[string]uint64{"ch": 4}, b.lastSeqs)
 
@@ -767,9 +771,9 @@ func TestRedisBroker_CatchUpMissed_MiddleGapCounted(t *testing.T) {
 	require.NoError(t, broker.Subscribe(ch))
 
 	// Four entries with dense seqs 1..4.
-	var firstPub *messageloop.Publication
+	var firstPub *stream.Publication
 	for i := 0; i < 4; i++ {
-		pub := &messageloop.Publication{Payload: []byte{byte('a' + i)}, Kind: messageloop.PayloadKindBinary}
+		pub := &stream.Publication{Payload: []byte{byte('a' + i)}, Kind: stream.PayloadKindBinary}
 		_, err := broker.Publish(ch, pub)
 		require.NoError(t, err)
 		if i == 0 {
@@ -779,11 +783,11 @@ func TestRedisBroker_CatchUpMissed_MiddleGapCounted(t *testing.T) {
 
 	// Delivery baseline: the first entry was delivered live (offset + seq 1).
 	var delivered []uint64
-	broker.handler = func(_ string, pub *messageloop.Publication) error {
+	broker.handler = func(_ string, pub *stream.Publication) error {
 		delivered = append(delivered, pub.Seq)
 		return nil
 	}
-	broker.deliverOnce(ch, &messageloop.Publication{Channel: ch, Offset: firstPub.Offset, Seq: firstPub.Seq})
+	broker.deliverOnce(ch, &stream.Publication{Channel: ch, Offset: firstPub.Offset, Seq: firstPub.Seq})
 	require.Equal(t, []uint64{1}, delivered)
 
 	// XDEL the seq=3 entry: the replay reads seq 2 and 4, a middle hole.
@@ -814,7 +818,7 @@ func TestRedisBroker_CatchUpMissed_LegacyBaselineNoFalsePositive(t *testing.T) {
 
 	var firstOffset uint64
 	for i := 0; i < 3; i++ {
-		offset, err := broker.Publish(ch, &messageloop.Publication{Payload: []byte{byte('a' + i)}, Kind: messageloop.PayloadKindBinary})
+		offset, err := broker.Publish(ch, &stream.Publication{Payload: []byte{byte('a' + i)}, Kind: stream.PayloadKindBinary})
 		require.NoError(t, err)
 		if i == 0 {
 			firstOffset = offset
@@ -822,7 +826,7 @@ func TestRedisBroker_CatchUpMissed_LegacyBaselineNoFalsePositive(t *testing.T) {
 	}
 
 	// Baseline with an offset only, no dense seq (legacy bookkeeping).
-	broker.deliverOnce(ch, &messageloop.Publication{Channel: ch, Offset: firstOffset})
+	broker.deliverOnce(ch, &stream.Publication{Channel: ch, Offset: firstOffset})
 
 	// Delete the middle missed entry; without a seq baseline the hole is not
 	// detectable and must not be reported.
@@ -842,11 +846,11 @@ func TestRedisBroker_CatchUpMissed_LegacyBaselineNoFalsePositive(t *testing.T) {
 
 // publishGapTestEntries publishes n entries on ch and returns their
 // publications (with Offset and Seq backfilled by Publish).
-func publishGapTestEntries(t *testing.T, broker *redisBroker, ch string, n int) []*messageloop.Publication {
+func publishGapTestEntries(t *testing.T, broker *redisBroker, ch string, n int) []*stream.Publication {
 	t.Helper()
-	pubs := make([]*messageloop.Publication, 0, n)
+	pubs := make([]*stream.Publication, 0, n)
 	for i := 0; i < n; i++ {
-		pub := &messageloop.Publication{Payload: []byte{byte('a' + i)}, Kind: messageloop.PayloadKindBinary}
+		pub := &stream.Publication{Payload: []byte{byte('a' + i)}, Kind: stream.PayloadKindBinary}
 		_, err := broker.Publish(ch, pub)
 		require.NoError(t, err)
 		pubs = append(pubs, pub)
@@ -872,11 +876,11 @@ func TestRedisBroker_CatchUpMissed_MiddleGapNotified(t *testing.T) {
 	pubs := publishGapTestEntries(t, broker, ch, 4)
 
 	// Delivery baseline: the first entry was delivered live (offset + seq 1).
-	broker.handler = func(_ string, pub *messageloop.Publication) error { return nil }
-	broker.deliverOnce(ch, &messageloop.Publication{Channel: ch, Offset: pubs[0].Offset, Seq: pubs[0].Seq})
+	broker.handler = func(_ string, pub *stream.Publication) error { return nil }
+	broker.deliverOnce(ch, &stream.Publication{Channel: ch, Offset: pubs[0].Offset, Seq: pubs[0].Seq})
 
-	var gaps []messageloop.CatchUpGap
-	broker.SetGapHandler(func(gap messageloop.CatchUpGap) { gaps = append(gaps, gap) })
+	var gaps []stream.CatchUpGap
+	broker.SetGapHandler(func(gap stream.CatchUpGap) { gaps = append(gaps, gap) })
 
 	// XDEL the seq=3 entry: the replay reads seq 2 and 4, a middle hole.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -888,7 +892,7 @@ func TestRedisBroker_CatchUpMissed_MiddleGapNotified(t *testing.T) {
 	require.EqualValues(t, 1, broker.catchUpGaps.Load(), "detection semantics are unchanged")
 	require.Len(t, gaps, 1, "exactly one gap notification per channel per catch-up")
 	require.Equal(t, ch, gaps[0].Channel)
-	require.Equal(t, messageloop.HistoryGapMiddle, gaps[0].Reason)
+	require.Equal(t, stream.HistoryGapMiddle, gaps[0].Reason)
 	require.EqualValues(t, 2, gaps[0].LastGoodSeq, "the last continuous entry before the hole is seq 2")
 	require.Equal(t, pubs[1].Offset, gaps[0].LastGoodOffset, "its offset is the last-known-good position")
 }
@@ -921,11 +925,11 @@ func TestRedisBroker_CatchUpMissed_ReplayTruncatedNotified(t *testing.T) {
 	pubs := publishGapTestEntries(t, broker, ch, 4)
 
 	// Delivery baseline: the first entry was delivered live.
-	broker.handler = func(_ string, pub *messageloop.Publication) error { return nil }
-	broker.deliverOnce(ch, &messageloop.Publication{Channel: ch, Offset: pubs[0].Offset, Seq: pubs[0].Seq})
+	broker.handler = func(_ string, pub *stream.Publication) error { return nil }
+	broker.deliverOnce(ch, &stream.Publication{Channel: ch, Offset: pubs[0].Offset, Seq: pubs[0].Seq})
 
-	var gaps []messageloop.CatchUpGap
-	broker.SetGapHandler(func(gap messageloop.CatchUpGap) { gaps = append(gaps, gap) })
+	var gaps []stream.CatchUpGap
+	broker.SetGapHandler(func(gap stream.CatchUpGap) { gaps = append(gaps, gap) })
 
 	// Shrink the catch-up window after publishing so the replay reads only
 	// seqs 2..3 while seq 4 is still in the stream.
@@ -937,7 +941,7 @@ func TestRedisBroker_CatchUpMissed_ReplayTruncatedNotified(t *testing.T) {
 	require.EqualValues(t, 1, broker.catchUpGaps.Load(), "the truncated tail is still detected and counted")
 	require.Len(t, gaps, 1)
 	require.Equal(t, ch, gaps[0].Channel)
-	require.Equal(t, messageloop.HistoryGapReplayTruncated, gaps[0].Reason)
+	require.Equal(t, stream.HistoryGapReplayTruncated, gaps[0].Reason)
 	require.Equal(t, pubs[2].Offset, gaps[0].LastGoodOffset, "the last replayed entry is the last-known-good position")
 }
 
@@ -961,11 +965,11 @@ func TestRedisBroker_CatchUpMissed_OneNoticePerChannelPerCatchUp(t *testing.T) {
 	require.NoError(t, err)
 
 	// Delivery baseline: the first entry was delivered live.
-	broker.handler = func(_ string, pub *messageloop.Publication) error { return nil }
-	broker.deliverOnce(ch, &messageloop.Publication{Channel: ch, Offset: pubs[0].Offset, Seq: pubs[0].Seq})
+	broker.handler = func(_ string, pub *stream.Publication) error { return nil }
+	broker.deliverOnce(ch, &stream.Publication{Channel: ch, Offset: pubs[0].Offset, Seq: pubs[0].Seq})
 
-	var gaps []messageloop.CatchUpGap
-	broker.SetGapHandler(func(gap messageloop.CatchUpGap) { gaps = append(gaps, gap) })
+	var gaps []stream.CatchUpGap
+	broker.SetGapHandler(func(gap stream.CatchUpGap) { gaps = append(gaps, gap) })
 
 	// Replay cap 2: the replay reads seqs 2 and 4 — a middle hole — while
 	// seqs 5..6 remain beyond the delivered tail: a truncated tail too.
@@ -976,7 +980,7 @@ func TestRedisBroker_CatchUpMissed_OneNoticePerChannelPerCatchUp(t *testing.T) {
 	broker.catchUpMissed(context.Background())
 	require.EqualValues(t, 2, broker.catchUpGaps.Load(), "both holes are detected and counted")
 	require.Len(t, gaps, 1, "at most one notification per channel per catch-up pass")
-	require.Equal(t, messageloop.HistoryGapMiddle, gaps[0].Reason, "the first detected hole wins")
+	require.Equal(t, stream.HistoryGapMiddle, gaps[0].Reason, "the first detected hole wins")
 }
 
 // TestRedisBroker_CatchUpMissed_GapHandlerPanicContained verifies C6: a
@@ -993,14 +997,14 @@ func TestRedisBroker_CatchUpMissed_GapHandlerPanicContained(t *testing.T) {
 	pubs := publishGapTestEntries(t, broker, ch, 4)
 
 	var delivered []uint64
-	broker.handler = func(_ string, pub *messageloop.Publication) error {
+	broker.handler = func(_ string, pub *stream.Publication) error {
 		delivered = append(delivered, pub.Seq)
 		return nil
 	}
-	broker.deliverOnce(ch, &messageloop.Publication{Channel: ch, Offset: pubs[0].Offset, Seq: pubs[0].Seq})
+	broker.deliverOnce(ch, &stream.Publication{Channel: ch, Offset: pubs[0].Offset, Seq: pubs[0].Seq})
 	require.Equal(t, []uint64{1}, delivered)
 
-	broker.SetGapHandler(func(messageloop.CatchUpGap) { panic("boom") })
+	broker.SetGapHandler(func(stream.CatchUpGap) { panic("boom") })
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -1026,11 +1030,11 @@ func TestRedisBroker_CatchUpMissed_LegacyBaselineNoNotification(t *testing.T) {
 	pubs := publishGapTestEntries(t, broker, ch, 3)
 
 	// Baseline with an offset only, no dense seq (legacy bookkeeping).
-	broker.handler = func(_ string, pub *messageloop.Publication) error { return nil }
-	broker.deliverOnce(ch, &messageloop.Publication{Channel: ch, Offset: pubs[0].Offset})
+	broker.handler = func(_ string, pub *stream.Publication) error { return nil }
+	broker.deliverOnce(ch, &stream.Publication{Channel: ch, Offset: pubs[0].Offset})
 
-	var gaps []messageloop.CatchUpGap
-	broker.SetGapHandler(func(gap messageloop.CatchUpGap) { gaps = append(gaps, gap) })
+	var gaps []stream.CatchUpGap
+	broker.SetGapHandler(func(gap stream.CatchUpGap) { gaps = append(gaps, gap) })
 
 	// Delete the middle missed entry; without a seq baseline the hole is not
 	// detectable and must not be notified.
@@ -1053,7 +1057,7 @@ func TestRedisBroker_CatchUpMissed_LegacyBaselineNoNotification(t *testing.T) {
 // broker never panics.
 func TestRedisBroker_NoteLiveSeqGap(t *testing.T) {
 	b := newTestRedisBroker()
-	b.handler = func(string, *messageloop.Publication) error { return nil }
+	b.handler = func(string, *stream.Publication) error { return nil }
 
 	// Nil metrics (memory/single-node assembly never wires the broker): no panic.
 	b.noteLiveSeqGap("ch", 5)
@@ -1066,17 +1070,17 @@ func TestRedisBroker_NoteLiveSeqGap(t *testing.T) {
 	require.Equal(t, float64(0), testutil.ToFloat64(metrics.LiveDropTotal))
 	require.False(t, isDegraded(b, "ch"), "no baseline, no jump evidence: must not mark degraded")
 
-	b.deliverOnce("ch", &messageloop.Publication{Offset: 1, Seq: 2})
+	b.deliverOnce("ch", &stream.Publication{Offset: 1, Seq: 2})
 	b.noteLiveSeqGap("ch", 3) // contiguous: no drop
 	require.Equal(t, float64(0), testutil.ToFloat64(metrics.LiveDropTotal))
 	require.False(t, isDegraded(b, "ch"))
-	b.deliverOnce("ch", &messageloop.Publication{Offset: 2, Seq: 3})
+	b.deliverOnce("ch", &stream.Publication{Offset: 2, Seq: 3})
 
 	b.noteLiveSeqGap("ch", 7) // skipped seqs 4..6
 	require.Equal(t, float64(3), testutil.ToFloat64(metrics.LiveDropTotal))
 	require.True(t, isDegraded(b, "ch"), "a detected live seq jump is buffer-overflow evidence: must mark the channel degraded (D4)")
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.LiveDegradedChannels))
-	b.deliverOnce("ch", &messageloop.Publication{Offset: 3, Seq: 7})
+	b.deliverOnce("ch", &stream.Publication{Offset: 3, Seq: 7})
 
 	b.noteLiveSeqGap("ch", 0) // legacy payload: never counted
 	b.noteLiveSeqGap("ch", 9) // skipped seq 8
@@ -1101,7 +1105,7 @@ func TestRedisBroker_LiveDrop_SeqGapCounted(t *testing.T) {
 	var mu sync.Mutex
 	var delivered []uint64
 	go func() {
-		_ = broker.Start(ctx, func(_ string, pub *messageloop.Publication) error {
+		_ = broker.Start(ctx, func(_ string, pub *stream.Publication) error {
 			mu.Lock()
 			delivered = append(delivered, pub.Seq)
 			mu.Unlock()
@@ -1127,7 +1131,7 @@ func TestRedisBroker_LiveDrop_SeqGapCounted(t *testing.T) {
 
 	// Three consecutive publications: a healthy live path must not count drops.
 	for i := 0; i < 3; i++ {
-		_, err := broker.Publish(ch, &messageloop.Publication{Payload: []byte{byte('a' + i)}, Kind: messageloop.PayloadKindBinary})
+		_, err := broker.Publish(ch, &stream.Publication{Payload: []byte{byte('a' + i)}, Kind: stream.PayloadKindBinary})
 		require.NoError(t, err)
 	}
 	require.Eventually(t, func() bool { return deliveredCount() == 3 }, 2*time.Second, 10*time.Millisecond)
@@ -1138,14 +1142,14 @@ func TestRedisBroker_LiveDrop_SeqGapCounted(t *testing.T) {
 	// entries.
 	seqKey := broker.opts.StreamPrefix + "seq:" + ch
 	require.NoError(t, broker.client.Set(context.Background(), seqKey, 10, 0).Err())
-	_, err := broker.Publish(ch, &messageloop.Publication{Payload: []byte("jump"), Kind: messageloop.PayloadKindBinary})
+	_, err := broker.Publish(ch, &stream.Publication{Payload: []byte("jump"), Kind: stream.PayloadKindBinary})
 	require.NoError(t, err)
 	require.Eventually(t, func() bool {
 		return testutil.ToFloat64(metrics.LiveDropTotal) == 7
 	}, 2*time.Second, 10*time.Millisecond, "the live seq jump must count exactly the skipped publications")
 
 	// A legacy (Seq 0) live publication never counts.
-	require.NoError(t, broker.PublishTransient(ch, &messageloop.Publication{Payload: []byte("legacy"), Kind: messageloop.PayloadKindBinary}))
+	require.NoError(t, broker.PublishTransient(ch, &stream.Publication{Payload: []byte("legacy"), Kind: stream.PayloadKindBinary}))
 	require.Eventually(t, func() bool { return deliveredCount() == 5 }, 2*time.Second, 10*time.Millisecond)
 	require.Equal(t, float64(7), testutil.ToFloat64(metrics.LiveDropTotal), "legacy Seq==0 publications must not count")
 }
@@ -1213,7 +1217,7 @@ func newBlockedWorkerBroker(t *testing.T, metrics *messageloop.Metrics) (b *redi
 	b.SetMetrics(metrics)
 	gate := make(chan struct{})
 	entered := make(chan struct{}, 1)
-	b.handler = func(string, *messageloop.Publication) error {
+	b.handler = func(string, *stream.Publication) error {
 		select {
 		case entered <- struct{}{}:
 		default:
@@ -1232,14 +1236,14 @@ func newBlockedWorkerBroker(t *testing.T, metrics *messageloop.Metrics) (b *redi
 
 	ch = "d4-buffer-full"
 	// Occupy the channel's worker so the queue below stays full.
-	b.dispatch(ch, &messageloop.Publication{Channel: ch, Offset: 1})
+	b.dispatch(ch, &stream.Publication{Channel: ch, Offset: 1})
 	select {
 	case <-entered:
 	case <-time.After(2 * time.Second):
 		t.Fatal("worker did not pick up the blocking publication")
 	}
 	for i := 0; i < deliveryQueueSize; i++ {
-		b.dispatch(ch, &messageloop.Publication{Channel: ch, Offset: uint64(i + 2)})
+		b.dispatch(ch, &stream.Publication{Channel: ch, Offset: uint64(i + 2)})
 	}
 	require.Equal(t, deliveryQueueSize, len(b.deliverChans[deliveryWorkerIndex(ch)]),
 		"the channel's worker queue must be full for buffer-full semantics to trigger")
@@ -1261,7 +1265,7 @@ func TestRedisBroker_DispatchOccupancy_DropsWhenQueueFull(t *testing.T) {
 	// Occupancy on a full queue: the dispatch must return immediately.
 	dropped := make(chan struct{})
 	go func() {
-		b.dispatchOccupancy(ch, &messageloop.OccupancyEvent{Gen: 1})
+		b.dispatchOccupancy(ch, &occupancy.OccupancyEvent{Gen: 1})
 		close(dropped)
 	}()
 	select {
@@ -1276,7 +1280,7 @@ func TestRedisBroker_DispatchOccupancy_DropsWhenQueueFull(t *testing.T) {
 
 	// A second drop while already degraded: counted and Warn-logged again, but
 	// the gauge does not double-transition.
-	b.dispatchOccupancy(ch, &messageloop.OccupancyEvent{Gen: 2})
+	b.dispatchOccupancy(ch, &occupancy.OccupancyEvent{Gen: 2})
 	require.Equal(t, float64(2), testutil.ToFloat64(metrics.LiveDropTotal))
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.LiveDegradedChannels))
 	require.Equal(t, 2, logs.count(slog.LevelWarn, "dropped occupancy event"))
@@ -1285,7 +1289,7 @@ func TestRedisBroker_DispatchOccupancy_DropsWhenQueueFull(t *testing.T) {
 	// still full, the blocking send must not complete.
 	pubDone := make(chan struct{})
 	go func() {
-		b.dispatch(ch, &messageloop.Publication{Channel: ch, Offset: deliveryQueueSize + 2})
+		b.dispatch(ch, &stream.Publication{Channel: ch, Offset: deliveryQueueSize + 2})
 		close(pubDone)
 	}()
 	select {
@@ -1319,7 +1323,7 @@ func TestRedisBroker_DegradedClearedOnOccupancyEnqueue(t *testing.T) {
 	b, ch, release := newBlockedWorkerBroker(t, metrics)
 	var occMu sync.Mutex
 	var occDelivered int
-	b.occHandler = func(string, messageloop.OccupancyEvent) error {
+	b.occHandler = func(string, occupancy.OccupancyEvent) error {
 		occMu.Lock()
 		occDelivered++
 		occMu.Unlock()
@@ -1327,7 +1331,7 @@ func TestRedisBroker_DegradedClearedOnOccupancyEnqueue(t *testing.T) {
 	}
 	idx := deliveryWorkerIndex(ch)
 
-	b.dispatchOccupancy(ch, &messageloop.OccupancyEvent{Gen: 1})
+	b.dispatchOccupancy(ch, &occupancy.OccupancyEvent{Gen: 1})
 	require.True(t, isDegraded(b, ch))
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.LiveDegradedChannels))
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.LiveDropTotal))
@@ -1337,7 +1341,7 @@ func TestRedisBroker_DegradedClearedOnOccupancyEnqueue(t *testing.T) {
 
 	// The queue has room again: this occupancy event enqueues successfully,
 	// clears the mark, and is delivered normally.
-	b.dispatchOccupancy(ch, &messageloop.OccupancyEvent{Gen: 2})
+	b.dispatchOccupancy(ch, &occupancy.OccupancyEvent{Gen: 2})
 	require.False(t, isDegraded(b, ch))
 	require.Equal(t, float64(0), testutil.ToFloat64(metrics.LiveDegradedChannels))
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.LiveDropTotal), "a successful enqueue must not count as a drop")
@@ -1377,12 +1381,12 @@ func TestRedisBroker_DispatchOccupancy_InlinePathUnchanged(t *testing.T) {
 	metrics := messageloop.NewMetrics(prometheus.NewRegistry())
 	b.SetMetrics(metrics)
 	var delivered int
-	b.occHandler = func(string, messageloop.OccupancyEvent) error {
+	b.occHandler = func(string, occupancy.OccupancyEvent) error {
 		delivered++
 		return nil
 	}
 
-	b.dispatchOccupancy("ch", &messageloop.OccupancyEvent{Gen: 1})
+	b.dispatchOccupancy("ch", &occupancy.OccupancyEvent{Gen: 1})
 	require.Equal(t, 1, delivered)
 	require.Equal(t, float64(0), testutil.ToFloat64(metrics.LiveDropTotal))
 	require.False(t, isDegraded(b, "ch"))

@@ -84,7 +84,7 @@ func TestOccupancy_NoForbiddenProductionRemnants(t *testing.T) {
 	require.NotContains(t, nodeSrc, "presenceClusterEmit", "no cluster_emit helper may remain")
 	require.NotContains(t, nodeSrc, "func (n *Node) emitPresence", "emitPresence must be gone")
 
-	eventSrc := readSource(t, "presence_event.go")
+	eventSrc := readSource(t, "internal/occupancy/presence_event.go")
 	require.NotContains(t, eventSrc, "ml.type", "the live path must not attach ml.type")
 	require.NotContains(t, eventSrc, "presencePublication", "the transient presence frame helper must be gone")
 }
@@ -94,4 +94,4 @@ func readSource(t *testing.T, file string) string {
 	data, err := os.ReadFile(file)
 	require.NoError(t, err)
 	return string(data)
-}
+}

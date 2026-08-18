@@ -1,4 +1,4 @@
-package messageloop
+package protocol
 
 import (
 	"errors"

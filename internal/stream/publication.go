@@ -1,4 +1,4 @@
-package messageloop
+package stream
 
 import (
 	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
