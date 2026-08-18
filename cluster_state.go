@@ -269,6 +269,9 @@ func (n *Node) syncClusterSessionState(ctx context.Context, client *Client) erro
 			return err
 		}
 		if !ok {
+			if n.metrics != nil {
+				n.metrics.BindFencedTotal.Inc()
+			}
 			return ErrSessionFenced
 		}
 		return directory.PutSessionSnapshot(ctx, snapshot, defaultClusterSessionSnapshotTTL)
@@ -277,6 +280,9 @@ func (n *Node) syncClusterSessionState(ctx context.Context, client *Client) erro
 	// The directory records a different fencing (another node's CAS won the
 	// session): this attachment is fenced and must not write anything back.
 	if current.NodeID != n.ClusterNodeID() || current.IncarnationID != n.ClusterIncarnationID() {
+		if n.metrics != nil {
+			n.metrics.BindRefreshFailTotal.Inc()
+		}
 		return ErrSessionFenced
 	}
 	// A directory version newer than the local one means this attachment is
@@ -287,6 +293,9 @@ func (n *Node) syncClusterSessionState(ctx context.Context, client *Client) erro
 	// same-node resume and this write records that bump without creating a
 	// new one (refresh never increments).
 	if current.LeaseVersion > desired.LeaseVersion {
+		if n.metrics != nil {
+			n.metrics.BindRefreshFailTotal.Inc()
+		}
 		return ErrSessionFenced
 	}
 
@@ -295,6 +304,9 @@ func (n *Node) syncClusterSessionState(ctx context.Context, client *Client) erro
 		return err
 	}
 	if !ok {
+		if n.metrics != nil {
+			n.metrics.BindRefreshFailTotal.Inc()
+		}
 		return ErrSessionFenced
 	}
 	return directory.PutSessionSnapshot(ctx, snapshot, defaultClusterSessionSnapshotTTL)

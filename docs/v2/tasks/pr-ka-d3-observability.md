@@ -3,7 +3,7 @@
 | 字段 | 值 |
 | --- | --- |
 | 标题 | `metrics: land contract observability (bind fencing, evict lag, dual activation, live drop, occupancy discard)` |
-| 状态 | **Ready**（待实现） |
+| 状态 | **Accepted**（2026-08-18 主 agent 终验通过，尚未 commit） |
 | 依赖 | D2 已合（`83c7faa`）。在 `v2` 分支上做 |
 | 设计来源 | [kernel-architecture.md](../kernel-architecture.md) 观测节（:578-584）与 LiveBus 缓冲满合同（:409）；转正评审架构覆盖路 |
 | 验收人 | 主 agent |
@@ -112,4 +112,15 @@ grep -n "cluster_command_hmac_reject_total\|recovery_gap_total\|live_gap_notice_
 
 ## 8. 实现备注（实现方填）
 
-（空）
+实现已完成（v2 分支，基于 `2c5ea2d`）。要点：
+
+- **metrics.go**：`Metrics` 增加 `BindFencedTotal` / `BindRefreshFailTotal` / `EvictLag` / `SessionDualActivationSeconds` / `OccupancyGenDiscards` / `LiveDropTotal` 六字段并注册；指标名与架构观测节逐字一致（`messageloop_` 前缀由 `Namespace` 加），均无 label；两个 histogram 用 `DefBuckets`（时长刻度）。
+- **cluster_state.go**：`syncClusterSessionState` 四个 ErrSessionFenced 点按 §3.1 分配埋点——首登 CAS(nil) `!ok` → `BindFencedTotal`；fencing 不符 / directory version 更新 / 续约 CAS `!ok` 三处 → `BindRefreshFailTotal`。判定逻辑零改动。
+- **cluster_resume.go**：takeover CAS claim `!claimed` → `BindFencedTotal`；`dualActivationStart` 取在 CAS 之前（规格 §3.2「从 :71 之前起算」），`evictStart` 紧贴 `requestSessionTakeover` 调用。`EvictLag` 在调用返回即 Observe（成功/失败都计，它是往返时延）；`SessionDualActivationSeconds` 只在 takeover 分支收尾 Observe（成功路径与 KD-K30 死节点旁路；回滚提前 return 的两条失败路径不 Observe，窗口未形成有效接管）。原 `if err := ...; err != nil` 改为 `takeoverErr := ...; if takeoverErr != nil`，返回值语义不变。
+- **node.go**：`onOccupancy` 的 `PresenceFailures{op="late"}` 替换为 `OccupancyGenDiscards.Inc()`；`PresenceFailures` vec 保留。全仓 `"late"` 零残留（grep 门禁验证）。
+- **pkg/redisbroker**：`redis.go` 加 `metricsMu`+`metrics` 字段与 `SetMetrics`/`getMetrics`（nil 容忍，照命令总线范式）；`pubsub.go` 消费循环 live publication 分支在 `deliverOnce` 推进 `lastSeqs` 之前调 `noteLiveSeqGap`，读基线用 `deliverMu`+`subMu.RLock`（与 `deliverOnce` 同锁序、无新锁）。语义：`Seq>0 && last>0 && Seq>last+1` 时 `Add(Seq-last-1)`；legacy（Seq==0）与无基线（重连 catch-up 重置后首条）不计。
+- **cmd/server/main.go**：`node.SetBroker(broker)` 后经接口断言 `SetMetrics(*messageloop.Metrics)` 接线；memory broker 不实现该接口，自然不接线、不 panic。
+- **测试**：`metrics_test.go` 删 `op="late"` 断言并加 `TestMetrics_ContractObservabilityRegistered`（注册名 + Inc/Observe + histogram SampleCount，用 `dto.Metric`）；`cluster_state_test.go` 加首登抢权失败 + 三种 refresh-fenced 子用例；`cluster_resume_test.go` 加 claim fenced、takeover 成功双 histogram 各 1 次、无远端旧主 0 次三个用例；`occupancy_test.go` 加迟到事件计数断言；`pubsub_test.go` 加无 Redis 的 `noteLiveSeqGap` 语义单测（含 nil metrics 不 panic）与真实 Redis 的 `TestRedisBroker_LiveDrop_SeqGapCounted`（连发无误报 → SET seq 计数器跳到 10 后发布 seq 11 断言 +7 → PublishTransient Seq==0 不计）。异步断言全部用 `require.Eventually`，无固定长 Sleep。
+- **docs/developer/05-observability.md**：§3.2 收 `live_drop_total`；§3.4 收 `cluster_command_hmac_reject_total`、`bind_fenced_total`、`bind_refresh_fail_total`、`evict_lag`、`session_dual_activation_seconds`；§3.5 收 `recovery_gap_total`、`live_gap_notice_total`、`occupancy_gen_discard_total`；§3 开头的语义标签清单同步补 `reason` 系列。
+
+验证：§5 全部命令实跑通过（`go build ./...`；`go test -count=1 ./pkg/redisbroker`；根目录定向测试；`go test -count=1 ./...` 全量；三条 grep 门禁）。真实 Redis 为本机 Docker 容器 `messageloop-test-redis`（127.0.0.1:6379，测试沿用 `requireCommandBusRedis`，DB 14）。无 git 操作，无格式 churn（改动文件保持各自原有 CRLF/LF 行尾）。

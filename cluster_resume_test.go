@@ -9,6 +9,9 @@ import (
 
 	"github.com/messageloopio/messageloop/config"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -710,4 +713,121 @@ func TestResumeRemoteSession_NodeLeaseLookupErrorStillRollsBack(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "node-b", lease.NodeID)
 	require.Equal(t, uint64(7), lease.LeaseVersion)
+}
+// --- PR-KA-D3: takeover observability (bind_fenced_total / evict_lag / session_dual_activation_seconds) ---
+
+// resumeMetricsTestNode builds a cluster-enabled node wired with metrics and
+// the given directory/command bus for resumeRemoteSession tests.
+func resumeMetricsTestNode(t *testing.T, directory SessionDirectory, bus ClusterCommandBus) (*Node, *Metrics) {
+	t.Helper()
+	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-a", IncarnationID: "inc-a", Backend: "memory"}, ClusterDependencies{
+		SessionDirectory: directory,
+		CommandBus:       bus,
+		QueryStore:       fakeQueryStore{},
+	})
+	require.NoError(t, err)
+	node := NewNode(nil)
+	node.SetCluster(runtime)
+	metrics := NewMetrics(prometheus.NewRegistry())
+	node.SetMetrics(metrics)
+	return node, metrics
+}
+
+func histogramSampleCount(t *testing.T, h prometheus.Histogram) uint64 {
+	t.Helper()
+	var metric dto.Metric
+	require.NoError(t, h.Write(&metric))
+	return metric.GetHistogram().GetSampleCount()
+}
+
+// TestResumeRemoteSession_Metrics_TakeoverClaimFencedCounted verifies D3: a
+// lost takeover CAS claim counts towards bind_fenced_total, and no takeover
+// timing is observed (no command was sent to a remote old owner).
+func TestResumeRemoteSession_Metrics_TakeoverClaimFencedCounted(t *testing.T) {
+	directory := &fakeSessionDirectory{
+		lease: &ClusterSessionLease{
+			SessionID:     "sess-remote",
+			NodeID:        "node-b",
+			IncarnationID: "inc-b",
+			LeaseVersion:  7,
+			ExpiresAt:     time.Now().Add(time.Hour),
+		},
+		snapshot: &ClusterSessionSnapshot{
+			SessionID: "sess-remote",
+			UserID:    "user-1",
+			ClientID:  "client-1",
+		},
+		forceCasFail: true,
+	}
+	node, metrics := resumeMetricsTestNode(t, directory, &fakeClusterCommandBus{})
+	client, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
+	require.NoError(t, err)
+
+	_, resumed, err := node.resumeRemoteSession(context.Background(), client, "sess-remote")
+	require.Error(t, err)
+	require.False(t, resumed)
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.BindFencedTotal))
+	require.Equal(t, uint64(0), histogramSampleCount(t, metrics.EvictLag))
+	require.Equal(t, uint64(0), histogramSampleCount(t, metrics.SessionDualActivationSeconds))
+}
+
+// TestResumeRemoteSession_Metrics_TakeoverObserved verifies D3: a successful
+// takeover of a remotely owned session observes evict_lag and
+// session_dual_activation_seconds exactly once each.
+func TestResumeRemoteSession_Metrics_TakeoverObserved(t *testing.T) {
+	directory := &fakeSessionDirectory{
+		lease: &ClusterSessionLease{
+			SessionID:     "sess-remote",
+			NodeID:        "node-b",
+			IncarnationID: "inc-b",
+			LeaseVersion:  7,
+			ExpiresAt:     time.Now().Add(time.Hour),
+		},
+		snapshot: &ClusterSessionSnapshot{
+			SessionID:     "sess-remote",
+			UserID:        "user-1",
+			ClientID:      "client-1",
+			Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "news"}},
+		},
+	}
+	bus := &fakeClusterCommandBus{result: &ClusterCommandResult{Status: ClusterCommandStatusSucceeded}}
+	node, metrics := resumeMetricsTestNode(t, directory, bus)
+	client, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
+	require.NoError(t, err)
+
+	_, resumed, err := node.resumeRemoteSession(context.Background(), client, "sess-remote")
+	require.NoError(t, err)
+	require.True(t, resumed)
+	require.Equal(t, float64(0), testutil.ToFloat64(metrics.BindFencedTotal))
+	require.Equal(t, uint64(1), histogramSampleCount(t, metrics.EvictLag))
+	require.Equal(t, uint64(1), histogramSampleCount(t, metrics.SessionDualActivationSeconds))
+}
+
+// TestResumeRemoteSession_Metrics_NoRemoteOwnerSkipsTiming verifies D3: a
+// resume whose lease has no remote old owner (same node incarnation) never
+// observes evict_lag or session_dual_activation_seconds.
+func TestResumeRemoteSession_Metrics_NoRemoteOwnerSkipsTiming(t *testing.T) {
+	directory := &fakeSessionDirectory{
+		lease: &ClusterSessionLease{
+			SessionID:     "sess-local",
+			NodeID:        "node-a",
+			IncarnationID: "inc-a",
+			LeaseVersion:  3,
+			ExpiresAt:     time.Now().Add(time.Hour),
+		},
+		snapshot: &ClusterSessionSnapshot{
+			SessionID: "sess-local",
+			UserID:    "user-1",
+			ClientID:  "client-1",
+		},
+	}
+	node, metrics := resumeMetricsTestNode(t, directory, &fakeClusterCommandBus{})
+	client, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
+	require.NoError(t, err)
+
+	_, resumed, err := node.resumeRemoteSession(context.Background(), client, "sess-local")
+	require.NoError(t, err)
+	require.True(t, resumed)
+	require.Equal(t, uint64(0), histogramSampleCount(t, metrics.EvictLag))
+	require.Equal(t, uint64(0), histogramSampleCount(t, metrics.SessionDualActivationSeconds))
 }

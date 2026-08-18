@@ -70,6 +70,12 @@ func main() {
 			return err
 		}
 		node.SetBroker(broker)
+		// Wire the shared metrics into the broker when it supports them (the
+		// Redis broker counts live-drop seq gaps, D3); the memory broker does
+		// not implement SetMetrics and stays unwired.
+		if metricsAware, ok := broker.(interface{ SetMetrics(*messageloop.Metrics) }); ok {
+			metricsAware.SetMetrics(metrics)
+		}
 
 		// In cluster mode the health endpoint probes Redis connectivity;
 		// wire the broker's ping as that probe when the broker supports it.

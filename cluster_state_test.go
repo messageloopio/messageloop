@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -272,4 +274,88 @@ func TestClusterSessionSync_ConcurrentCASNilOnlyOneWins(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, lease)
 	require.Equal(t, uint64(1), lease.LeaseVersion)
+}
+
+// --- PR-KA-D3: fencing counters (bind_fenced_total / bind_refresh_fail_total) ---
+
+// fencedMetricsTestClient builds a client on a metrics-wired cluster test
+// node without registering it, so only the explicit syncClusterSessionState
+// call under test can touch the fencing counters.
+func fencedMetricsTestClient(t *testing.T, directory SessionDirectory) (*Node, *Metrics, *Client) {
+	t.Helper()
+	node := clusterTestNode(t, directory)
+	metrics := NewMetrics(prometheus.NewRegistry())
+	node.SetMetrics(metrics)
+	client, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
+	require.NoError(t, err)
+	client.ForceTestIDs("sess-fenced", "user-fenced", "client-fenced")
+	return node, metrics, client
+}
+
+// TestClusterSessionSync_Metrics_FirstClaimFencedCounted verifies D3: a lost
+// CAS(nil) first registration counts towards bind_fenced_total and never
+// towards bind_refresh_fail_total.
+func TestClusterSessionSync_Metrics_FirstClaimFencedCounted(t *testing.T) {
+	directory := &fakeSessionDirectory{forceCasFail: true}
+	node, metrics, client := fencedMetricsTestClient(t, directory)
+
+	err := node.syncClusterSessionState(context.Background(), client)
+	require.ErrorIs(t, err, ErrSessionFenced)
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.BindFencedTotal))
+	require.Equal(t, float64(0), testutil.ToFloat64(metrics.BindRefreshFailTotal))
+}
+
+// TestClusterSessionSync_Metrics_RefreshFencedCounted verifies D3: the three
+// same-session refresh fencing paths (foreign fencing, newer directory
+// version, lost refresh CAS) each count towards bind_refresh_fail_total and
+// never towards bind_fenced_total.
+func TestClusterSessionSync_Metrics_RefreshFencedCounted(t *testing.T) {
+	cases := []struct {
+		name      string
+		directory *fakeSessionDirectory
+	}{
+		{
+			name: "foreign fencing",
+			directory: &fakeSessionDirectory{lease: &ClusterSessionLease{
+				SessionID:     "sess-fenced",
+				NodeID:        "node-b",
+				IncarnationID: "inc-b",
+				LeaseVersion:  2,
+				ExpiresAt:     time.Now().Add(time.Hour),
+			}},
+		},
+		{
+			name: "newer directory version",
+			directory: &fakeSessionDirectory{lease: &ClusterSessionLease{
+				SessionID:     "sess-fenced",
+				NodeID:        "node-a",
+				IncarnationID: "inc-a",
+				LeaseVersion:  5,
+				ExpiresAt:     time.Now().Add(time.Hour),
+			}},
+		},
+		{
+			name: "lost refresh CAS",
+			directory: &fakeSessionDirectory{
+				forceCasFail: true,
+				lease: &ClusterSessionLease{
+					SessionID:     "sess-fenced",
+					NodeID:        "node-a",
+					IncarnationID: "inc-a",
+					LeaseVersion:  1,
+					ExpiresAt:     time.Now().Add(time.Hour),
+				},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			node, metrics, client := fencedMetricsTestClient(t, tc.directory)
+
+			err := node.syncClusterSessionState(context.Background(), client)
+			require.ErrorIs(t, err, ErrSessionFenced)
+			require.Equal(t, float64(1), testutil.ToFloat64(metrics.BindRefreshFailTotal))
+			require.Equal(t, float64(0), testutil.ToFloat64(metrics.BindFencedTotal))
+		})
+	}
 }

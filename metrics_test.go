@@ -6,6 +6,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 )
 
@@ -61,8 +62,9 @@ func TestMetricsTransportLabel(t *testing.T) {
 
 // TestMetrics_PresenceFailuresRegistered verifies the presence_failures_total
 // counter vector is registered with the op label and counts each failure
-// operation (deliver/store/gen/late/companion/emit). The old rewrite op is
-// gone with the ml.type broadcast rewrite (B2).
+// operation (deliver/store/gen/companion/emit). The old rewrite op is gone
+// with the ml.type broadcast rewrite (B2); the late op moved to the dedicated
+// occupancy_gen_discard_total counter (D3).
 func TestMetrics_PresenceFailuresRegistered(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	metrics := NewMetrics(reg)
@@ -70,14 +72,12 @@ func TestMetrics_PresenceFailuresRegistered(t *testing.T) {
 	metrics.PresenceFailures.WithLabelValues("store").Inc()
 	metrics.PresenceFailures.WithLabelValues("deliver").Inc()
 	metrics.PresenceFailures.WithLabelValues("gen").Inc()
-	metrics.PresenceFailures.WithLabelValues("late").Inc()
 	metrics.PresenceFailures.WithLabelValues("companion").Inc()
 	metrics.PresenceFailures.WithLabelValues("emit").Inc()
 
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.PresenceFailures.WithLabelValues("store")))
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.PresenceFailures.WithLabelValues("deliver")))
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.PresenceFailures.WithLabelValues("gen")))
-	require.Equal(t, float64(1), testutil.ToFloat64(metrics.PresenceFailures.WithLabelValues("late")))
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.PresenceFailures.WithLabelValues("companion")))
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.PresenceFailures.WithLabelValues("emit")))
 
@@ -261,4 +261,52 @@ func TestMetrics_LiveGapNoticeRegistered(t *testing.T) {
 	}
 	require.True(t, names["messageloop_live_gap_notice_total"],
 		"messageloop_live_gap_notice_total must be registered")
+}
+
+// TestMetrics_ContractObservabilityRegistered verifies PR-KA-D3: the six
+// contract observability metrics from the kernel architecture observability
+// section are registered under their exact names and accept Inc/Observe
+// through the metrics object.
+func TestMetrics_ContractObservabilityRegistered(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	metrics := NewMetrics(reg)
+
+	metrics.BindFencedTotal.Inc()
+	metrics.BindRefreshFailTotal.Inc()
+	metrics.EvictLag.Observe(0.5)
+	metrics.SessionDualActivationSeconds.Observe(1.5)
+	metrics.OccupancyGenDiscards.Inc()
+	metrics.LiveDropTotal.Add(3)
+
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.BindFencedTotal))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.BindRefreshFailTotal))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.OccupancyGenDiscards))
+	require.Equal(t, float64(3), testutil.ToFloat64(metrics.LiveDropTotal))
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	names := make(map[string]bool, len(families))
+	for _, family := range families {
+		names[family.GetName()] = true
+	}
+	for _, name := range []string{
+		"messageloop_bind_fenced_total",
+		"messageloop_bind_refresh_fail_total",
+		"messageloop_evict_lag",
+		"messageloop_session_dual_activation_seconds",
+		"messageloop_occupancy_gen_discard_total",
+		"messageloop_live_drop_total",
+	} {
+		require.True(t, names[name], "%s must be registered", name)
+	}
+
+	// The two histograms recorded exactly one observation each.
+	for name, histogram := range map[string]prometheus.Histogram{
+		"messageloop_evict_lag":                       metrics.EvictLag,
+		"messageloop_session_dual_activation_seconds": metrics.SessionDualActivationSeconds,
+	} {
+		var metric dto.Metric
+		require.NoError(t, histogram.Write(&metric))
+		require.Equal(t, uint64(1), metric.GetHistogram().GetSampleCount(), "%s sample count", name)
+	}
 }

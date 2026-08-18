@@ -460,6 +460,7 @@ func (b *redisBroker) runPubSub(ctx context.Context) error {
 				}
 				switch redisMsg.Type {
 				case messageTypePublication:
+					b.noteLiveSeqGap(channelName, redisMsg.Seq)
 					b.deliverOnce(channelName, messageToPublication(channelName, redisMsg, redisMsg.Offset))
 				case messageTypeOccupancy:
 					// Occupancy has no stream offset: it must never go
@@ -650,6 +651,33 @@ func (b *redisBroker) newestStreamOffset(ctx context.Context, stream string) (ui
 		return 0, nil
 	}
 	return parseStreamOffset(msgs[0].ID), nil
+}
+
+// noteLiveSeqGap counts live publications lost between the delivery baseline
+// and the incoming dense seq (D3): when the go-redis live buffer
+// (pubsubBufferSize) is full, publications are dropped silently, so the
+// resulting seq jump is counted here instead of vanishing. It runs on the
+// live publication path only, right before deliverOnce advances the same
+// lastSeqs baseline (C4), serialized by deliverMu — no new lock. Legacy
+// payloads (Seq 0, the C4 break-chain semantics) and the first sequenced
+// publication after a baseline reset (lastSeqs 0, e.g. right after a
+// reconnect catch-up) never count. A nil metrics object disables counting.
+func (b *redisBroker) noteLiveSeqGap(channel string, seq uint64) {
+	if seq == 0 {
+		return
+	}
+	metrics := b.getMetrics()
+	if metrics == nil {
+		return
+	}
+	b.deliverMu.Lock()
+	b.subMu.RLock()
+	last := b.lastSeqs[channel]
+	b.subMu.RUnlock()
+	b.deliverMu.Unlock()
+	if last > 0 && seq > last+1 {
+		metrics.LiveDropTotal.Add(float64(seq - last - 1))
+	}
 }
 
 // deliverOnce hands a publication to the handler exactly once per channel

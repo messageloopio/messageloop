@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"sync"
 	"testing"
 	"time"
 
@@ -11,6 +12,8 @@ import (
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/pkg/topics"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -1027,4 +1030,104 @@ func TestRedisBroker_CatchUpMissed_LegacyBaselineNoNotification(t *testing.T) {
 	broker.catchUpMissed(context.Background())
 	require.EqualValues(t, 0, broker.catchUpGaps.Load())
 	require.Empty(t, gaps, "a legacy (seq-less) baseline must never produce a gap notification")
+}
+
+// --- PR-KA-D3: live_drop_total (dense-seq jump detection on the live path) ---
+
+// TestRedisBroker_NoteLiveSeqGap verifies D3 live-drop detection semantics
+// without Redis: only a forward jump over a known baseline counts, exactly by
+// the number of skipped seqs; legacy (Seq 0) payloads and a missing baseline
+// (e.g. right after a reconnect reset) never count; an unwired (nil metrics)
+// broker never panics.
+func TestRedisBroker_NoteLiveSeqGap(t *testing.T) {
+	b := newTestRedisBroker()
+	b.handler = func(string, *messageloop.Publication) error { return nil }
+
+	// Nil metrics (memory/single-node assembly never wires the broker): no panic.
+	b.noteLiveSeqGap("ch", 5)
+
+	metrics := messageloop.NewMetrics(prometheus.NewRegistry())
+	b.SetMetrics(metrics)
+
+	// No dense-seq baseline yet: rather miss than libel.
+	b.noteLiveSeqGap("ch", 9)
+	require.Equal(t, float64(0), testutil.ToFloat64(metrics.LiveDropTotal))
+
+	b.deliverOnce("ch", &messageloop.Publication{Offset: 1, Seq: 2})
+	b.noteLiveSeqGap("ch", 3) // contiguous: no drop
+	require.Equal(t, float64(0), testutil.ToFloat64(metrics.LiveDropTotal))
+	b.deliverOnce("ch", &messageloop.Publication{Offset: 2, Seq: 3})
+
+	b.noteLiveSeqGap("ch", 7) // skipped seqs 4..6
+	require.Equal(t, float64(3), testutil.ToFloat64(metrics.LiveDropTotal))
+	b.deliverOnce("ch", &messageloop.Publication{Offset: 3, Seq: 7})
+
+	b.noteLiveSeqGap("ch", 0) // legacy payload: never counted
+	b.noteLiveSeqGap("ch", 9) // skipped seq 8
+	require.Equal(t, float64(4), testutil.ToFloat64(metrics.LiveDropTotal))
+}
+
+// TestRedisBroker_LiveDrop_SeqGapCounted verifies D3 against a real Redis:
+// continuous live traffic never false-positives, a dense-seq jump on the live
+// path counts exactly the skipped publications, and a legacy (Seq 0)
+// transient publication is never counted.
+func TestRedisBroker_LiveDrop_SeqGapCounted(t *testing.T) {
+	redisCfg := requireCommandBusRedis(t)
+	broker := New(redisCfg).(*redisBroker)
+	t.Cleanup(func() { _ = broker.client.Close() })
+	metrics := messageloop.NewMetrics(prometheus.NewRegistry())
+	broker.SetMetrics(metrics)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	var mu sync.Mutex
+	var delivered []uint64
+	go func() {
+		_ = broker.Start(ctx, func(_ string, pub *messageloop.Publication) error {
+			mu.Lock()
+			delivered = append(delivered, pub.Seq)
+			mu.Unlock()
+			return nil
+		})
+	}()
+	select {
+	case <-broker.Ready():
+	case <-time.After(5 * time.Second):
+		t.Fatal("broker did not become ready")
+	}
+
+	ch := "live-drop-gap"
+	// Subscribe after Ready so the call blocks on the live subscribe ack:
+	// publications after this point are guaranteed to be delivered in real time.
+	require.NoError(t, broker.Subscribe(ch))
+
+	deliveredCount := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(delivered)
+	}
+
+	// Three consecutive publications: a healthy live path must not count drops.
+	for i := 0; i < 3; i++ {
+		_, err := broker.Publish(ch, &messageloop.Publication{Payload: []byte{byte('a' + i)}, Kind: messageloop.PayloadKindBinary})
+		require.NoError(t, err)
+	}
+	require.Eventually(t, func() bool { return deliveredCount() == 3 }, 2*time.Second, 10*time.Millisecond)
+	require.Equal(t, float64(0), testutil.ToFloat64(metrics.LiveDropTotal), "continuous live traffic must not count drops")
+
+	// Skip seqs 4..10 by bumping the dense seq counter directly: the next
+	// publish is assigned seq 11, and the live jump must count the 7 skipped
+	// entries.
+	seqKey := broker.opts.StreamPrefix + "seq:" + ch
+	require.NoError(t, broker.client.Set(context.Background(), seqKey, 10, 0).Err())
+	_, err := broker.Publish(ch, &messageloop.Publication{Payload: []byte("jump"), Kind: messageloop.PayloadKindBinary})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		return testutil.ToFloat64(metrics.LiveDropTotal) == 7
+	}, 2*time.Second, 10*time.Millisecond, "the live seq jump must count exactly the skipped publications")
+
+	// A legacy (Seq 0) live publication never counts.
+	require.NoError(t, broker.PublishTransient(ch, &messageloop.Publication{Payload: []byte("legacy"), Kind: messageloop.PayloadKindBinary}))
+	require.Eventually(t, func() bool { return deliveredCount() == 5 }, 2*time.Second, 10*time.Millisecond)
+	require.Equal(t, float64(7), testutil.ToFloat64(metrics.LiveDropTotal), "legacy Seq==0 publications must not count")
 }

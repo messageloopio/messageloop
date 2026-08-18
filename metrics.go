@@ -45,6 +45,12 @@ type Metrics struct {
 	HeartbeatIdleDisconnects        prometheus.Counter
 	AdminUserFanout                 *prometheus.HistogramVec
 	SurveyClientTotal               *prometheus.CounterVec
+	BindFencedTotal                 prometheus.Counter
+	BindRefreshFailTotal            prometheus.Counter
+	EvictLag                        prometheus.Histogram
+	SessionDualActivationSeconds    prometheus.Histogram
+	OccupancyGenDiscards            prometheus.Counter
+	LiveDropTotal                   prometheus.Counter
 }
 
 // NewMetrics creates and registers all Prometheus metrics.
@@ -183,6 +189,38 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name:      "survey_client_total",
 			Help:      "Total number of client-initiated surveys by result (ok or the top-level error code).",
 		}, []string{"result"}),
+		BindFencedTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "messageloop",
+			Name:      "bind_fenced_total",
+			Help:      "Total number of session bind/takeover attempts fenced out by a lost lease claim (CAS-nil first registration or takeover CAS conflict).",
+		}),
+		BindRefreshFailTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "messageloop",
+			Name:      "bind_refresh_fail_total",
+			Help:      "Total number of same-fence lease refreshes rejected as fenced (foreign fencing, newer directory version, or lost refresh CAS).",
+		}),
+		EvictLag: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Namespace: "messageloop",
+			Name:      "evict_lag",
+			Help:      "Round-trip latency in seconds of a session takeover (evict) command sent to the remote old owner.",
+			Buckets:   prometheus.DefBuckets,
+		}),
+		SessionDualActivationSeconds: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Namespace: "messageloop",
+			Name:      "session_dual_activation_seconds",
+			Help:      "Duration in seconds of the takeover overlap window (lease CAS win to takeover completion, including the dead-node bypass).",
+			Buckets:   prometheus.DefBuckets,
+		}),
+		OccupancyGenDiscards: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "messageloop",
+			Name:      "occupancy_gen_discard_total",
+			Help:      "Total number of occupancy events discarded because an equal or newer generation was already applied for the session.",
+		}),
+		LiveDropTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "messageloop",
+			Name:      "live_drop_total",
+			Help:      "Total number of live publications lost to dense-seq discontinuities (e.g. a full pub/sub buffer dropping messages silently).",
+		}),
 	}
 	reg.MustRegister(
 		m.ConnectionsTotal,
@@ -210,6 +248,12 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.HeartbeatIdleDisconnects,
 		m.AdminUserFanout,
 		m.SurveyClientTotal,
+		m.BindFencedTotal,
+		m.BindRefreshFailTotal,
+		m.EvictLag,
+		m.SessionDualActivationSeconds,
+		m.OccupancyGenDiscards,
+		m.LiveDropTotal,
 	)
 	return m
 }

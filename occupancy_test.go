@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -45,6 +47,27 @@ func TestOccupancy_ErrLateOccupancyIsASentinel(t *testing.T) {
 	require.NoError(t, node.onOccupancy(ch, OccupancyEvent{Event: base.Event, Gen: 11}))
 	err := node.onOccupancy(ch, OccupancyEvent{Event: base.Event, Gen: 10})
 	require.ErrorIs(t, err, ErrLateOccupancy)
+}
+
+// TestOccupancy_LateEventCountsGenDiscard verifies D3: a late occupancy event
+// (an equal or older generation already applied for the session) increments
+// occupancy_gen_discard_total instead of the retired presence_failures late
+// op.
+func TestOccupancy_LateEventCountsGenDiscard(t *testing.T) {
+	node := NewNode(nil)
+	metrics := NewMetrics(prometheus.NewRegistry())
+	node.SetMetrics(metrics)
+
+	const ch = "late.metric.ch"
+	base := OccupancyEvent{
+		Event: &clientpb.PresenceEvent{Channel: ch, Action: "join",
+			Info: &clientpb.PresenceInfo{SessionId: "sess-late"}},
+	}
+	require.NoError(t, node.onOccupancy(ch, OccupancyEvent{Event: base.Event, Gen: 11}))
+	require.Equal(t, float64(0), testutil.ToFloat64(metrics.OccupancyGenDiscards))
+	err := node.onOccupancy(ch, OccupancyEvent{Event: base.Event, Gen: 10})
+	require.ErrorIs(t, err, ErrLateOccupancy)
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.OccupancyGenDiscards))
 }
 
 // TestOccupancy_NoForbiddenProductionRemnants pins B2 §8.1 at source level:

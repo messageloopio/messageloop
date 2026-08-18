@@ -61,7 +61,7 @@ curl -s http://127.0.0.1:8080/health
 
 - 指标注册在进程内新建的 `prometheus.NewRegistry()` 上：除 `messageloop.Metrics` 定义的指标外，还注册了 Go runtime 与 process 默认采集器（`collectors.NewGoCollector()`、`collectors.NewProcessCollector(...)`，`cmd/server/main.go:44-47`），因此 `/metrics` 同时暴露 `go_*`、`process_*` 系列指标；
 - `node.SetMetrics(metrics)` 后，`Node` 与 `Hub` 在运行路径中更新指标；集群模式下指标对象同时注入 Redis 命令总线与投影修复器；
-- `messageloop_*` 指标以 `messageloop` 为命名空间；**cluster 启用且配置 `node_id` 时，指标带 `node_id` 标签**（`prometheus.WrapRegistererWith`，`cmd/server/main.go:49-53`）；`messageloop_connections_total` 另带 `transport` 标签（`ws`/`grpc`/`quic`，见 §3.1）。v1.0 起部分指标带自己的语义标签（`recovery_*` 的 `path`/`result`、`admin_user_fanout` 的 `op`、`survey_client_total` 的 `result`、`presence_failures_total` 的 `op`），其余指标无标签。
+- `messageloop_*` 指标以 `messageloop` 为命名空间；**cluster 启用且配置 `node_id` 时，指标带 `node_id` 标签**（`prometheus.WrapRegistererWith`，`cmd/server/main.go:49-53`）；`messageloop_connections_total` 另带 `transport` 标签（`ws`/`grpc`/`quic`，见 §3.1）。v1.0 起部分指标带自己的语义标签（`recovery_*` 的 `path`/`result`/`reason`、`live_gap_notice_total` 的 `reason`、`cluster_command_hmac_reject_total` 的 `reason`、`admin_user_fanout` 的 `op`、`survey_client_total` 的 `result`、`presence_failures_total` 的 `op`），其余指标无标签。
 
 快速查看示例：
 
@@ -84,6 +84,7 @@ curl -s http://127.0.0.1:8080/metrics | grep '^messageloop_'
 | `messageloop_messages_published_total` | counter | 无 | 发布成功累计数。`Node.Publish` 与 `Node.PublishTransient`（presence 事件等）成功时 +1 |
 | `messageloop_messages_delivered_total` | counter | 无 | 实时投递给订阅者成功累计数（`hub.go` 广播路径）。注意：**不计入历史恢复（recovery）投递**，仅统计实时广播 |
 | `messageloop_delivery_failures_total` | counter | 无 | 投递失败累计数（死信）。广播时 `Client.Send` 返回错误即 +1（`hub.go`） |
+| `messageloop_live_drop_total` | counter | 无 | LiveBus 实时投递丢失累计数：live publication 的稠密 seq 相对投递基线前跳时，按跳过的条数累加（go-redis 1024 缓冲满时静默丢弃的 publication 由此被计数，`pkg/redisbroker/pubsub.go` `noteLiveSeqGap`）；legacy（Seq==0）与重连基线重置后的首条不计 |
 
 ### 3.3 时长直方图
 
@@ -101,6 +102,11 @@ curl -s http://127.0.0.1:8080/metrics | grep '^messageloop_'
 | `messageloop_cluster_command_dedupe_hits_total` | counter | 无 | 集群命令去重命中次数（`pkg/redisbroker/cluster_command_bus.go`） |
 | `messageloop_cluster_command_timeouts_total` | counter | 无 | 集群命令等待应答超时次数（同一文件） |
 | `messageloop_cluster_command_unknown_final_state_total` | counter | 无 | 集群命令进入 `unknown_final_state` 的次数（同一文件） |
+| `messageloop_cluster_command_hmac_reject_total` | counter | `reason`（`missing`/`bad`/`skew`/`id`） | 集群命令信封被 HMAC 校验拒绝的次数，按原因分类（`pkg/redisbroker/cluster_command_bus.go`） |
+| `messageloop_bind_fenced_total` | counter | 无 | 会话绑定/接管被 fencing 淘汰的次数：首登 CAS(nil) 抢权失败（`cluster_state.go`）+ takeover CAS claim 失败（`cluster_resume.go`） |
+| `messageloop_bind_refresh_fail_total` | counter | 无 | 同 fence 续约被判 fenced 的次数：directory fencing 不符、directory version 更新、续约 CAS 失败三处（`cluster_state.go` `syncClusterSessionState`） |
+| `messageloop_evict_lag` | histogram | 无 | takeover 命令发往远端旧主的往返时延（秒），仅真实发往远端旧主时观测（`cluster_resume.go` `requestSessionTakeover`）；桶为默认桶 |
+| `messageloop_session_dual_activation_seconds` | histogram | 无 | takeover 重叠窗口时长（秒）：从接管 CAS 赢到 takeover 分支收尾（含 KD-K30 死节点旁路），目标 0；无远端旧主时不观测（`cluster_resume.go`）；桶为默认桶 |
 | `messageloop_cluster_projection_repairs_total` | counter | 无 | 投影修复（projection repair）成功的轮次（`cluster_projection_repair.go`） |
 | `messageloop_cluster_projection_repair_failures_total` | counter | 无 | 投影修复失败的轮次（同一文件） |
 
@@ -112,11 +118,14 @@ curl -s http://127.0.0.1:8080/metrics | grep '^messageloop_'
 | `messageloop_recovery_total` | counter | `path`（`connect`/`subscribe`）、`result`（`ok`/`truncated`/`failed`/`skipped`） | 频道恢复尝试次数，按路径与结果分类（`recover.go` `finishRecovery`） |
 | `messageloop_recovery_publications` | histogram | `path` | 每次频道恢复交付的 publication 条数；桶为计数刻度 `[1..1000]`，不是时长刻度（`recover.go`） |
 | `messageloop_recovery_truncated_total` | counter | `path` | 命中上限（请求级配额或策略 `recover_limit`）被截断的频道恢复次数（`recover.go`） |
+| `messageloop_recovery_gap_total` | counter | `reason`（`head_trimmed`/`empty_expired`） | 恢复过程中观测到历史空洞的频道恢复次数（`recover.go`） |
+| `messageloop_live_gap_notice_total` | counter | `reason`（`middle`/`replay_truncated`） | catch-up 检出空洞后扇出给本节点订阅者的 gap 通知次数（`pkg/redisbroker/pubsub.go` C6） |
 | `messageloop_heartbeat_idle_disconnects_total` | counter | 无 | 心跳以 3511 断开的连接数：idle 超时或服务端 ping 未应答（`heartbeat.go`，`heartbeatDisconnectOnce` 保证只计一次） |
 | `messageloop_admin_user_fanout` | histogram | `op`（`publish`/`disconnect`/`subscribe`/`unsubscribe`） | 按 user 定向的 Admin 操作一次扇出的 session 数；桶为计数刻度 `[1..1000]`（`pkg/grpcstream/api_handler.go`） |
 | `messageloop_survey_client_total` | counter | `result`（`ok` 或顶层错误码，如 `SURVEY_DISABLED`/`PERMISSION_DENIED`/`SURVEY_TOO_MANY_SUBSCRIBERS`/`RATE_LIMITED`） | 客户端发起的 Survey 按结果计数（`client.go` `handleSurvey` 与 worker） |
 | `messageloop_presence_publish_failures_total` | counter | 无 | presence join/leave **伴生频道**发布失败累计（`node.go` `PublishPresenceJoin`/`PublishPresenceLeave`） |
 | `messageloop_presence_failures_total` | counter | `op`（`deliver`/`store`/`rewrite`/`companion`/`emit`） | presence 按操作分类的失败次数：投递、store 读写、`ml.type=presence` 帧改写、伴生发布、`cluster_emit` 发布（`node.go` / `hub.go`） |
+| `messageloop_occupancy_gen_discard_total` | counter | 无 | 迟到 occupancy 事件丢弃次数：该 (channel, session) 已应用过同等或更新的 generation（`node.go` `onOccupancy`，替代原 `presence_failures_total{op="late"}`） |
 
 ## 4. 日志
 

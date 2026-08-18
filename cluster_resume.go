@@ -68,16 +68,28 @@ func (n *Node) resumeRemoteSession(ctx context.Context, client *Client, sessionI
 		LastActivityAt: time.Now().UnixMilli(),
 		ExpiresAt:      time.Now().Add(n.sessionLeaseTTL()),
 	}
+	// The dual-activation window starts at the claim: from the CAS below to
+	// the end of the takeover branch (including the KD-K30 dead-node bypass),
+	// both the old remote attachment and this one may be live.
+	dualActivationStart := time.Now()
 	claimed, err := directory.CompareAndSwapSessionLease(ctx, lease, desired, n.sessionLeaseTTL())
 	if err != nil {
 		return nil, false, err
 	}
 	if !claimed {
+		if n.metrics != nil {
+			n.metrics.BindFencedTotal.Inc()
+		}
 		return nil, false, DisconnectStale
 	}
 
 	if lease.NodeID != "" && lease.IncarnationID != "" && (lease.NodeID != n.ClusterNodeID() || lease.IncarnationID != n.ClusterIncarnationID()) {
-		if err := n.requestSessionTakeover(ctx, lease); err != nil {
+		evictStart := time.Now()
+		takeoverErr := n.requestSessionTakeover(ctx, lease)
+		if n.metrics != nil {
+			n.metrics.EvictLag.Observe(time.Since(evictStart).Seconds())
+		}
+		if takeoverErr != nil {
 			nodeLease, leaseErr := directory.GetNodeLease(ctx, lease.NodeID, lease.IncarnationID)
 			if leaseErr != nil {
 				// Still attempt the rollback before reporting the lease
@@ -91,10 +103,13 @@ func (n *Node) resumeRemoteSession(ctx context.Context, client *Client, sessionI
 				// keeps recognizing the old owner instead of a takeover that
 				// never completed.
 				n.rollbackSessionTakeover(ctx, directory, desired, lease)
-				return nil, false, err
+				return nil, false, takeoverErr
 			}
 			// nodeLease == nil: the old node is dead (KD-K30). Keep the new
 			// CAS and continue the resume.
+		}
+		if n.metrics != nil {
+			n.metrics.SessionDualActivationSeconds.Observe(time.Since(dualActivationStart).Seconds())
 		}
 	}
 

@@ -1363,7 +1363,7 @@ func (n *Node) onOccupancy(ch string, evt OccupancyEvent) error {
 	if last, ok := bySession[sid]; ok && evt.Gen <= last {
 		n.occMu.Unlock()
 		if n.metrics != nil {
-			n.metrics.PresenceFailures.WithLabelValues("late").Inc()
+			n.metrics.OccupancyGenDiscards.Inc()
 		}
 		return ErrLateOccupancy
 	}

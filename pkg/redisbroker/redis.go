@@ -87,6 +87,12 @@ type redisBroker struct {
 	// replayed in full (see checkCatchUpGap).
 	catchUpGaps atomic.Uint64
 
+	// metrics is the shared Prometheus metrics object (D3), wired via
+	// SetMetrics after construction. Nil disables counting (nil-tolerant,
+	// same paradigm as the cluster command bus).
+	metricsMu sync.RWMutex
+	metrics   *messageloop.Metrics
+
 	// activePubSub is the live pub/sub subscription; tests close it to
 	// simulate a disconnect. Guarded by pubsubMu.
 	pubsubMu     sync.Mutex
@@ -475,6 +481,21 @@ func (b *redisBroker) SetGapHandler(handler messageloop.GapHandler) {
 	b.gapHandlerMu.Lock()
 	b.gapHandler = handler
 	b.gapHandlerMu.Unlock()
+}
+
+// SetMetrics wires the shared Prometheus metrics object (D3). Nil is
+// tolerated and disables counting, so an unwired broker never panics.
+func (b *redisBroker) SetMetrics(metrics *messageloop.Metrics) {
+	b.metricsMu.Lock()
+	defer b.metricsMu.Unlock()
+	b.metrics = metrics
+}
+
+// getMetrics returns the wired metrics object, or nil when none was set.
+func (b *redisBroker) getMetrics() *messageloop.Metrics {
+	b.metricsMu.RLock()
+	defer b.metricsMu.RUnlock()
+	return b.metrics
 }
 
 // PublishOccupancy broadcasts an occupancy event on the exact channel's
