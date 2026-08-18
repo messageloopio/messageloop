@@ -111,3 +111,4 @@ npx --yes actionlint -oneline .github/workflows/ci.yml || python -c "import yaml
 - 三个 swagger 已含 19 码定稿（`SURVEY_FAILED` 各 1 次，`ACL_DENIED` 零命中），D7 残留关闭。
 - 主 agent 亲跑全绿：build/vet、全量 `go test -race ./...` 11/11（真实 Redis）、shared/sdks-go 模块测试、TS npm ci/build/jest 83/83、chatroom build、workflow YAML 解析（三 job）。
 - 收尾项：push 后 `gh run watch` 验证 v2 上真实运行，红了按 §3.5 fix-forward。
+- **GitHub 实跑复验（2026-08-18)**：首跑（`326307f`）红三处——lint action v6 不支持 golangci-lint v2、config_consistency_test 断言未跟踪的本地配置文件、session 慢消费者测试竞争窗；lint 首活另暴露 21 条存量发现。全部 fix-forward 于 `630bf63`（含 cluster.go repairer case 不可达的真 bug 修复），复跑（run 32123959673）三 job 全绿：build-and-test（含 redis 集成，redisbroker 61.6s 真跑非 SKIP)/lint/ts-sdk。
