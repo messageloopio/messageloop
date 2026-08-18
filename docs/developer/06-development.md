@@ -183,6 +183,8 @@ breaking:
   - `pkg/websocket/integration_test.go`：WebSocket 连接与发布。
   - `pkg/grpcstream/integration_test.go`、`pkg/grpcstream/port_integration_test.go`：gRPC 流端到端。
   - 根目录 `cluster_redis_integration_test.go`：需要 Redis 的多节点集群行为。
+- 双进程黑盒 e2e 位于 `sdks/go/e2e_process_test.go`（`TestE2EProcess`）：测试 `go build` 出真实 `cmd/server` 子进程，用 Go SDK 过真实 socket 跑 WS 全流程、历史回放、gRPC 传输与 admin gRPC 冒烟；运行方式为 `cd sdks/go && go test -count=1 -run TestE2EProcess .`。
+  Redis 变体按 `MESSAGELOOP_TEST_REDIS_ADDR`（默认 `127.0.0.1:6379`）探测，连不上自动 skip（使用 DB 13）。
 - 默认以 `task test`（`go test -race ./...`）作为完整门禁，与 CI 一致。
 
 ## 本地运行开发服务器

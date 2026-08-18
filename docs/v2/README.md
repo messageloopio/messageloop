@@ -29,6 +29,6 @@
 | [PR-KA-D6 实现规格](tasks/pr-ka-d6-admin-v2.md) | Accepted | admin 切 server/v2 + 删 shared/v1 收尾 + backlog 两条；[prompt](tasks/pr-ka-d6-prompt.md) |
 | [PR-KA-D7 实现规格](tasks/pr-ka-d7-error-codes.md) | Accepted | 错误码收口：ACL_* 换名入表 + errors.proto 19 码定稿；[prompt](tasks/pr-ka-d7-prompt.md) |
 | [PR-KA-D8 实现规格](tasks/pr-ka-d8-ci.md) | Accepted | CI 修复：v2 触发 + Redis service + 子模块/TS + buf 工具链固定；[prompt](tasks/pr-ka-d8-prompt.md) |
-| [PR-KA-D9 实现规格](tasks/pr-ka-d9-e2e.md) | Ready | 双进程黑盒 e2e：真 cmd/server 子进程 × 真 Go SDK；[prompt](tasks/pr-ka-d9-prompt.md) |
+| [PR-KA-D9 实现规格](tasks/pr-ka-d9-e2e.md) | Accepted | 双进程黑盒 e2e：真 cmd/server 子进程 × 真 Go SDK；[prompt](tasks/pr-ka-d9-prompt.md) |
 
 第三方实现：复制对应 `tasks/pr-ka-*-prompt.md` 围栏全文；规格与靶心冲突时以该步规格为准。

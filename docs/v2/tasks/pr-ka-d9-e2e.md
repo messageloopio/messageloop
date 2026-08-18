@@ -3,7 +3,7 @@
 | 字段 | 值 |
 | --- | --- |
 | 标题 | `e2e: black-box smoke against a spawned server process via the Go SDK` |
-| 状态 | **Ready**（待实现） |
+| 状态 | **Accepted**（2026-08-18 主 agent 终验通过，尚未 commit） |
 | 依赖 | D8 已合（`326307f`,CI 有 Redis service、sdks/go 测试已进 CI)。在 `v2` 分支上做 |
 | 设计来源 | 转正评审 backlog D9：现有 e2e 全是同进程（`pkg/websocket/e2e_test.go` 用 in-process node)，从未验证过 `cmd/server` 真实启动接线 + 真实 SDK 过真实网络 |
 | 验收人 | 主 agent |
@@ -80,4 +80,11 @@ cd sdks/go && go test -count=3 -run TestE2EProcess .      # 3 连过
 
 ## 8. 实现备注（实现方填）
 
-（留空）
+- 新增 `sdks/go/e2e_process_test.go`（单文件，内部测试包 `messageloopgo`,CRLF 行尾）。`TestE2EProcess` 先用 `go build -o <tmp>/messageloop-e2e-server[.exe] ./cmd/server`(`cmd.Dir` = 仓根 `../..`）构建真实服务器，再分两个子测试：`MemoryBroker`（场景 2–5 全量）与 `RedisBroker`(ping 不通 skip，否则重跑场景 2)。
+- 端口零硬编码：`net.Listen("tcp","127.0.0.1:0")` 抢占四个端口（http/grpc_admin/websocket/grpc）后释放写入生成的 YAML(`server.http.addr`、`server.grpc_admin.addr`+`auth_token`、`transport.websocket.addr`+`path:"/ws"`、`transport.grpc.addr`、`broker.type`);admin token 每次运行随机生成。
+- 就绪同步：子进程拉起后轮询 `http://<http addr>/health` 至 200(15s 封顶），同时监听进程提前退出（退出即带日志失败）；除 50ms 轮询间隔外无任何固定 Sleep,SDK 侧全部用 channel 等待（10s 封顶）。
+- 子进程清理：唯一 `cmd.Wait()` 在专用 goroutine,`t.Cleanup` 先 `Process.Kill()` 再等收割，断言失败同样必杀；实测 `ps` 无残留。
+- 场景 2 用 `WithAutoSubscribe` 保证 `Connect` 返回时订阅已注册（服务端 `handleConnect` 在发 `Connected` 前完成 `AddSubscription`)，发布用第二个 WS 客户端，payload 为含 `\x00\x01` 的二进制、断言逐字节一致。场景 3 用 `PublishWithAck` 保证两条历史有序落库，再 `SubscribeWith(ch, WithFresh())` 断言按序回放。场景 4 全程走 `DialGRPC`（自发自收，证明第二传输双向接线）。场景 5 用 `grpc.NewClient` + `metadata.AppendToOutgoingContext("authorization","Bearer <token>")` 调 `serverv2.APIService/GetChannels`、`GetPresence`。
+- Redis 探测：sdks/go 模块不依赖 go-redis，用裸 TCP 发 `AUTH`（如有密码）+`PING` 实现；变体配置 `broker.type: redis` + `db: 13`（避开其他套件用的 14/15)+ `stream_approximate: true`（配置校验强制）。频道名带每次运行随机前缀，避免共享 Redis 的跨次污染。
+- 负向自检：本地临时把 metadata 里的 token 改为错误值跑 `TestE2EProcess/MemoryBroker`，如预期失败（`Unauthenticated: invalid authorization token`)，证明断言非空转；已还原，不留码。
+- 冒烟未炸出任何服务端 bug（一次通过，含 Redis 变体）。未改动 §2 禁止项：服务端/根包源码、SDK 生产代码、ci.yml、proto/生成物零改动；无 git 操作。
