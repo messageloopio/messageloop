@@ -27,5 +27,6 @@
 | [PR-KA-D4 实现规格](tasks/pr-ka-d4-buffer-full.md) | Accepted | LiveBus 缓冲满：occupancy 优先丢 + 频道降级标记；[prompt](tasks/pr-ka-d4-prompt.md) |
 | [PR-KA-D5 实现规格](tasks/pr-ka-d5-proxy-v2.md) | Accepted | proxy 升 v2 + 拆 v1 桥 + 删死 v1 proto；[prompt](tasks/pr-ka-d5-prompt.md) |
 | [PR-KA-D6 实现规格](tasks/pr-ka-d6-admin-v2.md) | Accepted | admin 切 server/v2 + 删 shared/v1 收尾 + backlog 两条；[prompt](tasks/pr-ka-d6-prompt.md) |
+| [PR-KA-D7 实现规格](tasks/pr-ka-d7-error-codes.md) | Ready | 错误码收口：ACL_* 换名入表 + errors.proto 19 码定稿；[prompt](tasks/pr-ka-d7-prompt.md) |
 
 第三方实现：复制对应 `tasks/pr-ka-*-prompt.md` 围栏全文；规格与靶心冲突时以该步规格为准。
