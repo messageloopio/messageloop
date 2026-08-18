@@ -213,3 +213,47 @@ func TestDirectory_SnapshotRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, stored)
 }
+
+// TestDirectory_CompareAndSwapSessionStateAtomic: the combined CAS writes the
+// lease and the snapshot under one lock (PR-KA-D10 §1.2) — a won compare
+// stores both, a lost compare stores neither.
+func TestDirectory_CompareAndSwapSessionStateAtomic(t *testing.T) {
+	dir := NewDirectory()
+	ctx := context.Background()
+
+	// First registration: expected == nil on an empty slot writes both.
+	ok, err := dir.CompareAndSwapSessionState(ctx, nil, testLease("sess-1", "node-a", "inc-a", 1),
+		&messageloop.ClusterSessionSnapshot{SessionID: "sess-1", UserID: "user-1"}, time.Minute, time.Hour)
+	require.NoError(t, err)
+	require.True(t, ok)
+	snapshot, err := dir.GetSessionSnapshot(ctx, "sess-1")
+	require.NoError(t, err)
+	require.Equal(t, "user-1", snapshot.UserID, "the snapshot lands with the winning CAS")
+
+	// Same-fence refresh: lease and snapshot move together.
+	current, err := dir.GetSessionLease(ctx, "sess-1")
+	require.NoError(t, err)
+	refresh := testLease("sess-1", "node-a", "inc-a", 1)
+	refresh.LastActivityAt = 42
+	ok, err = dir.CompareAndSwapSessionState(ctx, current, refresh,
+		&messageloop.ClusterSessionSnapshot{SessionID: "sess-1", UserID: "user-2"}, time.Minute, time.Hour)
+	require.NoError(t, err)
+	require.True(t, ok)
+	snapshot, err = dir.GetSessionSnapshot(ctx, "sess-1")
+	require.NoError(t, err)
+	require.Equal(t, "user-2", snapshot.UserID)
+
+	// A stale compare writes neither key: the lease keeps the winner's record
+	// and the snapshot keeps the last won view.
+	ok, err = dir.CompareAndSwapSessionState(ctx, testLease("sess-1", "node-a", "inc-a", 99),
+		testLease("sess-1", "node-a", "inc-a", 100),
+		&messageloop.ClusterSessionSnapshot{SessionID: "sess-1", UserID: "user-stale"}, time.Minute, time.Hour)
+	require.NoError(t, err)
+	require.False(t, ok)
+	lease, err := dir.GetSessionLease(ctx, "sess-1")
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), lease.LeaseVersion)
+	snapshot, err = dir.GetSessionSnapshot(ctx, "sess-1")
+	require.NoError(t, err)
+	require.Equal(t, "user-2", snapshot.UserID, "a lost compare must not touch the snapshot")
+}

@@ -84,29 +84,40 @@ func (n *Node) resumeRemoteSession(ctx context.Context, client *Client, sessionI
 	}
 
 	if lease.NodeID != "" && lease.IncarnationID != "" && (lease.NodeID != n.ClusterNodeID() || lease.IncarnationID != n.ClusterIncarnationID()) {
-		evictStart := time.Now()
-		takeoverErr := n.requestSessionTakeover(ctx, lease)
-		if n.metrics != nil {
-			n.metrics.EvictLag.Observe(time.Since(evictStart).Seconds())
-		}
-		if takeoverErr != nil {
-			nodeLease, leaseErr := directory.GetNodeLease(ctx, lease.NodeID, lease.IncarnationID)
-			if leaseErr != nil {
-				// Still attempt the rollback before reporting the lease
-				// lookup failure.
-				n.rollbackSessionTakeover(ctx, directory, desired, lease)
-				return nil, false, leaseErr
+		// Same nodeID with a strictly newer node epoch (PR-KA-D10 §1.3, the
+		// C2 deferral): this process is a newer generation of the recorded
+		// owner. INCR allocation is monotonic (KD-K27), so the old generation
+		// is dead and a takeover RPC against it is doomed to fall into the
+		// KD-K30 dead-node bypass — skip it and continue with the claimed
+		// lease. Non-epoch incarnation IDs (test-injected "inc-a" and the
+		// like) never parse as epochs and never skip: their behavior is
+		// unchanged.
+		skipTakeover := lease.NodeID == n.ClusterNodeID() && NodeEpochNewer(n.ClusterIncarnationID(), lease.IncarnationID)
+		if !skipTakeover {
+			evictStart := time.Now()
+			takeoverErr := n.requestSessionTakeover(ctx, lease)
+			if n.metrics != nil {
+				n.metrics.EvictLag.Observe(time.Since(evictStart).Seconds())
 			}
-			if nodeLease != nil {
-				// The old node is still alive (the KD-K30 dead-node bypass
-				// does not apply): give the fencing back so the directory
-				// keeps recognizing the old owner instead of a takeover that
-				// never completed.
-				n.rollbackSessionTakeover(ctx, directory, desired, lease)
-				return nil, false, takeoverErr
+			if takeoverErr != nil {
+				nodeLease, leaseErr := directory.GetNodeLease(ctx, lease.NodeID, lease.IncarnationID)
+				if leaseErr != nil {
+					// Still attempt the rollback before reporting the lease
+					// lookup failure.
+					n.rollbackSessionTakeover(ctx, directory, desired, lease)
+					return nil, false, leaseErr
+				}
+				if nodeLease != nil {
+					// The old node is still alive (the KD-K30 dead-node bypass
+					// does not apply): give the fencing back so the directory
+					// keeps recognizing the old owner instead of a takeover that
+					// never completed.
+					n.rollbackSessionTakeover(ctx, directory, desired, lease)
+					return nil, false, takeoverErr
+				}
+				// nodeLease == nil: the old node is dead (KD-K30). Keep the new
+				// CAS and continue the resume.
 			}
-			// nodeLease == nil: the old node is dead (KD-K30). Keep the new
-			// CAS and continue the resume.
 		}
 		if n.metrics != nil {
 			n.metrics.SessionDualActivationSeconds.Observe(time.Since(dualActivationStart).Seconds())
@@ -168,12 +179,35 @@ func (n *Node) requestSessionTakeover(ctx context.Context, lease *ClusterSession
 	return fmt.Errorf("takeover command failed: %s", result.ErrorMessage)
 }
 
-func (n *Node) restoreSessionSubscriptions(ctx context.Context, client *Client, subscriptions []ClusterSubscriptionSnapshot) error {
-	restored := make([]string, 0, len(subscriptions))
+// clusterRestoreFailure records one snapshot channel whose restore failed
+// during a cross-node resume hydrate (PR-KA-D10 §1.1). The channel is not
+// restored; the session stays alive with the channels that did restore, and
+// the client learns about the failure from a per-channel RECOVER_FAILED
+// envelope sent after Connected (finishConnect).
+type clusterRestoreFailure struct {
+	channel string
+	err     error
+}
+
+// restoreSessionSubscriptions re-creates the snapshot's subscriptions one
+// channel at a time. There is no saga and no rollback (PR-KA-D10 §1.1): a
+// channel whose restore or presence registration fails is not restored — it
+// is recorded in the returned failure list and the remaining channels
+// continue; channels that already restored stay restored.
+func (n *Node) restoreSessionSubscriptions(ctx context.Context, client *Client, subscriptions []ClusterSubscriptionSnapshot) []clusterRestoreFailure {
+	var failures []clusterRestoreFailure
 	for _, sub := range subscriptions {
 		if err := n.restoreLocalSubscription(ctx, sub.Channel, NewSubscriber(client, sub.Ephemeral)); err != nil {
-			n.rollbackRestoredSubscriptions(client, restored)
-			return err
+			log.WarnContext(ctx, "failed to restore subscription for resumed session",
+				"channel", sub.Channel, "session", client.SessionID(), "error", err)
+			// resumeRemoteSession pre-seeds the session's channel set from the
+			// snapshot; an unrestored channel must leave it again so the
+			// session view (and Connected.Subscriptions) reflects reality.
+			client.mu.Lock()
+			delete(client.subscribedChannels, sub.Channel)
+			client.mu.Unlock()
+			failures = append(failures, clusterRestoreFailure{channel: sub.Channel, err: err})
+			continue
 		}
 		// shouldTrackPresence gates the restore exactly like every other
 		// presence writer: wildcard patterns, ephemeral subscriptions and
@@ -182,32 +216,23 @@ func (n *Node) restoreSessionSubscriptions(ctx context.Context, client *Client, 
 		// duplicate join for a resumed session.
 		if n.shouldTrackPresence(sub.Channel, sub.Ephemeral) {
 			if err := n.SetPresenceForSession(ctx, sub.Channel, client); err != nil {
-				n.rollbackRestoredSubscriptions(client, append(restored, sub.Channel))
-				return err
+				log.WarnContext(ctx, "failed to restore presence for resumed session",
+					"channel", sub.Channel, "session", client.SessionID(), "error", err)
+				// The channel must end up fully unrestored: undo the
+				// subscription just added (the projection +1 below never ran
+				// for it, so no compensation is owed). Other restored
+				// channels are untouched.
+				if _, rmErr := n.removeLocalSubscriptionOnly(sub.Channel, client, true); rmErr != nil {
+					log.WarnContext(ctx, "failed to undo subscription after presence restore failure",
+						"channel", sub.Channel, "session", client.SessionID(), "error", rmErr)
+				}
+				failures = append(failures, clusterRestoreFailure{channel: sub.Channel, err: err})
+				continue
 			}
 		}
-		restored = append(restored, sub.Channel)
 		n.adjustClusterChannelSubscriptionsTimeout(sub.Channel, 1)
 	}
-	return nil
-}
-
-// rollbackRestoredSubscriptions undoes restored subscriptions after a partial
-// restore failure, compensating the shared channel projection for each channel
-// that was actually removed and clearing the presence entries the restore
-// path added.
-func (n *Node) rollbackRestoredSubscriptions(client *Client, channels []string) {
-	for _, channel := range channels {
-		removed, _ := n.removeLocalSubscriptionOnly(channel, client, true)
-		if removed {
-			n.adjustClusterChannelSubscriptionsTimeout(channel, -1)
-			// A partial restore must not leave a ghost online member behind.
-			// Remove on a channel that never registered presence is a no-op.
-			ctx, cancel := context.WithTimeout(context.Background(), clusterProjectionAdjustTimeout)
-			_ = n.presence.Remove(ctx, channel, client.SessionID())
-			cancel()
-		}
-	}
+	return failures
 }
 
 func (n *Node) restoreLocalSubscription(ctx context.Context, ch string, sub Subscriber) error {

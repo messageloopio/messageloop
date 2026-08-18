@@ -148,6 +148,101 @@ func (d *redisSessionDirectory) CompareAndSwapSessionLease(ctx context.Context, 
 	return false, err
 }
 
+// compareAndSwapSessionStateScript performs the session lease CAS and the
+// snapshot write in one atomic step (PR-KA-D10 §1.2), eliminating the
+// blind-write window between a won lease CAS and the snapshot PUT that used
+// to follow it.
+//
+// KEYS[1] = session lease key, KEYS[2] = session snapshot key.
+// ARGV[1] = expected lease JSON (empty requires the lease key to be absent),
+// ARGV[2] = desired lease JSON, ARGV[3] = snapshot JSON (empty skips the
+// snapshot write), ARGV[4]/ARGV[5] = lease/snapshot TTL in milliseconds.
+//
+// The compare predicate is exactly the production four-field one
+// (session_id/node_id/incarnation_id/lease_version —
+// clusterSessionLeaseEqual); it is NOT a full-blob comparison, so a
+// concurrent same-fence refresh that only moved LastActivityAt/TTL still
+// matches. Serialization is pinned: the lease value written here is the same
+// json.Marshal(ClusterSessionLease) blob the WATCH-based
+// CompareAndSwapSessionLease writes, and the snapshot value is the same
+// json.Marshal(ClusterSessionSnapshot) blob PutSessionSnapshot writes — key
+// names, value shapes and every reader are unchanged. lease_version compares
+// as a Lua number, which is exact far beyond any realistic version.
+var compareAndSwapSessionStateScript = redis.NewScript(`
+local current = redis.call('GET', KEYS[1])
+if ARGV[1] == '' then
+  if current then return 0 end
+else
+  if not current then return 0 end
+  local cur = cjson.decode(current)
+  local exp = cjson.decode(ARGV[1])
+  if cur['session_id'] ~= exp['session_id']
+     or cur['node_id'] ~= exp['node_id']
+     or cur['incarnation_id'] ~= exp['incarnation_id']
+     or cur['lease_version'] ~= exp['lease_version'] then
+    return 0
+  end
+end
+redis.call('SET', KEYS[1], ARGV[2], 'PX', ARGV[4])
+if ARGV[3] ~= '' then
+  redis.call('SET', KEYS[2], ARGV[3], 'PX', ARGV[5])
+end
+return 1
+`)
+
+// CompareAndSwapSessionState atomically CASes the session lease and writes
+// the session snapshot (SessionStateCompareAndSwapper): the four-field
+// compare, the lease SET and the snapshot SET run inside one Lua script, so
+// a failed compare writes neither key and a won compare never leaves a stale
+// snapshot behind. TTLs are unchanged (lease TTL / 24h snapshot TTL), applied
+// as PX — internally the same absolute expiry the EX/PX mix of the plain Set
+// calls produced.
+func (d *redisSessionDirectory) CompareAndSwapSessionState(ctx context.Context, expected, desired *messageloop.ClusterSessionLease, snapshot *messageloop.ClusterSessionSnapshot, leaseTTL, snapshotTTL time.Duration) (bool, error) {
+	if desired == nil || desired.SessionID == "" {
+		return false, nil
+	}
+
+	expectedJSON := ""
+	if expected != nil {
+		payload, err := json.Marshal(expected)
+		if err != nil {
+			return false, err
+		}
+		expectedJSON = string(payload)
+	}
+	desiredJSON, err := json.Marshal(desired)
+	if err != nil {
+		return false, err
+	}
+	snapshotJSON := ""
+	if snapshot != nil && snapshot.SessionID != "" {
+		payload, err := json.Marshal(snapshot)
+		if err != nil {
+			return false, err
+		}
+		snapshotJSON = string(payload)
+	}
+
+	result, err := compareAndSwapSessionStateScript.Run(ctx, d.client,
+		[]string{d.sessionLeaseKey(desired.SessionID), d.sessionSnapshotKey(desired.SessionID)},
+		expectedJSON, string(desiredJSON), snapshotJSON,
+		ttlMilliseconds(leaseTTL), ttlMilliseconds(snapshotTTL)).Int()
+	if err != nil {
+		return false, err
+	}
+	if result != 1 {
+		return false, nil
+	}
+	return true, d.syncUserIndex(ctx, expected, desired, leaseTTL)
+}
+
+func ttlMilliseconds(d time.Duration) int64 {
+	if ms := d.Milliseconds(); ms > 0 {
+		return ms
+	}
+	return 1
+}
+
 func (d *redisSessionDirectory) GetSessionLease(ctx context.Context, sessionID string) (*messageloop.ClusterSessionLease, error) {
 	if sessionID == "" {
 		return nil, nil
@@ -368,6 +463,7 @@ func clusterSessionLeaseEqual(left, right *messageloop.ClusterSessionLease) bool
 }
 
 var _ messageloop.SessionDirectory = (*redisSessionDirectory)(nil)
+var _ messageloop.SessionStateCompareAndSwapper = (*redisSessionDirectory)(nil)
 var _ messageloop.ClusterSessionLeaseLister = (*redisSessionDirectory)(nil)
 var _ messageloop.ClusterNodeLeaseLister = (*redisSessionDirectory)(nil)
 var _ messageloop.NodeEpochAllocator = (*redisSessionDirectory)(nil)

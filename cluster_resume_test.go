@@ -9,6 +9,7 @@ import (
 
 	"github.com/messageloopio/messageloop/config"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	dto "github.com/prometheus/client_model/go"
@@ -220,7 +221,7 @@ func TestNode_RestoreSessionSubscriptions_AdjustsSharedProjection(t *testing.T) 
 	client.ForceTestIDs("sess-restore", "user-restore", "client-restore")
 
 	subscriptions := []ClusterSubscriptionSnapshot{{Channel: "news"}, {Channel: "sports"}}
-	require.NoError(t, node.restoreSessionSubscriptions(context.Background(), client, subscriptions))
+	require.Empty(t, node.restoreSessionSubscriptions(context.Background(), client, subscriptions))
 
 	channels, err := node.Channels(context.Background())
 	require.NoError(t, err)
@@ -339,10 +340,35 @@ func (b *failSubscribeBroker) History(string, uint64, int) (*HistoryPage, error)
 	return nil, nil
 }
 
-// Task 13b: when restoring a remote session's subscriptions fails, the
-// partially restored session must be rolled back: no zombie session in the
-// hub and no leftover lease/snapshot.
-func TestClient_RemoteResume_RestoreFailureRollsBackSession(t *testing.T) {
+// failChannelSubscribeBroker fails Subscribe for one specific channel, so a
+// remote resume hydrate fails that channel only (PR-KA-D10 §1.1).
+type failChannelSubscribeBroker struct {
+	failCh string
+}
+
+func (b *failChannelSubscribeBroker) Start(context.Context, PublicationHandler) error { return nil }
+func (b *failChannelSubscribeBroker) Subscribe(ch string) error {
+	if ch == b.failCh {
+		return errors.New("injected subscribe failure")
+	}
+	return nil
+}
+func (b *failChannelSubscribeBroker) Unsubscribe(string) error                     { return nil }
+func (b *failChannelSubscribeBroker) Publish(string, *Publication) (uint64, error) { return 0, nil }
+func (b *failChannelSubscribeBroker) PublishTransient(string, *Publication) error  { return nil }
+func (b *failChannelSubscribeBroker) PublishOccupancy(string, OccupancyEvent) error {
+	return nil
+}
+func (b *failChannelSubscribeBroker) SetOccupancyHandler(OccupancyHandler) error { return nil }
+func (b *failChannelSubscribeBroker) SetGapHandler(GapHandler)                   {}
+func (b *failChannelSubscribeBroker) History(string, uint64, int) (*HistoryPage, error) {
+	return nil, nil
+}
+
+// resumeSoftFailFixture wires a RequireAuth node with a recording directory
+// holding one remotely-owned session and runs a resume Connect for it.
+func resumeSoftFailFixture(t *testing.T, snapshot *ClusterSessionSnapshot, broker Broker) (*Node, *Session, *capturingTransport, *recordingSessionDirectory) {
+	t.Helper()
 	ctx := context.Background()
 	directory := &recordingSessionDirectory{fakeSessionDirectory: &fakeSessionDirectory{
 		lease: &ClusterSessionLease{
@@ -352,12 +378,7 @@ func TestClient_RemoteResume_RestoreFailureRollsBackSession(t *testing.T) {
 			LeaseVersion:  3,
 			ExpiresAt:     time.Now().Add(time.Hour),
 		},
-		snapshot: &ClusterSessionSnapshot{
-			SessionID:     "sess-remote",
-			UserID:        "user-1",
-			ClientID:      "client-1",
-			Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "news"}},
-		},
+		snapshot: snapshot,
 	}}
 	bus := &fakeClusterCommandBus{result: &ClusterCommandResult{Status: ClusterCommandStatusSucceeded}}
 	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-a", IncarnationID: "inc-a", Backend: "memory"}, ClusterDependencies{
@@ -369,7 +390,7 @@ func TestClient_RemoteResume_RestoreFailureRollsBackSession(t *testing.T) {
 
 	node := NewNode(&config.Server{RequireAuth: true})
 	node.SetCluster(runtime)
-	node.SetBroker(&failSubscribeBroker{})
+	node.SetBroker(broker)
 	authProxy := &connectAuthProxyStub{userID: "user-1"}
 	require.NoError(t, node.AddProxy(authProxy, "", SystemMethodAuthenticate))
 
@@ -381,7 +402,7 @@ func TestClient_RemoteResume_RestoreFailureRollsBackSession(t *testing.T) {
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_Connect{
 			Connect: &clientpb.Connect{
-				Version: testProtocolVersion,
+				Version:   testProtocolVersion,
 				ClientId:  "client-1",
 				Token:     "ok-token",
 				SessionId: "sess-remote",
@@ -389,14 +410,105 @@ func TestClient_RemoteResume_RestoreFailureRollsBackSession(t *testing.T) {
 		},
 	}
 	require.NoError(t, client.HandleMessage(ctx, resumeMsg))
+	return node, client, transport, directory
+}
 
-	// The new connection is closed...
-	require.True(t, transport.isClosed(), "the new connection must be disconnected")
+// recoverFailedEnvelopes returns every top-level RECOVER_FAILED error
+// envelope captured on the transport, in arrival order.
+func recoverFailedEnvelopes(t *testing.T, transport *capturingTransport) []*sharedv2.Error {
+	t.Helper()
+	var errs []*sharedv2.Error
+	for _, data := range transport.snapshotMessages() {
+		var out clientpb.OutboundMessage
+		require.NoError(t, (JSONMarshaler{}).Unmarshal(data, &out))
+		if e := out.GetError(); e != nil && e.GetCode() == "RECOVER_FAILED" {
+			errs = append(errs, e)
+		}
+	}
+	return errs
+}
 
-	// ...and no zombie session or cluster state remains.
-	require.Nil(t, node.Hub().LookupSession("sess-remote"), "no zombie session in the hub")
-	require.True(t, directory.deletedLease, "lease must be cleaned up")
-	require.True(t, directory.deletedSnapshot, "snapshot must be cleaned up")
+// PR-KA-D10 §1.1: a per-channel hydrate failure is soft — the failed channel
+// is skipped, every other channel stays restored, the session survives (no
+// hub removal, no lease/snapshot delete, no 3502), and the client receives a
+// RECOVER_FAILED envelope naming the failed channel after Connected.
+func TestClient_RemoteResume_RestorePartialFailureKeepsSession(t *testing.T) {
+	snapshot := &ClusterSessionSnapshot{
+		SessionID: "sess-remote",
+		UserID:    "user-1",
+		ClientID:  "client-1",
+		Subscriptions: []ClusterSubscriptionSnapshot{
+			{Channel: "news"},
+			{Channel: "broken.ch"},
+		},
+	}
+	node, client, transport, directory := resumeSoftFailFixture(t, snapshot, &failChannelSubscribeBroker{failCh: "broken.ch"})
+
+	require.False(t, transport.isClosed(), "the connection must survive a partial hydrate failure")
+	require.Same(t, client, node.Hub().LookupSession("sess-remote"), "the session must stay registered")
+	require.True(t, client.hasSubscription("news"), "the healthy channel must stay restored")
+	require.False(t, client.hasSubscription("broken.ch"), "the failed channel must not be restored")
+	_, subscribed := node.hub.LookupSubscriber("broken.ch", client)
+	require.False(t, subscribed, "the failed channel must not be in the hub")
+	require.False(t, directory.deletedLease, "hydrate soft-fail never deletes the lease")
+	require.False(t, directory.deletedSnapshot, "hydrate soft-fail never deletes the snapshot")
+
+	// Connected (sent before the failure envelopes) lists only the restored
+	// channel.
+	var connected *clientpb.Connected
+	for _, data := range transport.snapshotMessages() {
+		var out clientpb.OutboundMessage
+		require.NoError(t, (JSONMarshaler{}).Unmarshal(data, &out))
+		if got := out.GetConnected(); got != nil {
+			connected = got
+			break
+		}
+	}
+	require.NotNil(t, connected, "the resume must still send Connected")
+	require.True(t, connected.Resumed)
+	require.Len(t, connected.Subscriptions, 1)
+	require.Equal(t, "news", connected.Subscriptions[0].Channel)
+
+	failures := recoverFailedEnvelopes(t, transport)
+	require.Len(t, failures, 1, "exactly one per-channel RECOVER_FAILED envelope")
+	require.Equal(t, "recover_error", failures[0].GetType())
+	require.Equal(t, "broken.ch", failures[0].GetMetadata().GetFields()["channel"].GetStringValue())
+}
+
+// PR-KA-D10 §1.1 boundary: even when every snapshot channel fails to
+// hydrate, the session stays alive with an empty subscription set — no 3502,
+// no directory cleanup.
+func TestClient_RemoteResume_RestoreAllChannelsFailKeepsSession(t *testing.T) {
+	snapshot := &ClusterSessionSnapshot{
+		SessionID:     "sess-remote",
+		UserID:        "user-1",
+		ClientID:      "client-1",
+		Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "news"}},
+	}
+	node, client, transport, directory := resumeSoftFailFixture(t, snapshot, &failSubscribeBroker{})
+
+	require.False(t, transport.isClosed(), "an all-failed hydrate must not disconnect the client")
+	require.Same(t, client, node.Hub().LookupSession("sess-remote"))
+	require.False(t, client.hasSubscription("news"))
+	require.False(t, directory.deletedLease)
+	require.False(t, directory.deletedSnapshot)
+
+	var connected *clientpb.Connected
+	for _, data := range transport.snapshotMessages() {
+		var out clientpb.OutboundMessage
+		require.NoError(t, (JSONMarshaler{}).Unmarshal(data, &out))
+		if got := out.GetConnected(); got != nil {
+			connected = got
+			break
+		}
+	}
+	require.NotNil(t, connected)
+	require.True(t, connected.Resumed)
+	require.Empty(t, connected.Subscriptions, "no channel restored: Connected lists none")
+
+	failures := recoverFailedEnvelopes(t, transport)
+	require.Len(t, failures, 1)
+	require.Equal(t, "news", failures[0].GetMetadata().GetFields()["channel"].GetStringValue())
 }
 // Task 13e: session snapshots must preserve the per-subscription ephemeral
 // flag so a cross-node resume does not turn ephemeral subscriptions into
@@ -435,7 +547,7 @@ func TestNode_RestoreSessionSubscriptions_SkipsPresenceForEphemeral(t *testing.T
 		{Channel: "eph.ch", Ephemeral: true},
 		{Channel: "normal.ch"},
 	}
-	require.NoError(t, node.restoreSessionSubscriptions(context.Background(), client, subscriptions))
+	require.Empty(t, node.restoreSessionSubscriptions(context.Background(), client, subscriptions))
 
 	present, err := node.presence.Get(context.Background(), "eph.ch")
 	require.NoError(t, err)
@@ -460,7 +572,7 @@ func TestNode_RestoreSessionSubscriptions_SkipsPresenceForWildcard(t *testing.T)
 		{Channel: "chat.**", Ephemeral: false},
 		{Channel: "normal.ch"},
 	}
-	require.NoError(t, node.restoreSessionSubscriptions(context.Background(), client, subscriptions))
+	require.Empty(t, node.restoreSessionSubscriptions(context.Background(), client, subscriptions))
 
 	present, err := node.presence.Get(context.Background(), "chat.**")
 	require.NoError(t, err)
@@ -501,30 +613,35 @@ func (b *failSecondSubscribeBroker) History(string, uint64, int) (*HistoryPage, 
 	return nil, nil
 }
 
-// TestNode_RestoreSessionSubscriptions_RollbackClearsPresence verifies that
-// a partial restore rollback removes the presence entries the restore path
-// added (no ghost online member after a failed restore).
-func TestNode_RestoreSessionSubscriptions_RollbackClearsPresence(t *testing.T) {
+// TestNode_RestoreSessionSubscriptions_PartialFailureKeepsRestoredChannels
+// verifies the PR-KA-D10 §1.1 soft-fail semantics: when one channel's restore
+// fails midway, the channels that already restored keep their subscription
+// and presence entries (no rollback, no projection compensation), and the
+// failed channel is reported in the failure list.
+func TestNode_RestoreSessionSubscriptions_PartialFailureKeepsRestoredChannels(t *testing.T) {
 	node := NewNode(nil)
 	node.SetBroker(&failSecondSubscribeBroker{})
 	client, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
 	require.NoError(t, err)
-	client.ForceTestIDs("sess-restore-rollback", "user-rollback", "client-rollback")
+	client.ForceTestIDs("sess-restore-soft", "user-soft", "client-soft")
 
 	subscriptions := []ClusterSubscriptionSnapshot{
-		{Channel: "rollback.ch.1"},
-		{Channel: "rollback.ch.2"},
+		{Channel: "soft.ch.1"},
+		{Channel: "soft.ch.2"},
 	}
-	err = node.restoreSessionSubscriptions(context.Background(), client, subscriptions)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "injected subscribe failure")
+	failures := node.restoreSessionSubscriptions(context.Background(), client, subscriptions)
+	require.Len(t, failures, 1)
+	require.Equal(t, "soft.ch.2", failures[0].channel)
+	require.Contains(t, failures[0].err.Error(), "injected subscribe failure")
 
-	// The first channel was restored (presence added) then rolled back: no
-	// ghost presence may remain.
-	present, getErr := node.presence.Get(context.Background(), "rollback.ch.1")
+	// The first channel was restored and is NOT rolled back: its presence
+	// entry and subscription survive.
+	present, getErr := node.presence.Get(context.Background(), "soft.ch.1")
 	require.NoError(t, getErr)
-	require.Empty(t, present, "rollback must clear the presence entry of restored channels")
-	require.False(t, client.hasSubscription("rollback.ch.1"))
+	require.Contains(t, present, "sess-restore-soft",
+		"a restored channel must keep its presence entry after a later channel fails")
+	require.True(t, client.hasSubscription("soft.ch.1"))
+	require.False(t, client.hasSubscription("soft.ch.2"))
 }
 
 // TestNode_Fence_DoesNotDeleteNewSession verifies P1-C6 under PR-KA-B1
@@ -830,4 +947,93 @@ func TestResumeRemoteSession_Metrics_NoRemoteOwnerSkipsTiming(t *testing.T) {
 	require.True(t, resumed)
 	require.Equal(t, uint64(0), histogramSampleCount(t, metrics.EvictLag))
 	require.Equal(t, uint64(0), histogramSampleCount(t, metrics.SessionDualActivationSeconds))
+}
+
+// --- PR-KA-D10 §1.3: same-node older-generation leases skip the takeover RPC ---
+
+// TestResumeRemoteSession_SameNodeOlderEpochSkipsTakeover: when the stored
+// lease names this nodeID with a strictly older node epoch, the old process
+// generation is dead (monotonic INCR, KD-K27) and a takeover RPC against it
+// is doomed to the KD-K30 bypass — resume skips the RPC and proceeds with
+// the claimed lease.
+func TestResumeRemoteSession_SameNodeOlderEpochSkipsTakeover(t *testing.T) {
+	directory := &fakeSessionDirectory{
+		lease: &ClusterSessionLease{
+			SessionID:     "sess-epoch",
+			NodeID:        "node-a",
+			IncarnationID: "1",
+			LeaseVersion:  7,
+			ExpiresAt:     time.Now().Add(time.Hour),
+		},
+		snapshot: &ClusterSessionSnapshot{
+			SessionID:     "sess-epoch",
+			UserID:        "user-1",
+			ClientID:      "client-1",
+			Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "news"}},
+		},
+	}
+	bus := &fakeClusterCommandBus{result: &ClusterCommandResult{Status: ClusterCommandStatusSucceeded}}
+	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-a", IncarnationID: "2", Backend: "memory"}, ClusterDependencies{
+		SessionDirectory: directory,
+		CommandBus:       bus,
+		QueryStore:       fakeQueryStore{},
+	})
+	require.NoError(t, err)
+
+	node := NewNode(nil)
+	node.SetCluster(runtime)
+	client, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
+	require.NoError(t, err)
+
+	snapshot, resumed, err := node.resumeRemoteSession(context.Background(), client, "sess-epoch")
+	require.NoError(t, err)
+	require.True(t, resumed)
+	require.NotNil(t, snapshot)
+	require.Empty(t, bus.commands, "no takeover RPC against a dead older generation of the same node")
+
+	lease, err := directory.GetSessionLease(context.Background(), "sess-epoch")
+	require.NoError(t, err)
+	require.Equal(t, "node-a", lease.NodeID)
+	require.Equal(t, "2", lease.IncarnationID)
+	require.Equal(t, uint64(8), lease.LeaseVersion, "the claim still bumps the lease version")
+}
+
+// TestResumeRemoteSession_NonEpochIncarnationDoesNotSkip: same nodeID with a
+// non-epoch incarnation ID (ParseNodeEpoch fails) keeps the old behavior —
+// the takeover RPC is issued.
+func TestResumeRemoteSession_NonEpochIncarnationDoesNotSkip(t *testing.T) {
+	directory := &fakeSessionDirectory{
+		lease: &ClusterSessionLease{
+			SessionID:     "sess-nonepoch",
+			NodeID:        "node-a",
+			IncarnationID: "inc-a-old",
+			LeaseVersion:  7,
+			ExpiresAt:     time.Now().Add(time.Hour),
+		},
+		snapshot: &ClusterSessionSnapshot{
+			SessionID:     "sess-nonepoch",
+			UserID:        "user-1",
+			ClientID:      "client-1",
+			Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "news"}},
+		},
+	}
+	bus := &fakeClusterCommandBus{result: &ClusterCommandResult{Status: ClusterCommandStatusSucceeded}}
+	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-a", IncarnationID: "inc-a", Backend: "memory"}, ClusterDependencies{
+		SessionDirectory: directory,
+		CommandBus:       bus,
+		QueryStore:       fakeQueryStore{},
+	})
+	require.NoError(t, err)
+
+	node := NewNode(nil)
+	node.SetCluster(runtime)
+	client, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
+	require.NoError(t, err)
+
+	snapshot, resumed, err := node.resumeRemoteSession(context.Background(), client, "sess-nonepoch")
+	require.NoError(t, err)
+	require.True(t, resumed)
+	require.NotNil(t, snapshot)
+	require.Len(t, bus.commands, 1, "a non-epoch incarnation never skips the takeover RPC")
+	require.Equal(t, ClusterCommandTakeover, bus.commands[0].Type)
 }

@@ -97,6 +97,20 @@ type ClusterChannelInfo struct {
 // ClusterCommandHandler handles one incoming cluster command locally.
 type ClusterCommandHandler func(ctx context.Context, cmd *ClusterCommand) (*ClusterCommandResult, error)
 
+// SessionStateCompareAndSwapper is an optional SessionDirectory extension
+// (PR-KA-D10 §1.2): the session lease CAS and the session snapshot write
+// commit in one atomic step, closing the blind-write window between a won
+// lease CAS and the snapshot PUT that used to follow it. The compare
+// predicate is exactly the CompareAndSwapSessionLease four-field one
+// (SessionID, NodeID, IncarnationID, LeaseVersion; expected == nil requires
+// the lease record to be absent). ok=false writes nothing — neither lease
+// nor snapshot. Wiring is by type assertion (the NodeEpochAllocator
+// precedent): directories without the extension fall back to the two-step
+// path in compareAndSwapSessionState.
+type SessionStateCompareAndSwapper interface {
+	CompareAndSwapSessionState(ctx context.Context, expected, desired *ClusterSessionLease, snapshot *ClusterSessionSnapshot, leaseTTL, snapshotTTL time.Duration) (bool, error)
+}
+
 func (noopSessionDirectory) PutNodeLease(context.Context, *ClusterNodeLease, time.Duration) error {
 	return nil
 }
@@ -109,6 +123,13 @@ func (noopSessionDirectory) GetNodeLease(context.Context, string, string) (*Clus
 // no remote directory to conflict with, so the local sync must never be
 // fenced by a lease it cannot even read back.
 func (noopSessionDirectory) CompareAndSwapSessionLease(context.Context, *ClusterSessionLease, *ClusterSessionLease, time.Duration) (bool, error) {
+	return true, nil
+}
+
+// CompareAndSwapSessionState on the noop directory always succeeds, like the
+// lease-only CAS above: with no remote directory there is nothing to write
+// atomically.
+func (noopSessionDirectory) CompareAndSwapSessionState(context.Context, *ClusterSessionLease, *ClusterSessionLease, *ClusterSessionSnapshot, time.Duration, time.Duration) (bool, error) {
 	return true, nil
 }
 
@@ -264,7 +285,7 @@ func (n *Node) syncClusterSessionState(ctx context.Context, client *Client) erro
 	// CAS(expected=nil). A blind SET could overwrite a lease another node
 	// registered in the meantime.
 	if current == nil {
-		ok, err := directory.CompareAndSwapSessionLease(ctx, nil, desired, n.sessionLeaseTTL())
+		ok, err := n.compareAndSwapSessionState(ctx, directory, nil, desired, snapshot)
 		if err != nil {
 			return err
 		}
@@ -274,7 +295,7 @@ func (n *Node) syncClusterSessionState(ctx context.Context, client *Client) erro
 			}
 			return ErrSessionFenced
 		}
-		return directory.PutSessionSnapshot(ctx, snapshot, defaultClusterSessionSnapshotTTL)
+		return nil
 	}
 
 	// The directory records a different fencing (another node's CAS won the
@@ -299,7 +320,7 @@ func (n *Node) syncClusterSessionState(ctx context.Context, client *Client) erro
 		return ErrSessionFenced
 	}
 
-	ok, err := directory.CompareAndSwapSessionLease(ctx, current, desired, n.sessionLeaseTTL())
+	ok, err := n.compareAndSwapSessionState(ctx, directory, current, desired, snapshot)
 	if err != nil {
 		return err
 	}
@@ -309,7 +330,26 @@ func (n *Node) syncClusterSessionState(ctx context.Context, client *Client) erro
 		}
 		return ErrSessionFenced
 	}
-	return directory.PutSessionSnapshot(ctx, snapshot, defaultClusterSessionSnapshotTTL)
+	return nil
+}
+
+// compareAndSwapSessionState runs the lease CAS and the snapshot write as one
+// atomic step when the directory implements SessionStateCompareAndSwapper
+// (the Redis directory does, via a single Lua script; PR-KA-D10 §1.2).
+// Directories without the extension fall back to the two-step CAS +
+// PutSessionSnapshot, which is NOT atomic: a stale in-flight refresh can land
+// its snapshot after another node won the lease between the two writes. That
+// residual window is accepted for the fakes and the noop directory; the
+// production Redis path never takes it.
+func (n *Node) compareAndSwapSessionState(ctx context.Context, directory SessionDirectory, expected, desired *ClusterSessionLease, snapshot *ClusterSessionSnapshot) (bool, error) {
+	if cas, ok := directory.(SessionStateCompareAndSwapper); ok {
+		return cas.CompareAndSwapSessionState(ctx, expected, desired, snapshot, n.sessionLeaseTTL(), defaultClusterSessionSnapshotTTL)
+	}
+	ok, err := directory.CompareAndSwapSessionLease(ctx, expected, desired, n.sessionLeaseTTL())
+	if err != nil || !ok {
+		return ok, err
+	}
+	return true, directory.PutSessionSnapshot(ctx, snapshot, defaultClusterSessionSnapshotTTL)
 }
 
 func (n *Node) deleteClusterSessionState(ctx context.Context, sessionID string) error {

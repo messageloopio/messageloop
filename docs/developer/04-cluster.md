@@ -205,7 +205,7 @@ cluster:
 
 会话所有权 = 「会话租约指向的节点实例正在服务该会话」。`LeaseVersion` 是所有权代际计数：新连接从 1 起，每次 resume/takeover 递增（`client.go`、`cluster_resume.go`）。它被用于接管时的版本校验，防止旧代际的接管命令误伤新代际的会话。
 
-**会话租约的写入只走 CAS，没有盲写（PR-KA-A1）**。`syncClusterSessionState`（`cluster_state.go`）是唯一的热路径写入方，它的三种情形：
+**会话租约的写入只走 CAS，没有盲写（PR-KA-A1）**；且自 PR-KA-D10 起，**lease CAS 与 snapshot 写入合成一次原子操作**：`syncClusterSessionState`（`cluster_state.go`）是唯一的热路径写入方，它经可选接口 `SessionStateCompareAndSwapper.CompareAndSwapSessionState`（type-assert 接线，未实现该接口的 Directory 回退到旧的「CAS + PutSessionSnapshot」两步，非原子）把「四字段比对 + lease SET + snapshot SET」压成一步——Redis 实现是一条 Lua 脚本（`pkg/redisbroker/cluster_directory.go`)，比对谓词与既有 CAS 完全相同（`SessionID`/`NodeID`/`IncarnationID`/`LeaseVersion`,expected 为 nil 时要求键不存在）,`ok=false` 时两个键都不写，两键 TTL 不变（lease 600s / snapshot 24h)。这消灭了「CAS 抢租成功 → 裸 snapshot PUT」之间旧快照盲落的窗口。三种情形：
 
 - **首次登记**：Directory 中无该 session 的租约 → `CompareAndSwapSessionLease(expected=nil)` 抢注（版本 1）。
 - **same-fence 续约**：租约仍指向本节点实例且版本与本地一致 → `CompareAndSwapSessionLease(expected=当前租约)` 刷新 TTL / `LastActivityAt` / `UserID` 等，**`LeaseVersion` 不递增**。无条件 `SET` 的 lease put 方法已从 `SessionDirectory` 接口与全部实现中删除（PR-KA-B4）：盲写会把已被他节点 CAS 抢走的所有权写回去，任何分支都不允许绕过 CAS。
@@ -235,9 +235,9 @@ cluster:
 客户端携带 `SessionId` 重连，但旧会话不在本节点（本地 `LookupSession` 未命中）时，走跨节点恢复路径 `resumeRemoteSession`（`cluster_resume.go:34-88`）：
 
 1. 读会话租约与会话快照；两者缺一即放弃恢复（返回未恢复）。
-2. 若租约有效且属于其他节点实例：向该节点发送 `takeover` 命令（`requestSessionTakeover`，`cluster_resume.go:90-110`）。takeover 命令携带 `LeaseVersion` 与元数据 `new_node_id` / `new_incarnation_id`；目标节点执行 `handleClusterTakeoverCommand`（`cluster_commands.go:242-267`）：先校验 `LeaseVersion` 与本地一致（不一致返回 `LEASE_VERSION_MISMATCH`），再 `evictSessionForTakeover` 驱逐旧连接。
+2. 若租约有效且属于其他节点实例：向该节点发送 `takeover` 命令（`requestSessionTakeover`，`cluster_resume.go`）。takeover 命令携带 `LeaseVersion` 与元数据 `new_node_id` / `new_incarnation_id`；目标节点执行 `handleClusterTakeoverCommand`（`cluster_commands.go:242-267`）：先校验 `LeaseVersion` 与本地一致（不一致返回 `LEASE_VERSION_MISMATCH`），再 `evictSessionForTakeover` 驱逐旧连接。**同节点旧世代跳过 takeover(PR-KA-D10 §1.3，兑现 C2 延期授权）**：当租约的 `NodeID` 就是本节点且 `NodeEpochNewer(本进程世代, 租约世代)` 为真时（node epoch 由 INCR 单调分配，KD-K27，旧世代进程必已死亡、注定落入第 3 步的死节点旁路），直接持已 CAS 到手的租约进恢复，省掉一次注定失败的 takeover RPC；非 epoch 形式的 IncarnationID（`ParseNodeEpoch` 解析失败）不跳过，行为与旧版一致。
 3. **接管失败时的降级**：若 takeover 命令失败（例如目标节点刚宕机、命令超时），则检查目标节点的节点租约——节点租约也已不存在时，视为旧节点已死，继续执行恢复；节点租约仍在则中止恢复，并把抢占到的租约 **CAS 回滚**到原 owner（把 fencing 还回去，`cluster_resume.go` 的 `rollbackSessionTakeover`）；节点租约查询本身失败时同样先尝试回滚再返回错误。
-4. 恢复成功后在本地重建会话状态：身份字段、订阅集合、`clusterLeaseVersion = 旧租约版本 + 1`，并 `AddClient` 注册；随后 `restoreSessionSubscriptions`（`cluster_resume.go:112-127`）逐频道重建订阅 + presence 登记 + 本节点投影 +1，任一频道失败则回滚已恢复的频道（含投影补偿 -1）。
+4. 恢复成功后在本地重建会话状态：身份字段、订阅集合、`clusterLeaseVersion = 旧租约版本 + 1`，并 `AddClient` 注册；随后 `restoreSessionSubscriptions`（`cluster_resume.go`）逐频道重建订阅 + presence 登记 + 本节点投影 +1。**hydrate 是逐频道软失败，没有 saga(PR-KA-D10 §1.1)**：某频道 restore/presence 失败 → 该频道不恢复（presence 失败会把刚加的订阅一并撤掉，投影从未 +1 故无需补偿）、记入失败列表、继续其余频道；**不做回滚**（成功频道保留），更不做旧版的「删 hub 注册 + 删 lease/snapshot + 3502」——会话以部分订阅存活，全部频道失败时亦然（空订阅存活）。`Connected` 发出之后，每个失败频道收到一个顶层 Error 信封：`code=RECOVER_FAILED`、`type=recover_error`、`metadata.entries["channel"]=<ch>`(D7 码表内码，无 proto 变更）；失败频道同时被排除在快照频道的恢复续读集合之外，客户端按既有顶层错误路径自行重订。**显式决策：hydrate 不重新过 Authorizer/ACL**——恢复是已授权会话的延续，快照里的订阅关系在建立时已通过当时的 ACL；若权限在会话存活期间被回收，由管理面（Disconnect/权限变更后的强制下线）而非恢复路径负责。
 
 **驱逐（`evictSessionForTakeover`，`cluster_resume.go:196-249`）**：标记旧连接关闭、取消心跳、逐个移除其全部频道订阅并同步投影 -1；任何频道移除失败都会把已移除的频道整体回滚（恢复订阅 + 投影 +1），保证不留下"半驱逐"状态；最后从 hub 移除会话并关闭传输。集成测试 `TestClusterRedis_RemoteResumeTakeover` 验证了完整链路：node B 上的新连接把 node A 上的旧连接驱逐，新连接收到 `Connected{Resumed: true}` 且订阅被恢复。
 

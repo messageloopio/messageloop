@@ -109,6 +109,25 @@ func (d *Directory) CompareAndSwapSessionLease(_ context.Context, expected, desi
 	return true, nil
 }
 
+// CompareAndSwapSessionState implements the optional atomic lease+snapshot
+// write (SessionStateCompareAndSwapper, PR-KA-D10 §1.2): the four-field
+// compare, the lease swap and the snapshot store commit under the same lock,
+// so a failed compare leaves both records untouched.
+func (d *Directory) CompareAndSwapSessionState(_ context.Context, expected, desired *messageloop.ClusterSessionLease, snapshot *messageloop.ClusterSessionSnapshot, _, _ time.Duration) (bool, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	current := d.sessionLeases[desired.SessionID]
+	if !leaseEqual(current, expected) {
+		return false, nil
+	}
+	leaseCopy := *desired
+	d.sessionLeases[desired.SessionID] = &leaseCopy
+	if snapshot != nil {
+		d.snapshots[snapshot.SessionID] = copySnapshot(snapshot)
+	}
+	return true, nil
+}
+
 // leaseEqual mirrors the production lease comparison: only the fencing
 // fields (SessionID, NodeID, IncarnationID, LeaseVersion) participate.
 func leaseEqual(current, expected *messageloop.ClusterSessionLease) bool {
@@ -266,7 +285,8 @@ func (d *Directory) ListUserSessions(_ context.Context, userID string) ([]string
 }
 
 var (
-	_ messageloop.SessionDirectory          = (*Directory)(nil)
-	_ messageloop.ClusterSessionLeaseLister = (*Directory)(nil)
-	_ messageloop.ClusterNodeLeaseLister    = (*Directory)(nil)
+	_ messageloop.SessionDirectory              = (*Directory)(nil)
+	_ messageloop.SessionStateCompareAndSwapper = (*Directory)(nil)
+	_ messageloop.ClusterSessionLeaseLister     = (*Directory)(nil)
+	_ messageloop.ClusterNodeLeaseLister        = (*Directory)(nil)
 )

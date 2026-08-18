@@ -3,7 +3,7 @@
 | 字段 | 值 |
 | --- | --- |
 | 标题 | `cluster: soft-fail hydrate without saga, atomic lease+snapshot write, epoch-wired takeover skip` |
-| 状态 | **Ready**（待实现） |
+| 状态 | **Accepted**（2026-08-18 主 agent 终验通过，尚未 commit） |
 | 依赖 | D9 已合（`8eab8a8`)。在 `v2` 分支上做 |
 | 设计来源 | 转正评审 backlog D10；`docs/v2/kernel-architecture.md` :348（禁止逐频道 saga）、:292（单频道软失败哲学）、:610 宪法 5（没有盲写）、KD-K27/C2 延期授权（`pr-ka-c2-epoch.md:76`) |
 | 验收人 | 主 agent |
@@ -124,4 +124,19 @@ golangci-lint run ./...           # 必须保持 0 issues(D8 已清零)
 
 ## 8. 实现备注（实现方填）
 
-（留空）
+实现于 `v2` 分支工作区（未 commit)。
+
+- **§1.1 hydrate 软失败**:`restoreSessionSubscriptions` 改返回 `[]clusterRestoreFailure`（新类型，`cluster_resume.go`)，逐频道软失败、无 saga;`rollbackRestoredSubscriptions` 整体删除。两个失败面：①`restoreLocalSubscription` 失败 → 把该频道从 `resumeRemoteSession` 预填的 `client.subscribedChannels` 中删掉（不删则 `Connected.Subscriptions` 会虚报该频道）;②`SetPresenceForSession` 失败 → 用 `removeLocalSubscriptionOnly` 撤销刚加的订阅（投影 +1 在 presence 之后才执行，故无需补偿）。`client.go` `finishConnect`：硬回滚（删 hub + 删 lease/snapshot + 3502）移除；失败频道从「快照频道恢复续读集合」中排除；`Connected` 发出之后逐频道发顶层 `RECOVER_FAILED`/`recover_error` 信封，`metadata.entries["channel"]=<ch>`；发送前用 `hasSubscription` 过滤掉已被本次 Connect 请求自己订回来的频道（避免「已订上却报失败」的矛盾信封）。
+- **§1.2 原子写**：新可选接口 `SessionStateCompareAndSwapper` 置于 `cluster_state.go`(ClusterCommandHandler 旁）。`syncClusterSessionState` 两个写点统一走新增的 `compareAndSwapSessionState` helper 做 type-assert 分派；fallback = 旧两步，注释标注非原子。Redis 实现为一条 Lua(`compareAndSwapSessionStateScript`):**比对谓词经 cjson 按四字段（session_id/node_id/incarnation_id/lease_version）比较，不是全 blob 序列化比较**——规格书 §1.2 的「与 expected 序列化比较」若按全 blob 理解会比现状更严（并发 same-fence 续约只动 TTL/LastActivityAt 就会失配 → 误 3502)，违反硬约束 2 的谓词形状门禁，故按四字段实现并在脚本注释中钉死。lease_version 以 Lua number 比较（远低于 2^53)。TTL 以 PX 毫秒传入（EX/PX 在 Redis 内部同为绝对过期时间戳，值不变）。Lua 成功后仍走既有 `syncUserIndex`(best-effort)。
+- **§1.3 epoch 跳过**:`resumeRemoteSession` takeover 分支内，同 nodeID 且 `NodeEpochNewer(本进程, 租约)` 为真时跳过 `requestSessionTakeover` 直接进恢复；`EvictLag` 只在真正发 RPC 时观测，`SessionDualActivationSeconds` 对跳过路径仍观测（双激活窗口从 CAS 起算、客观存在）。非 epoch ID(`inc-a` 等）不跳过，行为不变。
+- **§3.4 核对**:noop 与 sim Directory 直接实现新接口；`fakeSessionDirectory`/`countingSessionDirectory`/`trackingClusterComponent` 显式走 fallback（新增 `TestSyncClusterSessionState_FallbackForDirectoriesWithoutAtomicWrite` pin 住 fake 不实现该接口）。
+- **偏离 §2 一处**:`presence_test.go:525` 一行断言随签名变化由 `require.NoError` 改为 `require.Empty`（编译强制，无行为变化）。
+- Redis 集成：`TestClusterRedis_RemoteResumeTakeover` 增加「抢租后 snapshot 即为新 owner 视图」断言；新增 `TestClusterRedis_CompareAndSwapSessionState_Atomic`(DB 14）直连 Lua 路径覆盖首登记/same-fence 刷新/失配两键不动/expected 非 nil 而键缺失四种情形，并 PTTL 校验两键 TTL 不变。
+
+## 9. 主 agent 终验备注（2026-08-18)
+
+**Verdict:Accepted**。终验动作（均主 agent 亲跑，未采信实现方自报）:
+
+- diff 面：12 个改动文件全部落在 §2 白名单；`hub.go`/`session.go`/`protocol/`/`shared/genproto/`/SDK 手写代码 `git diff` 为零；唯一 §2 偏离（`presence_test.go:525` 一行，编译强制）已记录，接受。`git ls-files --eol` 全部 `w/crlf`，无格式 churn。
+- 算法抽查：软失败两条失败面（restore 失败删预填频道；presence 失败 `removeLocalSubscriptionOnly` 撤订阅、投影从未 +1 故无补偿）与 `Connected` 后 `RECOVER_FAILED` 信封（`hasSubscription` 过滤）逻辑自洽；Lua 谓词与既有 `clusterSessionLeaseEqual` 四字段逐字段等价，`ok=false` 两键不写，PX 传 TTL;epoch 跳过仅同 nodeID + 双方可解析 epoch 生效，`inc-a` 类 ID 不跳过。
+- 亲跑测试链（串行，真实 Redis DB 14):`go build ./...`;`go test -count=1 -run "TestSim_|TestCluster|TestResume|TestClientFix|TestSession" .`(17.2s);`go test -count=1 ./pkg/redisbroker ./internal/cluster/...`;全量 `go test -count=1 ./...` 11 包全 ok（根 74.0s / redisbroker 62.7s);`sdks/go` 4.9s;`sdks/ts` npx jest 83/83;`_examples/chatroom` build ok;`golangci-lint run ./...` 0 issues。

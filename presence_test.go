@@ -522,7 +522,7 @@ func TestPresence_RestoreWildcardSkipsStore(t *testing.T) {
 		{Channel: "chat.**", Ephemeral: false},
 		{Channel: "normal.ch"},
 	}
-	require.NoError(t, node.restoreSessionSubscriptions(context.Background(), client, subscriptions))
+	require.Empty(t, node.restoreSessionSubscriptions(context.Background(), client, subscriptions))
 
 	present, err := node.presence.Get(context.Background(), "chat.**")
 	require.NoError(t, err)

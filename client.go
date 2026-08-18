@@ -520,19 +520,14 @@ func (c *Session) finishConnect(ctx context.Context, in *clientpb.InboundMessage
 		return c.disconnectOnConnectError(ctx, err)
 	}
 
+	var restoreFailures []clusterRestoreFailure
 	if resumeSnapshot != nil {
-		if err := c.node.restoreSessionSubscriptions(ctx, c, resumeSnapshot.Subscriptions); err != nil {
-			// Roll back the partially restored session: remove the hub
-			// registration and the cluster lease/snapshot, then disconnect
-			// the new connection. Without this the session lingers as a
-			// zombie that cannot be resumed.
-			c.node.hub.RemoveSession(c.SessionID())
-			if delErr := c.node.deleteClusterSessionState(context.Background(), c.SessionID()); delErr != nil {
-				log.WarnContext(ctx, "failed to clean cluster session state after restore failure",
-					"session", c.SessionID(), "error", delErr)
-			}
-			return DisconnectStale
-		}
+		// Hydrate is per-channel soft-fail (PR-KA-D10 §1.1): a channel that
+		// fails to restore is skipped and reported to the client with a
+		// RECOVER_FAILED envelope after Connected — the session lives on with
+		// the restored subset; there is no saga, no hub/lease/snapshot
+		// teardown and no 3502.
+		restoreFailures = c.node.restoreSessionSubscriptions(ctx, c, resumeSnapshot.Subscriptions)
 	}
 
 	// Notify proxy about client connection
@@ -635,10 +630,19 @@ func (c *Session) finishConnect(ctx context.Context, in *clientpb.InboundMessage
 	// Cross-node resume: channels the snapshot subscribed but this Connect
 	// request did not list are recovered too. They resume from the
 	// server-recorded ChannelOffsets; a channel missing an offset is skipped
-	// (never replayed from the beginning).
+	// (never replayed from the beginning). Channels whose hydrate failed are
+	// excluded: they were not restored, and the client is told to
+	// re-subscribe via the RECOVER_FAILED envelope sent below.
 	if resumeSnapshot != nil {
+		failed := make(map[string]struct{}, len(restoreFailures))
+		for _, failure := range restoreFailures {
+			failed[failure.channel] = struct{}{}
+		}
 		for _, snap := range resumeSnapshot.Subscriptions {
 			if _, dup := seenRecovery[snap.Channel]; dup {
+				continue
+			}
+			if _, bad := failed[snap.Channel]; bad {
 				continue
 			}
 			seenRecovery[snap.Channel] = struct{}{}
@@ -665,6 +669,30 @@ func (c *Session) finishConnect(ctx context.Context, in *clientpb.InboundMessage
 		}
 	})); err != nil {
 		return err
+	}
+	// Report hydrate failures after Connected (PR-KA-D10 §1.1): one top-level
+	// RECOVER_FAILED envelope per unrestored snapshot channel, with the
+	// channel in metadata, so the client can re-subscribe through the normal
+	// top-level error path. A channel the Connect request itself managed to
+	// subscribe is no longer failed and is not reported.
+	for _, failure := range restoreFailures {
+		if c.hasSubscription(failure.channel) {
+			continue
+		}
+		metadata, metaErr := structpb.NewStruct(map[string]interface{}{"channel": failure.channel})
+		if metaErr != nil {
+			continue // unreachable for a string-only map
+		}
+		_ = c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+			out.Envelope = &clientpb.OutboundMessage_Error{
+				Error: &sharedv2.Error{
+					Code:     "RECOVER_FAILED",
+					Type:     "recover_error",
+					Message:  fmt.Sprintf("failed to restore subscription to channel %q: %v", failure.channel, failure.err),
+					Metadata: metadata,
+				},
+			}
+		}))
 	}
 	for _, snap := range c.presenceSnapshots(ctx) {
 		if err := c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {

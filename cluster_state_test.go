@@ -359,3 +359,45 @@ func TestClusterSessionSync_Metrics_RefreshFencedCounted(t *testing.T) {
 		})
 	}
 }
+
+// --- PR-KA-D10 §1.2: atomic lease+snapshot write wiring ---
+
+// TestSyncClusterSessionState_FallbackForDirectoriesWithoutAtomicWrite pins
+// the type-assert dispatch (§3.4: the interface is not compile-time enforced,
+// so coverage must not rely on compile errors): fakeSessionDirectory does NOT
+// implement SessionStateCompareAndSwapper, and syncClusterSessionState over
+// it keeps the old two-step behavior — first registration lands the lease via
+// CAS(nil) and the snapshot via PutSessionSnapshot.
+func TestSyncClusterSessionState_FallbackForDirectoriesWithoutAtomicWrite(t *testing.T) {
+	directory := &fakeSessionDirectory{}
+	var iface SessionDirectory = directory
+	_, implements := iface.(SessionStateCompareAndSwapper)
+	require.False(t, implements,
+		"fakeSessionDirectory deliberately exercises the non-atomic fallback; implementing the interface here must be a conscious decision")
+
+	node := clusterTestNode(t, directory)
+	client, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
+	require.NoError(t, err)
+	client.ForceTestIDs("sess-fallback", "user-fallback", "client-fallback")
+	require.NoError(t, node.AddClient(client))
+
+	lease, err := directory.GetSessionLease(context.Background(), "sess-fallback")
+	require.NoError(t, err)
+	require.NotNil(t, lease)
+	require.Equal(t, uint64(1), lease.LeaseVersion)
+	require.Equal(t, 1, directory.casCalls, "the fallback claims the lease through the plain CAS")
+}
+
+// TestNoopSessionDirectory_ImplementsAtomicWrite pins the noop directory's
+// trivial SessionStateCompareAndSwapper (always succeeds, nothing to write).
+func TestNoopSessionDirectory_ImplementsAtomicWrite(t *testing.T) {
+	var iface SessionDirectory = &noopSessionDirectory{}
+	directory, ok := iface.(SessionStateCompareAndSwapper)
+	require.True(t, ok, "noopSessionDirectory must implement SessionStateCompareAndSwapper")
+
+	ok, err := directory.CompareAndSwapSessionState(context.Background(), nil,
+		&ClusterSessionLease{SessionID: "sess-noop", NodeID: "node-a", IncarnationID: "inc-a", LeaseVersion: 1},
+		&ClusterSessionSnapshot{SessionID: "sess-noop"}, time.Minute, time.Hour)
+	require.NoError(t, err)
+	require.True(t, ok)
+}

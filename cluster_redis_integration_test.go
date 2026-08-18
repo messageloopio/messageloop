@@ -25,6 +25,10 @@ import (
 
 const clusterRedisIntegrationDB = 15
 
+// clusterAtomicWriteTestDB isolates the PR-KA-D10 atomic-write tests from the
+// other cluster integration scenarios.
+const clusterAtomicWriteTestDB = 14
+
 // testClusterHMACKey is the 32-byte HMAC key shared by the buses of the
 // cluster integration tests.
 var testClusterHMACKey = []byte("integration-test-hmac-key-0123456789")
@@ -312,6 +316,125 @@ func TestClusterRedis_RemoteResumeTakeover(t *testing.T) {
 	channels := connected.Subscriptions
 	require.Len(t, channels, 1)
 	require.Equal(t, channel, channels[0].Channel)
+
+	// PR-KA-D10 §1.2: lease CAS and snapshot write commit in one atomic step,
+	// so right after the takeover the stored snapshot is already the new
+	// owner's view — never the previous generation's.
+	directory := redisbroker.NewSessionDirectory(redisCfg)
+	defer func() { _ = directory.Shutdown(ctx) }()
+	storedLease, err := directory.GetSessionLease(ctx, oldSessionID)
+	require.NoError(t, err)
+	require.Equal(t, "node-b", storedLease.NodeID)
+	storedSnapshot, err := directory.GetSessionSnapshot(ctx, oldSessionID)
+	require.NoError(t, err)
+	require.NotNil(t, storedSnapshot, "the snapshot lands together with the winning lease CAS")
+	require.Equal(t, oldSessionID, storedSnapshot.SessionID)
+	require.Len(t, storedSnapshot.Subscriptions, 1)
+	require.Equal(t, channel, storedSnapshot.Subscriptions[0].Channel)
+}
+
+// TestClusterRedis_CompareAndSwapSessionState_Atomic drives the
+// SessionStateCompareAndSwapper Lua path directly against real Redis
+// (PR-KA-D10 §1.2): the first registration and the same-fence refresh write
+// lease and snapshot in one step, and a lost compare writes neither key.
+func TestClusterRedis_CompareAndSwapSessionState_Atomic(t *testing.T) {
+	redisCfg := requireClusterRedis(t, clusterAtomicWriteTestDB)
+	ctx := context.Background()
+
+	directory := redisbroker.NewSessionDirectory(redisCfg)
+	t.Cleanup(func() { _ = directory.Shutdown(ctx) })
+
+	cas, ok := directory.(messageloop.SessionStateCompareAndSwapper)
+	require.True(t, ok, "the redis session directory must implement SessionStateCompareAndSwapper")
+
+	redisClient := redis.NewClient(&redis.Options{Addr: redisCfg.Addr, Password: redisCfg.Password, DB: redisCfg.DB})
+	t.Cleanup(func() { _ = redisClient.Close() })
+	opts := redisbroker.NewOptions(redisCfg)
+	leaseKey := opts.ClusterSessionLeasePrefix + "sess-atomic"
+	snapshotKey := opts.ClusterSessionSnapshotPrefix + "sess-atomic"
+
+	leaseV1 := &messageloop.ClusterSessionLease{
+		SessionID:     "sess-atomic",
+		NodeID:        "node-a",
+		IncarnationID: "1",
+		UserID:        "user-1",
+		LeaseVersion:  1,
+		ExpiresAt:     time.Now().Add(10 * time.Minute),
+	}
+	snapshotV1 := &messageloop.ClusterSessionSnapshot{
+		SessionID:     "sess-atomic",
+		UserID:        "user-1",
+		Subscriptions: []messageloop.ClusterSubscriptionSnapshot{{Channel: "news"}},
+	}
+
+	// First registration: CAS(nil) + snapshot SET commit together.
+	ok, err := cas.CompareAndSwapSessionState(ctx, nil, leaseV1, snapshotV1, 10*time.Minute, 24*time.Hour)
+	require.NoError(t, err)
+	require.True(t, ok)
+	stored, err := directory.GetSessionLease(ctx, "sess-atomic")
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), stored.LeaseVersion)
+	storedSnapshot, err := directory.GetSessionSnapshot(ctx, "sess-atomic")
+	require.NoError(t, err)
+	require.NotNil(t, storedSnapshot, "the snapshot lands with the winning CAS")
+
+	// TTLs are unchanged: the lease TTL the caller passed, and 24h snapshot.
+	leaseTTL, err := redisClient.PTTL(ctx, leaseKey).Result()
+	require.NoError(t, err)
+	require.Greater(t, leaseTTL, 9*time.Minute)
+	require.LessOrEqual(t, leaseTTL, 10*time.Minute)
+	snapshotTTL, err := redisClient.PTTL(ctx, snapshotKey).Result()
+	require.NoError(t, err)
+	require.Greater(t, snapshotTTL, 23*time.Hour)
+	require.LessOrEqual(t, snapshotTTL, 24*time.Hour)
+
+	// Same-fence refresh: lease and snapshot move together.
+	current, err := directory.GetSessionLease(ctx, "sess-atomic")
+	require.NoError(t, err)
+	refresh := *current
+	refresh.LastActivityAt = time.Now().UnixMilli()
+	snapshotV2 := &messageloop.ClusterSessionSnapshot{
+		SessionID: "sess-atomic",
+		UserID:    "user-1",
+		Subscriptions: []messageloop.ClusterSubscriptionSnapshot{
+			{Channel: "news"},
+			{Channel: "sports"},
+		},
+	}
+	ok, err = cas.CompareAndSwapSessionState(ctx, current, &refresh, snapshotV2, 10*time.Minute, 24*time.Hour)
+	require.NoError(t, err)
+	require.True(t, ok)
+	storedSnapshot, err = directory.GetSessionSnapshot(ctx, "sess-atomic")
+	require.NoError(t, err)
+	require.Len(t, storedSnapshot.Subscriptions, 2)
+
+	// A lost compare writes neither key: the lease keeps the winner's record
+	// and the snapshot keeps the last won view.
+	stale := *current
+	stale.LeaseVersion = 99
+	desired := *current
+	desired.LeaseVersion = 100
+	snapshotStale := &messageloop.ClusterSessionSnapshot{SessionID: "sess-atomic", UserID: "user-stale"}
+	ok, err = cas.CompareAndSwapSessionState(ctx, &stale, &desired, snapshotStale, 10*time.Minute, 24*time.Hour)
+	require.NoError(t, err)
+	require.False(t, ok)
+	stored, err = directory.GetSessionLease(ctx, "sess-atomic")
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), stored.LeaseVersion, "a lost compare must not touch the lease")
+	storedSnapshot, err = directory.GetSessionSnapshot(ctx, "sess-atomic")
+	require.NoError(t, err)
+	require.Len(t, storedSnapshot.Subscriptions, 2, "a lost compare must not touch the snapshot")
+
+	// A non-nil expected against an absent key loses and writes nothing.
+	absentLease := *leaseV1
+	absentLease.SessionID = "sess-atomic-missing"
+	ok, err = cas.CompareAndSwapSessionState(ctx, &absentLease, &absentLease,
+		&messageloop.ClusterSessionSnapshot{SessionID: "sess-atomic-missing"}, 10*time.Minute, 24*time.Hour)
+	require.NoError(t, err)
+	require.False(t, ok, "expected non-nil requires the key to exist")
+	missing, err := directory.GetSessionSnapshot(ctx, "sess-atomic-missing")
+	require.NoError(t, err)
+	require.Nil(t, missing, "a lost compare on an absent key must not write the snapshot")
 }
 
 func TestClusterRedis_ProjectionRepairRestoresChannels(t *testing.T) {
