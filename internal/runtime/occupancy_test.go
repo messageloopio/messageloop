@@ -1,4 +1,4 @@
-package messageloop
+package runtime
 
 import (
 	"context"
@@ -75,7 +75,7 @@ func TestOccupancy_LateEventCountsGenDiscard(t *testing.T) {
 // longer recognize an "ml.type" presence frame, and node.go has no
 // presenceClusterEmit / emitPresence remnant.
 func TestOccupancy_NoForbiddenProductionRemnants(t *testing.T) {
-	hubSrc := readSource(t, "internal/session/hub.go")
+	hubSrc := readSource(t, "../session/hub.go")
 	require.NotContains(t, hubSrc, "node *Node", "Hub must not hold a Node back-reference")
 	require.NotContains(t, hubSrc, "ml.type", "broadcastPublication must not recognize an ml.type frame")
 	require.NotContains(t, hubSrc, "PresenceMetaType", "the ml.type constants must be gone")
@@ -84,7 +84,7 @@ func TestOccupancy_NoForbiddenProductionRemnants(t *testing.T) {
 	require.NotContains(t, nodeSrc, "presenceClusterEmit", "no cluster_emit helper may remain")
 	require.NotContains(t, nodeSrc, "func (n *Node) emitPresence", "emitPresence must be gone")
 
-	eventSrc := readSource(t, "internal/occupancy/presence_event.go")
+	eventSrc := readSource(t, "../occupancy/presence_event.go")
 	require.NotContains(t, eventSrc, "ml.type", "the live path must not attach ml.type")
 	require.NotContains(t, eventSrc, "presencePublication", "the transient presence frame helper must be gone")
 }

@@ -12,7 +12,10 @@ import (
 	"github.com/lynx-go/lynx"
 	"github.com/lynx-go/lynx/contrib/zap"
 	lynxhttp "github.com/lynx-go/lynx/server/http"
-	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/internal/runtime"
+	"github.com/messageloopio/messageloop/internal/cluster"
+	mlmetrics "github.com/messageloopio/messageloop/internal/metrics"
+	"github.com/messageloopio/messageloop/internal/stream"
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/pkg/transport/quic"
 	"github.com/messageloopio/messageloop/pkg/redisbroker"
@@ -39,7 +42,7 @@ func main() {
 			return fmt.Errorf("invalid config: %w", err)
 		}
 
-		node := messageloop.NewNode(&cfg.Server)
+		node := runtime.NewNode(&cfg.Server)
 		reg := prometheus.NewRegistry()
 		reg.MustRegister(
 			collectors.NewGoCollector(),
@@ -51,7 +54,7 @@ func main() {
 			// multi-node deployments can be aggregated per node.
 			metricsRegisterer = prometheus.WrapRegistererWith(prometheus.Labels{"node_id": cfg.Cluster.NodeID}, reg)
 		}
-		metrics := messageloop.NewMetrics(metricsRegisterer)
+		metrics := mlmetrics.NewMetrics(metricsRegisterer)
 		node.SetMetrics(metrics)
 
 		cluster, err := setupCluster(cfg, node, metrics)
@@ -73,7 +76,7 @@ func main() {
 		// Wire the shared metrics into the broker when it supports them (the
 		// Redis broker counts live-drop seq gaps, D3); the memory broker does
 		// not implement SetMetrics and stays unwired.
-		if metricsAware, ok := broker.(interface{ SetMetrics(*messageloop.Metrics) }); ok {
+		if metricsAware, ok := broker.(interface{ SetMetrics(*mlmetrics.Metrics) }); ok {
 			metricsAware.SetMetrics(metrics)
 		}
 
@@ -133,25 +136,25 @@ func main() {
 }
 
 // normalizeClusterOptions validates and normalizes cluster options from the
-// config, mirroring messageloop.ClusterOptions.normalize() so the
+// config, mirroring cluster.ClusterOptions.Normalize() so the
 // control-plane dependencies can be wired before the single NewCluster
 // construction (the normalization result is passed back into NewCluster).
 // The IncarnationID is left empty here: setupCluster allocates the monotonic
 // node_epoch (KD-K27) before wiring the bus / lease manager, which need the
 // final ID.
-func normalizeClusterOptions(cfg *config.Config) (messageloop.ClusterOptions, error) {
+func normalizeClusterOptions(cfg *config.Config) (cluster.ClusterOptions, error) {
 	if !cfg.Cluster.Enabled {
-		return messageloop.ClusterOptions{}, nil
+		return cluster.ClusterOptions{}, nil
 	}
 	nodeID := strings.TrimSpace(cfg.Cluster.NodeID)
 	if nodeID == "" {
-		return messageloop.ClusterOptions{}, errors.New("cluster node_id is required when cluster is enabled")
+		return cluster.ClusterOptions{}, errors.New("cluster node_id is required when cluster is enabled")
 	}
 	backend := strings.TrimSpace(cfg.Cluster.Backend)
 	if backend == "" {
 		backend = "redis"
 	}
-	return messageloop.ClusterOptions{
+	return cluster.ClusterOptions{
 		Enabled: true,
 		NodeID:  nodeID,
 		Backend: backend,
@@ -161,28 +164,28 @@ func normalizeClusterOptions(cfg *config.Config) (messageloop.ClusterOptions, er
 // setupCluster creates and wires the cluster based on the provided config.
 // For Redis-backed clusters it also configures the session directory, command bus,
 // query store, node lease manager, projection repairer, and presence store.
-func setupCluster(cfg *config.Config, node *messageloop.Node, metrics *messageloop.Metrics) (*messageloop.Cluster, error) {
+func setupCluster(cfg *config.Config, node *runtime.Node, metrics *mlmetrics.Metrics) (*runtime.Cluster, error) {
 	opts, err := normalizeClusterOptions(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("invalid cluster config: %w", err)
 	}
 
 	if !opts.Enabled || opts.Backend != "redis" {
-		cluster, err := messageloop.NewCluster(opts, messageloop.ClusterDependencies{})
+		cluster, err := runtime.NewCluster(opts, runtime.ClusterDependencies{})
 		if err != nil {
 			return nil, fmt.Errorf("invalid cluster config: %w", err)
 		}
 		return cluster, nil
 	}
 
-	deps := messageloop.ClusterDependencies{}
+	deps := runtime.ClusterDependencies{}
 	deps.SessionDirectory = redisbroker.NewSessionDirectory(cfg.Broker.Redis)
 
 	// Allocate this process's generation BEFORE wiring anything that carries
 	// the incarnation (bus channels, lease manager): the node_epoch INCR is
 	// the only production source of IncarnationID (KD-K27). If the INCR is
 	// impossible, startup is refused — never fall back to a random ID.
-	epochAllocator, ok := deps.SessionDirectory.(messageloop.NodeEpochAllocator)
+	epochAllocator, ok := deps.SessionDirectory.(cluster.NodeEpochAllocator)
 	if !ok {
 		return nil, errors.New("cluster node_epoch: redis session directory cannot allocate node epochs")
 	}
@@ -190,7 +193,7 @@ func setupCluster(cfg *config.Config, node *messageloop.Node, metrics *messagelo
 	if err != nil {
 		return nil, fmt.Errorf("allocate cluster node_epoch: %w", err)
 	}
-	opts.IncarnationID = messageloop.FormatNodeEpoch(epoch)
+	opts.IncarnationID = cluster.FormatNodeEpoch(epoch)
 	slog.Info("allocated cluster node epoch", "node_id", opts.NodeID, "incarnation_id", opts.IncarnationID, "node_epoch", epoch)
 
 	// The command-bus HMAC key comes only from node configuration; a
@@ -202,22 +205,22 @@ func setupCluster(cfg *config.Config, node *messageloop.Node, metrics *messagelo
 	}
 	deps.CommandBus = redisbroker.NewClusterCommandBus(cfg.Broker.Redis, opts.NodeID, opts.IncarnationID, hmacKey)
 	deps.QueryStore = redisbroker.NewClusterQueryStore(cfg.Broker.Redis, opts.NodeID, opts.IncarnationID)
-	deps.NodeLeaseManager = messageloop.NewClusterNodeLeaseManager(
+	deps.NodeLeaseManager = runtime.NewClusterNodeLeaseManager(
 		deps.SessionDirectory,
-		messageloop.ClusterNodeLeaseManagerConfig{
+		runtime.ClusterNodeLeaseManagerConfig{
 			NodeID:        opts.NodeID,
 			IncarnationID: opts.IncarnationID,
 		},
 	)
 	// One repairer drives projection republish, dead-projection reaping,
 	// user-index rebuild, and membership OnLeave (PR-KA-B4).
-	deps.Repairer = messageloop.NewClusterRepairer(node, deps.SessionDirectory, deps.QueryStore, messageloop.ClusterRepairerConfig{})
+	deps.Repairer = runtime.NewClusterRepairer(node, deps.SessionDirectory, deps.QueryStore, runtime.ClusterRepairerConfig{})
 	deps.CommandBus.SetHandler(node.ClusterCommandHandler())
-	if metricsAware, ok := deps.CommandBus.(interface{ SetMetrics(*messageloop.Metrics) }); ok {
+	if metricsAware, ok := deps.CommandBus.(interface{ SetMetrics(*mlmetrics.Metrics) }); ok {
 		metricsAware.SetMetrics(metrics)
 	}
 
-	cluster, err := messageloop.NewCluster(opts, deps)
+	cluster, err := runtime.NewCluster(opts, deps)
 	if err != nil {
 		return nil, fmt.Errorf("wire cluster: %w", err)
 	}
@@ -225,7 +228,7 @@ func setupCluster(cfg *config.Config, node *messageloop.Node, metrics *messagelo
 }
 
 // newBroker creates a Broker instance based on the broker type in config.
-func newBroker(cfg *config.Config) (messageloop.Broker, error) {
+func newBroker(cfg *config.Config) (stream.Broker, error) {
 	brokerType := cfg.Broker.Type
 	if brokerType == "" {
 		brokerType = "memory" // default
@@ -234,14 +237,14 @@ func newBroker(cfg *config.Config) (messageloop.Broker, error) {
 	case "redis":
 		return redisbroker.New(cfg.Broker.Redis), nil
 	case "memory":
-		return messageloop.NewMemoryBroker(messageloop.MemoryBrokerOptions{}), nil
+		return stream.NewMemoryBroker(stream.MemoryBrokerOptions{}), nil
 	default:
 		return nil, fmt.Errorf("unknown broker type: %s", brokerType)
 	}
 }
 
 // setupProxy configures and registers backend proxy routes on node from the given config.
-func setupProxy(cfg *config.Config, node *messageloop.Node) error {
+func setupProxy(cfg *config.Config, node *runtime.Node) error {
 	if len(cfg.Proxy) == 0 {
 		return nil
 	}
@@ -301,13 +304,13 @@ func buildWebSocketOptions(cfg *config.Config, logger *slog.Logger) ws.Options {
 }
 
 // newWebSocketServer builds the WebSocket server component from config.
-func newWebSocketServer(cfg *config.Config, node *messageloop.Node, logger *slog.Logger) *ws.Server {
+func newWebSocketServer(cfg *config.Config, node *runtime.Node, logger *slog.Logger) *ws.Server {
 	return ws.NewServer(buildWebSocketOptions(cfg, logger), node)
 }
 
 // newQUICServer builds the optional QUIC client listener. A nil server is
 // returned (without error) when transport.quic.addr is empty.
-func newQUICServer(cfg *config.Config, node *messageloop.Node) (*quic.Server, error) {
+func newQUICServer(cfg *config.Config, node *runtime.Node) (*quic.Server, error) {
 	if cfg.Transport.QUIC.Addr == "" {
 		return nil, nil
 	}
@@ -343,7 +346,7 @@ func newQUICServer(cfg *config.Config, node *messageloop.Node) (*quic.Server, er
 }
 
 // newAdminServer builds the HTTP admin server component (health + metrics).
-func newAdminServer(cfg *config.Config, node *messageloop.Node, reg *prometheus.Registry) *lynxhttp.Server {
+func newAdminServer(cfg *config.Config, node *runtime.Node, reg *prometheus.Registry) *lynxhttp.Server {
 	adminAddr := cfg.Server.Http.Addr
 	if adminAddr == "" {
 		adminAddr = "127.0.0.1:8080"

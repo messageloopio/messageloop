@@ -1,4 +1,4 @@
-package messageloop
+package messageloop_test
 
 import (
 	"os"

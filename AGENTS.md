@@ -147,8 +147,8 @@ func TestCSTrieMatcher(t *testing.T) {
 
 - `internal/session/client.go`: Client session handling, message routing
 - `internal/session/hub.go`: Connection registry with sharding
-- `broker.go`: Pub/sub interface with memory/Redis implementations
-- `node.go`: Central coordinator
+- `internal/stream/broker.go`: Pub/sub interface with memory/Redis implementations
+- `internal/runtime/node.go`: Central coordinator (Node, Cluster facade, recover)
 - `cmd/server/main.go`: Bootstrap wiring and listener setup
 - `cmd/server/runtime.go`: gRPC preflight and startup ordering helpers
 - `pkg/transport/grpc/client_server.go`: Client gRPC streaming server component

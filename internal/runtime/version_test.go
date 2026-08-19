@@ -1,9 +1,10 @@
-package messageloop
+package runtime
 
 import (
 	"context"
 	"testing"
 
+	"github.com/messageloopio/messageloop/internal/protocol"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -102,9 +103,9 @@ func TestVersionGate_AcceptsGeneration2(t *testing.T) {
 func TestProtocolGenerationOK(t *testing.T) {
 	assert := assert.New(t)
 	for _, ok := range []string{"2", "2.0.0", "2.1.3", "2.0.0-rc.1"} {
-		assert.True(protocolGenerationOK(ok), "%q must be accepted", ok)
+		assert.True(protocol.GenerationOK(ok), "%q must be accepted", ok)
 	}
 	for _, rejected := range []string{"", "1", "1.0.0", "3.0.0", "0.9", "abc", "2x", ".2", " 2"} {
-		assert.False(protocolGenerationOK(rejected), "%q must be rejected", rejected)
+		assert.False(protocol.GenerationOK(rejected), "%q must be rejected", rejected)
 	}
 }

@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/lynx-go/x/log"
-	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/internal/runtime"
+	"github.com/messageloopio/messageloop/internal/session"
+	"github.com/messageloopio/messageloop/internal/protocol"
 	"github.com/messageloopio/messageloop/shared"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
@@ -33,18 +35,18 @@ func (s *Server) handleConn(conn *quic.Conn) {
 	defer func() { _ = stream.Close() }()
 
 	alpn := conn.ConnectionState().TLS.NegotiatedProtocol
-	var marshaler messageloop.Marshaler
+	var marshaler shared.Marshaler
 	if alpn == shared.ALPNMessageLoopProto {
-		marshaler = messageloop.ProtobufMarshaler{}
+		marshaler = shared.ProtobufMarshaler{}
 	} else {
-		marshaler = messageloop.ProtoJSONMarshaler
+		marshaler = shared.ProtoJSONMarshaler
 	}
 
 	transport := newTransport(conn, stream, marshaler, s.opts.WriteTimeout)
-	client, closeFn, err := messageloop.NewClient(ctx, s.node, transport, marshaler, messageloop.WithProtocol("quic"))
+	client, closeFn, err := runtime.NewClient(ctx, s.node, transport, marshaler, session.WithProtocol("quic"))
 	if err != nil {
 		log.ErrorContext(ctx, "create quic client error", err)
-		_ = conn.CloseWithError(quic.ApplicationErrorCode(messageloop.DisconnectInternal.Code), err.Error())
+		_ = conn.CloseWithError(quic.ApplicationErrorCode(protocol.DisconnectInternal.Code), err.Error())
 		return
 	}
 	defer func() { _ = closeFn() }()
@@ -74,7 +76,7 @@ func (s *Server) handleConn(conn *quic.Conn) {
 			}
 			if errors.Is(err, shared.ErrFrameTooLarge) {
 				log.ErrorContext(ctx, "quic frame too large", err)
-				_ = client.Send(ctx, messageloop.MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
+				_ = client.Send(ctx, session.MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
 					out.Envelope = &clientpb.OutboundMessage_Error{
 						Error: &sharedpb.Error{
 							Code:    "BAD_REQUEST",
@@ -92,7 +94,7 @@ func (s *Server) handleConn(conn *quic.Conn) {
 		msg := &clientpb.InboundMessage{}
 		if err := marshaler.Unmarshal(data, msg); err != nil {
 			log.ErrorContext(ctx, "decode quic client message error", err)
-			_ = client.Send(ctx, messageloop.MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
+			_ = client.Send(ctx, session.MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
 				out.Envelope = &clientpb.OutboundMessage_Error{
 					Error: &sharedpb.Error{
 						Code:    "BAD_REQUEST",

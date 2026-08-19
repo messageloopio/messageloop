@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/pkg/transport/grpc"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
@@ -17,7 +17,7 @@ import (
 // flow: client A subscribes to a channel, client B publishes, client A receives.
 func TestGRPC_ClientStream_PubSub(t *testing.T) {
 	ctx := t.Context()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	require.NoError(t, node.Run(ctx))
 	t.Cleanup(node.Shutdown)
 
@@ -77,7 +77,7 @@ func TestGRPC_ClientStream_PubSub(t *testing.T) {
 // message delivery through the gRPC streaming transport.
 func TestGRPC_ClientStream_SubscribeUnsubscribe(t *testing.T) {
 	ctx := t.Context()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	require.NoError(t, node.Run(ctx))
 	t.Cleanup(node.Shutdown)
 
@@ -125,7 +125,7 @@ func TestGRPC_ClientStream_SubscribeUnsubscribe(t *testing.T) {
 // multiple gRPC streaming subscribers on the same channel.
 func TestGRPC_ClientStream_MultipleSubscribers(t *testing.T) {
 	ctx := t.Context()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	require.NoError(t, node.Run(ctx))
 	t.Cleanup(node.Shutdown)
 
@@ -190,7 +190,7 @@ func TestGRPC_ClientStream_MultipleSubscribers(t *testing.T) {
 // removes the client's subscriptions from the hub.
 func TestGRPC_ClientStream_DisconnectCleansUp(t *testing.T) {
 	ctx := t.Context()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	require.NoError(t, node.Run(ctx))
 	t.Cleanup(node.Shutdown)
 

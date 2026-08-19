@@ -1,4 +1,4 @@
-package messageloop
+package runtime
 
 import (
 	"context"
@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/messageloopio/messageloop/internal/cluster"
 )
 
 // ClusterDependencies groups the control-plane adapters used by a cluster-enabled node.
@@ -62,7 +64,7 @@ func NewCluster(options ClusterOptions, deps ClusterDependencies) (*Cluster, err
 	// repairer derivation below, which copies the incarnation into its
 	// config.
 	if normalized.Enabled && normalized.IncarnationID == "" {
-		incarnationID, err := allocateNodeIncarnation(normalized, deps.SessionDirectory)
+		incarnationID, err := cluster.AllocateNodeIncarnation(normalized, deps.SessionDirectory)
 		if err != nil {
 			return nil, err
 		}

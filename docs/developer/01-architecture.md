@@ -42,20 +42,20 @@ MessageLoop 的核心设计目标可以归纳为四点：
 
 | 组件 | 文件 | 职责 |
 | --- | --- | --- |
-| `Node` | node.go | 中央协调者，持有并装配所有子系统，对外暴露发布、订阅、Survey、代理等入口 |
+| `Node` | internal/runtime/node.go | 中央协调者，持有并装配所有子系统，对外暴露发布、订阅、Survey、代理等入口 |
 | `Hub` | internal/session/hub.go | 连接与会话注册表（64 分片），通道订阅注册表（64 分片），通配符订阅匹配，每用户连接数限制 |
 | `Session` | internal/session/session.go、client.go | 单条连接的生命周期与消息处理：状态机（Authenticating/Attached/Detached/Closed）、鉴权、resume、写队列、限制执行、入站消息路由 |
-| `Broker` | broker.go、broker_memory.go、pkg/redisbroker/ | 发布/订阅与历史存储；内存实现与 Redis 实现 |
-| `Presence` | presence.go、presence_event.go、pkg/redisbroker/presence_redis.go | 频道内在线成员追踪与 join/leave 事件分发 |
-| `Survey` | internal/survey/survey.go、node.go | 向频道订阅者广播请求并带超时收集响应 |
-| `Authorizer` | authorizer.go | 单一授权求值器：一个 Decide、一张 server.authorizer 表、一种通配语言；频道策略 Effects 与 Admin Capability 闭集 |
+| `Broker` | internal/stream/broker.go、broker_memory.go、pkg/redisbroker/ | 发布/订阅与历史存储；内存实现与 Redis 实现 |
+| `Presence` | internal/occupancy/presence.go、presence_event.go、pkg/redisbroker/presence_redis.go | 频道内在线成员追踪与 join/leave 事件分发 |
+| `Survey` | internal/survey/survey.go、internal/runtime/node.go | 向频道订阅者广播请求并带超时收集响应 |
+| `Authorizer` | internal/authz/authorizer.go | 单一授权求值器：一个 Decide、一张 server.authorizer 表、一种通配语言；频道策略 Effects 与 Admin Capability 闭集 |
 | `Proxy` | proxy/ | RPC 转发与鉴权/ACL/生命周期钩子的后端集成 |
-| `Cluster` | cluster.go、cluster_*.go | 可选的 Redis 支撑分布式控制面（详见[《分布式集群指南》](04-cluster.md)） |
+| `Cluster` | internal/runtime/cluster.go、cluster_*.go（契约在 internal/cluster） | 可选的 Redis 支撑分布式控制面（详见[《分布式集群指南》](04-cluster.md)） |
 | `Metrics` | internal/metrics/metrics.go | Prometheus 指标收集（详见[《可观测性指南》](05-observability.md)） |
 
 ## 3. 核心组件
 
-### 3.1 Node（node.go）
+### 3.1 Node（internal/runtime/node.go）
 
 `Node` 是运行时装配根：它持有 `hub`、`broker`、`presence`、`cluster`、`proxy`、`authorizer`、`metrics`、`surveys` 等全部子系统，并通过一组 setter 方法注入实现。
 
@@ -63,7 +63,7 @@ MessageLoop 的核心设计目标可以归纳为四点：
 
 | 方法 | 说明 |
 | --- | --- |
-| `NewNode(cfg *config.Server)` | 构造默认装配：`newHub(0, MaxConnectionsPerUser)`（`aliases.go` 转发 `session.NewHub`）、`NewMemoryBroker`、`NewMemoryPresenceStore`，从配置构建 Authorizer（`server.authorizer` 一张表，永不 nil）与心跳管理器 |
+| `NewNode(cfg *config.Server)` | 构造默认装配：`session.NewHub(0, MaxConnectionsPerUser)`、`NewMemoryBroker`、`NewMemoryPresenceStore`，从配置构建 Authorizer（`server.authorizer` 一张表，永不 nil）与心跳管理器 |
 | `Run(ctx)` | 先启动集群（若启用），再以 `go n.broker.Start(ctx, handler)` 启动 broker，handler 即 `n.hub.BroadcastPublication`；若 broker 实现 `Ready()` 则等待其就绪 |
 | `Shutdown()` | 以 `DisconnectForceNoReconnect` 排空全部连接，受 `DefaultShutdownTimeout`（10s）约束，然后关闭集群 |
 | `AddClient(c)` | 注册连接（超限返回 `DisconnectConnectionLimit`），集群模式下同步会话状态 |
@@ -74,7 +74,7 @@ MessageLoop 的核心设计目标可以归纳为四点：
 | `SetupProxy` / `FindProxy` / `ProxyRPC` | 代理装配与 RPC 转发入口 |
 | `MaxMessageSize()` | 入站消息上限，配置为 0 时取 `DefaultMaxMessageSize`（64 KB） |
 
-**订阅 Saga**：`AddSubscription` 与 `RemoveSubscription` 在每通道锁（`subLock`，16384 分片，见 §8）内串行执行，由 `runSubSaga`（subscription_saga.go）分步提交：hub 订阅登记 → 客户端频道跟踪 → broker 订阅计数（仅首个订阅者真正 `Subscribe`）→ 集群会话/频道状态同步。任一步失败时按逆序回滚已执行的步骤。
+**订阅 Saga**：`AddSubscription` 与 `RemoveSubscription` 在每通道锁（`subLock`，16384 分片，见 §8）内串行执行，由 `runSubSaga`（internal/runtime/subscription_saga.go）分步提交：hub 订阅登记 → 客户端频道跟踪 → broker 订阅计数（仅首个订阅者真正 `Subscribe`）→ 集群会话/频道状态同步。任一步失败时按逆序回滚已执行的步骤。
 
 **启动顺序**（cmd/server/main.go + cmd/server/runtime.go）：
 
@@ -208,7 +208,7 @@ join/leave 事件以 **Occupancy** 概念分发（B2）：每次 Join/Leave 取�
 
 只有频道策略 `legacy_presence_channel=true` 时，才额外把旧 JSON 格式（`__type: "presence"`、`action`、`channel`、`client_id`、`user_id`、`timestamp`）瞬时发布到 `presenceChannel(ch) = ch + "/__presence"` 伴生频道（`PublishPresenceJoin`/`PublishPresenceLeave`，仅精确频道，通配从不写伴生）。Redis 端 presence store `Get` 清理 TTL 蒸发的幽灵成员时，对该 session 合成一条 leave 并取新 gen 再 `PublishOccupancy`（B2 §5.3；memory store 无 TTL 无合成）。
 
-### 3.6 Survey（internal/survey/survey.go、node.go）
+### 3.6 Survey（internal/survey/survey.go、internal/runtime/node.go）
 
 `Node.Survey` 流程：
 
@@ -293,7 +293,7 @@ type Transport interface {
 
 `RawCodec` 允许把**已序列化的 protobuf 字节**（`rawFrame`）直接发送，避免二次序列化；也兼容普通 `proto.Message`。其 `Name()` 返回 `"messageloop-proto"` 而不是默认的 `"proto"`，避免在进程级 codec 注册表中覆盖标准 proto codec，并采用每服务器 `ForceServerCodec` 注入。名称同时是内容子类型标签，须与 Go SDK 客户端（sdks/go/grpc.go）使用的 codec 名称一致。
 
-### 4.5 Marshaler 与编码协商（shared/marshaler.go、marshaler.go）
+### 4.5 Marshaler 与编码协商（shared/marshaler.go）
 
 `Marshaler` 接口提供 `Marshal`/`MarshalAppend`/`Unmarshal`/`Name`：
 
@@ -301,7 +301,7 @@ type Transport interface {
 | --- | --- | --- |
 | `JSONMarshaler` | `json` | proto 消息走 protojson（`UseProtoNames`），其他走 `encoding/json` |
 | `ProtobufMarshaler` | `proto` | 二进制 protobuf |
-| `ProtoJSONMarshaler` | `json` | protojson 专用实现，根包默认回退项 |
+| `ProtoJSONMarshaler` | `json` | protojson 专用实现，传输默认回退项 |
 
 WebSocket 端通过子协议协商：服务端宣告 `messageloop`、`messageloop+json`、`messageloop+proto` 三种子协议，按客户端请求中第一个包含 marshaler 名称（`json`/`proto`）的子协议选定；`messageloop+proto` 使用二进制帧，其余使用文本帧。gRPC 端固定 protobuf。
 
@@ -499,9 +499,10 @@ Occupancy 事件**不是** Publication（改走 broker 的实时 `occupancy` 消
 
 | 路径 | 内容 |
 | --- | --- |
-| 仓库根（*.go） | 核心包：`node.go`、`session_runtime.go`、`aliases.go`、`marshaler.go`、`defaults.go`、`health.go`、`subscription_saga.go`、`recover.go`，以及集群相关 `cluster.go`、`cluster_commands.go`、`cluster_state.go`、`cluster_resume.go`、`cluster_repair.go` |
+| 仓库根（doc.go） | 模块根空壳（PR-KA-D15 / KD-K26）：无导出符号 |
+| internal/runtime/ | 编排层：`node.go`、`session_runtime.go`、`health.go`、`subscription_saga.go`、`recover.go`、Cluster 门面 `cluster.go` / `cluster_commands.go` / `cluster_state.go` / `cluster_resume.go` / `cluster_repair.go`、Sim 钩子 `cluster_sim.go` |
 | internal/session/ | Session Plane：`session.go`、`client.go`、`hub.go`、`heartbeat.go`、`pool.go`、`transport.go`、`runtime.go`（`Runtime` 缝） |
-| internal/survey/ | Survey 叶子类型（编排仍在根 `node.go`，D15 再收） |
+| internal/survey/ | Survey 叶子类型（编排留在 `internal/runtime` Node 上） |
 | cmd/server/ | 可执行入口：`main.go`（装配与监听器）、`runtime.go`（gRPC 预绑定与启动顺序） |
 | config/ | 配置结构（`config.go`）与校验 |
 | shared/ | 独立 Go 模块：marshaler 实现（`shared/marshaler.go`）与生成的 protobuf 代码（`shared/genproto/`） |

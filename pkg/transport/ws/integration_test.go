@@ -9,14 +9,15 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/internal/runtime"
+	"github.com/messageloopio/messageloop/shared"
 	"github.com/messageloopio/messageloop/config"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	ws "github.com/messageloopio/messageloop/pkg/transport/ws"
 	"github.com/stretchr/testify/require"
 )
 
-func startTestWSServer(t *testing.T, node *messageloop.Node) *httptest.Server {
+func startTestWSServer(t *testing.T, node *runtime.Node) *httptest.Server {
 	t.Helper()
 	opts := ws.Options{WsPath: "/ws", CheckOrigin: func(r *http.Request) bool { return true }}
 	handler := ws.NewHandler(node, opts)
@@ -56,7 +57,7 @@ func readJSON(t *testing.T, conn *websocket.Conn, timeout time.Duration) map[str
 
 func TestWebSocket_ConnectAndPublish(t *testing.T) {
 	ctx := t.Context()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	require.NoError(t, node.Run(ctx))
 
 	server := startTestWSServer(t, node)
@@ -101,7 +102,7 @@ func TestWebSocket_ConnectAndPublish(t *testing.T) {
 
 func TestWebSocket_RateLimiting(t *testing.T) {
 	ctx := t.Context()
-	node := messageloop.NewNode(&config.Server{
+	node := runtime.NewNode(&config.Server{
 		Limits: config.Limits{MaxPublishesPerSecond: 2},
 	})
 	require.NoError(t, node.Run(ctx))
@@ -144,7 +145,7 @@ func TestWebSocket_RateLimiting(t *testing.T) {
 // connection could never decode a frame.
 func TestWebSocket_SubprotocolNegotiation(t *testing.T) {
 	ctx := t.Context()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	require.NoError(t, node.Run(ctx))
 
 	server := startTestWSServer(t, node)
@@ -204,7 +205,7 @@ func jsonRoundTrip(t *testing.T, conn *websocket.Conn) {
 // binary frames.
 func protoRoundTrip(t *testing.T, conn *websocket.Conn) {
 	t.Helper()
-	protoMarshaler := messageloop.ProtobufMarshaler{}
+	protoMarshaler := shared.ProtobufMarshaler{}
 	msg := &clientpb.InboundMessage{
 		Id: "conn",
 		Envelope: &clientpb.InboundMessage_Connect{

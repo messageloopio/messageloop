@@ -6,7 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/internal/session"
+	"github.com/messageloopio/messageloop/internal/protocol"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	googlegrpc "google.golang.org/grpc"
@@ -118,7 +119,7 @@ func (t *Transport) effectiveTimeout() time.Duration {
 	return defaultWriteTimeout
 }
 
-func (t *Transport) Close(disconnect messageloop.Disconnect) error {
+func (t *Transport) Close(disconnect protocol.Disconnect) error {
 	var err error
 	t.closeOnce.Do(func() {
 		t.mu.Lock()
@@ -150,7 +151,7 @@ func (t *Transport) writeError(code int32, reason string) error {
 	metadata := &structpb.Struct{Fields: map[string]*structpb.Value{
 		"disconnect_code": structpb.NewNumberValue(float64(code)),
 	}}
-	msg := messageloop.MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
+	msg := session.MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_Error{
 			Error: &sharedpb.Error{
 				Code:     "DISCONNECT_ERROR",
@@ -167,7 +168,7 @@ func (t *Transport) writeError(code int32, reason string) error {
 	return t.sendWithBudget(sendRequest{msg: rawFrame(frame), disconnect: true}, disconnectFrameTimeout)
 }
 
-var _ messageloop.Transport = new(Transport)
+var _ session.Transport = new(Transport)
 
 func newGRPCTransport(
 	stream googlegrpc.BidiStreamingServer[clientpb.InboundMessage, clientpb.OutboundMessage],

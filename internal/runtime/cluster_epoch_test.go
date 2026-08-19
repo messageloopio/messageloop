@@ -1,4 +1,4 @@
-package messageloop
+package runtime
 
 import (
 	"os"
@@ -55,7 +55,7 @@ func TestNewCluster_EmptyIncarnationIDRedisWithoutAllocator(t *testing.T) {
 func TestNoUUIDIncarnationInProductionSource(t *testing.T) {
 	t.Parallel()
 
-	for _, path := range []string{"cluster.go", "internal/cluster/epoch.go", "cmd/server/main.go"} {
+	for _, path := range []string{"cluster.go", "../cluster/epoch.go", "../../cmd/server/main.go"} {
 		source, err := os.ReadFile(path)
 		require.NoError(t, err)
 		assert.NotContains(t, string(source), "uuid.NewString",

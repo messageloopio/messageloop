@@ -10,7 +10,7 @@ import (
 
 	"github.com/lynx-go/lynx"
 	"github.com/lynx-go/x/log"
-	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/quic-go/quic-go"
 )
 
@@ -41,7 +41,7 @@ const DefaultKeepAlivePeriod = 15 * time.Second
 
 // Server is a lynx.Service that accepts QUIC client connections.
 type Server struct {
-	node *messageloop.Node
+	node *runtime.Node
 	opts Options
 	ln   *quic.Listener
 
@@ -51,7 +51,7 @@ type Server struct {
 
 // NewServer pre-binds a UDP/QUIC listener so startup fails before the
 // accept loop if the address or TLS material is invalid.
-func NewServer(opts Options, node *messageloop.Node) (*Server, error) {
+func NewServer(opts Options, node *runtime.Node) (*Server, error) {
 	if opts.Addr == "" {
 		return nil, fmt.Errorf("quic-server addr is required")
 	}

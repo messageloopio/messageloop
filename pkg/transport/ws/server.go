@@ -8,7 +8,7 @@ import (
 
 	"github.com/lynx-go/lynx"
 	"github.com/lynx-go/x/log"
-	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/internal/runtime"
 )
 
 type Server struct {
@@ -44,7 +44,7 @@ func DefaultOptions() Options {
 
 func NewServer(
 	opts Options,
-	node *messageloop.Node,
+	node *runtime.Node,
 ) *Server {
 	mux := http.NewServeMux()
 	handler := NewHandler(node, opts)

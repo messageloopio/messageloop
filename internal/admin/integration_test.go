@@ -7,7 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/internal/runtime"
+	"github.com/messageloopio/messageloop/internal/session"
+	"github.com/messageloopio/messageloop/internal/protocol"
+	"github.com/messageloopio/messageloop/internal/stream"
+	"github.com/messageloopio/messageloop/shared"
 	"github.com/messageloopio/messageloop/internal/admin"
 	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
 	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
@@ -20,7 +24,7 @@ import (
 
 const bufSize = 1024 * 1024
 
-func startTestGRPCServer(t *testing.T, node *messageloop.Node) serverv2.APIServiceClient {
+func startTestGRPCServer(t *testing.T, node *runtime.Node) serverv2.APIServiceClient {
 	t.Helper()
 
 	lis := bufconn.Listen(bufSize)
@@ -46,14 +50,14 @@ type mockTransport struct{ closed bool }
 
 func (m *mockTransport) Write([]byte) error                 { return nil }
 func (m *mockTransport) WriteMany(...[]byte) error          { return nil }
-func (m *mockTransport) Close(messageloop.Disconnect) error { m.closed = true; return nil }
+func (m *mockTransport) Close(protocol.Disconnect) error { m.closed = true; return nil }
 func (m *mockTransport) RemoteAddr() string                 { return "127.0.0.1:0" }
 
-func addTestClient(t *testing.T, node *messageloop.Node, sessionID, userID string) *messageloop.Client {
+func addTestClient(t *testing.T, node *runtime.Node, sessionID, userID string) *session.Client {
 	t.Helper()
 	ctx := context.Background()
 	transport := &mockTransport{}
-	client, _, err := messageloop.NewClient(ctx, node, transport, messageloop.ProtobufMarshaler{})
+	client, _, err := runtime.NewClient(ctx, node, transport, shared.ProtobufMarshaler{})
 	require.NoError(t, err)
 	// Force deterministic IDs for testing
 	client.ForceTestIDs(sessionID, userID, "client-"+sessionID)
@@ -63,14 +67,14 @@ func addTestClient(t *testing.T, node *messageloop.Node, sessionID, userID strin
 
 func TestGRPC_AdminAPI_PublishAndDisconnect(t *testing.T) {
 	ctx := t.Context()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	require.NoError(t, node.Run(ctx))
 
 	api := startTestGRPCServer(t, node)
 
 	// Add a test client and subscribe
 	client := addTestClient(t, node, "sess-1", "user-1")
-	require.NoError(t, node.AddSubscription(ctx, "chat", messageloop.NewSubscriber(client, false)))
+	require.NoError(t, node.AddSubscription(ctx, "chat", session.NewSubscriber(client, false)))
 
 	// Publish via API
 	_, err := api.Publish(ctx, &serverv2.PublishRequest{
@@ -95,7 +99,7 @@ func TestGRPC_AdminAPI_PublishAndDisconnect(t *testing.T) {
 
 func TestGRPC_AdminAPI_SubscribeUnsubscribe(t *testing.T) {
 	ctx := t.Context()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	require.NoError(t, node.Run(ctx))
 
 	api := startTestGRPCServer(t, node)
@@ -141,14 +145,14 @@ func TestGRPC_AdminAPI_SubscribeUnsubscribe(t *testing.T) {
 
 func TestGRPC_AdminAPI_GetHistory(t *testing.T) {
 	ctx := t.Context()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	require.NoError(t, node.Run(ctx))
 
 	api := startTestGRPCServer(t, node)
 
 	// Publish some messages to build history
 	for i := 0; i < 3; i++ {
-		_, err := node.Publish("history-ch", &messageloop.Publication{Payload: []byte("msg"), Kind: messageloop.PayloadKindBinary})
+		_, err := node.Publish("history-ch", &stream.Publication{Payload: []byte("msg"), Kind: stream.PayloadKindBinary})
 		require.NoError(t, err)
 	}
 
@@ -169,7 +173,7 @@ func TestGRPC_AdminAPI_GetHistory(t *testing.T) {
 // through the admin API is stored as valid JSON (P0-3).
 func TestGRPC_AdminAPI_Publish_JSONPayload(t *testing.T) {
 	ctx := t.Context()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	require.NoError(t, node.Run(ctx))
 
 	api := startTestGRPCServer(t, node)
@@ -195,7 +199,7 @@ func TestGRPC_AdminAPI_Publish_JSONPayload(t *testing.T) {
 	require.NoError(t, err)
 	pubs := page.Pubs()
 	require.Len(t, pubs, 1)
-	require.Equal(t, messageloop.PayloadKindJSON, pubs[0].Kind)
+	require.Equal(t, stream.PayloadKindJSON, pubs[0].Kind)
 
 	var decoded map[string]interface{}
 	require.NoError(t, json.Unmarshal(pubs[0].Payload, &decoded))

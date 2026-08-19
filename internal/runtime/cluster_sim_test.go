@@ -1,4 +1,4 @@
-package messageloop_test
+package runtime_test
 
 // PR-KA-C1 constitution scenarios (spec §5): the fencing contract locked in
 // on the deterministic two-node simulator (internal/cluster/sim). These tests
@@ -12,7 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/internal/runtime"
+	"github.com/messageloopio/messageloop/internal/session"
+	"github.com/messageloopio/messageloop/internal/protocol"
+	"github.com/messageloopio/messageloop/internal/cluster"
+	"github.com/messageloopio/messageloop/shared"
 	"github.com/messageloopio/messageloop/internal/cluster/sim"
 	"github.com/stretchr/testify/require"
 )
@@ -22,15 +26,15 @@ type simNoopTransport struct{}
 
 func (simNoopTransport) Write([]byte) error                 { return nil }
 func (simNoopTransport) WriteMany(...[]byte) error          { return nil }
-func (simNoopTransport) Close(messageloop.Disconnect) error { return nil }
+func (simNoopTransport) Close(protocol.Disconnect) error { return nil }
 func (simNoopTransport) RemoteAddr() string                 { return "sim" }
 
 // attachedCount counts, across both nodes, how many hubs hold sessionID in
 // the Attached state. The fencing contract allows at most one at any time.
 func attachedCount(w *sim.World, sessionID string) int {
 	count := 0
-	for _, node := range []*messageloop.Node{w.A, w.B} {
-		if s := node.Hub().LookupSession(sessionID); s != nil && s.State() == messageloop.SessionAttached {
+	for _, node := range []*runtime.Node{w.A, w.B} {
+		if s := node.Hub().LookupSession(sessionID); s != nil && s.State() == session.SessionAttached {
 			count++
 		}
 	}
@@ -63,14 +67,14 @@ func TestSim_StealThenPing(t *testing.T) {
 	// synchronous bus delivers the takeover to A.
 	bClient, err := w.NewResumeClient(w.B)
 	require.NoError(t, err)
-	_, resumed, err := messageloop.SimResumeRemoteSession(w.B, ctx, bClient, "sess-1")
+	_, resumed, err := runtime.SimResumeRemoteSession(w.B, ctx, bClient, "sess-1")
 	require.NoError(t, err)
 	require.True(t, resumed)
 	requireLease(t, w, "sess-1", "node-b", "inc-b", 2)
 
 	// A's next ping refresh is fenced and writes nothing back.
-	err = messageloop.SimSyncClusterSessionState(w.A, ctx, aClient)
-	require.ErrorIs(t, err, messageloop.ErrSessionFenced)
+	err = runtime.SimSyncClusterSessionState(w.A, ctx, aClient)
+	require.ErrorIs(t, err, cluster.ErrSessionFenced)
 	requireLease(t, w, "sess-1", "node-b", "inc-b", 2)
 }
 
@@ -83,15 +87,15 @@ func TestSim_BindThenEvictFences(t *testing.T) {
 
 	aClient, err := w.AddClient(w.A, "sess-1", "user-1", "client-1")
 	require.NoError(t, err)
-	require.Equal(t, messageloop.SessionAttached, aClient.State())
+	require.Equal(t, session.SessionAttached, aClient.State())
 
 	bClient, err := w.NewResumeClient(w.B)
 	require.NoError(t, err)
-	_, resumed, err := messageloop.SimResumeRemoteSession(w.B, ctx, bClient, "sess-1")
+	_, resumed, err := runtime.SimResumeRemoteSession(w.B, ctx, bClient, "sess-1")
 	require.NoError(t, err)
 	require.True(t, resumed)
 
-	require.Equal(t, messageloop.SessionClosed, aClient.State(), "evicted session is Fenced, not Detached")
+	require.Equal(t, session.SessionClosed, aClient.State(), "evicted session is Fenced, not Detached")
 	require.Nil(t, w.A.Hub().LookupSession("sess-1"), "fenced session leaves A's hub")
 	requireLease(t, w, "sess-1", "node-b", "inc-b", 2)
 	require.Empty(t, w.Dir.DeletedSessionLeases(), "a fenced node must not unbind the new owner's lease")
@@ -110,21 +114,21 @@ func TestSim_LostEvictNoDual(t *testing.T) {
 	w.Bus.DropNext() // the takeover Evict to A vanishes
 	bClient, err := w.NewResumeClient(w.B)
 	require.NoError(t, err)
-	_, resumed, err := messageloop.SimResumeRemoteSession(w.B, ctx, bClient, "sess-1")
+	_, resumed, err := runtime.SimResumeRemoteSession(w.B, ctx, bClient, "sess-1")
 	require.NoError(t, err)
 	require.True(t, resumed, "the CAS claim survives the lost Evict (the old node has no live node lease)")
 
 	// The Directory is authoritative: B owns the fencing even though A's
 	// local attachment is still up (the Evict never arrived).
 	requireLease(t, w, "sess-1", "node-b", "inc-b", 2)
-	require.Equal(t, messageloop.SessionAttached, aClient.State())
+	require.Equal(t, session.SessionAttached, aClient.State())
 	require.LessOrEqual(t, attachedCount(w, "sess-1"), 1)
 
 	// A learns of the fencing loss on its next sync and fences itself.
-	err = messageloop.SimSyncClusterSessionState(w.A, ctx, aClient)
-	require.ErrorIs(t, err, messageloop.ErrSessionFenced)
-	require.NoError(t, aClient.Fence(messageloop.DisconnectStale))
-	require.Equal(t, messageloop.SessionClosed, aClient.State())
+	err = runtime.SimSyncClusterSessionState(w.A, ctx, aClient)
+	require.ErrorIs(t, err, cluster.ErrSessionFenced)
+	require.NoError(t, aClient.Fence(protocol.DisconnectStale))
+	require.Equal(t, session.SessionClosed, aClient.State())
 	require.Nil(t, w.A.Hub().LookupSession("sess-1"))
 
 	// Only now does B attach the resumed session: the single Attached copy.
@@ -143,18 +147,18 @@ func TestSim_LocalDetachAttach(t *testing.T) {
 
 	client, err := w.AddClient(w.A, "sess-4", "user-4", "client-4")
 	require.NoError(t, err)
-	require.Equal(t, messageloop.SessionAttached, client.State())
+	require.Equal(t, session.SessionAttached, client.State())
 
-	client.Detach(messageloop.Disconnect{Code: 3000, Reason: "transport swap"})
-	require.Equal(t, messageloop.SessionDetached, client.State(), "local handover is Detach, never Fence")
+	client.Detach(protocol.Disconnect{Code: 3000, Reason: "transport swap"})
+	require.Equal(t, session.SessionDetached, client.State(), "local handover is Detach, never Fence")
 	requireLease(t, w, "sess-4", "node-a", "inc-a", 1)
 
-	require.NoError(t, client.Attach(&messageloop.Attachment{
+	require.NoError(t, client.Attach(&session.Attachment{
 		Transport: simNoopTransport{},
-		Marshaler: messageloop.JSONMarshaler{},
+		Marshaler: shared.JSONMarshaler{},
 		Protocol:  "ws",
 	}))
-	require.Equal(t, messageloop.SessionAttached, client.State())
+	require.Equal(t, session.SessionAttached, client.State())
 
 	// The hub entry is the very same Session object, and the Directory
 	// fencing never changed hands or version.
@@ -176,7 +180,7 @@ func TestSim_DeadNodeOnLeave(t *testing.T) {
 
 	// Both incarnations are alive in the Directory.
 	putNodeLease := func(nodeID, incarnationID string) {
-		require.NoError(t, w.Dir.PutNodeLease(ctx, &messageloop.ClusterNodeLease{
+		require.NoError(t, w.Dir.PutNodeLease(ctx, &cluster.ClusterNodeLease{
 			NodeID:        nodeID,
 			IncarnationID: incarnationID,
 			StartedAt:     time.Now(),
@@ -187,12 +191,12 @@ func TestSim_DeadNodeOnLeave(t *testing.T) {
 	putNodeLease("node-b", "inc-b")
 
 	// First beat only primes the alive set.
-	require.NoError(t, messageloop.SimMembershipOnce(w.RepairerB, ctx))
+	require.NoError(t, runtime.SimMembershipOnce(w.RepairerB, ctx))
 	requireLease(t, w, "sess-1", "node-a", "inc-a", 1)
 
 	// A dies; the next beat fires OnLeave and deletes A's session fencing.
 	w.Dir.DeleteNodeLease("node-a", "inc-a")
-	require.NoError(t, messageloop.SimMembershipOnce(w.RepairerB, ctx))
+	require.NoError(t, runtime.SimMembershipOnce(w.RepairerB, ctx))
 
 	lease, err := w.Dir.GetSessionLease(ctx, "sess-1")
 	require.NoError(t, err)
@@ -202,7 +206,7 @@ func TestSim_DeadNodeOnLeave(t *testing.T) {
 	require.Empty(t, sessions, "DeleteSessionLease syncs the user index")
 
 	// B may claim the session immediately — no 600s TTL wait.
-	ok, err := w.Dir.CompareAndSwapSessionLease(ctx, nil, &messageloop.ClusterSessionLease{
+	ok, err := w.Dir.CompareAndSwapSessionLease(ctx, nil, &cluster.ClusterSessionLease{
 		SessionID:     "sess-1",
 		NodeID:        "node-b",
 		IncarnationID: "inc-b",
@@ -221,8 +225,8 @@ func TestSim_CasNilOnlyOneWins(t *testing.T) {
 	w := sim.NewWorld()
 	ctx := context.Background()
 
-	claim := func(nodeID, incarnationID string) *messageloop.ClusterSessionLease {
-		return &messageloop.ClusterSessionLease{
+	claim := func(nodeID, incarnationID string) *cluster.ClusterSessionLease {
+		return &cluster.ClusterSessionLease{
 			SessionID:     "sess-1",
 			NodeID:        nodeID,
 			IncarnationID: incarnationID,

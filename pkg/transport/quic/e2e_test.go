@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/pkg/transport/quic"
 	"github.com/messageloopio/messageloop/shared"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
@@ -17,7 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func startTestQUICServer(t *testing.T, node *messageloop.Node) *quic.Server {
+func startTestQUICServer(t *testing.T, node *runtime.Node) *quic.Server {
 	t.Helper()
 	server, err := quic.NewServer(quic.Options{
 		Addr:         "127.0.0.1:0",
@@ -132,7 +132,7 @@ func connectSession(t *testing.T, stream *quicgo.Stream, clientID string) *clien
 
 func TestQUIC_ConnectSubscribePublish(t *testing.T) {
 	ctx := t.Context()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	require.NoError(t, node.Run(ctx))
 	t.Cleanup(node.Shutdown)
 
@@ -181,7 +181,7 @@ func TestQUIC_ConnectSubscribePublish(t *testing.T) {
 
 func TestQUIC_ProtobufALPN(t *testing.T) {
 	ctx := t.Context()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	require.NoError(t, node.Run(ctx))
 	t.Cleanup(node.Shutdown)
 
@@ -207,7 +207,7 @@ func TestQUIC_ProtobufALPN(t *testing.T) {
 
 func TestQUIC_DisconnectCleansUpSubscriptions(t *testing.T) {
 	ctx := t.Context()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	require.NoError(t, node.Run(ctx))
 	t.Cleanup(node.Shutdown)
 

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -16,7 +16,7 @@ import (
 // channel is delivered to all subscribers on that channel.
 func TestWebSocket_MultiClientBroadcast(t *testing.T) {
 	ctx := t.Context()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	require.NoError(t, node.Run(ctx))
 
 	server := startTestWSServer(t, node)
@@ -95,7 +95,7 @@ func readPublication(t *testing.T, conn *websocket.Conn, timeout time.Duration) 
 // drops to zero.
 func TestWebSocket_DisconnectCleansUpSubscriptions(t *testing.T) {
 	ctx := t.Context()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	require.NoError(t, node.Run(ctx))
 
 	server := startTestWSServer(t, node)
@@ -131,7 +131,7 @@ func TestWebSocket_DisconnectCleansUpSubscriptions(t *testing.T) {
 // subscribe. A denied subscribe should return an error but not disconnect.
 func TestWebSocket_ACL_SubscribeDenied(t *testing.T) {
 	ctx := t.Context()
-	node := messageloop.NewNode(&config.Server{
+	node := runtime.NewNode(&config.Server{
 		Authorizer: config.AuthorizerConfig{
 			Rules: []config.AuthorizerRule{
 				{Pattern: "private.*", AllowSubscribe: []string{"admin"}},
@@ -188,7 +188,7 @@ func TestWebSocket_ACL_SubscribeDenied(t *testing.T) {
 // by ACL returns an error without disconnecting.
 func TestWebSocket_ACL_PublishDenied(t *testing.T) {
 	ctx := t.Context()
-	node := messageloop.NewNode(&config.Server{
+	node := runtime.NewNode(&config.Server{
 		Authorizer: config.AuthorizerConfig{
 			Rules: []config.AuthorizerRule{
 				{Pattern: "readonly.*", AllowPublish: []string{"admin"}},
@@ -230,7 +230,7 @@ func TestWebSocket_ACL_PublishDenied(t *testing.T) {
 // a client no longer receives messages on that channel.
 func TestWebSocket_UnsubscribeStopsDelivery(t *testing.T) {
 	ctx := t.Context()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	require.NoError(t, node.Run(ctx))
 
 	server := startTestWSServer(t, node)

@@ -12,7 +12,7 @@
 
 ## High-Level Architecture
 
-- **Node**: Central coordinator managing Hub, Broker, and Proxy components.
+- **Node**: Central coordinator (`internal/runtime`) managing Hub, Broker, and Proxy components. Root package exports nothing after PR-KA-D15.
 - **Hub**: Connection and subscription registry sharded into 64 shards to reduce lock contention.
 - **Broker**: Abstract interface for Pub/Sub. Implementations:
   - `MemoryBroker`: In-process pub/sub for single-node deployments.

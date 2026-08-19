@@ -3,7 +3,7 @@ package main
 import (
 	"time"
 
-	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/internal/admin"
 	"github.com/messageloopio/messageloop/pkg/transport/grpc"
@@ -37,7 +37,7 @@ func (s *preparedGRPCServers) Close() {
 	}
 }
 
-func newGRPCClientServer(cfg *config.Config, node *messageloop.Node) (*grpc.Server, error) {
+func newGRPCClientServer(cfg *config.Config, node *runtime.Node) (*grpc.Server, error) {
 	opts := grpc.Options{
 		Addr:           cfg.Transport.GRPC.Addr,
 		TLSCertFile:    cfg.Transport.GRPC.TLS.CertFile,
@@ -52,7 +52,7 @@ func newGRPCClientServer(cfg *config.Config, node *messageloop.Node) (*grpc.Serv
 	return grpc.PrepareClientServer(opts, node)
 }
 
-func newGRPCAdminServer(cfg *config.Config, node *messageloop.Node) (*grpc.Server, error) {
+func newGRPCAdminServer(cfg *config.Config, node *runtime.Node) (*grpc.Server, error) {
 	return admin.PrepareAdminServer(grpc.Options{
 		Addr:               cfg.Server.GRPCAdmin.Addr,
 		TLSCertFile:        cfg.Server.GRPCAdmin.TLS.CertFile,
@@ -64,7 +64,7 @@ func newGRPCAdminServer(cfg *config.Config, node *messageloop.Node) (*grpc.Serve
 
 // prepareGRPCServers pre-binds both gRPC listeners. If the admin server fails
 // to prepare, the client server is closed so its listener is released.
-func prepareGRPCServers(cfg *config.Config, node *messageloop.Node) (*preparedGRPCServers, error) {
+func prepareGRPCServers(cfg *config.Config, node *runtime.Node) (*preparedGRPCServers, error) {
 	clientServer, err := newGRPCClientServer(cfg, node)
 	if err != nil {
 		return nil, err

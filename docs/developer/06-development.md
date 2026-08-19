@@ -17,16 +17,20 @@
 
 | 条目 | 职责 |
 | --- | --- |
-| `node.go`、`client.go`、`hub.go`、`broker.go`、`broker_memory.go`、`transport.go`、`presence.go`、`survey.go`、`acl.go`、`metrics.go`、`heartbeat.go`、`health.go`、`disconnect.go`、`marshaler.go`、`defaults.go` 等根级 `*.go` | 核心服务端类型：`Node` 协调器、`Client` 会话、`Hub` 连接注册表、`Broker`/`Transport`/`Presence`/`Survey`/`ACL` 接口与实现 |
-| `cluster.go`、`cluster_commands.go`、`cluster_state.go`、`cluster_resume.go`、`cluster_projection_repair.go` | 集群控制面（节点发现、命令总线、投影修复），Redis 支撑 |
-| `subscription_saga.go` | 订阅状态机（订阅/退订的可靠交付） |
+| 仓库根 `doc.go` | 模块根空壳（PR-KA-D15）：无导出符号 |
+| `internal/runtime/` | 编排层：`Node` 协调器、Cluster 门面、recover、health、subscription saga、Sim 钩子、`session_runtime.go` |
+| `internal/session/` | Session Plane：`Session`/`Hub`/`Transport`/`Heartbeat` 与 `Runtime` 缝 |
+| `internal/stream/` | Broker 契约与内存实现 |
+| `internal/occupancy/`、`internal/survey/`、`internal/protocol/`、`internal/authz/`、`internal/channel/`、`internal/metrics/` | 叶子契约 |
+| `internal/cluster/` | 集群控制面契约（`contracts.go`、`epoch.go`、`user_index.go`）与 `hmac/`、`sim/` |
+| `internal/admin/` | 管理 gRPC API |
 | `cmd/server/` | 服务端入口 `main.go` 与 gRPC 启动预检 `runtime.go`，基于 `lynx` 框架 |
 | `config/` | 配置结构体定义与校验（`config.go`、`config_test.go`） |
 | `protocol/` | Protobuf 源文件（单一 buf module），下分 `shared/v2/`、`client/v2/`、`server/v2/`、`proxy/v2/`（v1 已于 D6 删尽） |
 | `shared/` | 独立 Go 模块 `github.com/messageloopio/messageloop/shared`；`genproto/` 为生成代码，`marshaler.go` 为 JSON/Protobuf 序列化器 |
-| `pkg/websocket/` | WebSocket 传输实现（含集成测试） |
-| `pkg/grpcstream/` | gRPC 流式传输（客户端流 `client_server.go`、管理 API `admin_server.go`、公共准备逻辑 `server.go`） |
-| `pkg/quicstream/` | 可选 QUIC 客户端传输（一条双向流 + 长度前缀帧，TLS 1.3 / ALPN 协商编码） |
+| `pkg/transport/ws/` | WebSocket 传输实现（含集成测试） |
+| `pkg/transport/grpc/` | gRPC 流式传输（客户端流 `client_server.go`、公共准备逻辑 `server.go`） |
+| `pkg/transport/quic/` | 可选 QUIC 客户端传输（一条双向流 + 长度前缀帧，TLS 1.3 / ALPN 协商编码） |
 | `pkg/topics/` | 主题匹配器：`cstrie`（默认并发实现）、`trie`、`naive`、`inverted_bitmap` 等 |
 | `pkg/redisbroker/` | Redis broker 实现：Streams 历史、Pub/Sub 实时分发、Redis 支撑的 presence 与集群命令总线 |
 | `proxy/` | RPC 代理后端集成（HTTP/gRPC 后端、路由、超时） |
@@ -70,7 +74,7 @@ go test -v ./pkg/topics/... -run TestCSTrieMatcher
 
 以下测试在启动时通过 Redis `Ping` 探测可用性，失败则调用 `t.Skipf` 自动跳过，无需 build tag 或环境变量开关：
 
-- 根目录 `cluster_redis_integration_test.go`：多节点集群的会话管理、查询与在线状态聚合，使用 **DB 15**，测试前后执行 `FlushDB`。
+- `internal/runtime/cluster_redis_integration_test.go`：多节点集群的会话管理、查询与在线状态聚合，使用 **DB 15**，测试前后执行 `FlushDB`。
 - `pkg/redisbroker/cluster_command_bus_test.go`（命令总线）、`pkg/redisbroker/publish_transient_test.go`（瞬时发布不进历史）、`pkg/redisbroker/history_test.go`：使用 **DB 14**。
 
 连接参数通过环境变量配置：
@@ -85,7 +89,7 @@ $env:MESSAGELOOP_TEST_REDIS_ADDR = "127.0.0.1:6379"
 go test -race -v ./pkg/redisbroker/...
 ```
 
-没有 Redis 时这些测试直接跳过，其余测试不受影响。此外，`pkg/websocket/integration_test.go`、`pkg/grpcstream/integration_test.go` 与 `pkg/grpcstream/port_integration_test.go` 属于端到端用例：它们在测试内直接构造 `messageloop.NewNode(...)` 与进程内组件（不依赖外部运行中的服务器），随 `go test ./...` 一起执行。
+没有 Redis 时这些测试直接跳过，其余测试不受影响。此外，`pkg/transport/ws/integration_test.go` 与 `pkg/transport/grpc/port_integration_test.go` 属于端到端用例：它们在测试内直接构造 `runtime.NewNode(...)` 与进程内组件（不依赖外部运行中的服务器），随 `go test ./...` 一起执行。
 
 ## 静态检查
 

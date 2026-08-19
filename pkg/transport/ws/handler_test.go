@@ -7,7 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/lynx-go/x/encoding/json"
-	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/shared"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"github.com/stretchr/testify/assert"
@@ -29,54 +29,54 @@ func TestHandler_NegotiationMatrix(t *testing.T) {
 		name         string
 		subProtocol  string // conn.Subprotocol() after negotiation
 		wantBinary   bool
-		wantType     func(t *testing.T, m messageloop.Marshaler)
+		wantType     func(t *testing.T, m shared.Marshaler)
 	}{
 		{
 			name:        "plain messageloop",
 			subProtocol: "messageloop",
 			wantBinary:  false,
-			wantType: func(t *testing.T, m messageloop.Marshaler) {
-				assert.IsType(t, messageloop.ProtoJSONMarshaler, m)
+			wantType: func(t *testing.T, m shared.Marshaler) {
+				assert.IsType(t, shared.ProtoJSONMarshaler, m)
 			},
 		},
 		{
 			name:        "json suffix",
 			subProtocol: "messageloop+json",
 			wantBinary:  false,
-			wantType: func(t *testing.T, m messageloop.Marshaler) {
-				assert.IsType(t, messageloop.ProtoJSONMarshaler, m)
+			wantType: func(t *testing.T, m shared.Marshaler) {
+				assert.IsType(t, shared.ProtoJSONMarshaler, m)
 			},
 		},
 		{
 			name:        "proto suffix",
 			subProtocol: "messageloop+proto",
 			wantBinary:  true,
-			wantType: func(t *testing.T, m messageloop.Marshaler) {
-				assert.IsType(t, messageloop.ProtobufMarshaler{}, m)
+			wantType: func(t *testing.T, m shared.Marshaler) {
+				assert.IsType(t, shared.ProtobufMarshaler{}, m)
 			},
 		},
 		{
 			name:        "no subprotocol",
 			subProtocol: "",
 			wantBinary:  false,
-			wantType: func(t *testing.T, m messageloop.Marshaler) {
-				assert.IsType(t, messageloop.ProtoJSONMarshaler, m)
+			wantType: func(t *testing.T, m shared.Marshaler) {
+				assert.IsType(t, shared.ProtoJSONMarshaler, m)
 			},
 		},
 		{
 			name:        "unknown name containing proto must not match by substring",
 			subProtocol: "messageloop-proto",
 			wantBinary:  false,
-			wantType: func(t *testing.T, m messageloop.Marshaler) {
-				assert.IsType(t, messageloop.ProtoJSONMarshaler, m)
+			wantType: func(t *testing.T, m shared.Marshaler) {
+				assert.IsType(t, shared.ProtoJSONMarshaler, m)
 			},
 		},
 		{
 			name:        "unknown random name",
 			subProtocol: "xproto.unknown",
 			wantBinary:  false,
-			wantType: func(t *testing.T, m messageloop.Marshaler) {
-				assert.IsType(t, messageloop.ProtoJSONMarshaler, m)
+			wantType: func(t *testing.T, m shared.Marshaler) {
+				assert.IsType(t, shared.ProtoJSONMarshaler, m)
 			},
 		},
 	}
@@ -99,9 +99,9 @@ func TestHandler_NegotiationMatrix(t *testing.T) {
 			data, err := m.Marshal(out)
 			require.NoError(t, err)
 			if tc.wantBinary {
-				require.NoError(t, messageloop.ProtobufMarshaler{}.Unmarshal(data, &clientpb.OutboundMessage{}))
+				require.NoError(t, shared.ProtobufMarshaler{}.Unmarshal(data, &clientpb.OutboundMessage{}))
 			} else {
-				require.NoError(t, messageloop.ProtoJSONMarshaler.Unmarshal(data, &clientpb.OutboundMessage{}))
+				require.NoError(t, shared.ProtoJSONMarshaler.Unmarshal(data, &clientpb.OutboundMessage{}))
 			}
 		})
 	}
@@ -135,10 +135,10 @@ func TestHandler_marshaler(t *testing.T) {
 			}},
 		},
 	}
-	data, err := messageloop.JSONMarshaler{}.Marshal(out)
+	data, err := shared.JSONMarshaler{}.Marshal(out)
 	require.NoError(t, err)
 	t.Logf("json marshal: %s", string(data))
-	data, err = messageloop.ProtoJSONMarshaler.Marshal(out)
+	data, err = shared.ProtoJSONMarshaler.Marshal(out)
 	require.NoError(t, err)
 	t.Logf("protojson marshal: %s", string(data))
 	// Verify the bytes payload matches

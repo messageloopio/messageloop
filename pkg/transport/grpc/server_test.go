@@ -3,14 +3,14 @@ package grpc
 import (
 	"testing"
 
-	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/internal/runtime"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
 	"github.com/stretchr/testify/require"
 )
 
 func TestPrepareClientServer_RegistersOnlyMessageLoopService(t *testing.T) {
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	server, err := PrepareClientServer(Options{Addr: "127.0.0.1:0"}, node)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = server.Close() })
@@ -20,7 +20,7 @@ func TestPrepareClientServer_RegistersOnlyMessageLoopService(t *testing.T) {
 	require.NotContains(t, serviceInfo, serverv2.APIService_ServiceDesc.ServiceName)
 }
 func TestPrepareClientServer_RejectsPartialTLSConfig(t *testing.T) {
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 
 	_, err := PrepareClientServer(Options{
 		Addr:        "127.0.0.1:0",

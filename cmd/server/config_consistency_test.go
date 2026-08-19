@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/config"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
@@ -47,7 +47,7 @@ func TestRepositoryConfigsValidateAndPrebind(t *testing.T) {
 			cfg.Transport.GRPC.Addr = "127.0.0.1:0"
 			cfg.Server.GRPCAdmin.Addr = "127.0.0.1:0"
 
-			servers, err := prepareGRPCServers(cfg, messageloop.NewNode(nil))
+			servers, err := prepareGRPCServers(cfg, runtime.NewNode(nil))
 			require.NoError(t, err, "gRPC servers must pre-bind with the config's addresses")
 			servers.Close()
 		})
@@ -56,7 +56,7 @@ func TestRepositoryConfigsValidateAndPrebind(t *testing.T) {
 
 func TestNewQUICServer_DisabledWhenAddrEmpty(t *testing.T) {
 	cfg := &config.Config{}
-	server, err := newQUICServer(cfg, messageloop.NewNode(nil))
+	server, err := newQUICServer(cfg, runtime.NewNode(nil))
 	require.NoError(t, err)
 	require.Nil(t, server)
 }
@@ -67,7 +67,7 @@ func TestNewQUICServer_PrebindsInsecure(t *testing.T) {
 			QUIC: config.QUICTransport{Addr: "127.0.0.1:0", Insecure: true},
 		},
 	}
-	server, err := newQUICServer(cfg, messageloop.NewNode(nil))
+	server, err := newQUICServer(cfg, runtime.NewNode(nil))
 	require.NoError(t, err)
 	require.NotNil(t, server)
 	require.NotEmpty(t, server.Addr())

@@ -5,7 +5,9 @@ import (
 	"time"
 
 	"github.com/lynx-go/x/log"
-	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/internal/runtime"
+	"github.com/messageloopio/messageloop/internal/session"
+	"github.com/messageloopio/messageloop/shared"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	googlegrpc "google.golang.org/grpc"
 	"google.golang.org/grpc/peer"
@@ -13,7 +15,7 @@ import (
 
 type gRPCHandler struct {
 	clientpb.UnimplementedMessageLoopServiceServer
-	node         *messageloop.Node
+	node         *runtime.Node
 	writeTimeout time.Duration
 }
 
@@ -24,7 +26,7 @@ func (h *gRPCHandler) MessageLoop(stream googlegrpc.BidiStreamingServer[clientpb
 		remoteAddr = p.Addr.String()
 	}
 	transport := newGRPCTransport(stream, remoteAddr, h.writeTimeout)
-	client, closeFn, err := messageloop.NewClient(stream.Context(), h.node, transport, messageloop.ProtobufMarshaler{}, messageloop.WithProtocol("grpc"))
+	client, closeFn, err := runtime.NewClient(stream.Context(), h.node, transport, shared.ProtobufMarshaler{}, session.WithProtocol("grpc"))
 	if err != nil {
 		return err
 	}
@@ -52,7 +54,7 @@ func (h *gRPCHandler) MessageLoop(stream googlegrpc.BidiStreamingServer[clientpb
 	}
 }
 
-func NewGRPCHandler(node *messageloop.Node, opts ...GRPCHandlerOption) clientpb.MessageLoopServiceServer {
+func NewGRPCHandler(node *runtime.Node, opts ...GRPCHandlerOption) clientpb.MessageLoopServiceServer {
 	h := &gRPCHandler{
 		node: node,
 	}

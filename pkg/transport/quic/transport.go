@@ -6,7 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/internal/session"
+	"github.com/messageloopio/messageloop/internal/protocol"
 	"github.com/messageloopio/messageloop/shared"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
@@ -24,24 +25,24 @@ const (
 	disconnectFrameTimeout = 1 * time.Second
 )
 
-// Transport implements messageloop.Transport over one QUIC bidirectional stream.
+// Transport implements session.Transport over one QUIC bidirectional stream.
 type Transport struct {
 	conn         *quic.Conn
 	stream       *quic.Stream
-	marshaler    messageloop.Marshaler
+	marshaler    shared.Marshaler
 	remoteAddr   string
 	writeMu      sync.Mutex
 	writeTimeout time.Duration
 	closed       bool
 }
 
-func newTransport(conn *quic.Conn, stream *quic.Stream, marshaler messageloop.Marshaler, writeTimeout time.Duration) *Transport {
+func newTransport(conn *quic.Conn, stream *quic.Stream, marshaler shared.Marshaler, writeTimeout time.Duration) *Transport {
 	remote := ""
 	if conn != nil && conn.RemoteAddr() != nil {
 		remote = conn.RemoteAddr().String()
 	}
 	if marshaler == nil {
-		marshaler = messageloop.ProtobufMarshaler{}
+		marshaler = shared.ProtobufMarshaler{}
 	}
 	return &Transport{
 		conn:         conn,
@@ -81,7 +82,7 @@ func (t *Transport) WriteMany(msgs ...[]byte) error {
 	return nil
 }
 
-func (t *Transport) Close(disconnect messageloop.Disconnect) error {
+func (t *Transport) Close(disconnect protocol.Disconnect) error {
 	t.writeMu.Lock()
 	if t.closed {
 		t.writeMu.Unlock()
@@ -102,11 +103,11 @@ func (t *Transport) Close(disconnect messageloop.Disconnect) error {
 	return nil
 }
 
-func (t *Transport) writeDisconnectFrame(disconnect messageloop.Disconnect) error {
+func (t *Transport) writeDisconnectFrame(disconnect protocol.Disconnect) error {
 	metadata := &structpb.Struct{Fields: map[string]*structpb.Value{
 		"disconnect_code": structpb.NewNumberValue(float64(disconnect.Code)),
 	}}
-	msg := messageloop.MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
+	msg := session.MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_Error{
 			Error: &sharedpb.Error{
 				Code:     "DISCONNECT_ERROR",
@@ -143,4 +144,4 @@ func (t *Transport) effectiveTimeout() time.Duration {
 	return defaultWriteTimeout
 }
 
-var _ messageloop.Transport = (*Transport)(nil)
+var _ session.Transport = (*Transport)(nil)

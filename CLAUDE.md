@@ -83,7 +83,7 @@ Config structure defined in `config/config.go` with example in `config-example.y
 
 ### Core Components
 
-**Node** (`node.go`) - Central coordinator that manages Hub, Broker, PresenceStore, Cluster, Proxy, HeartbeatManager, ACL, Metrics, and Surveys.
+**Node** (`internal/runtime/node.go`) - Central coordinator that manages Hub, Broker, PresenceStore, Cluster, Proxy, HeartbeatManager, ACL, Metrics, and Surveys.
 
 **Client** (`internal/session/client.go`) - Represents a single connection. Handles protocol messages:
 - `Connect` - Initial authentication and session establishment
@@ -99,8 +99,8 @@ Config structure defined in `config/config.go` with example in `config-example.y
 - `matcher` - Concurrent topic trie (`topics.CSTrieMatcher`) for wildcard subscriptions
 - `maxConnsPerUser` - Per-user connection limit enforcement
 
-**Broker** (`broker.go`) - Interface for pub/sub operations with pluggable implementations:
-- **Memory broker** (`broker_memory.go`) - In-process pub/sub for single-node deployments
+**Broker** (`internal/stream/broker.go`) - Interface for pub/sub operations with pluggable implementations:
+- **Memory broker** (`internal/stream/broker_memory.go`) - In-process pub/sub for single-node deployments
 - **Redis broker** (`pkg/redisbroker/`) - Distributed broker using Redis Streams (persistent history) and Pub/Sub (real-time fan-out)
 - `Publish` - Send data to a channel (optionally maintains history with offset+epoch)
 - `Subscribe` / `Unsubscribe` - Manage node's channel subscriptions
@@ -172,7 +172,7 @@ Client protocol messages defined in `shared/genproto/client/v2/`:
 - `Message` - Wrapper containing Channel, Id, Offset, and Payload
 - `Publication` - Contains Envelopes (array of Message)
 
-The `marshaler.go` re-exports shared marshalers from `shared/marshaler.go`:
+Marshalers live in `shared/marshaler.go` (import `github.com/messageloopio/messageloop/shared`):
 - `JSONMarshaler{}` - Standard JSON encoding
 - `ProtobufMarshaler{}` - Protobuf binary encoding
 - `ProtoJSONMarshaler` - Protobuf JSON encoding
@@ -189,7 +189,7 @@ The `marshaler.go` re-exports shared marshalers from `shared/marshaler.go`:
 
 ### Disconnect Handling
 
-Typed `Disconnect` errors (`disconnect.go`) signal intentional connection termination with codes:
+Typed `Disconnect` errors (`internal/protocol/disconnect.go`) signal intentional connection termination with codes:
 - **3000** - Connection closed (clean disconnect, or network loss)
 - **3500-3509** - Terminal errors: InvalidToken, BadRequest, Stale, ForceNoReconnect, ConnectionLimit, ChannelLimit, InappropriateProtocol, PermissionDenied, NotAvailable, TooManyErrors
 - **3511** - IdleTimeout (heartbeat detected inactivity)
@@ -198,9 +198,10 @@ Typed `Disconnect` errors (`disconnect.go`) signal intentional connection termin
 
 ## Module Structure
 
-- **Root package** (`*.go`) - Node coordinator, cluster orchestration, recover, aliases, session Runtime adapter
+- **Root package** (`doc.go`) - Empty module root after PR-KA-D15; exports nothing
+- `internal/runtime/` - Node coordinator, Cluster facade, recover, health, subscription saga, Sim hooks, session Runtime adapter
 - `internal/session/` - Session Plane: Session, Hub, Transport, Heartbeat, Runtime seam
-- `internal/survey/` - Survey leaf types (orchestration still on Node until D15)
+- `internal/survey/` - Survey leaf types (orchestration stays on Node)
 - `cmd/server/` - Server entry point using `lynx` framework
 - `config/` - Configuration structures
 - `shared/` - Separate Go module (`github.com/messageloopio/messageloop/shared`) with shared marshalers and generated protobuf Go code

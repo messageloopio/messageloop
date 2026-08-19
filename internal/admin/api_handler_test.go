@@ -9,7 +9,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/internal/runtime"
+	"github.com/messageloopio/messageloop/internal/session"
+	"github.com/messageloopio/messageloop/internal/protocol"
+	"github.com/messageloopio/messageloop/internal/stream"
+	"github.com/messageloopio/messageloop/internal/occupancy"
+	"github.com/messageloopio/messageloop/shared"
 	"github.com/messageloopio/messageloop/config"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
@@ -42,7 +47,7 @@ func (t *captureTransport) WriteMany(data ...[]byte) error {
 	return nil
 }
 
-func (t *captureTransport) Close(messageloop.Disconnect) error { return nil }
+func (t *captureTransport) Close(protocol.Disconnect) error { return nil }
 
 func (t *captureTransport) RemoteAddr() string { return "127.0.0.1:12345" }
 
@@ -52,7 +57,7 @@ type failPublishBroker struct {
 	failChannel string
 }
 
-func (b *failPublishBroker) Start(ctx context.Context, handler messageloop.PublicationHandler) error {
+func (b *failPublishBroker) Start(ctx context.Context, handler stream.PublicationHandler) error {
 	<-ctx.Done()
 	return nil
 }
@@ -60,25 +65,25 @@ func (b *failPublishBroker) Start(ctx context.Context, handler messageloop.Publi
 func (b *failPublishBroker) Subscribe(ch string) error   { return nil }
 func (b *failPublishBroker) Unsubscribe(ch string) error { return nil }
 
-func (b *failPublishBroker) Publish(ch string, pub *messageloop.Publication) (uint64, error) {
+func (b *failPublishBroker) Publish(ch string, pub *stream.Publication) (uint64, error) {
 	if b.failChannel == "" || ch == b.failChannel {
 		return 0, errors.New("broker unavailable")
 	}
 	return 1, nil
 }
 
-func (b *failPublishBroker) PublishTransient(ch string, pub *messageloop.Publication) error {
+func (b *failPublishBroker) PublishTransient(ch string, pub *stream.Publication) error {
 	return nil
 }
 
-func (b *failPublishBroker) PublishOccupancy(ch string, evt messageloop.OccupancyEvent) error {
+func (b *failPublishBroker) PublishOccupancy(ch string, evt occupancy.OccupancyEvent) error {
 	return nil
 }
 
-func (b *failPublishBroker) SetOccupancyHandler(messageloop.OccupancyHandler) error { return nil }
-func (b *failPublishBroker) SetGapHandler(messageloop.GapHandler)                   {}
+func (b *failPublishBroker) SetOccupancyHandler(stream.OccupancyHandler) error { return nil }
+func (b *failPublishBroker) SetGapHandler(stream.GapHandler)                   {}
 
-func (b *failPublishBroker) History(ch string, sinceOffset uint64, limit int) (*messageloop.HistoryPage, error) {
+func (b *failPublishBroker) History(ch string, sinceOffset uint64, limit int) (*stream.HistoryPage, error) {
 	return nil, nil
 }
 
@@ -95,7 +100,7 @@ func (m *mockTransport) WriteMany(data ...[]byte) error {
 	return nil
 }
 
-func (m *mockTransport) Close(disconnect messageloop.Disconnect) error {
+func (m *mockTransport) Close(disconnect protocol.Disconnect) error {
 	m.closed = true
 	return nil
 }
@@ -113,7 +118,7 @@ type probeBroker struct {
 	historyChannel string
 }
 
-func (b *probeBroker) Start(ctx context.Context, handler messageloop.PublicationHandler) error {
+func (b *probeBroker) Start(ctx context.Context, handler stream.PublicationHandler) error {
 	<-ctx.Done()
 	return nil
 }
@@ -121,34 +126,34 @@ func (b *probeBroker) Start(ctx context.Context, handler messageloop.Publication
 func (b *probeBroker) Subscribe(ch string) error   { return nil }
 func (b *probeBroker) Unsubscribe(ch string) error { return nil }
 
-func (b *probeBroker) Publish(ch string, pub *messageloop.Publication) (uint64, error) {
+func (b *probeBroker) Publish(ch string, pub *stream.Publication) (uint64, error) {
 	b.publishCalls++
 	b.publishChannel = ch
 	return 1, nil
 }
 
-func (b *probeBroker) PublishTransient(ch string, pub *messageloop.Publication) error { return nil }
+func (b *probeBroker) PublishTransient(ch string, pub *stream.Publication) error { return nil }
 
-func (b *probeBroker) PublishOccupancy(ch string, evt messageloop.OccupancyEvent) error {
+func (b *probeBroker) PublishOccupancy(ch string, evt occupancy.OccupancyEvent) error {
 	return nil
 }
 
-func (b *probeBroker) SetOccupancyHandler(messageloop.OccupancyHandler) error { return nil }
-func (b *probeBroker) SetGapHandler(messageloop.GapHandler)                   {}
+func (b *probeBroker) SetOccupancyHandler(stream.OccupancyHandler) error { return nil }
+func (b *probeBroker) SetGapHandler(stream.GapHandler)                   {}
 
-func (b *probeBroker) History(ch string, sinceOffset uint64, limit int) (*messageloop.HistoryPage, error) {
+func (b *probeBroker) History(ch string, sinceOffset uint64, limit int) (*stream.HistoryPage, error) {
 	b.historyCalls++
 	b.historyChannel = ch
-	return &messageloop.HistoryPage{}, nil
+	return &stream.HistoryPage{}, nil
 }
 
 func policyBoolPtr(v bool) *bool { return &v }
 
 // newUserTestClient registers a client in the node hub under the given user
 // ID (bypassing proxy auth via ForceTestIDs) and returns it.
-func newUserTestClient(t *testing.T, node *messageloop.Node, transport messageloop.Transport, sessionID, userID string) *messageloop.Client {
+func newUserTestClient(t *testing.T, node *runtime.Node, transport session.Transport, sessionID, userID string) *session.Client {
 	t.Helper()
-	client, _, err := messageloop.NewClient(context.Background(), node, transport, messageloop.JSONMarshaler{})
+	client, _, err := runtime.NewClient(context.Background(), node, transport, shared.JSONMarshaler{})
 	require.NoError(t, err)
 	client.ForceTestIDs(sessionID, userID, "client-"+sessionID)
 	require.NoError(t, node.AddClient(client))
@@ -174,7 +179,7 @@ func transportContainsText(transport *captureTransport, text string) bool {
 // channels in the same request still succeed (partial-success semantics).
 func TestAPIServiceHandler_AddHistoryDeniedByPolicy(t *testing.T) {
 	ctx := context.Background()
-	node := messageloop.NewNode(&config.Server{
+	node := runtime.NewNode(&config.Server{
 		Authorizer: config.AuthorizerConfig{
 			Rules: []config.AuthorizerRule{
 				{Pattern: "game.tick.**", ChannelPolicySpec: config.ChannelPolicySpec{TransientOnly: policyBoolPtr(true)}},
@@ -210,7 +215,7 @@ func TestAPIServiceHandler_AddHistoryDeniedByPolicy(t *testing.T) {
 	// fail, so the RPC itself reports an error (existing all-failed
 	// semantics), and the broker is still never called.
 	probe2 := &probeBroker{}
-	node2 := messageloop.NewNode(&config.Server{
+	node2 := runtime.NewNode(&config.Server{
 		Authorizer: config.AuthorizerConfig{
 			Rules: []config.AuthorizerRule{
 				{Pattern: "game.tick.**", ChannelPolicySpec: config.ChannelPolicySpec{TransientOnly: policyBoolPtr(true)}},
@@ -242,7 +247,7 @@ func TestAPIServiceHandler_AddHistoryDeniedByPolicy(t *testing.T) {
 // policy-disabled-history channel is still delivered.
 func TestAPIServiceHandler_PublishToChannelsWithoutAddHistoryOnDisabledChannel(t *testing.T) {
 	ctx := context.Background()
-	node := messageloop.NewNode(&config.Server{
+	node := runtime.NewNode(&config.Server{
 		Authorizer: config.AuthorizerConfig{
 			Rules: []config.AuthorizerRule{
 				{Pattern: "game.tick.**", ChannelPolicySpec: config.ChannelPolicySpec{TransientOnly: policyBoolPtr(true)}},
@@ -272,12 +277,12 @@ func TestAPIServiceHandler_PublishToChannelsWithoutAddHistoryOnDisabledChannel(t
 
 func TestAPIServiceHandler_PublishToSessions(t *testing.T) {
 	ctx := context.Background()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	handler := NewAPIServiceHandler(node)
 
 	// Create a test client
 	transport := &mockTransport{}
-	client, closeFn, err := messageloop.NewClient(ctx, node, transport, messageloop.ProtobufMarshaler{})
+	client, closeFn, err := runtime.NewClient(ctx, node, transport, shared.ProtobufMarshaler{})
 	require.NoError(t, err)
 	defer func() { _ = closeFn() }()
 
@@ -312,7 +317,7 @@ func TestAPIServiceHandler_PublishToSessions(t *testing.T) {
 
 func TestAPIServiceHandler_PublishToNonExistentSession(t *testing.T) {
 	ctx := context.Background()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	handler := NewAPIServiceHandler(node)
 
 	// Create payload
@@ -343,7 +348,7 @@ func TestAPIServiceHandler_PublishToNonExistentSession(t *testing.T) {
 
 func TestAPIServiceHandler_PublishToChannels(t *testing.T) {
 	ctx := context.Background()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	_ = node.Run(ctx) // Start broker
 	handler := NewAPIServiceHandler(node)
 
@@ -373,7 +378,7 @@ func TestAPIServiceHandler_PublishToChannels(t *testing.T) {
 
 func TestAPIServiceHandler_PublishAddHistory(t *testing.T) {
 	ctx := context.Background()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	_ = node.Run(ctx)
 	handler := NewAPIServiceHandler(node)
 
@@ -403,7 +408,7 @@ func TestAPIServiceHandler_PublishAddHistory(t *testing.T) {
 
 func TestAPIServiceHandler_PublishWithoutAddHistoryNotInHistory(t *testing.T) {
 	ctx := context.Background()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	_ = node.Run(ctx)
 	handler := NewAPIServiceHandler(node)
 
@@ -433,7 +438,7 @@ func TestAPIServiceHandler_PublishWithoutAddHistoryNotInHistory(t *testing.T) {
 // add_history=false 显式值同样不落历史（与缺省 false 语义一致，防止默认值漂移）。
 func TestAPIServiceHandler_PublishExplicitFalseAddHistoryNotInHistory(t *testing.T) {
 	ctx := context.Background()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	_ = node.Run(ctx)
 	handler := NewAPIServiceHandler(node)
 
@@ -465,13 +470,13 @@ func TestAPIServiceHandler_PublishExplicitFalseAddHistoryNotInHistory(t *testing
 // 且在线会话能实际收到消息（组合路径回归）。
 func TestAPIServiceHandler_PublishSessionWithAddHistoryStaysSession(t *testing.T) {
 	ctx := context.Background()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	_ = node.Run(ctx)
 	handler := NewAPIServiceHandler(node)
 
 	// 注册一个真实客户端会话
 	transport := &captureTransport{}
-	client, closeFn, err := messageloop.NewClient(ctx, node, transport, messageloop.JSONMarshaler{})
+	client, closeFn, err := runtime.NewClient(ctx, node, transport, shared.JSONMarshaler{})
 	require.NoError(t, err)
 	defer func() { _ = closeFn() }()
 	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
@@ -519,7 +524,7 @@ func TestAPIServiceHandler_PublishSessionWithAddHistoryStaysSession(t *testing.T
 
 func TestAPIServiceHandler_PublishBrokerFailureReturnsError(t *testing.T) {
 	ctx := context.Background()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	node.SetBroker(&failPublishBroker{})
 	handler := NewAPIServiceHandler(node)
 
@@ -547,7 +552,7 @@ func TestAPIServiceHandler_PublishBrokerFailureReturnsError(t *testing.T) {
 
 func TestAPIServiceHandler_PublishPartialFailureSucceeds(t *testing.T) {
 	ctx := context.Background()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	node.SetBroker(&failPublishBroker{failChannel: "broken-channel"})
 	handler := NewAPIServiceHandler(node)
 
@@ -574,12 +579,12 @@ func TestAPIServiceHandler_PublishPartialFailureSucceeds(t *testing.T) {
 
 func TestAPIServiceHandler_Disconnect(t *testing.T) {
 	ctx := context.Background()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	handler := NewAPIServiceHandler(node)
 
 	// Create a test client
 	transport := &mockTransport{}
-	client, _, err := messageloop.NewClient(ctx, node, transport, messageloop.ProtobufMarshaler{})
+	client, _, err := runtime.NewClient(ctx, node, transport, shared.ProtobufMarshaler{})
 	require.NoError(t, err)
 
 	// Add the client to the hub
@@ -601,7 +606,7 @@ func TestAPIServiceHandler_Disconnect(t *testing.T) {
 
 func TestAPIServiceHandler_DisconnectNonExistentSession(t *testing.T) {
 	ctx := context.Background()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	handler := NewAPIServiceHandler(node)
 
 	// Test disconnecting a non-existent session
@@ -619,12 +624,12 @@ func TestAPIServiceHandler_DisconnectNonExistentSession(t *testing.T) {
 
 func TestAPIServiceHandler_Subscribe(t *testing.T) {
 	ctx := context.Background()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	handler := NewAPIServiceHandler(node)
 
 	// Create a test client
 	transport := &mockTransport{}
-	client, closeFn, err := messageloop.NewClient(ctx, node, transport, messageloop.ProtobufMarshaler{})
+	client, closeFn, err := runtime.NewClient(ctx, node, transport, shared.ProtobufMarshaler{})
 	require.NoError(t, err)
 	defer func() { _ = closeFn() }()
 
@@ -646,7 +651,7 @@ func TestAPIServiceHandler_Subscribe(t *testing.T) {
 
 func TestAPIServiceHandler_SubscribeNonExistentSession(t *testing.T) {
 	ctx := context.Background()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	handler := NewAPIServiceHandler(node)
 
 	// Test subscribing with a non-existent session
@@ -663,12 +668,12 @@ func TestAPIServiceHandler_SubscribeNonExistentSession(t *testing.T) {
 
 func TestAPIServiceHandler_Unsubscribe(t *testing.T) {
 	ctx := context.Background()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	handler := NewAPIServiceHandler(node)
 
 	// Create a test client
 	transport := &mockTransport{}
-	client, closeFn, err := messageloop.NewClient(ctx, node, transport, messageloop.ProtobufMarshaler{})
+	client, closeFn, err := runtime.NewClient(ctx, node, transport, shared.ProtobufMarshaler{})
 	require.NoError(t, err)
 	defer func() { _ = closeFn() }()
 
@@ -697,7 +702,7 @@ func TestAPIServiceHandler_Unsubscribe(t *testing.T) {
 
 func TestAPIServiceHandler_UnsubscribeNonExistentSession(t *testing.T) {
 	ctx := context.Background()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	handler := NewAPIServiceHandler(node)
 
 	// Test unsubscribing with a non-existent session
@@ -716,7 +721,7 @@ func TestAPIServiceHandler_UnsubscribeNonExistentSession(t *testing.T) {
 // returns them intact.
 func TestAPIServiceHandler_GetHistory_ReturnsContentTypeAndId(t *testing.T) {
 	ctx := context.Background()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	_ = node.Run(ctx) // Start broker
 	handler := NewAPIServiceHandler(node)
 
@@ -761,12 +766,12 @@ func TestAPIServiceHandler_GetHistory_ReturnsContentTypeAndId(t *testing.T) {
 // fails with FailedPrecondition before the broker is read.
 func TestAdmin_GetHistorySincePosition(t *testing.T) {
 	ctx := context.Background()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	require.NoError(t, node.Run(ctx))
 	handler := NewAPIServiceHandler(node)
 
 	for _, text := range []string{"m1", "m2", "m3"} {
-		_, err := node.Publish("pos.ch", &messageloop.Publication{Payload: []byte(text), Kind: messageloop.PayloadKindText})
+		_, err := node.Publish("pos.ch", &stream.Publication{Payload: []byte(text), Kind: stream.PayloadKindText})
 		require.NoError(t, err)
 	}
 	epoch := node.Broker().(interface{ Epoch() string }).Epoch()
@@ -800,7 +805,7 @@ func TestAdmin_GetHistorySincePosition(t *testing.T) {
 
 	// stale epoch: FailedPrecondition, broker History never reached (probe).
 	probe := &probeBroker{}
-	probeNode := messageloop.NewNode(nil)
+	probeNode := runtime.NewNode(nil)
 	probeNode.SetBroker(probe)
 	probeHandler := NewAPIServiceHandler(probeNode)
 	_, err = probeHandler.GetHistory(ctx, &serverv2.GetHistoryRequest{
@@ -823,7 +828,7 @@ func TestAdmin_GetHistorySincePosition(t *testing.T) {
 // Task 13a: admin subscribe/publish must respect the authorizer rules.
 func TestAPIServiceHandler_Subscribe_ACLDenied(t *testing.T) {
 	ctx := context.Background()
-	node := messageloop.NewNode(&config.Server{
+	node := runtime.NewNode(&config.Server{
 		Authorizer: config.AuthorizerConfig{
 			Rules: []config.AuthorizerRule{
 				{Pattern: "private.*", AllowSubscribe: []string{"alice"}},
@@ -840,7 +845,7 @@ func TestAPIServiceHandler_Subscribe_ACLDenied(t *testing.T) {
 	require.False(t, resp.Results["private.room"], "admin subscribe to an ACL-denied channel must be rejected")
 
 	// Without ACL rules the admin operation proceeds (session not found).
-	openNode := messageloop.NewNode(nil)
+	openNode := runtime.NewNode(nil)
 	openHandler := NewAPIServiceHandler(openNode)
 	openResp, err := openHandler.Subscribe(ctx, &serverv2.SubscribeRequest{
 		SessionId: "sess-1",
@@ -852,7 +857,7 @@ func TestAPIServiceHandler_Subscribe_ACLDenied(t *testing.T) {
 
 func TestAPIServiceHandler_Publish_ACLDenied(t *testing.T) {
 	ctx := context.Background()
-	node := messageloop.NewNode(&config.Server{
+	node := runtime.NewNode(&config.Server{
 		Authorizer: config.AuthorizerConfig{
 			Rules: []config.AuthorizerRule{
 				{Pattern: "private.*", AllowPublish: []string{"bob"}},
@@ -881,11 +886,11 @@ func TestAPIServiceHandler_Publish_ACLDenied(t *testing.T) {
 // legacy client_id key) and client_id is the Connect.client_id.
 func TestAdmin_GetPresenceFillsNewFields(t *testing.T) {
 	ctx := context.Background()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	require.NoError(t, node.Run(ctx))
 
 	transport := &mockTransport{}
-	client, _, err := messageloop.NewClient(ctx, node, transport, messageloop.JSONMarshaler{})
+	client, _, err := runtime.NewClient(ctx, node, transport, shared.JSONMarshaler{})
 	require.NoError(t, err)
 
 	connect := &clientpb.InboundMessage{
@@ -923,13 +928,13 @@ func TestAdmin_GetPresenceFillsNewFields(t *testing.T) {
 // Connect.client_id was recorded).
 func TestAdmin_GetPresence_LegacyKeyFallsBackToClientID(t *testing.T) {
 	ctx := context.Background()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	require.NoError(t, node.Run(ctx))
 
-	store := messageloop.NewMemoryPresenceStore()
+	store := occupancy.NewMemoryPresenceStore()
 	node.SetPresenceStore(store)
 	// Simulate a legacy record: only client_id/user_id/connected_at set.
-	require.NoError(t, store.Add(ctx, "legacy.ch", &messageloop.PresenceInfo{
+	require.NoError(t, store.Add(ctx, "legacy.ch", &occupancy.PresenceInfo{
 		ClientID:    "legacy-session",
 		UserID:      "legacy-user",
 		ConnectedAt: 1,
@@ -951,7 +956,7 @@ func TestAdmin_GetPresence_LegacyKeyFallsBackToClientID(t *testing.T) {
 // of the user and to no one else.
 func TestAdmin_PublishDestinationUsers(t *testing.T) {
 	ctx := context.Background()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	handler := NewAPIServiceHandler(node)
 
 	transportA := &captureTransport{}
@@ -987,7 +992,7 @@ func TestAdmin_PublishDestinationUsers(t *testing.T) {
 // no session directory or Redis is involved.
 func TestAdmin_PublishUsersNoCluster(t *testing.T) {
 	ctx := context.Background()
-	node := messageloop.NewNode(nil) // cluster.enabled=false
+	node := runtime.NewNode(nil) // cluster.enabled=false
 	handler := NewAPIServiceHandler(node)
 
 	transport := &captureTransport{}
@@ -1013,7 +1018,7 @@ func TestAdmin_PublishUsersNoCluster(t *testing.T) {
 // every session of the user and reports per-session results.
 func TestAdmin_DisconnectUsers(t *testing.T) {
 	ctx := context.Background()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	handler := NewAPIServiceHandler(node)
 
 	transportA := &mockTransport{}
@@ -1041,7 +1046,7 @@ func TestAdmin_DisconnectUsers(t *testing.T) {
 // and that a registered session survives the rejected requests untouched.
 func TestAdmin_EmptyUserInvalidArgument(t *testing.T) {
 	ctx := context.Background()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	handler := NewAPIServiceHandler(node)
 
 	transport := &mockTransport{}
@@ -1078,7 +1083,7 @@ func TestAdmin_EmptyUserInvalidArgument(t *testing.T) {
 // untouched, and the results are keyed by channel.
 func TestAdmin_SubscribeByUser(t *testing.T) {
 	ctx := context.Background()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	handler := NewAPIServiceHandler(node)
 
 	newUserTestClient(t, node, &mockTransport{}, "sess-sub-user", "U")
@@ -1110,7 +1115,7 @@ func TestAdmin_SubscribeByUser(t *testing.T) {
 // called (spy broker).
 func TestAdmin_GetHistoryRequiresCapability(t *testing.T) {
 	ctx := context.Background()
-	node := messageloop.NewNode(&config.Server{
+	node := runtime.NewNode(&config.Server{
 		GRPCAdmin: config.GRPCAdmin{Capabilities: []string{"channels.list"}},
 	})
 	probe := &probeBroker{}
@@ -1126,7 +1131,7 @@ func TestAdmin_GetHistoryRequiresCapability(t *testing.T) {
 // keep GetHistory usable (the default bits include history.read).
 func TestAdmin_GetHistoryDefaultCapabilities(t *testing.T) {
 	ctx := context.Background()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	probe := &probeBroker{}
 	node.SetBroker(probe)
 	handler := NewAPIServiceHandler(node)
@@ -1142,7 +1147,7 @@ func TestAdmin_GetHistoryDefaultCapabilities(t *testing.T) {
 // the broker is never touched.
 func TestAdmin_GetHistoryExplicitEmptyCapabilities(t *testing.T) {
 	ctx := context.Background()
-	node := messageloop.NewNode(&config.Server{
+	node := runtime.NewNode(&config.Server{
 		GRPCAdmin: config.GRPCAdmin{Capabilities: []string{}},
 	})
 	probe := &probeBroker{}
@@ -1165,7 +1170,7 @@ func TestAdmin_GetHistoryExplicitEmptyCapabilities(t *testing.T) {
 // read before the broker is touched, even with history.read held.
 func TestAdmin_GetHistoryDecideDenied(t *testing.T) {
 	ctx := context.Background()
-	node := messageloop.NewNode(&config.Server{
+	node := runtime.NewNode(&config.Server{
 		Authorizer: config.AuthorizerConfig{
 			Rules: []config.AuthorizerRule{{Pattern: "secret.**", DenyAll: true}},
 		},
@@ -1190,7 +1195,7 @@ func TestAdmin_GetHistoryDecideDenied(t *testing.T) {
 // channels fail softly.
 func TestAdmin_GetPresenceDecideDenied(t *testing.T) {
 	ctx := context.Background()
-	node := messageloop.NewNode(&config.Server{
+	node := runtime.NewNode(&config.Server{
 		Authorizer: config.AuthorizerConfig{
 			Rules: []config.AuthorizerRule{
 				{Pattern: "secret.**", DenyAll: true},
@@ -1210,7 +1215,7 @@ func TestAdmin_GetPresenceDecideDenied(t *testing.T) {
 // destinations are capability-gated (session.act / user.fanout).
 func TestAdmin_PublishSessionRequiresCapability(t *testing.T) {
 	ctx := context.Background()
-	node := messageloop.NewNode(&config.Server{
+	node := runtime.NewNode(&config.Server{
 		GRPCAdmin: config.GRPCAdmin{Capabilities: []string{"user.fanout"}},
 	})
 	handler := NewAPIServiceHandler(node)

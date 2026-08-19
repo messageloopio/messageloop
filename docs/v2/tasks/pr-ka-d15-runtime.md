@@ -263,3 +263,19 @@ test ! -f aliases.go
 - 偏离(应尽量无;D14 那种跨包未导出漏检不应再出现——同包测试一起走)
 
 ## 9. 实现备注(实现方填)
+
+实现于 2026-08-19,v2 分支,基于 `ecabc5a`(D15 规格已合;D14 tip `6e17bdb` 的后继)。工作区未 commit。验证全绿(`go build ./...`、`go test -count=1 ./internal/runtime` 聚焦集、`go test -count=1 ./pkg/redisbroker ./internal/... ./pkg/transport/... ./cmd/server`、`go test -count=1 ./...`、`sdks/go`、`sdks/ts` npx jest 83、`_examples/chatroom` build、`golangci-lint run ./...` 0 issues)。五条门禁符合预期。
+
+**迁入**:12 生产 + 30 同包测试 `package runtime` + 3 外部测试 `package runtime_test`(原 `messageloop_test`)。git mv 初态均为 `R`;随后 package/import/§3.3 包装改直引后工作树显示 `RM`/`AM`。
+
+**常量拆分**:`internal/runtime/defaults.go`(4)、`internal/occupancy/defaults.go`(`MaxPresenceSnapshotClients=256`)、`internal/survey/defaults.go`(2)。runtime 经 `aliases_local.go` 做本包 const 别名,node.go 短名零改;`admin/api_handler.go` 直引 `occupancy.MaxPresenceSnapshotClients`。未抽 `positionFrom`/`offsetFrom` 到 stream(§2.3 可选,跳过;session 保留 D14 副本,recover 随 Node 进 runtime)。
+
+**包装直引**:`node.go` `newHub`→`session.NewHub`;`newPresenceEvent`/`marshalPresenceEvent`→`occupancy.NewPresenceEvent`/`occupancy.MarshalPresenceEvent`;`cluster.go` `allocateNodeIncarnation`→`cluster.AllocateNodeIncarnation`;`version_test.go` `protocolGenerationOK`→`protocol.GenerationOK`。
+
+**消费方**:cmd/server、三 transports、admin、sim/world.go 及全部外部测试不再 import 根包。`cmd/server/main.go` metrics 包别名 `mlmetrics`(局部名 `metrics` 遮蔽);`world.go` 与 `cluster_redis_integration_test.go` 契约面用 `clusterpkg`(局部变量 `cluster` 遮蔽)。`cmd/server/main.go:136` 注释收为 `cluster.ClusterOptions.Normalize()`。
+
+**测试**:迁入 runtime 318(`package runtime` 300 + `runtime_test` 18);留根 `error_codes_test.go` 改 `package messageloop_test`(1);删除 `marshaler_test.go`(19 Test + 3 Benchmark,shared 已覆盖)。`TestNoUUIDIncarnationInProductionSource` 路径改为 `cluster.go` / `../cluster/epoch.go` / `../../cmd/server/main.go`;`TestOccupancy_NoForbiddenProductionRemnants` 改为 `../session/hub.go` 与 `../occupancy/presence_event.go`。
+
+**根包**:只剩 `doc.go`(无导出)+ `error_codes_test.go`。`aliases.go`/`marshaler.go`/`defaults.go` 已删;`internal/rpc` 未建;recover 未并 stream;survey 编排仍在 Node。`session_runtime.go` 的 `index`/`isWildcard`/`publicationID`/`broadcastParallelLimit`/`pingClusterRefreshInterval` 随迁留在 runtime(session 未导出)。Sim 三条导出函数语义未改。
+
+**偏离**:无行为/锁序/Sim 偏离。可选 `internal/stream/position.go` 未做。为消遮蔽加了 `mlmetrics`/`clusterpkg` 两个 import 别名(不改函数体语义)。未改红线目录里仍写着「aliases.go until D15」的陈旧注释(`internal/{session,cluster,metrics,occupancy,survey}` 包注释)。

@@ -1,4 +1,4 @@
-package messageloop_test
+package runtime_test
 
 import (
 	"context"
@@ -11,7 +11,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/internal/runtime"
+	"github.com/messageloopio/messageloop/internal/session"
+	"github.com/messageloopio/messageloop/internal/protocol"
+	clusterpkg "github.com/messageloopio/messageloop/internal/cluster"
+	"github.com/messageloopio/messageloop/internal/survey"
+	"github.com/messageloopio/messageloop/shared"
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/internal/admin"
 	"github.com/messageloopio/messageloop/pkg/redisbroker"
@@ -78,7 +83,7 @@ type integrationCapturingTransport struct {
 	messages    [][]byte
 	closeCount  atomic.Int32
 	closed      atomic.Bool
-	closeReason messageloop.Disconnect
+	closeReason protocol.Disconnect
 }
 
 func (c *integrationCapturingTransport) Write(data []byte) error {
@@ -103,7 +108,7 @@ func (c *integrationCapturingTransport) WriteMany(data ...[]byte) error {
 	return nil
 }
 
-func (c *integrationCapturingTransport) Close(disconnect messageloop.Disconnect) error {
+func (c *integrationCapturingTransport) Close(disconnect protocol.Disconnect) error {
 	c.closed.Store(true)
 	c.closeCount.Add(1)
 	c.closeReason = disconnect
@@ -118,7 +123,7 @@ func (c *integrationCapturingTransport) isClosed() bool {
 	return c.closed.Load()
 }
 
-func (c *integrationCapturingTransport) getCloseReason() messageloop.Disconnect {
+func (c *integrationCapturingTransport) getCloseReason() protocol.Disconnect {
 	return c.closeReason
 }
 
@@ -156,7 +161,7 @@ func TestClusterRedis_RemoteSessionAdminAndQueries(t *testing.T) {
 	nodeB := newClusterRedisTestNode(t, ctx, redisCfg, "node-b")
 
 	transport := &integrationCapturingTransport{}
-	client, _, err := messageloop.NewClient(ctx, nodeA, transport, messageloop.JSONMarshaler{})
+	client, _, err := runtime.NewClient(ctx, nodeA, transport, shared.JSONMarshaler{})
 	require.NoError(t, err)
 	client.ForceTestIDs("sess-admin", "user-admin", "client-admin")
 	require.NoError(t, nodeA.AddClient(client))
@@ -214,7 +219,7 @@ func TestClusterRedis_RemoteSessionAdminAndQueries(t *testing.T) {
 		return true
 	}, 5*time.Second, 50*time.Millisecond)
 
-	ok, err = nodeB.DisconnectSession(ctx, client.SessionID(), messageloop.Disconnect{Code: 3009, Reason: "cluster-admin-test"})
+	ok, err = nodeB.DisconnectSession(ctx, client.SessionID(), protocol.Disconnect{Code: 3009, Reason: "cluster-admin-test"})
 	require.NoError(t, err)
 	require.True(t, ok)
 
@@ -232,11 +237,11 @@ func TestClusterRedis_RemoteResumeTakeover(t *testing.T) {
 	nodeB := newClusterRedisTestNode(t, ctx, redisCfg, "node-b")
 	authA := &integrationAuthProxy{userID: "user-old"}
 	authB := &integrationAuthProxy{userID: "user-old"}
-	require.NoError(t, nodeA.AddProxy(authA, "", messageloop.SystemMethodAuthenticate))
-	require.NoError(t, nodeB.AddProxy(authB, "", messageloop.SystemMethodAuthenticate))
+	require.NoError(t, nodeA.AddProxy(authA, "", session.SystemMethodAuthenticate))
+	require.NoError(t, nodeB.AddProxy(authB, "", session.SystemMethodAuthenticate))
 
 	oldTransport := &integrationCapturingTransport{}
-	oldClient, _, err := messageloop.NewClient(ctx, nodeA, oldTransport, messageloop.JSONMarshaler{})
+	oldClient, _, err := runtime.NewClient(ctx, nodeA, oldTransport, shared.JSONMarshaler{})
 	require.NoError(t, err)
 
 	connectMsg := &clientpb.InboundMessage{
@@ -258,7 +263,7 @@ func TestClusterRedis_RemoteResumeTakeover(t *testing.T) {
 	require.NoError(t, oldClient.HandleMessage(ctx, subscribeMsg))
 
 	newTransport := &integrationCapturingTransport{}
-	newClient, _, err := messageloop.NewClient(ctx, nodeB, newTransport, messageloop.JSONMarshaler{})
+	newClient, _, err := runtime.NewClient(ctx, nodeB, newTransport, shared.JSONMarshaler{})
 	require.NoError(t, err)
 
 	resumeMsg := &clientpb.InboundMessage{
@@ -304,7 +309,7 @@ func TestClusterRedis_RemoteResumeTakeover(t *testing.T) {
 	var connected *clientpb.Connected
 	for _, data := range newTransport.messagesSnapshot() {
 		var msg clientpb.OutboundMessage
-		require.NoError(t, messageloop.JSONMarshaler{}.Unmarshal(data, &msg))
+		require.NoError(t, shared.JSONMarshaler{}.Unmarshal(data, &msg))
 		if got := msg.GetConnected(); got != nil {
 			connected = got
 			break
@@ -344,7 +349,7 @@ func TestClusterRedis_CompareAndSwapSessionState_Atomic(t *testing.T) {
 	directory := redisbroker.NewSessionDirectory(redisCfg)
 	t.Cleanup(func() { _ = directory.Shutdown(ctx) })
 
-	cas, ok := directory.(messageloop.SessionStateCompareAndSwapper)
+	cas, ok := directory.(clusterpkg.SessionStateCompareAndSwapper)
 	require.True(t, ok, "the redis session directory must implement SessionStateCompareAndSwapper")
 
 	redisClient := redis.NewClient(&redis.Options{Addr: redisCfg.Addr, Password: redisCfg.Password, DB: redisCfg.DB})
@@ -353,7 +358,7 @@ func TestClusterRedis_CompareAndSwapSessionState_Atomic(t *testing.T) {
 	leaseKey := opts.ClusterSessionLeasePrefix + "sess-atomic"
 	snapshotKey := opts.ClusterSessionSnapshotPrefix + "sess-atomic"
 
-	leaseV1 := &messageloop.ClusterSessionLease{
+	leaseV1 := &clusterpkg.ClusterSessionLease{
 		SessionID:     "sess-atomic",
 		NodeID:        "node-a",
 		IncarnationID: "1",
@@ -361,10 +366,10 @@ func TestClusterRedis_CompareAndSwapSessionState_Atomic(t *testing.T) {
 		LeaseVersion:  1,
 		ExpiresAt:     time.Now().Add(10 * time.Minute),
 	}
-	snapshotV1 := &messageloop.ClusterSessionSnapshot{
+	snapshotV1 := &clusterpkg.ClusterSessionSnapshot{
 		SessionID:     "sess-atomic",
 		UserID:        "user-1",
-		Subscriptions: []messageloop.ClusterSubscriptionSnapshot{{Channel: "news"}},
+		Subscriptions: []clusterpkg.ClusterSubscriptionSnapshot{{Channel: "news"}},
 	}
 
 	// First registration: CAS(nil) + snapshot SET commit together.
@@ -393,10 +398,10 @@ func TestClusterRedis_CompareAndSwapSessionState_Atomic(t *testing.T) {
 	require.NoError(t, err)
 	refresh := *current
 	refresh.LastActivityAt = time.Now().UnixMilli()
-	snapshotV2 := &messageloop.ClusterSessionSnapshot{
+	snapshotV2 := &clusterpkg.ClusterSessionSnapshot{
 		SessionID: "sess-atomic",
 		UserID:    "user-1",
-		Subscriptions: []messageloop.ClusterSubscriptionSnapshot{
+		Subscriptions: []clusterpkg.ClusterSubscriptionSnapshot{
 			{Channel: "news"},
 			{Channel: "sports"},
 		},
@@ -414,7 +419,7 @@ func TestClusterRedis_CompareAndSwapSessionState_Atomic(t *testing.T) {
 	stale.LeaseVersion = 99
 	desired := *current
 	desired.LeaseVersion = 100
-	snapshotStale := &messageloop.ClusterSessionSnapshot{SessionID: "sess-atomic", UserID: "user-stale"}
+	snapshotStale := &clusterpkg.ClusterSessionSnapshot{SessionID: "sess-atomic", UserID: "user-stale"}
 	ok, err = cas.CompareAndSwapSessionState(ctx, &stale, &desired, snapshotStale, 10*time.Minute, 24*time.Hour)
 	require.NoError(t, err)
 	require.False(t, ok)
@@ -429,7 +434,7 @@ func TestClusterRedis_CompareAndSwapSessionState_Atomic(t *testing.T) {
 	absentLease := *leaseV1
 	absentLease.SessionID = "sess-atomic-missing"
 	ok, err = cas.CompareAndSwapSessionState(ctx, &absentLease, &absentLease,
-		&messageloop.ClusterSessionSnapshot{SessionID: "sess-atomic-missing"}, 10*time.Minute, 24*time.Hour)
+		&clusterpkg.ClusterSessionSnapshot{SessionID: "sess-atomic-missing"}, 10*time.Minute, 24*time.Hour)
 	require.NoError(t, err)
 	require.False(t, ok, "expected non-nil requires the key to exist")
 	missing, err := directory.GetSessionSnapshot(ctx, "sess-atomic-missing")
@@ -443,13 +448,13 @@ func TestClusterRedis_ProjectionRepairRestoresChannels(t *testing.T) {
 
 	node := newClusterRedisTestNode(t, ctx, redisCfg, "node-a")
 	transport := &integrationCapturingTransport{}
-	client, _, err := messageloop.NewClient(ctx, node, transport, messageloop.JSONMarshaler{})
+	client, _, err := runtime.NewClient(ctx, node, transport, shared.JSONMarshaler{})
 	require.NoError(t, err)
 	client.ForceTestIDs("sess-repair", "user-repair", "client-repair")
 	require.NoError(t, node.AddClient(client))
 
 	channel := "cluster-repair-" + uuid.NewString()
-	require.NoError(t, node.AddSubscription(ctx, channel, messageloop.NewSubscriber(client, false)))
+	require.NoError(t, node.AddSubscription(ctx, channel, session.NewSubscriber(client, false)))
 
 	require.Eventually(t, func() bool {
 		channels, err := node.Channels(ctx)
@@ -495,25 +500,25 @@ func TestClusterRedis_SurveyAggregatesAcrossNodes(t *testing.T) {
 	nodeB := newClusterRedisTestNode(t, ctx, redisCfg, "node-b")
 
 	transportA := &integrationCapturingTransport{}
-	clientA, _, err := messageloop.NewClient(ctx, nodeA, transportA, messageloop.JSONMarshaler{})
+	clientA, _, err := runtime.NewClient(ctx, nodeA, transportA, shared.JSONMarshaler{})
 	require.NoError(t, err)
 	clientA.ForceTestIDs("sess-survey-a", "user-survey-a", "client-survey-a")
 	require.NoError(t, nodeA.AddClient(clientA))
 
 	transportB := &integrationCapturingTransport{}
-	clientB, _, err := messageloop.NewClient(ctx, nodeB, transportB, messageloop.JSONMarshaler{})
+	clientB, _, err := runtime.NewClient(ctx, nodeB, transportB, shared.JSONMarshaler{})
 	require.NoError(t, err)
 	clientB.ForceTestIDs("sess-survey-b", "user-survey-b", "client-survey-b")
 	require.NoError(t, nodeB.AddClient(clientB))
 
 	channel := "cluster-survey-" + uuid.NewString()
-	require.NoError(t, nodeA.AddSubscription(ctx, channel, messageloop.NewSubscriber(clientA, false)))
-	require.NoError(t, nodeB.AddSubscription(ctx, channel, messageloop.NewSubscriber(clientB, false)))
+	require.NoError(t, nodeA.AddSubscription(ctx, channel, session.NewSubscriber(clientA, false)))
+	require.NoError(t, nodeB.AddSubscription(ctx, channel, session.NewSubscriber(clientB, false)))
 	transportA.clearMessages()
 	transportB.clearMessages()
 
 	var (
-		surveyResults []*messageloop.SurveyResult
+		surveyResults []*survey.SurveyResult
 		surveyErr     error
 	)
 	done := make(chan struct{})
@@ -533,7 +538,7 @@ func TestClusterRedis_SurveyAggregatesAcrossNodes(t *testing.T) {
 
 	require.NoError(t, surveyErr)
 	require.Len(t, surveyResults, 2)
-	resultsBySession := make(map[string]*messageloop.SurveyResult, len(surveyResults))
+	resultsBySession := make(map[string]*survey.SurveyResult, len(surveyResults))
 	for _, result := range surveyResults {
 		resultsBySession[result.SessionID] = result
 	}
@@ -545,7 +550,7 @@ func TestClusterRedis_SurveyAggregatesAcrossNodes(t *testing.T) {
 	require.Equal(t, []byte("reply-b"), resultsBySession["sess-survey-b"].Payload)
 }
 
-func respondToSurvey(t *testing.T, ctx context.Context, client *messageloop.Client, transport *integrationCapturingTransport, payload []byte) {
+func respondToSurvey(t *testing.T, ctx context.Context, client *session.Client, transport *integrationCapturingTransport, payload []byte) {
 	t.Helper()
 
 	var surveyRequest *clientpb.SurveyRequest
@@ -555,7 +560,7 @@ func respondToSurvey(t *testing.T, ctx context.Context, client *messageloop.Clie
 			return false
 		}
 		outbound := &clientpb.OutboundMessage{}
-		if err := (messageloop.JSONMarshaler{}).Unmarshal(message, outbound); err != nil {
+		if err := (shared.JSONMarshaler{}).Unmarshal(message, outbound); err != nil {
 			return false
 		}
 		surveyRequest = outbound.GetSurveyRequest()
@@ -616,34 +621,34 @@ func requireClusterRedis(t *testing.T, db int) config.RedisConfig {
 
 // newClusterRedisTestNodeWithConfig builds a Redis-backed cluster node with
 // a caller-supplied server config (policy/ACL overrides for client survey).
-func newClusterRedisTestNodeWithConfig(t *testing.T, parent context.Context, redisCfg config.RedisConfig, nodeID string, cfg *config.Server) *messageloop.Node {
+func newClusterRedisTestNodeWithConfig(t *testing.T, parent context.Context, redisCfg config.RedisConfig, nodeID string, cfg *config.Server) *runtime.Node {
 	t.Helper()
 
-	node := messageloop.NewNode(cfg)
+	node := runtime.NewNode(cfg)
 	node.SetBroker(redisbroker.New(redisCfg))
 	node.SetPresenceStore(redisbroker.NewPresenceStore(redisCfg))
 
 	// The redis session directory allocates the node epoch (KD-K27); the
 	// first NewCluster only exists to resolve the incarnation used to wire
 	// the bus / lease manager below.
-	clusterDeps := messageloop.ClusterDependencies{}
+	clusterDeps := runtime.ClusterDependencies{}
 	clusterDeps.SessionDirectory = redisbroker.NewSessionDirectory(redisCfg)
 
-	cluster, err := messageloop.NewCluster(messageloop.ClusterOptions{Enabled: true, NodeID: nodeID, Backend: "redis"}, messageloop.ClusterDependencies{
+	cluster, err := runtime.NewCluster(clusterpkg.ClusterOptions{Enabled: true, NodeID: nodeID, Backend: "redis"}, runtime.ClusterDependencies{
 		SessionDirectory: clusterDeps.SessionDirectory,
 	})
 	require.NoError(t, err)
 
 	clusterDeps.CommandBus = redisbroker.NewClusterCommandBus(redisCfg, cluster.NodeID(), cluster.IncarnationID(), testClusterHMACKey)
 	clusterDeps.QueryStore = redisbroker.NewClusterQueryStore(redisCfg, cluster.NodeID(), cluster.IncarnationID())
-	clusterDeps.NodeLeaseManager = messageloop.NewClusterNodeLeaseManager(clusterDeps.SessionDirectory, messageloop.ClusterNodeLeaseManagerConfig{
+	clusterDeps.NodeLeaseManager = runtime.NewClusterNodeLeaseManager(clusterDeps.SessionDirectory, runtime.ClusterNodeLeaseManagerConfig{
 		NodeID:        cluster.NodeID(),
 		IncarnationID: cluster.IncarnationID(),
 	})
-	clusterDeps.Repairer = messageloop.NewClusterRepairer(node, clusterDeps.SessionDirectory, clusterDeps.QueryStore, messageloop.ClusterRepairerConfig{Interval: 200 * time.Millisecond, MembershipInterval: 200 * time.Millisecond})
+	clusterDeps.Repairer = runtime.NewClusterRepairer(node, clusterDeps.SessionDirectory, clusterDeps.QueryStore, runtime.ClusterRepairerConfig{Interval: 200 * time.Millisecond, MembershipInterval: 200 * time.Millisecond})
 	clusterDeps.CommandBus.SetHandler(node.ClusterCommandHandler())
 
-	cluster, err = messageloop.NewCluster(messageloop.ClusterOptions{
+	cluster, err = runtime.NewCluster(clusterpkg.ClusterOptions{
 		Enabled:       true,
 		NodeID:        cluster.NodeID(),
 		Backend:       cluster.Backend(),
@@ -661,7 +666,7 @@ func newClusterRedisTestNodeWithConfig(t *testing.T, parent context.Context, red
 	return node
 }
 
-func newClusterRedisTestNode(t *testing.T, parent context.Context, redisCfg config.RedisConfig, nodeID string) *messageloop.Node {
+func newClusterRedisTestNode(t *testing.T, parent context.Context, redisCfg config.RedisConfig, nodeID string) *runtime.Node {
 	t.Helper()
 
 	// Cluster test nodes require authentication: session takeover/resume is
@@ -675,7 +680,7 @@ func TestClusterRedis_NodeRun_WaitsForBrokerReady(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	node.SetBroker(redisbroker.New(redisCfg))
 
 	done := make(chan error, 1)
@@ -715,7 +720,7 @@ func integrationPresenceEventsOf(transport *integrationCapturingTransport) []*cl
 	var events []*clientpb.PresenceEvent
 	for _, data := range messages {
 		var out clientpb.OutboundMessage
-		if err := (messageloop.JSONMarshaler{}).Unmarshal(data, &out); err != nil {
+		if err := (shared.JSONMarshaler{}).Unmarshal(data, &out); err != nil {
 			continue
 		}
 		if evt := out.GetPresenceEvent(); evt != nil {
@@ -734,7 +739,7 @@ func integrationPublicationCount(transport *integrationCapturingTransport) int {
 	count := 0
 	for _, data := range messages {
 		var out clientpb.OutboundMessage
-		if err := (messageloop.JSONMarshaler{}).Unmarshal(data, &out); err != nil {
+		if err := (shared.JSONMarshaler{}).Unmarshal(data, &out); err != nil {
 			continue
 		}
 		if out.GetPublication() != nil {
@@ -754,8 +759,8 @@ func TestPresence_OccupancyAcrossRedisExactlyOne(t *testing.T) {
 	redisCfg := requireClusterRedis(t, clusterRedisIntegrationDB)
 	ctx := context.Background()
 
-	newNode := func() *messageloop.Node {
-		node := messageloop.NewNode(nil)
+	newNode := func() *runtime.Node {
+		node := runtime.NewNode(nil)
 		node.SetBroker(redisbroker.New(redisCfg))
 		node.SetPresenceStore(redisbroker.NewPresenceStore(redisCfg))
 		nodeCtx, cancel := context.WithCancel(ctx)
@@ -767,10 +772,10 @@ func TestPresence_OccupancyAcrossRedisExactlyOne(t *testing.T) {
 	node2 := newNode()
 
 	const ch = "emit.redis.ch"
-	connectAndSubscribeIntegration := func(t *testing.T, node *messageloop.Node, clientID string) (*messageloop.Client, *integrationCapturingTransport) {
+	connectAndSubscribeIntegration := func(t *testing.T, node *runtime.Node, clientID string) (*session.Client, *integrationCapturingTransport) {
 		t.Helper()
 		transport := &integrationCapturingTransport{}
-		client, _, err := messageloop.NewClient(ctx, node, transport, messageloop.JSONMarshaler{})
+		client, _, err := runtime.NewClient(ctx, node, transport, shared.JSONMarshaler{})
 		require.NoError(t, err)
 		require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
 			Id:       "connect-" + clientID,
@@ -832,13 +837,13 @@ func TestAdmin_DisconnectUsersAcrossNodes(t *testing.T) {
 	const userID = "cross-node-user"
 
 	transportA := &integrationCapturingTransport{}
-	clientA, _, err := messageloop.NewClient(ctx, nodeA, transportA, messageloop.JSONMarshaler{})
+	clientA, _, err := runtime.NewClient(ctx, nodeA, transportA, shared.JSONMarshaler{})
 	require.NoError(t, err)
 	clientA.ForceTestIDs("sess-user-a", userID, "client-a")
 	require.NoError(t, nodeA.AddClient(clientA))
 
 	transportB := &integrationCapturingTransport{}
-	clientB, _, err := messageloop.NewClient(ctx, nodeB, transportB, messageloop.JSONMarshaler{})
+	clientB, _, err := runtime.NewClient(ctx, nodeB, transportB, shared.JSONMarshaler{})
 	require.NoError(t, err)
 	clientB.ForceTestIDs("sess-user-b", userID, "client-b")
 	require.NoError(t, nodeB.AddClient(clientB))
@@ -894,11 +899,11 @@ func TestClusterRedis_ResumeUserChangeMigratesIndex(t *testing.T) {
 	nodeB := newClusterRedisTestNode(t, ctx, redisCfg, "node-b")
 	authOld := &integrationAuthProxy{userID: "user-old"}
 	authNew := &integrationAuthProxy{userID: "user-new"}
-	require.NoError(t, nodeA.AddProxy(authOld, "", messageloop.SystemMethodAuthenticate))
-	require.NoError(t, nodeB.AddProxy(authNew, "", messageloop.SystemMethodAuthenticate))
+	require.NoError(t, nodeA.AddProxy(authOld, "", session.SystemMethodAuthenticate))
+	require.NoError(t, nodeB.AddProxy(authNew, "", session.SystemMethodAuthenticate))
 
 	oldTransport := &integrationCapturingTransport{}
-	oldClient, _, err := messageloop.NewClient(ctx, nodeA, oldTransport, messageloop.JSONMarshaler{})
+	oldClient, _, err := runtime.NewClient(ctx, nodeA, oldTransport, shared.JSONMarshaler{})
 	require.NoError(t, err)
 	connectMsg := &clientpb.InboundMessage{
 		Id: "connect-old",
@@ -922,7 +927,7 @@ func TestClusterRedis_ResumeUserChangeMigratesIndex(t *testing.T) {
 	// the inherited lease user, and the next lease write must migrate the
 	// index membership.
 	newTransport := &integrationCapturingTransport{}
-	newClient, _, err := messageloop.NewClient(ctx, nodeB, newTransport, messageloop.JSONMarshaler{})
+	newClient, _, err := runtime.NewClient(ctx, nodeB, newTransport, shared.JSONMarshaler{})
 	require.NoError(t, err)
 	resumeMsg := &clientpb.InboundMessage{
 		Id: "connect-new",

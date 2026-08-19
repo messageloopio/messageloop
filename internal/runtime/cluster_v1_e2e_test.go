@@ -1,4 +1,4 @@
-package messageloop_test
+package runtime_test
 
 import (
 	"context"
@@ -6,7 +6,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/internal/runtime"
+	"github.com/messageloopio/messageloop/internal/session"
+	"github.com/messageloopio/messageloop/internal/stream"
+	"github.com/messageloopio/messageloop/shared"
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/pkg/redisbroker"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
@@ -35,8 +38,8 @@ func TestPresence_OccupancyWildcardAcrossNodes(t *testing.T) {
 	redisCfg := requireClusterRedis(t, clusterRedisIntegrationDB)
 	ctx := context.Background()
 
-	newNode := func() *messageloop.Node {
-		node := messageloop.NewNode(nil)
+	newNode := func() *runtime.Node {
+		node := runtime.NewNode(nil)
 		node.SetBroker(redisbroker.New(redisCfg))
 		node.SetPresenceStore(redisbroker.NewPresenceStore(redisCfg))
 		nodeCtx, cancel := context.WithCancel(ctx)
@@ -50,10 +53,10 @@ func TestPresence_OccupancyWildcardAcrossNodes(t *testing.T) {
 	const pattern = "im.**"
 	const exact = "im.room.1"
 
-	connectAndSubscribe := func(t *testing.T, node *messageloop.Node, clientID, channel string) (*messageloop.Client, *integrationCapturingTransport) {
+	connectAndSubscribe := func(t *testing.T, node *runtime.Node, clientID, channel string) (*session.Client, *integrationCapturingTransport) {
 		t.Helper()
 		transport := &integrationCapturingTransport{}
-		client, _, err := messageloop.NewClient(ctx, node, transport, messageloop.JSONMarshaler{})
+		client, _, err := runtime.NewClient(ctx, node, transport, shared.JSONMarshaler{})
 		require.NoError(t, err)
 		require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
 			Id:       "connect-" + clientID,
@@ -125,20 +128,20 @@ func TestSubscribe_RecoverRedisHistory(t *testing.T) {
 	redisCfg := requireClusterRedis(t, clusterRedisIntegrationDB)
 	ctx := context.Background()
 
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	node.SetBroker(redisbroker.New(redisCfg))
 	nodeCtx, cancel := context.WithCancel(ctx)
 	t.Cleanup(func() { cancel(); node.Shutdown() })
 	require.NoError(t, node.Run(nodeCtx))
 
 	channel := "recover." + uuid.NewString()
-	first, err := node.Publish(channel, &messageloop.Publication{Payload: []byte("m1"), Kind: messageloop.PayloadKindText})
+	first, err := node.Publish(channel, &stream.Publication{Payload: []byte("m1"), Kind: stream.PayloadKindText})
 	require.NoError(t, err)
 	require.NotZero(t, first, "redis history must assign a real offset")
-	second, err := node.Publish(channel, &messageloop.Publication{Payload: []byte("m2"), Kind: messageloop.PayloadKindText})
+	second, err := node.Publish(channel, &stream.Publication{Payload: []byte("m2"), Kind: stream.PayloadKindText})
 	require.NoError(t, err)
 	require.Greater(t, second, first)
-	third, err := node.Publish(channel, &messageloop.Publication{Payload: []byte("m3"), Kind: messageloop.PayloadKindText})
+	third, err := node.Publish(channel, &stream.Publication{Payload: []byte("m3"), Kind: stream.PayloadKindText})
 	require.NoError(t, err)
 
 	epocher, ok := node.Broker().(interface{ Epoch() string })
@@ -146,7 +149,7 @@ func TestSubscribe_RecoverRedisHistory(t *testing.T) {
 	require.NotEmpty(t, epocher.Epoch())
 
 	transport := &integrationCapturingTransport{}
-	client, _, err := messageloop.NewClient(ctx, node, transport, messageloop.JSONMarshaler{})
+	client, _, err := runtime.NewClient(ctx, node, transport, shared.JSONMarshaler{})
 	require.NoError(t, err)
 	client.ForceTestIDs("sess-recover", "user-recover", "client-recover")
 	require.NoError(t, node.AddClient(client))
@@ -214,18 +217,18 @@ func TestClientSurvey_AggregatesAcrossRedisNodes(t *testing.T) {
 	channel := "csurvey." + uuid.NewString()
 
 	transportA := &integrationCapturingTransport{}
-	clientA, _, err := messageloop.NewClient(ctx, nodeA, transportA, messageloop.JSONMarshaler{})
+	clientA, _, err := runtime.NewClient(ctx, nodeA, transportA, shared.JSONMarshaler{})
 	require.NoError(t, err)
 	clientA.ForceTestIDs("sess-csurvey-a", "user-csurvey-a", "client-a")
 	require.NoError(t, nodeA.AddClient(clientA))
-	require.NoError(t, nodeA.AddSubscription(ctx, channel, messageloop.NewSubscriber(clientA, false)))
+	require.NoError(t, nodeA.AddSubscription(ctx, channel, session.NewSubscriber(clientA, false)))
 
 	transportB := &integrationCapturingTransport{}
-	clientB, _, err := messageloop.NewClient(ctx, nodeB, transportB, messageloop.JSONMarshaler{})
+	clientB, _, err := runtime.NewClient(ctx, nodeB, transportB, shared.JSONMarshaler{})
 	require.NoError(t, err)
 	clientB.ForceTestIDs("sess-csurvey-b", "user-csurvey-b", "client-b")
 	require.NoError(t, nodeB.AddClient(clientB))
-	require.NoError(t, nodeB.AddSubscription(ctx, channel, messageloop.NewSubscriber(clientB, false)))
+	require.NoError(t, nodeB.AddSubscription(ctx, channel, session.NewSubscriber(clientB, false)))
 
 	transportA.clearMessages()
 	transportB.clearMessages()
@@ -290,7 +293,7 @@ func waitForSurveyRequestIntegration(t *testing.T, transport *integrationCapturi
 			return false
 		}
 		out := &clientpb.OutboundMessage{}
-		if err := (messageloop.JSONMarshaler{}).Unmarshal(msg, out); err != nil {
+		if err := (shared.JSONMarshaler{}).Unmarshal(msg, out); err != nil {
 			return false
 		}
 		req = out.GetSurveyRequest()
@@ -309,7 +312,7 @@ func waitForSurveyResultIntegration(t *testing.T, transport *integrationCapturin
 		transport.mu.Unlock()
 		for _, data := range messages {
 			var out clientpb.OutboundMessage
-			if err := (messageloop.JSONMarshaler{}).Unmarshal(data, &out); err != nil {
+			if err := (shared.JSONMarshaler{}).Unmarshal(data, &out); err != nil {
 				continue
 			}
 			if result = out.GetSurveyResult(); result != nil {
@@ -338,7 +341,7 @@ func integrationReplaysOf(t *testing.T, transport *integrationCapturingTransport
 	transport.mu.Unlock()
 	for _, data := range frames {
 		out := &clientpb.OutboundMessage{}
-		require.NoError(t, (messageloop.JSONMarshaler{}).Unmarshal(data, out))
+		require.NoError(t, (shared.JSONMarshaler{}).Unmarshal(data, out))
 		pub := out.GetPublication()
 		if pub == nil {
 			continue
@@ -365,7 +368,7 @@ func integrationRecoverCompleteFor(t *testing.T, transport *integrationCapturing
 	transport.mu.Unlock()
 	for _, data := range frames {
 		out := &clientpb.OutboundMessage{}
-		require.NoError(t, (messageloop.JSONMarshaler{}).Unmarshal(data, out))
+		require.NoError(t, (shared.JSONMarshaler{}).Unmarshal(data, out))
 		if rc := out.GetRecoverComplete(); rc != nil && rc.GetChannel() == channel {
 			return rc
 		}

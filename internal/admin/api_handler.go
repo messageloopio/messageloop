@@ -6,7 +6,8 @@ import (
 	"time"
 
 	"github.com/lynx-go/x/log"
-	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/internal/runtime"
+	"github.com/messageloopio/messageloop/internal/occupancy"
 	"github.com/messageloopio/messageloop/internal/authz"
 	"github.com/messageloopio/messageloop/internal/protocol"
 	"github.com/messageloopio/messageloop/internal/stream"
@@ -19,10 +20,10 @@ import (
 
 type apiServiceHandler struct {
 	serverv2.UnimplementedAPIServiceServer
-	node *messageloop.Node
+	node *runtime.Node
 }
 
-func NewAPIServiceHandler(node *messageloop.Node) serverv2.APIServiceServer {
+func NewAPIServiceHandler(node *runtime.Node) serverv2.APIServiceServer {
 	return &apiServiceHandler{node: node}
 }
 
@@ -400,7 +401,7 @@ func (h *apiServiceHandler) GetPresence(ctx context.Context, req *serverv2.GetPr
 	// channel policy cap like the client path; with the bit it stays full
 	// (PR-KA-A4 §7).
 	if h.node.AdminCapabilities()&authz.CapPresenceLargeSnapshot == 0 {
-		limit := messageloop.MaxPresenceSnapshotClients
+		limit := occupancy.MaxPresenceSnapshotClients
 		if pol := h.node.ChannelPolicy(req.Channel); pol.PresenceSnapshotLimit > 0 {
 			limit = pol.PresenceSnapshotLimit
 		}

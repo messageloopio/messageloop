@@ -4,7 +4,7 @@ import (
 	"net"
 	"testing"
 
-	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/config"
 	"github.com/stretchr/testify/require"
 )
@@ -24,7 +24,7 @@ func TestPrepareGRPCServers_CleansUpClientListenerOnAdminFailure(t *testing.T) {
 		},
 	}
 
-	_, err = prepareGRPCServers(cfg, messageloop.NewNode(nil))
+	_, err = prepareGRPCServers(cfg, runtime.NewNode(nil))
 	require.Error(t, err)
 
 	rebound, err := net.Listen("tcp", addr)
@@ -39,6 +39,6 @@ func TestPrepareGRPCServers_RequiresAdminAddr(t *testing.T) {
 		},
 	}
 
-	_, err := prepareGRPCServers(cfg, messageloop.NewNode(nil))
+	_, err := prepareGRPCServers(cfg, runtime.NewNode(nil))
 	require.EqualError(t, err, "grpc-admin-server addr is required")
 }

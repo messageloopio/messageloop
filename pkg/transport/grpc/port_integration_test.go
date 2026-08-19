@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/pkg/transport/grpc"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
@@ -77,7 +77,7 @@ func connectClientStream(t *testing.T, conn *googlegrpc.ClientConn, clientID str
 
 func TestGRPC_ClientPort_MessageLoopConnects(t *testing.T) {
 	ctx := t.Context()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	require.NoError(t, node.Run(ctx))
 	t.Cleanup(node.Shutdown)
 
@@ -92,7 +92,7 @@ func TestGRPC_ClientPort_MessageLoopConnects(t *testing.T) {
 
 func TestGRPC_ClientPort_DoesNotExposeAdminAPI(t *testing.T) {
 	ctx := t.Context()
-	node := messageloop.NewNode(nil)
+	node := runtime.NewNode(nil)
 	require.NoError(t, node.Run(ctx))
 	t.Cleanup(node.Shutdown)
 

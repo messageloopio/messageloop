@@ -1,4 +1,4 @@
-package messageloop
+package runtime
 
 import (
 	"context"
@@ -12,6 +12,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
 	"github.com/messageloopio/messageloop/config"
+	"github.com/messageloopio/messageloop/internal/occupancy"
+	"github.com/messageloopio/messageloop/internal/session"
 	"github.com/messageloopio/messageloop/proxy"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
@@ -77,7 +79,7 @@ func NewNode(cfg *config.Server) *Node {
 	}
 
 	node := &Node{
-		hub:         newHub(0, limits.MaxConnectionsPerUser),
+		hub:         session.NewHub(0, limits.MaxConnectionsPerUser),
 		rpcTimeout:  proxy.DefaultRPCTimeout,
 		limits:      limits,
 		surveys:     make(map[string]*Survey),
@@ -1149,8 +1151,8 @@ func presenceChannel(ch string) string {
 // Kept for the legacy companion path (legacy_presence_channel=true) and for
 // direct callers; first-class occupancy flows over the live bus instead.
 func (n *Node) PublishPresenceJoin(channel, clientID, userID string) {
-	evt := newPresenceEvent("join", channel, clientID, userID)
-	data, err := marshalPresenceEvent(evt)
+	evt := occupancy.NewPresenceEvent("join", channel, clientID, userID)
+	data, err := occupancy.MarshalPresenceEvent(evt)
 	if err != nil {
 		return
 	}
@@ -1169,8 +1171,8 @@ func (n *Node) PublishPresenceJoin(channel, clientID, userID string) {
 // Presence events are transient: they are delivered in real time but never
 // written to broker history, so they do not leak into the recovery stream.
 func (n *Node) PublishPresenceLeave(channel, clientID, userID string) {
-	evt := newPresenceEvent("leave", channel, clientID, userID)
-	data, err := marshalPresenceEvent(evt)
+	evt := occupancy.NewPresenceEvent("leave", channel, clientID, userID)
+	data, err := occupancy.MarshalPresenceEvent(evt)
 	if err != nil {
 		return
 	}

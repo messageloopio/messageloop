@@ -5,7 +5,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/internal/session"
+	"github.com/messageloopio/messageloop/internal/protocol"
 )
 
 // msgTypeFromSubprotocol returns the WebSocket message type for the given negotiated subprotocol.
@@ -53,7 +54,7 @@ func (t *Transport) WriteMany(msgs ...[]byte) error {
 	return nil
 }
 
-func (t *Transport) Close(disconnect messageloop.Disconnect) error {
+func (t *Transport) Close(disconnect protocol.Disconnect) error {
 	// Always close the underlying connection, even when the peer has already
 	// torn the socket down (e.g. RST): WriteControl and the read loop below
 	// fail early on such sockets, and skipping conn.Close() would leak the fd.
@@ -90,13 +91,13 @@ func (t *Transport) Close(disconnect messageloop.Disconnect) error {
 	return nil
 }
 
-var _ messageloop.Transport = (*Transport)(nil)
+var _ session.Transport = (*Transport)(nil)
 
 // closeCode returns the WebSocket close code for the given Disconnect.
 // A zero Code is reserved by RFC 6455 ("no status code") but is used for
 // normal closures by the server core, so it falls back to 1000
 // (CloseNormalClosure) to keep the reason string deliverable.
-func closeCode(disconnect messageloop.Disconnect) int {
+func closeCode(disconnect protocol.Disconnect) int {
 	if disconnect.Code == 0 {
 		return websocket.CloseNormalClosure
 	}

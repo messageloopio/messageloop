@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/internal/protocol"
 	"github.com/stretchr/testify/require"
 )
 
@@ -70,7 +70,7 @@ func TestTransport_CloseClosesFDWhenPeerRST(t *testing.T) {
 
 	// Close must close the client-side fd on every path, including the
 	// WriteControl failure the reset socket triggers.
-	_ = transport.Close(messageloop.Disconnect{Code: 3500, Reason: "bye"})
+	_ = transport.Close(protocol.Disconnect{Code: 3500, Reason: "bye"})
 
 	// Reading must return net.ErrClosed — not a fresh "connection reset by
 	// peer" from an fd that is still open.
@@ -117,14 +117,14 @@ func websocketAccept(key string) string {
 }
 
 func TestCloseCode_FallsBackToNormalClosureWhenZero(t *testing.T) {
-	got := closeCode(messageloop.Disconnect{})
+	got := closeCode(protocol.Disconnect{})
 	if got != websocket.CloseNormalClosure {
 		t.Errorf("closeCode(Disconnect{}) = %d, want %d", got, websocket.CloseNormalClosure)
 	}
 }
 
 func TestCloseCode_PreservesNonZeroCode(t *testing.T) {
-	got := closeCode(messageloop.Disconnect{Code: 3500, Reason: "invalid token"})
+	got := closeCode(protocol.Disconnect{Code: 3500, Reason: "invalid token"})
 	if got != 3500 {
 		t.Errorf("closeCode() = %d, want 3500", got)
 	}

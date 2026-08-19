@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/internal/protocol"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"github.com/stretchr/testify/require"
@@ -144,8 +144,8 @@ func TestTransport_ConcurrentWriteManyAndClose(t *testing.T) {
 		}()
 	}
 	time.Sleep(50 * time.Millisecond)
-	require.NoError(t, transport.Close(messageloop.Disconnect{Code: 3500, Reason: "test disconnect"}))
-	require.NoError(t, transport.Close(messageloop.Disconnect{Code: 3501, Reason: "second close is a no-op"}))
+	require.NoError(t, transport.Close(protocol.Disconnect{Code: 3500, Reason: "test disconnect"}))
+	require.NoError(t, transport.Close(protocol.Disconnect{Code: 3501, Reason: "second close is a no-op"}))
 	close(stop)
 	wg.Wait()
 
@@ -187,7 +187,7 @@ func TestTransport_ConcurrentWriteManyAndClose_DefaultWriteTimeout(t *testing.T)
 		}()
 	}
 	time.Sleep(50 * time.Millisecond)
-	require.NoError(t, transport.Close(messageloop.Disconnect{Code: 3500, Reason: "test disconnect"}))
+	require.NoError(t, transport.Close(protocol.Disconnect{Code: 3500, Reason: "test disconnect"}))
 	close(stop)
 	wg.Wait()
 
@@ -217,7 +217,7 @@ func TestTransport_WriteManyTimesOutWhenWorkerBlocked(t *testing.T) {
 	}
 
 	stream.release()
-	require.NoError(t, transport.Close(messageloop.Disconnect{Code: 3500, Reason: "test disconnect"}))
+	require.NoError(t, transport.Close(protocol.Disconnect{Code: 3500, Reason: "test disconnect"}))
 	require.ErrorIs(t, transport.WriteMany([]byte("after close")), ErrTransportClosed)
 }
 
@@ -285,7 +285,7 @@ func TestTransport_SlowEnqueueGetsFreshAckBudget(t *testing.T) {
 		}
 	}
 
-	require.NoError(t, transport.Close(messageloop.Disconnect{Code: 3500, Reason: "test disconnect"}))
+	require.NoError(t, transport.Close(protocol.Disconnect{Code: 3500, Reason: "test disconnect"}))
 	require.ErrorIs(t, transport.WriteMany([]byte("after close")), ErrTransportClosed)
 	require.False(t, stream.hasConcurrentSend(), "detected concurrent SendMsg on the gRPC stream")
 }
@@ -320,7 +320,7 @@ func TestTransport_CloseWithFullQueueReturnsPromptly(t *testing.T) {
 	// close and return promptly (disconnectFrameTimeout, not the 10s write
 	// timeout).
 	closeStart := time.Now()
-	closeErr := transport.Close(messageloop.Disconnect{Code: 3512, Reason: "slow consumer"})
+	closeErr := transport.Close(protocol.Disconnect{Code: 3512, Reason: "slow consumer"})
 	require.Less(t, time.Since(closeStart), 5*time.Second, "Close must not block for a full write timeout")
 	require.Error(t, closeErr, "disconnect frame could not be enqueued with an occupied slot")
 
@@ -350,7 +350,7 @@ func TestTransport_CloseCarriesDisconnectCode(t *testing.T) {
 	stream := newFakeBidiStream()
 	transport := newGRPCTransport(stream, "fake-addr", 5*time.Second)
 
-	require.NoError(t, transport.Close(messageloop.Disconnect{Code: 3512, Reason: "slow consumer"}))
+	require.NoError(t, transport.Close(protocol.Disconnect{Code: 3512, Reason: "slow consumer"}))
 
 	sent := stream.sentMessages()
 	var errMsg *sharedpb.Error

@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/internal/runtime"
+	"github.com/messageloopio/messageloop/internal/session"
+	"github.com/messageloopio/messageloop/internal/protocol"
+	"github.com/messageloopio/messageloop/shared"
 	clusterpkg "github.com/messageloopio/messageloop/internal/cluster"
 )
 
 // World is the deterministic two-node fencing fixture: nodes A and B are real
-// *messageloop.Node instances (running the production syncClusterSessionState
+// *runtime.Node instances (running the production syncClusterSessionState
 // / resumeRemoteSession / Fence paths) sharing one in-memory Directory and
 // one orchestrable Bus. Incarnation IDs are scripted (inc-a / inc-b), the
 // backend is memory, and no component is started, so no background goroutine
@@ -20,12 +23,12 @@ type World struct {
 	Dir   *Directory
 	Bus   *Bus
 
-	A *messageloop.Node
-	B *messageloop.Node
+	A *runtime.Node
+	B *runtime.Node
 
 	// RepairerA / RepairerB are the per-node cluster repairers built over the
 	// shared Directory. They are never started; tests drive membership beats
-	// explicitly (messageloop.SimMembershipOnce).
+	// explicitly (runtime.SimMembershipOnce).
 	RepairerA clusterpkg.ClusterRepairer
 	RepairerB clusterpkg.ClusterRepairer
 }
@@ -44,18 +47,18 @@ func NewWorld() *World {
 	return world
 }
 
-func (w *World) newNode(nodeID, incarnationID string) (*messageloop.Node, clusterpkg.ClusterRepairer) {
-	node := messageloop.NewNode(nil)
-	repairer := messageloop.NewClusterRepairer(node, w.Dir, nil, messageloop.ClusterRepairerConfig{
+func (w *World) newNode(nodeID, incarnationID string) (*runtime.Node, clusterpkg.ClusterRepairer) {
+	node := runtime.NewNode(nil)
+	repairer := runtime.NewClusterRepairer(node, w.Dir, nil, runtime.ClusterRepairerConfig{
 		NodeID:        nodeID,
 		IncarnationID: incarnationID,
 	})
-	cluster, err := messageloop.NewCluster(messageloop.ClusterOptions{
+	cluster, err := runtime.NewCluster(clusterpkg.ClusterOptions{
 		Enabled:       true,
 		NodeID:        nodeID,
 		IncarnationID: incarnationID,
 		Backend:       "memory",
-	}, messageloop.ClusterDependencies{
+	}, runtime.ClusterDependencies{
 		SessionDirectory: w.Dir,
 		CommandBus:       w.Bus,
 		Repairer:         repairer,
@@ -72,8 +75,8 @@ func (w *World) newNode(nodeID, incarnationID string) (*messageloop.Node, cluste
 // its session lease: NewClient + ForceTestIDs + AddClient (whose cluster sync
 // does the first CAS(nil) claim). It fails when the Directory rejects the
 // claim (the session is already owned elsewhere).
-func (w *World) AddClient(node *messageloop.Node, sessionID, userID, clientID string) (*messageloop.Session, error) {
-	client, _, err := messageloop.NewClient(context.Background(), node, noopTransport{}, messageloop.JSONMarshaler{})
+func (w *World) AddClient(node *runtime.Node, sessionID, userID, clientID string) (*session.Session, error) {
+	client, _, err := runtime.NewClient(context.Background(), node, noopTransport{}, shared.JSONMarshaler{})
 	if err != nil {
 		return nil, err
 	}
@@ -86,9 +89,9 @@ func (w *World) AddClient(node *messageloop.Node, sessionID, userID, clientID st
 
 // NewResumeClient creates a fresh, unattached client on node: the inbound
 // connection a cross-node resume would arrive on. Hand it to
-// messageloop.SimResumeRemoteSession, then AttachResumed.
-func (w *World) NewResumeClient(node *messageloop.Node) (*messageloop.Session, error) {
-	client, _, err := messageloop.NewClient(context.Background(), node, noopTransport{}, messageloop.JSONMarshaler{})
+// runtime.SimResumeRemoteSession, then AttachResumed.
+func (w *World) NewResumeClient(node *runtime.Node) (*session.Session, error) {
+	client, _, err := runtime.NewClient(context.Background(), node, noopTransport{}, shared.JSONMarshaler{})
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +101,7 @@ func (w *World) NewResumeClient(node *messageloop.Node) (*messageloop.Session, e
 // AttachResumed attaches and registers a client after a successful
 // SimResumeRemoteSession, mirroring the production handleConnect commit: the
 // resumed session joins the hub and refreshes its (newly claimed) lease.
-func (w *World) AttachResumed(node *messageloop.Node, client *messageloop.Session, sessionID, userID, clientID string) error {
+func (w *World) AttachResumed(node *runtime.Node, client *session.Session, sessionID, userID, clientID string) error {
 	client.ForceTestIDs(sessionID, userID, clientID)
 	return node.AddClient(client)
 }
@@ -110,7 +113,7 @@ type noopTransport struct{}
 
 func (noopTransport) Write([]byte) error                 { return nil }
 func (noopTransport) WriteMany(...[]byte) error          { return nil }
-func (noopTransport) Close(messageloop.Disconnect) error { return nil }
+func (noopTransport) Close(protocol.Disconnect) error { return nil }
 func (noopTransport) RemoteAddr() string                 { return "sim" }
 
-var _ messageloop.Transport = noopTransport{}
+var _ session.Transport = noopTransport{}

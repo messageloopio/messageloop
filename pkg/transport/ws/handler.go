@@ -6,18 +6,20 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/lynx-go/x/log"
-	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/internal/runtime"
+	"github.com/messageloopio/messageloop/internal/session"
+	"github.com/messageloopio/messageloop/shared"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
 type Handler struct {
-	node     *messageloop.Node
+	node     *runtime.Node
 	opt      *Options
 	upgrader *websocket.Upgrader
 }
 
-func NewHandler(node *messageloop.Node, opt Options) *Handler {
+func NewHandler(node *runtime.Node, opt Options) *Handler {
 	handler := &Handler{
 		node: node,
 		opt:  &opt,
@@ -50,7 +52,7 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	marshaler := h.marshaler(subProtocol)
 	transport := newTransport(conn, msgTypeFromSubprotocol(subProtocol), h.opt.WriteTimeout)
 	ctx := r.Context()
-	client, closeFn, err := messageloop.NewClient(ctx, h.node, transport, marshaler, messageloop.WithProtocol("ws"))
+	client, closeFn, err := runtime.NewClient(ctx, h.node, transport, marshaler, session.WithProtocol("ws"))
 	if err != nil {
 		log.ErrorContext(r.Context(), "create client error", err)
 		// The connection is already upgraded; rw can no longer carry an HTTP
@@ -87,7 +89,7 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		msg := &clientpb.InboundMessage{}
 		if err := marshaler.Unmarshal(data, msg); err != nil {
 			log.ErrorContext(ctx, "decode client message error", err)
-			_ = client.Send(ctx, messageloop.MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
+			_ = client.Send(ctx, session.MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
 				out.Envelope = &clientpb.OutboundMessage_Error{
 					Error: &sharedpb.Error{
 						Code:    "BAD_REQUEST",
@@ -112,12 +114,12 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 // frames. Unknown subprotocols fall back to JSON rather than matching by
 // substring, so names containing "proto" cannot accidentally select the
 // protobuf marshaler.
-func (h *Handler) marshaler(subProtocol string) messageloop.Marshaler {
+func (h *Handler) marshaler(subProtocol string) shared.Marshaler {
 	switch subProtocol {
 	case "messageloop+proto":
-		return messageloop.ProtobufMarshaler{}
+		return shared.ProtobufMarshaler{}
 	default:
-		return messageloop.ProtoJSONMarshaler
+		return shared.ProtoJSONMarshaler
 	}
 }
 
