@@ -116,6 +116,59 @@ func websocketAccept(key string) string {
 	return base64.StdEncoding.EncodeToString(h.Sum(nil))
 }
 
+// TestTransport_CloseUnblocksReadLoop pins the single-reader contract: while
+// the handler's read loop is blocked in ReadMessage, Close must not read
+// frames itself (that raced with the loop under -race); closing the conn
+// unblocks the loop, and the peer still receives the close frame carrying the
+// disconnect code.
+func TestTransport_CloseUnblocksReadLoop(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	readErr := make(chan error, 1)
+	closeDone := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		transport := newTransport(conn, websocket.TextMessage, time.Second)
+		// The handler's read loop: the only reader on this connection.
+		go func() {
+			for {
+				if _, _, err := conn.ReadMessage(); err != nil {
+					readErr <- err
+					return
+				}
+			}
+		}()
+		// Let the read loop block in ReadMessage, then close concurrently.
+		time.Sleep(50 * time.Millisecond)
+		_ = transport.Close(protocol.Disconnect{Code: 3503, Reason: "shutdown"})
+		close(closeDone)
+	}))
+	defer srv.Close()
+
+	dialer := websocket.Dialer{}
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+	clientConn, _, err := dialer.Dial(wsURL, nil)
+	require.NoError(t, err)
+	defer func() { _ = clientConn.Close() }()
+
+	// The peer receives the close frame carrying the disconnect code.
+	_, _, err = clientConn.ReadMessage()
+	var closeErr *websocket.CloseError
+	require.ErrorAs(t, err, &closeErr)
+	require.Equal(t, 3503, closeErr.Code)
+
+	// The server read loop is unblocked by conn.Close.
+	select {
+	case err := <-readErr:
+		require.Error(t, err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("read loop stayed blocked after Close")
+	}
+	<-closeDone
+}
+
 func TestCloseCode_FallsBackToNormalClosureWhenZero(t *testing.T) {
 	got := closeCode(protocol.Disconnect{})
 	if got != websocket.CloseNormalClosure {

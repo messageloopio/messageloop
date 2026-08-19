@@ -475,6 +475,65 @@ func TestHub_BroadcastPublication(t *testing.T) {
 	}
 }
 
+// TestHub_BroadcastPublication_MixedEncodings covers the per-encoding
+// serialization of the broadcast path: subscribers sharing a marshaler receive
+// identical frame bytes (one marshal per encoding), and each frame decodes
+// correctly with its own encoding.
+func TestHub_BroadcastPublication_MixedEncodings(t *testing.T) {
+	h := newHub(0, 0)
+
+	newEncodedClient := func(sessionID string, m Marshaler) (*Session, *mockTransport) {
+		transport := &mockTransport{}
+		client, _, err := NewClient(context.Background(), newFakeRuntime(), transport, m)
+		require.NoError(t, err)
+		client.mu.Lock()
+		client.session = sessionID
+		client.user = "user-" + sessionID
+		client.client = "client-" + sessionID
+		client.mu.Unlock()
+		// Attach so the writer goroutine drains the send queue: the broadcast
+		// waits on each frame's done channel, so writes land synchronously.
+		require.NoError(t, client.Attach(client.attachment))
+		return client, transport
+	}
+
+	jsonClient1, jsonTransport1 := newEncodedClient("json-1", JSONMarshaler{})
+	jsonClient2, jsonTransport2 := newEncodedClient("json-2", JSONMarshaler{})
+	protoClient, protoTransport := newEncodedClient("proto-1", ProtobufMarshaler{})
+
+	for _, client := range []*Session{jsonClient1, jsonClient2, protoClient} {
+		_, _ = h.AddSub("test-channel", Subscriber{Session: client, Ephemeral: false})
+	}
+
+	pub := &Publication{
+		Channel: "test-channel",
+		Offset:  1,
+		Payload: []byte("test payload"),
+		Time:    time.Now().UnixMilli(),
+	}
+	require.NoError(t, h.BroadcastPublication("test-channel", pub))
+
+	// Each subscriber received exactly one frame.
+	require.Equal(t, 1, jsonTransport1.getMessageCount())
+	require.Equal(t, 1, jsonTransport2.getMessageCount())
+	require.Equal(t, 1, protoTransport.getMessageCount())
+
+	// Subscribers with the same encoding share identical frame bytes.
+	assert.Equal(t, jsonTransport1.getMessage(0), jsonTransport2.getMessage(0))
+
+	// Each frame decodes with its own encoding and carries the publication.
+	var jsonOut, protoOut clientpb.OutboundMessage
+	require.NoError(t, JSONMarshaler{}.Unmarshal(jsonTransport1.getMessage(0), &jsonOut))
+	require.NoError(t, ProtobufMarshaler{}.Unmarshal(protoTransport.getMessage(0), &protoOut))
+	for _, out := range []*clientpb.OutboundMessage{&jsonOut, &protoOut} {
+		publication := out.GetPublication()
+		require.NotNil(t, publication, "frame must carry a publication envelope")
+		require.Len(t, publication.Messages, 1)
+		assert.Equal(t, "test-channel", publication.Messages[0].Channel)
+		assert.Equal(t, []byte("test payload"), publication.Messages[0].Payload.GetBinary())
+	}
+}
+
 func TestIndex(t *testing.T) {
 	tests := []struct {
 		name       string
