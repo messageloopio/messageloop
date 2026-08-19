@@ -34,6 +34,7 @@
 | [PR-KA-D11 实现规格](tasks/pr-ka-d11-packages.md) | Accepted | KD-K26 阶段一：叶子契约下沉 internal/* + 根 alias 过渡；[prompt](tasks/pr-ka-d11-prompt.md) |
 | [PR-KA-D12 实现规格](tasks/pr-ka-d12-packages.md) | Accepted | KD-K26 阶段二：authz/channel 下沉 + transport 改名 + admin 剥离；[prompt](tasks/pr-ka-d12-prompt.md) |
 | [PR-KA-D13 实现规格](tasks/pr-ka-d13-cluster-contracts.md) | Accepted | KD-K26 阶段三(a)：cluster 契约下沉 internal/cluster + metrics 下沉 internal/metrics；[prompt](tasks/pr-ka-d13-prompt.md) |
-| [PR-KA-D14 实现规格](tasks/pr-ka-d14-session-plane.md) | Ready(实现完成,待验收) | KD-K26 阶段三(b)：session plane 下沉 internal/session + Session.node 依赖反转；[prompt](tasks/pr-ka-d14-prompt.md) |
+| [PR-KA-D14 实现规格](tasks/pr-ka-d14-session-plane.md) | Accepted | KD-K26 阶段三(b)：session plane 下沉 internal/session + Session.node 依赖反转；[prompt](tasks/pr-ka-d14-prompt.md) |
+| [PR-KA-D15 实现规格](tasks/pr-ka-d15-runtime.md) | Ready | KD-K26 收口：Node/Cluster 门面下沉 internal/runtime + 清除根 alias；[prompt](tasks/pr-ka-d15-prompt.md) |
 
 第三方实现：复制对应 `tasks/pr-ka-*-prompt.md` 围栏全文；规格与靶心冲突时以该步规格为准。

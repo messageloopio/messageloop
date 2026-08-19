@@ -3,7 +3,7 @@
 | 字段 | 值 |
 | --- | --- |
 | 标题 | `refactor: sink session plane into internal/session, invert Session→Node behind Runtime` |
-| 状态 | **Ready** |
+| 状态 | **Accepted**(2026-08-19 已合 `6e17bdb`) |
 | 依赖 | D13 已合(`a2aa7a2`)。在 `v2` 分支上做 |
 | 设计来源 | [kernel-architecture.md](../kernel-architecture.md) :150-191(Session Plane、包图、硬规则)、KD-K26;D13 规格 §7 阶段图 |
 | 验收人 | 主 agent |
