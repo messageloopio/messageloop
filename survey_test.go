@@ -15,6 +15,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// userPrincipal is a local copy of the helper that moved with the authorizer
+// tests to internal/authz in PR-KA-D12.
+func userPrincipal(userID string) Principal {
+	return Principal{Kind: PrincipalUser, UserID: userID}
+}
+
 func TestSurvey_NewSurvey(t *testing.T) {
 	id := "test-survey-123"
 	channel := "test-channel"

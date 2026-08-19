@@ -40,9 +40,9 @@ task lint  # golangci-lint run
 ```
 
 ### Integration tests (require running server)
-- `pkg/websocket/integration_test.go` - Connect and publish via WebSocket
-- `pkg/grpcstream/integration_test.go` - gRPC streaming e2e tests
-- `pkg/grpcstream/port_integration_test.go` - Port-level gRPC tests
+- `pkg/transport/ws/integration_test.go` - Connect and publish via WebSocket
+- `internal/admin/integration_test.go` - gRPC streaming e2e tests
+- `pkg/transport/grpc/port_integration_test.go` (client port) and `internal/admin/port_integration_test.go` (admin port) - Port-level gRPC tests
 
 ### Run the server
 ```bash
@@ -146,17 +146,17 @@ The system abstracts connection handling via the **Transport** interface (`trans
 
 **Write buffer pool** (`pool.go`) - Uses `sync.Pool` with 4 KB initial capacity to reduce allocations for outbound messages.
 
-**WebSocket** (`pkg/websocket/`) - HTTP-upgraded WebSocket connections:
+**WebSocket** (`pkg/transport/ws/`) - HTTP-upgraded WebSocket connections:
 - Handler detects encoding from WebSocket subprotocol (`messageloop`, `messageloop+json`, `messageloop+proto`)
 - Integrates with `lynx` framework for lifecycle management
 
-**QUIC** (`pkg/quicstream/`) - Optional UDP/QUIC client listener:
+**QUIC** (`pkg/transport/quic/`) - Optional UDP/QUIC client listener:
 - One QUIC connection per client, one bidirectional stream
 - Length-prefixed frames (`uint32be` + payload); ALPN selects encoding (`messageloop+json` / `messageloop+proto`)
 - Requires TLS 1.3 (`tls.cert_file`/`tls.key_file`, or `insecure: true` for a self-signed dev cert)
 - Go SDK: `DialQUIC(addr, opts...)`
 
-**gRPC Stream** (`pkg/grpcstream/`) - Bidirectional gRPC streaming:
+**gRPC Stream** (`pkg/transport/grpc/`) - Bidirectional gRPC streaming:
 - `client_server.go` - Client streaming listener, manages per-connection streams
 - `admin_server.go` - Admin gRPC API server (separate listener from client traffic)
 - `server.go` - Shared server preparation, TLS loading, pre-bound listener lifecycle
@@ -204,9 +204,9 @@ Typed `Disconnect` errors (`disconnect.go`) signal intentional connection termin
 - `shared/` - Separate Go module (`github.com/messageloopio/messageloop/shared`) with shared marshalers and generated protobuf Go code
 - `protocol/` - Protobuf definitions (source)
 - `genproto/` - Generated protobuf (local replace to shared/)
-- `pkg/websocket/` - WebSocket transport implementation
-- `pkg/grpcstream/` - gRPC streaming transport implementation
-- `pkg/quicstream/` - QUIC client transport implementation
+- `pkg/transport/ws/` - WebSocket transport implementation
+- `pkg/transport/grpc/` - gRPC streaming transport implementation
+- `pkg/transport/quic/` - QUIC client transport implementation
 - `pkg/topics/` - Topic matching algorithms for wildcard subscriptions
 - `pkg/redisbroker/` - Redis-based distributed broker implementation
 - `proxy/` - RPC proxy backend integration

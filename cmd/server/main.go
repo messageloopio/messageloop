@@ -14,9 +14,9 @@ import (
 	lynxhttp "github.com/lynx-go/lynx/server/http"
 	"github.com/messageloopio/messageloop"
 	"github.com/messageloopio/messageloop/config"
-	"github.com/messageloopio/messageloop/pkg/quicstream"
+	"github.com/messageloopio/messageloop/pkg/transport/quic"
 	"github.com/messageloopio/messageloop/pkg/redisbroker"
-	"github.com/messageloopio/messageloop/pkg/websocket"
+	"github.com/messageloopio/messageloop/pkg/transport/ws"
 	proxyproxy "github.com/messageloopio/messageloop/proxy"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -260,9 +260,9 @@ func setupProxy(cfg *config.Config, node *messageloop.Node) error {
 }
 
 // buildWebSocketOptions translates the WebSocket transport config into
-// websocket.Options.
-func buildWebSocketOptions(cfg *config.Config, logger *slog.Logger) websocket.Options {
-	wsOpts := websocket.Options{
+// ws.Options.
+func buildWebSocketOptions(cfg *config.Config, logger *slog.Logger) ws.Options {
+	wsOpts := ws.Options{
 		Addr:        cfg.Transport.WebSocket.Addr,
 		WsPath:      cfg.Transport.WebSocket.Path,
 		TLSCertFile: cfg.Transport.WebSocket.TLS.CertFile,
@@ -272,7 +272,7 @@ func buildWebSocketOptions(cfg *config.Config, logger *slog.Logger) websocket.Op
 	if cfg.Transport.WebSocket.WriteTimeout == "" {
 		// Unconfigured: keep the default 10s write timeout so slow consumers
 		// cannot block broadcasts indefinitely.
-		wsOpts.WriteTimeout = websocket.DefaultWSWriteTimeout
+		wsOpts.WriteTimeout = ws.DefaultWSWriteTimeout
 	} else if d, err := time.ParseDuration(cfg.Transport.WebSocket.WriteTimeout); err == nil {
 		// Explicitly configured (including "0" to disable the timeout).
 		wsOpts.WriteTimeout = d
@@ -301,24 +301,24 @@ func buildWebSocketOptions(cfg *config.Config, logger *slog.Logger) websocket.Op
 }
 
 // newWebSocketServer builds the WebSocket server component from config.
-func newWebSocketServer(cfg *config.Config, node *messageloop.Node, logger *slog.Logger) *websocket.Server {
-	return websocket.NewServer(buildWebSocketOptions(cfg, logger), node)
+func newWebSocketServer(cfg *config.Config, node *messageloop.Node, logger *slog.Logger) *ws.Server {
+	return ws.NewServer(buildWebSocketOptions(cfg, logger), node)
 }
 
 // newQUICServer builds the optional QUIC client listener. A nil server is
 // returned (without error) when transport.quic.addr is empty.
-func newQUICServer(cfg *config.Config, node *messageloop.Node) (*quicstream.Server, error) {
+func newQUICServer(cfg *config.Config, node *messageloop.Node) (*quic.Server, error) {
 	if cfg.Transport.QUIC.Addr == "" {
 		return nil, nil
 	}
-	opts := quicstream.Options{
+	opts := quic.Options{
 		Addr:        cfg.Transport.QUIC.Addr,
 		TLSCertFile: cfg.Transport.QUIC.TLS.CertFile,
 		TLSKeyFile:  cfg.Transport.QUIC.TLS.KeyFile,
 		Insecure:    cfg.Transport.QUIC.Insecure,
 	}
 	if cfg.Transport.QUIC.WriteTimeout == "" {
-		opts.WriteTimeout = quicstream.DefaultWriteTimeout
+		opts.WriteTimeout = quic.DefaultWriteTimeout
 	} else if d, err := time.ParseDuration(cfg.Transport.QUIC.WriteTimeout); err == nil {
 		opts.WriteTimeout = d
 	}
@@ -332,14 +332,14 @@ func newQUICServer(cfg *config.Config, node *messageloop.Node) (*quicstream.Serv
 		// Keep the QUIC idle timeout above the application heartbeat so the
 		// protocol-level idle check (3511) fires first.
 		opts.MaxIdleTimeout = 2 * hb.IdleTimeout
-		if opts.MaxIdleTimeout < quicstream.DefaultMaxIdleTimeout {
-			opts.MaxIdleTimeout = quicstream.DefaultMaxIdleTimeout
+		if opts.MaxIdleTimeout < quic.DefaultMaxIdleTimeout {
+			opts.MaxIdleTimeout = quic.DefaultMaxIdleTimeout
 		}
 	}
 	if hb.PingInterval > 0 {
 		opts.KeepAlivePeriod = hb.PingInterval
 	}
-	return quicstream.NewServer(opts, node)
+	return quic.NewServer(opts, node)
 }
 
 // newAdminServer builds the HTTP admin server component (health + metrics).

@@ -1,17 +1,19 @@
 package messageloop
 
 import (
+	"github.com/messageloopio/messageloop/internal/authz"
 	"github.com/messageloopio/messageloop/internal/channel"
 	"github.com/messageloopio/messageloop/internal/occupancy"
 	"github.com/messageloopio/messageloop/internal/protocol"
 	"github.com/messageloopio/messageloop/internal/stream"
 )
 
-// PR-KA-D11 过渡转发(D13 清除;新代码不准引根 alias)。
+// PR-KA-D11/D12 过渡转发(D13 清除;新代码不准引根 alias)。
 //
-// Transition forwarding for the five leaf contract groups sunk into
+// Transition forwarding for the leaf contract groups sunk into
 // internal/{protocol,channel,occupancy,stream} by PR-KA-D11 (KD-K26 phase
-// one). This file is the single alias point so that cmd/server, the
+// one) and internal/{channel,authz} by PR-KA-D12 (phase two). This file is
+// the single alias point so that cmd/server, the
 // transports, proxy and internal/cluster keep compiling unchanged. It is
 // removed in phase three (D13); new code must import the internal packages
 // directly and must not reference these root aliases.
@@ -53,6 +55,58 @@ type CompiledInterest = channel.CompiledInterest
 var (
 	CompileInterest   = channel.CompileInterest
 	MatchAfterCompile = channel.MatchAfterCompile
+)
+
+// PR-KA-D12 sunk the channel-policy contract into the same package.
+
+type ChannelPolicy = channel.ChannelPolicy
+
+var (
+	DefaultChannelPolicy = channel.DefaultChannelPolicy
+	ErrHistoryDisabled   = channel.ErrHistoryDisabled
+)
+
+// --- internal/authz ---
+
+type (
+	Action        = authz.Action
+	PrincipalKind = authz.PrincipalKind
+	Principal     = authz.Principal
+	Capability    = authz.Capability
+	Decision      = authz.Decision
+	Authorizer    = authz.Authorizer
+)
+
+const (
+	ActionSubscribePattern = authz.ActionSubscribePattern
+	ActionPublish          = authz.ActionPublish
+	ActionRecover          = authz.ActionRecover
+	ActionPresence         = authz.ActionPresence
+	ActionSurvey           = authz.ActionSurvey
+)
+
+const (
+	PrincipalUser  = authz.PrincipalUser
+	PrincipalAdmin = authz.PrincipalAdmin
+)
+
+const (
+	CapPresenceLargeSnapshot = authz.CapPresenceLargeSnapshot
+	CapSurveyBypassGate      = authz.CapSurveyBypassGate
+	CapHistoryRead           = authz.CapHistoryRead
+	CapPresenceRead          = authz.CapPresenceRead
+	CapChannelsList          = authz.CapChannelsList
+	CapSessionAct            = authz.CapSessionAct
+	CapUserFanout            = authz.CapUserFanout
+	CapSubscribeAny          = authz.CapSubscribeAny
+	CapPatternGlobal         = authz.CapPatternGlobal
+)
+
+var (
+	ClosedCapabilityNames    = authz.ClosedCapabilityNames
+	DefaultAdminCapabilities = authz.DefaultAdminCapabilities
+	ErrInvalidRulePattern    = authz.ErrInvalidRulePattern
+	NewAuthorizer            = authz.NewAuthorizer
 )
 
 // --- internal/occupancy ---

@@ -5,13 +5,14 @@ import (
 
 	"github.com/messageloopio/messageloop"
 	"github.com/messageloopio/messageloop/config"
-	"github.com/messageloopio/messageloop/pkg/grpcstream"
+	"github.com/messageloopio/messageloop/internal/admin"
+	"github.com/messageloopio/messageloop/pkg/transport/grpc"
 	"github.com/lynx-go/lynx"
 )
 
 type preparedGRPCServers struct {
-	client *grpcstream.Server
-	admin  *grpcstream.Server
+	client *grpc.Server
+	admin  *grpc.Server
 }
 
 func (s *preparedGRPCServers) Components() []lynx.Service {
@@ -36,8 +37,8 @@ func (s *preparedGRPCServers) Close() {
 	}
 }
 
-func newGRPCClientServer(cfg *config.Config, node *messageloop.Node) (*grpcstream.Server, error) {
-	opts := grpcstream.Options{
+func newGRPCClientServer(cfg *config.Config, node *messageloop.Node) (*grpc.Server, error) {
+	opts := grpc.Options{
 		Addr:           cfg.Transport.GRPC.Addr,
 		TLSCertFile:    cfg.Transport.GRPC.TLS.CertFile,
 		TLSKeyFile:     cfg.Transport.GRPC.TLS.KeyFile,
@@ -48,11 +49,11 @@ func newGRPCClientServer(cfg *config.Config, node *messageloop.Node) (*grpcstrea
 			opts.WriteTimeout = d
 		}
 	}
-	return grpcstream.PrepareClientServer(opts, node)
+	return grpc.PrepareClientServer(opts, node)
 }
 
-func newGRPCAdminServer(cfg *config.Config, node *messageloop.Node) (*grpcstream.Server, error) {
-	return grpcstream.PrepareAdminServer(grpcstream.Options{
+func newGRPCAdminServer(cfg *config.Config, node *messageloop.Node) (*grpc.Server, error) {
+	return admin.PrepareAdminServer(grpc.Options{
 		Addr:               cfg.Server.GRPCAdmin.Addr,
 		TLSCertFile:        cfg.Server.GRPCAdmin.TLS.CertFile,
 		TLSKeyFile:         cfg.Server.GRPCAdmin.TLS.KeyFile,

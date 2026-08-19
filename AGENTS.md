@@ -151,8 +151,8 @@ func TestCSTrieMatcher(t *testing.T) {
 - `node.go`: Central coordinator
 - `cmd/server/main.go`: Bootstrap wiring and listener setup
 - `cmd/server/runtime.go`: gRPC preflight and startup ordering helpers
-- `pkg/grpcstream/client_server.go`: Client gRPC streaming server component
-- `pkg/grpcstream/admin_server.go`: Admin gRPC server component
-- `pkg/grpcstream/server.go`: Shared gRPC server preparation and listener lifecycle
-- `pkg/quicstream/`: Optional QUIC client transport (length-prefixed frames over one bidirectional stream)
+- `pkg/transport/grpc/client_server.go`: Client gRPC streaming server component
+- `internal/admin/admin_server.go`: Admin gRPC server component
+- `pkg/transport/grpc/server.go`: Shared gRPC server preparation and listener lifecycle
+- `pkg/transport/quic/`: Optional QUIC client transport (length-prefixed frames over one bidirectional stream)
 - `pkg/topics/`: Topic matcher implementations (cstrie, trie, naive, inverted_bitmap)

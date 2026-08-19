@@ -1,7 +1,8 @@
 // Package channel holds the subscription-interest contract
 // (CompileInterest/CompiledInterest/MatchAfterCompile) sunk from the root
 // package in PR-KA-D11 (KD-K26 phase one; target layout:
-// docs/v2/kernel-architecture.md :173-191).
+// docs/v2/kernel-architecture.md :173-191) and the channel-policy contract
+// (ChannelPolicy/CompiledPolicySpec) sunk in PR-KA-D12 (phase two).
 package channel
 
 import (

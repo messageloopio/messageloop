@@ -105,7 +105,7 @@ func (n *Node) AdminCanSubscribe(channel string) bool {
 	}
 	p := n.adminPrincipal()
 	if p.Caps&CapSubscribeAny != 0 {
-		return n.authorizer.decideSubscribeSkipAllowLists(channel).Allow
+		return n.authorizer.DecideSubscribeSkipAllowLists(channel).Allow
 	}
 	return n.authorizer.Decide(p, ActionSubscribePattern, channel).Allow
 }

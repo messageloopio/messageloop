@@ -276,17 +276,17 @@ type Transport interface {
 
 核心逻辑只与字节流交互，编码由 `Marshaler` 负责，传输不感知协议消息结构。
 
-### 4.2 WebSocket（pkg/websocket/）
+### 4.2 WebSocket（pkg/transport/ws/）
 
 - `server.go`：`lynx.Service` 实现，挂载 `/ws` 路径（默认 `:9080`），支持 TLS 与 `ReadHeaderTimeout`（10s）。
 - `handler.go`：升级后按子协议协商编码（见 §4.5），`NewClient(..., WithProtocol("ws"))` 创建会话；读循环解码 `InboundMessage` 后交给 `client.HandleMessage`；`SetReadLimit` 施加消息大小上限；读超时为 60s 或 2 × 心跳 idle 超时。
 - `transport.go`：`writeMu` 串行化写入；关闭时发送 WebSocket close 帧（`Disconnect.Code` 直接作为 close code，code 0 回退为 1000）并等待对端确认。
 
-### 4.3 gRPC 流（pkg/grpcstream/）
+### 4.3 gRPC 流（pkg/transport/grpc/）
 
 - `client_server.go`：`PrepareClientServer` 注册 `MessageLoopService`，每个客户端一条双向流（`handler.go` 的 `MessageLoop` 方法），固定使用 `ProtobufMarshaler`。
-- `admin_server.go`：`PrepareAdminServer` 在独立监听器注册 `APIService`（管理 API），可选 Bearer Token 拦截器（常量时间比较防时序泄漏）。
-- `server.go`：共享的 `prepareServer`——预绑定监听器、加载 TLS、施加 `ForceServerCodec(RawCodec)` 与 `MaxRecvMsgSize`，统一生命周期。
+- `admin_server.go`（internal/admin/）：`PrepareAdminServer` 在独立监听器注册 `APIService`（管理 API），可选 Bearer Token 拦截器（常量时间比较防时序泄漏）。
+- `server.go`：共享的 `PrepareServer`——预绑定监听器、加载 TLS、施加 `ForceServerCodec(RawCodec)` 与 `MaxRecvMsgSize`，统一生命周期。
 - `transport.go`：写入经单 worker goroutine 串行化（`sendCh` 缓冲 64，默认写超时 10s），入队前拷贝消息字节（调用方可能复用池化缓冲），关闭时先投递 `DISCONNECT_ERROR` 错误帧再退出 worker。
 
 ### 4.4 RawCodec（codec.go）
@@ -460,7 +460,7 @@ Occupancy 事件**不是** Publication（改走 broker 的实时 `occupancy` 消
 
 ## 7. 断连模型（disconnect.go）
 
-`Disconnect` 是携带 `Code` 与 `Reason` 的结构体并实现 `error` 接口：核心代码以返回错误的方式表达"应断开此连接"，`Client.HandleMessage` 用 `errors.As` 识别后调用 `close(disconnect)`，传输层把 Code 与 Reason 交给客户端（WebSocket 用 close 帧的 code/reason；gRPC 用 `DISCONNECT_ERROR` 错误信封，数值码随错误信封传递——目标语义，由传输修复实现后生效，见 `pkg/grpcstream/transport.go:106-121`）。`Code` 为 0 时表示正常关闭（WebSocket 端映射为 1000）。
+`Disconnect` 是携带 `Code` 与 `Reason` 的结构体并实现 `error` 接口：核心代码以返回错误的方式表达"应断开此连接"，`Client.HandleMessage` 用 `errors.As` 识别后调用 `close(disconnect)`，传输层把 Code 与 Reason 交给客户端（WebSocket 用 close 帧的 code/reason；gRPC 用 `DISCONNECT_ERROR` 错误信封，数值码随错误信封传递——目标语义，由传输修复实现后生效，见 `pkg/transport/grpc/transport.go:106-121`）。`Code` 为 0 时表示正常关闭（WebSocket 端映射为 1000）。
 
 | Code | 常量 | 含义 |
 | --- | --- | --- |
@@ -504,8 +504,9 @@ Occupancy 事件**不是** Publication（改走 broker 的实时 `occupancy` 消
 | config/ | 配置结构（`config.go`）与校验 |
 | shared/ | 独立 Go 模块：marshaler 实现（`shared/marshaler.go`）与生成的 protobuf 代码（`shared/genproto/`） |
 | protocol/ | protobuf 源定义（client/、server/、shared/、event/、proxy/、includes/） |
-| pkg/websocket/ | WebSocket 传输：`server.go`、`handler.go`、`transport.go` |
-| pkg/grpcstream/ | gRPC 流传输与管理 API：`client_server.go`、`admin_server.go`、`server.go`、`handler.go`、`transport.go`、`codec.go`、`api_handler.go` |
+| pkg/transport/ws/ | WebSocket 传输：`server.go`、`handler.go`、`transport.go` |
+| pkg/transport/grpc/ | gRPC 流传输：`client_server.go`、`server.go`、`handler.go`、`transport.go`、`codec.go` |
+| internal/admin/ | 管理 gRPC API：`admin_server.go`、`api_handler.go` |
 | pkg/topics/ | 主题匹配：`matcher.go`、`cstrie.go`、`trie.go`、`naive.go`、`inverted_bitmap.go`、`optimized_inverted_bitmap.go` |
 | pkg/redisbroker/ | Redis Broker（`redis.go`、`pubsub.go`、`history.go`、`options.go`、`message.go`、`client.go`）、Redis Presence（`presence_redis.go`）与集群支撑（`cluster_*`） |
 | proxy/ | RPC 代理：`proxy.go`、`router.go`、`http.go`、`grpc.go` |

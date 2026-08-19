@@ -14,8 +14,8 @@ import (
 )
 
 // CapabilityNames is the closed set of admin capability names accepted under
-// server.grpc_admin.capabilities. It mirrors the root package's
-// ClosedCapabilityNames (the root package cannot import config, so the two
+// server.grpc_admin.capabilities. It mirrors internal/authz's
+// ClosedCapabilityNames (internal/authz cannot import config, so the two
 // lists are kept in sync manually).
 var CapabilityNames = map[string]struct{}{
 	"presence.large_snapshot": {},

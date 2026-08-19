@@ -13,7 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/messageloopio/messageloop"
 	"github.com/messageloopio/messageloop/config"
-	"github.com/messageloopio/messageloop/pkg/grpcstream"
+	"github.com/messageloopio/messageloop/internal/admin"
 	"github.com/messageloopio/messageloop/pkg/redisbroker"
 	"github.com/messageloopio/messageloop/proxy"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
@@ -857,7 +857,7 @@ func TestAdmin_DisconnectUsersAcrossNodes(t *testing.T) {
 
 	// Admin Disconnect with users=[U] from nodeA: the remote session is
 	// resolved via the index + lease, then routed through the command bus.
-	handler := grpcstream.NewAPIServiceHandler(nodeA)
+	handler := admin.NewAPIServiceHandler(nodeA)
 	resp, err := handler.Disconnect(ctx, &serverv2.DisconnectRequest{
 		Users:  []string{userID},
 		Code:   3009,

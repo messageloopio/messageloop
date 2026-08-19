@@ -51,9 +51,9 @@
 
 ## gRPC Package Structure
 
-- `pkg/grpcstream/client_server.go`: client streaming listener/component
-- `pkg/grpcstream/admin_server.go`: admin gRPC listener/component
-- `pkg/grpcstream/server.go`: shared preparation, validation, TLS loading, and pre-bound listener lifecycle
+- `pkg/transport/grpc/client_server.go`: client streaming listener/component
+- `internal/admin/admin_server.go`: admin gRPC listener/component
+- `pkg/transport/grpc/server.go`: shared preparation, validation, TLS loading, and pre-bound listener lifecycle
 - `cmd/server/runtime.go`: bootstrap preflight that prepares gRPC listeners before `node.Run(...)`
 
 ## MCP Servers
