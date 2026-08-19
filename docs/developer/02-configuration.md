@@ -41,7 +41,7 @@
    - `broker.type` 必须为 `memory` 或 `redis`（空等价于 `memory`），否则报 `unknown broker.type: ...`；
    - 为 `redis` 时 `broker.redis.addr` 必填，否则报 `broker.redis.addr is required when broker.type is redis`；
    - `broker.redis.consumer_group` 非空 → 直接拒绝：`broker.redis.consumer_group is not implemented; remove it from the configuration`（该字段声明但从未被消费，见 [broker.redis 字段](#brokerredis-字段)）；
-   - `broker.redis.stream_approximate` 非 true（含显式 false）→ 直接拒绝：`broker.redis.stream_approximate: false is not supported (only approximate trimming is implemented); remove the field or set it to true`（`config.go:222-231`）。
+   - `broker.redis.stream_approximate` 非 true（含显式 false 与省略）→ 直接拒绝：`broker.redis.stream_approximate must be set to true explicitly (only approximate trimming is implemented; an omitted field parses as false)`（`config.go:446-453`）。
 6. **cluster 前置条件**：`cluster.enabled: true` 要求 `broker.type: redis`，否则报 `cluster requires broker.type=redis`。启用集群还要求恰好一个 HMAC 密钥源（`cluster.hmac_key` 或 `cluster.hmac_key_file`）且解析后密钥 ≥32 字节，启动解析失败即拒绝启动（该校验不在 `Validate()` 中，见 [cluster 节](#cluster-节)）。
 7. **授权表**（`server.authorizer`，见 [server.authorizer 节](#server-节)）：规则 `pattern` 非空且是订阅 key 语言（`*` 单段、`**` 仅末尾、字面前缀非空，`a.**.b` / `*.room` / 裸 `**` 非法）；`history_size` 设置时 `>= 0`；`history_ttl` / `max_survey_timeout` 非空时必须是合法 Go duration；`grpc_admin.capabilities` 必须在闭集内。**`server.acl` / `server.channels` 键出现即失败**（已删除，KD-K31）。
 
@@ -330,7 +330,7 @@ broker:
 | `broker.redis.read_timeout` | string | `3s` | 读操作超时 |
 | `broker.redis.write_timeout` | string | `3s` | 写操作超时 |
 | `broker.redis.stream_max_length` | int64 | 10000 | 每条频道 Stream 的最大条目数（XADD 的 `MAXLEN`，`pkg/redisbroker/redis.go:85-90`） |
-| `broker.redis.stream_approximate` | bool | `true` | 是否使用 Stream `MAXLEN ~` 近似截断（`Approx` 标志）。**注意：仅实现近似截断，显式写 `stream_approximate: false`（或省略后反序列化为 false）会被 `Validate()` 拒绝**（`Validate()` 规则 5，`config.go:229-231`），必须删除该字段或设为 `true` |
+| `broker.redis.stream_approximate` | bool | `true` | 是否使用 Stream `MAXLEN ~` 近似截断（`Approx` 标志）。**注意：仅实现近似截断，`stream_approximate: false` 或省略该字段（反序列化为 false）都会被 `Validate()` 拒绝**（`Validate()` 规则 5，`config.go:446-453`），必须显式设为 `true` |
 | `broker.redis.history_ttl` | string | `24h` | 频道 Stream 的空闲过期时间（每条发布后刷新 `EXPIRE`，`pkg/redisbroker/redis.go:94-96`） |
 | `broker.redis.consumer_group` | string | 未设置 | **未实现：配置非空会被 `Validate()` 直接拒绝**（`broker.redis.consumer_group is not implemented`，`Validate()` 规则 5）。该字段仅存在于 `config.RedisConfig`（`config/config.go:153`）声明，整个代码库没有任何读取点；配置它会启动失败，应移除 |
 

@@ -446,9 +446,10 @@ func (c *Config) Validate() error {
 		// stream_approximate=false is silently ignored by the broker (only
 		// approximate trimming is implemented, so it always behaves as true).
 		// An unset field is indistinguishable from an explicit false after
-		// parsing, so require the field to be explicitly true.
+		// parsing, so the field must be set to true explicitly — omitting it
+		// is rejected as well.
 		if !c.Broker.Redis.StreamApproximate {
-			return fmt.Errorf("broker.redis.stream_approximate: false is not supported (only approximate trimming is implemented); remove the field or set it to true")
+			return fmt.Errorf("broker.redis.stream_approximate must be set to true explicitly (only approximate trimming is implemented; an omitted field parses as false)")
 		}
 	default:
 		return fmt.Errorf("unknown broker.type: %q (expected \"memory\" or \"redis\")", c.Broker.Type)

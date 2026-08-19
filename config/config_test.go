@@ -108,7 +108,7 @@ func TestValidate_RedisStreamApproximateFalseRejected(t *testing.T) {
 			Redis: RedisConfig{Addr: "localhost:6379", StreamApproximate: false},
 		},
 	}
-	assert.ErrorContains(t, cfg.Validate(), "broker.redis.stream_approximate: false is not supported")
+	assert.ErrorContains(t, cfg.Validate(), "broker.redis.stream_approximate must be set to true explicitly")
 }
 
 func TestValidate_ClusterRequiresRedis(t *testing.T) {
