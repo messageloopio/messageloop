@@ -388,8 +388,11 @@ func (c *Session) handleConnect(ctx context.Context, in *clientpb.InboundMessage
 	// Resumption is only permitted when real authentication happened
 	// (require_auth + a verified token via the auth proxy). In anonymous mode
 	// a session id cannot be trusted — anyone could guess it — so it is
-	// ignored and the connect starts a fresh session.
-	resumeAllowed := c.rt.RequireAuth() && p != nil
+	// ignored and the connect starts a fresh session. An authenticated proxy
+	// response without a user ID violates the auth contract; treating it as
+	// resumable would skip the cross-user check below and let anyone knowing
+	// a session id take over (and anonymize) that session.
+	resumeAllowed := c.rt.RequireAuth() && p != nil && authUser != ""
 	if connect.SessionId != "" && !resumeAllowed {
 		c.mu.Lock()
 		c.session = originalSessionID
@@ -780,6 +783,21 @@ func (c *Session) sendSubscribeRequestError(ctx context.Context, in *clientpb.In
 	}))
 }
 
+// sendRequestError sends a top-level BAD_REQUEST envelope for a malformed
+// client frame (e.g. a missing required field) and keeps the connection up:
+// a client mistake is a request error, not a server fault.
+func (c *Session) sendRequestError(ctx context.Context, in *clientpb.InboundMessage, message string) error {
+	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+		out.Envelope = &clientpb.OutboundMessage_Error{
+			Error: &sharedv2.Error{
+				Code:    "BAD_REQUEST",
+				Type:    "request_error",
+				Message: message,
+			},
+		}
+	}))
+}
+
 // checkSubscribeACL evaluates one subscription through the Authorizer and the
 // proxy (PR-KA-A4 §8.1) and returns the error envelope to send to the client,
 // or nil when the subscription is allowed. Order: routability, static Decide,
@@ -891,7 +909,7 @@ func (c *Session) handleRPC(ctx context.Context, in *clientpb.InboundMessage, rp
 	method := rpcReq.Method
 
 	if channel == "" {
-		return errors.New("missing channel in RPC request")
+		return c.sendRequestError(ctx, in, "missing channel in RPC request")
 	}
 
 	// Apply RPC timeout from configuration or use default
@@ -1022,7 +1040,7 @@ func (c *Session) handlePublish(ctx context.Context, in *clientpb.InboundMessage
 
 	channel := publish.Channel
 	if channel == "" {
-		return errors.New("missing channel in publish message")
+		return c.sendRequestError(ctx, in, "missing channel in publish message")
 	}
 
 	// Static authorization first (PR-KA-A4 §8.1): a proxy that allows must

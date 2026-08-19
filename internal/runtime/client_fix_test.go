@@ -1243,6 +1243,52 @@ func TestClientSession_AnonymousResumeRejected(t *testing.T) {
 	assert.Same(t, clientA, node.Hub().LookupSession(sessionA), "session A must not be evicted")
 }
 
+// Regression: an auth proxy that authenticates successfully but returns no
+// user ID violates the auth contract. The presented session id must be
+// ignored (fresh session, no takeover) — resuming here would skip the
+// cross-user check and let anyone knowing a session id take over (and
+// anonymize) that session.
+func TestClientSession_ResumeRejectedWhenAuthReturnsEmptyUser(t *testing.T) {
+	ctx := context.Background()
+	node := NewNode(&config.Server{RequireAuth: true})
+	authProxy := &connectAuthProxyStub{userID: "user-1"}
+	require.NoError(t, node.AddProxy(authProxy, "", SystemMethodAuthenticate))
+
+	transportA := &capturingTransport{}
+	clientA, _, err := NewClient(ctx, node, transportA, JSONMarshaler{})
+	require.NoError(t, err)
+	connectA := &clientpb.InboundMessage{
+		Id: "msg-1",
+		Envelope: &clientpb.InboundMessage_Connect{
+			Connect: &clientpb.Connect{Version: testProtocolVersion, ClientId: "client-a", Token: "t"},
+		},
+	}
+	require.NoError(t, clientA.HandleMessage(ctx, connectA))
+	sessionA := clientA.SessionID()
+	require.NotEmpty(t, sessionA)
+	require.Equal(t, "user-1", clientA.UserID())
+
+	// The proxy starts breaking the auth contract: success, but no user ID.
+	authProxy.userID = ""
+
+	transportB := &capturingTransport{}
+	clientB, _, err := NewClient(ctx, node, transportB, JSONMarshaler{})
+	require.NoError(t, err)
+	connectB := &clientpb.InboundMessage{
+		Id: "msg-2",
+		Envelope: &clientpb.InboundMessage_Connect{
+			Connect: &clientpb.Connect{Version: testProtocolVersion, ClientId: "client-b", Token: "t", SessionId: sessionA},
+		},
+	}
+	require.NoError(t, clientB.HandleMessage(ctx, connectB))
+
+	// B must not take over the session: it gets a fresh session id, A keeps
+	// its identity and stays registered in the hub.
+	require.NotEqual(t, sessionA, clientB.SessionID(), "resume with empty authenticated user must be rejected")
+	assert.Same(t, clientA, node.Hub().LookupSession(sessionA), "session A must not be evicted")
+	assert.Equal(t, "user-1", clientA.UserID(), "session A identity must not be cleared")
+}
+
 // Task 9: a local resume must not leak the ConnectionsTotal gauge: the old
 // client was counted once, the new client takes over that count (still one),
 // and closing the resumed client returns the gauge to zero.
