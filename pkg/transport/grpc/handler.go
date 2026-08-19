@@ -49,7 +49,13 @@ func (h *gRPCHandler) MessageLoop(stream googlegrpc.BidiStreamingServer[clientpb
 			return err
 		}
 		if err := client.HandleMessage(ctx, in); err != nil {
-			return err
+			// Soft-fail like the WS/QUIC read loops: HandleMessage already
+			// answered with an INTERNAL_ERROR envelope for non-Disconnect
+			// errors (and Disconnect errors close the transport, surfacing as
+			// a Recv error above). Returning here would tear down the whole
+			// stream and leak the raw error text as the gRPC status message.
+			log.ErrorContext(ctx, "handle grpc message error", err)
+			continue
 		}
 	}
 }
