@@ -5,12 +5,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/internal/cluster"
 )
 
 // Directory is the simulator's authoritative in-memory session directory: one
 // instance is shared by every node in a World, exactly like the Redis
-// directory in production. It implements messageloop.SessionDirectory plus
+// directory in production. It implements cluster.SessionDirectory plus
 // the lease listers the repairer needs (ClusterSessionLeaseLister and
 // ClusterNodeLeaseLister).
 //
@@ -23,9 +23,9 @@ import (
 type Directory struct {
 	mu sync.Mutex
 
-	sessionLeases map[string]*messageloop.ClusterSessionLease
-	snapshots     map[string]*messageloop.ClusterSessionSnapshot
-	nodeLeases    map[nodeIncarnation]*messageloop.ClusterNodeLease
+	sessionLeases map[string]*cluster.ClusterSessionLease
+	snapshots     map[string]*cluster.ClusterSessionSnapshot
+	nodeLeases    map[nodeIncarnation]*cluster.ClusterNodeLease
 	users         map[string]map[string]struct{}
 
 	// deletedSessionLeases records every DeleteSessionLease call, in order,
@@ -41,9 +41,9 @@ type nodeIncarnation struct {
 // NewDirectory returns an empty shared Directory.
 func NewDirectory() *Directory {
 	return &Directory{
-		sessionLeases: make(map[string]*messageloop.ClusterSessionLease),
-		snapshots:     make(map[string]*messageloop.ClusterSessionSnapshot),
-		nodeLeases:    make(map[nodeIncarnation]*messageloop.ClusterNodeLease),
+		sessionLeases: make(map[string]*cluster.ClusterSessionLease),
+		snapshots:     make(map[string]*cluster.ClusterSessionSnapshot),
+		nodeLeases:    make(map[nodeIncarnation]*cluster.ClusterNodeLease),
 		users:         make(map[string]map[string]struct{}),
 	}
 }
@@ -52,7 +52,7 @@ func (d *Directory) Start(context.Context) error    { return nil }
 func (d *Directory) Shutdown(context.Context) error { return nil }
 
 // PutNodeLease stores the node liveness record under (NodeID, IncarnationID).
-func (d *Directory) PutNodeLease(_ context.Context, lease *messageloop.ClusterNodeLease, _ time.Duration) error {
+func (d *Directory) PutNodeLease(_ context.Context, lease *cluster.ClusterNodeLease, _ time.Duration) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	copy := *lease
@@ -61,7 +61,7 @@ func (d *Directory) PutNodeLease(_ context.Context, lease *messageloop.ClusterNo
 }
 
 // GetNodeLease returns the stored node lease, or nil when absent.
-func (d *Directory) GetNodeLease(_ context.Context, nodeID, incarnationID string) (*messageloop.ClusterNodeLease, error) {
+func (d *Directory) GetNodeLease(_ context.Context, nodeID, incarnationID string) (*cluster.ClusterNodeLease, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	lease := d.nodeLeases[nodeIncarnation{nodeID: nodeID, incarnationID: incarnationID}]
@@ -82,10 +82,10 @@ func (d *Directory) DeleteNodeLease(nodeID, incarnationID string) {
 }
 
 // ListNodeLeases enumerates every stored node lease (ClusterNodeLeaseLister).
-func (d *Directory) ListNodeLeases(context.Context) ([]*messageloop.ClusterNodeLease, error) {
+func (d *Directory) ListNodeLeases(context.Context) ([]*cluster.ClusterNodeLease, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	leases := make([]*messageloop.ClusterNodeLease, 0, len(d.nodeLeases))
+	leases := make([]*cluster.ClusterNodeLease, 0, len(d.nodeLeases))
 	for _, lease := range d.nodeLeases {
 		copy := *lease
 		leases = append(leases, &copy)
@@ -97,7 +97,7 @@ func (d *Directory) ListNodeLeases(context.Context) ([]*messageloop.ClusterNodeL
 // current record equals expected on the fencing fields (SessionID, NodeID,
 // IncarnationID, LeaseVersion). expected == nil matches an absent record
 // (first registration). A failed compare leaves the stored lease untouched.
-func (d *Directory) CompareAndSwapSessionLease(_ context.Context, expected, desired *messageloop.ClusterSessionLease, _ time.Duration) (bool, error) {
+func (d *Directory) CompareAndSwapSessionLease(_ context.Context, expected, desired *cluster.ClusterSessionLease, _ time.Duration) (bool, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	current := d.sessionLeases[desired.SessionID]
@@ -113,7 +113,7 @@ func (d *Directory) CompareAndSwapSessionLease(_ context.Context, expected, desi
 // write (SessionStateCompareAndSwapper, PR-KA-D10 §1.2): the four-field
 // compare, the lease swap and the snapshot store commit under the same lock,
 // so a failed compare leaves both records untouched.
-func (d *Directory) CompareAndSwapSessionState(_ context.Context, expected, desired *messageloop.ClusterSessionLease, snapshot *messageloop.ClusterSessionSnapshot, _, _ time.Duration) (bool, error) {
+func (d *Directory) CompareAndSwapSessionState(_ context.Context, expected, desired *cluster.ClusterSessionLease, snapshot *cluster.ClusterSessionSnapshot, _, _ time.Duration) (bool, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	current := d.sessionLeases[desired.SessionID]
@@ -130,7 +130,7 @@ func (d *Directory) CompareAndSwapSessionState(_ context.Context, expected, desi
 
 // leaseEqual mirrors the production lease comparison: only the fencing
 // fields (SessionID, NodeID, IncarnationID, LeaseVersion) participate.
-func leaseEqual(current, expected *messageloop.ClusterSessionLease) bool {
+func leaseEqual(current, expected *cluster.ClusterSessionLease) bool {
 	if current == nil || expected == nil {
 		return current == nil && expected == nil
 	}
@@ -141,7 +141,7 @@ func leaseEqual(current, expected *messageloop.ClusterSessionLease) bool {
 }
 
 // GetSessionLease returns the stored session lease, or nil when absent.
-func (d *Directory) GetSessionLease(_ context.Context, sessionID string) (*messageloop.ClusterSessionLease, error) {
+func (d *Directory) GetSessionLease(_ context.Context, sessionID string) (*cluster.ClusterSessionLease, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	lease := d.sessionLeases[sessionID]
@@ -177,10 +177,10 @@ func (d *Directory) DeletedSessionLeases() []string {
 
 // ListSessionLeases enumerates every stored session lease
 // (ClusterSessionLeaseLister).
-func (d *Directory) ListSessionLeases(context.Context) ([]*messageloop.ClusterSessionLease, error) {
+func (d *Directory) ListSessionLeases(context.Context) ([]*cluster.ClusterSessionLease, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	leases := make([]*messageloop.ClusterSessionLease, 0, len(d.sessionLeases))
+	leases := make([]*cluster.ClusterSessionLease, 0, len(d.sessionLeases))
 	for _, lease := range d.sessionLeases {
 		copy := *lease
 		leases = append(leases, &copy)
@@ -189,7 +189,7 @@ func (d *Directory) ListSessionLeases(context.Context) ([]*messageloop.ClusterSe
 }
 
 // PutSessionSnapshot stores the resumable session state under SessionID.
-func (d *Directory) PutSessionSnapshot(_ context.Context, snapshot *messageloop.ClusterSessionSnapshot, _ time.Duration) error {
+func (d *Directory) PutSessionSnapshot(_ context.Context, snapshot *cluster.ClusterSessionSnapshot, _ time.Duration) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.snapshots[snapshot.SessionID] = copySnapshot(snapshot)
@@ -197,7 +197,7 @@ func (d *Directory) PutSessionSnapshot(_ context.Context, snapshot *messageloop.
 }
 
 // GetSessionSnapshot returns the stored snapshot, or nil when absent.
-func (d *Directory) GetSessionSnapshot(_ context.Context, sessionID string) (*messageloop.ClusterSessionSnapshot, error) {
+func (d *Directory) GetSessionSnapshot(_ context.Context, sessionID string) (*cluster.ClusterSessionSnapshot, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	snapshot := d.snapshots[sessionID]
@@ -217,9 +217,9 @@ func (d *Directory) DeleteSessionSnapshot(_ context.Context, sessionID string) e
 
 // copySnapshot deep-copies the mutable slices/maps so stored state is never
 // aliased with caller state.
-func copySnapshot(snapshot *messageloop.ClusterSessionSnapshot) *messageloop.ClusterSessionSnapshot {
+func copySnapshot(snapshot *cluster.ClusterSessionSnapshot) *cluster.ClusterSessionSnapshot {
 	copy := *snapshot
-	copy.Subscriptions = append([]messageloop.ClusterSubscriptionSnapshot(nil), snapshot.Subscriptions...)
+	copy.Subscriptions = append([]cluster.ClusterSubscriptionSnapshot(nil), snapshot.Subscriptions...)
 	if snapshot.ChannelOffsets != nil {
 		copy.ChannelOffsets = make(map[string]uint64, len(snapshot.ChannelOffsets))
 		for channel, offset := range snapshot.ChannelOffsets {
@@ -285,8 +285,8 @@ func (d *Directory) ListUserSessions(_ context.Context, userID string) ([]string
 }
 
 var (
-	_ messageloop.SessionDirectory              = (*Directory)(nil)
-	_ messageloop.SessionStateCompareAndSwapper = (*Directory)(nil)
-	_ messageloop.ClusterSessionLeaseLister     = (*Directory)(nil)
-	_ messageloop.ClusterNodeLeaseLister        = (*Directory)(nil)
+	_ cluster.SessionDirectory              = (*Directory)(nil)
+	_ cluster.SessionStateCompareAndSwapper = (*Directory)(nil)
+	_ cluster.ClusterSessionLeaseLister     = (*Directory)(nil)
+	_ cluster.ClusterNodeLeaseLister        = (*Directory)(nil)
 )

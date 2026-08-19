@@ -3,6 +3,8 @@ package messageloop
 import (
 	"github.com/messageloopio/messageloop/internal/authz"
 	"github.com/messageloopio/messageloop/internal/channel"
+	"github.com/messageloopio/messageloop/internal/cluster"
+	"github.com/messageloopio/messageloop/internal/metrics"
 	"github.com/messageloopio/messageloop/internal/occupancy"
 	"github.com/messageloopio/messageloop/internal/protocol"
 	"github.com/messageloopio/messageloop/internal/stream"
@@ -176,3 +178,73 @@ var (
 type MemoryBrokerOptions = stream.MemoryBrokerOptions
 
 var NewMemoryBroker = stream.NewMemoryBroker
+
+// --- internal/cluster ---
+
+type (
+	ClusterOptions                = cluster.ClusterOptions
+	ClusterLifecycle              = cluster.ClusterLifecycle
+	SessionDirectory              = cluster.SessionDirectory
+	ClusterCommandBus             = cluster.ClusterCommandBus
+	ClusterNodeProjection         = cluster.ClusterNodeProjection
+	ClusterQueryStore             = cluster.ClusterQueryStore
+	ClusterNodeLeaseManager       = cluster.ClusterNodeLeaseManager
+	ClusterRepairer               = cluster.ClusterRepairer
+	ClusterSessionLeaseLister     = cluster.ClusterSessionLeaseLister
+	ClusterNodeLeaseLister        = cluster.ClusterNodeLeaseLister
+	ClusterCommandType            = cluster.ClusterCommandType
+	ClusterCommandStatus          = cluster.ClusterCommandStatus
+	ClusterCommand                = cluster.ClusterCommand
+	ClusterCommandResult          = cluster.ClusterCommandResult
+	ClusterNodeLease              = cluster.ClusterNodeLease
+	ClusterSessionLease           = cluster.ClusterSessionLease
+	ClusterSubscriptionSnapshot   = cluster.ClusterSubscriptionSnapshot
+	ClusterSessionSnapshot        = cluster.ClusterSessionSnapshot
+	ClusterChannelInfo            = cluster.ClusterChannelInfo
+	ClusterCommandHandler         = cluster.ClusterCommandHandler
+	SessionStateCompareAndSwapper = cluster.SessionStateCompareAndSwapper
+	NodeEpochAllocator            = cluster.NodeEpochAllocator
+	MemoryNodeEpochAllocator      = cluster.MemoryNodeEpochAllocator
+)
+
+const (
+	ClusterCommandDisconnect  = cluster.ClusterCommandDisconnect
+	ClusterCommandSubscribe   = cluster.ClusterCommandSubscribe
+	ClusterCommandUnsubscribe = cluster.ClusterCommandUnsubscribe
+	ClusterCommandPublish     = cluster.ClusterCommandPublish
+	ClusterCommandTakeover    = cluster.ClusterCommandTakeover
+	ClusterCommandSurvey      = cluster.ClusterCommandSurvey
+)
+
+const (
+	ClusterCommandStatusPending           = cluster.ClusterCommandStatusPending
+	ClusterCommandStatusSucceeded         = cluster.ClusterCommandStatusSucceeded
+	ClusterCommandStatusFailed            = cluster.ClusterCommandStatusFailed
+	ClusterCommandStatusInProgress        = cluster.ClusterCommandStatusInProgress
+	ClusterCommandStatusUnknownFinalState = cluster.ClusterCommandStatusUnknownFinalState
+)
+
+var (
+	ErrClusterCommandUnsupported = cluster.ErrClusterCommandUnsupported
+	ErrSessionFenced             = cluster.ErrSessionFenced
+	FormatNodeEpoch              = cluster.FormatNodeEpoch
+	ParseNodeEpoch               = cluster.ParseNodeEpoch
+	NodeEpochNewer               = cluster.NodeEpochNewer
+	NewMemoryNodeEpochAllocator  = cluster.NewMemoryNodeEpochAllocator
+	SyncUserIndex                = cluster.SyncUserIndex
+)
+
+// allocateNodeIncarnation keeps the pre-D13 unexported name for the root call
+// sites (cluster.go); the implementation now lives in internal/cluster.
+func allocateNodeIncarnation(options ClusterOptions, directory SessionDirectory) (string, error) {
+	return cluster.AllocateNodeIncarnation(options, directory)
+}
+
+// --- internal/metrics ---
+
+type Metrics = metrics.Metrics
+
+var (
+	NewMetrics            = metrics.NewMetrics
+	MetricsTransportLabel = metrics.MetricsTransportLabel
+)

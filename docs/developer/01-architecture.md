@@ -51,7 +51,7 @@ MessageLoop 的核心设计目标可以归纳为四点：
 | `Authorizer` | authorizer.go | 单一授权求值器：一个 Decide、一张 server.authorizer 表、一种通配语言；频道策略 Effects 与 Admin Capability 闭集 |
 | `Proxy` | proxy/ | RPC 转发与鉴权/ACL/生命周期钩子的后端集成 |
 | `Cluster` | cluster.go、cluster_*.go | 可选的 Redis 支撑分布式控制面（详见[《分布式集群指南》](04-cluster.md)） |
-| `Metrics` | metrics.go | Prometheus 指标收集（详见[《可观测性指南》](05-observability.md)） |
+| `Metrics` | internal/metrics/metrics.go | Prometheus 指标收集（详见[《可观测性指南》](05-observability.md)） |
 
 ## 3. 核心组件
 
@@ -257,7 +257,7 @@ join/leave 事件以 **Occupancy** 概念分发（B2）：每次 Join/Leave 取�
 
 **三层超时**：① 客户端级——`node.rpcTimeout`（`server.rpc_timeout`，默认 `proxy.DefaultRPCTimeout` 30s，见 client.go `handleRPC`）；② 代理级——每个 `ProxyConfig.Timeout`（默认同样 30s）；③ 传输级——HTTP client 超时 / gRPC 上下文 deadline。代理的 `withTimeout` 只在上下文没有 deadline 时才叠加自己的超时，嵌套时取最紧约束。
 
-### 3.9 Metrics（metrics.go）
+### 3.9 Metrics（internal/metrics/metrics.go）
 
 `Metrics` 注册一组 Prometheus 指标：连接/订阅/活跃频道 gauge、发布/投递计数、发布与 RPC 耗时直方图、投递失败计数，以及集群命令去重命中、命令超时、投影修复等集群指标。v1.0 另有策略强制瞬时、恢复、心跳 3511、Admin 按 user 扇出、客户端 Survey、presence 失败等（`channel_policy_transient_forced_total`、`recovery_*`、`heartbeat_idle_disconnects_total`、`admin_user_fanout`、`survey_client_total`、`presence_*_failures_total`）。采集、标签与完整表见[《可观测性指南》](05-observability.md) §3 / §3.5。
 
@@ -499,7 +499,7 @@ Occupancy 事件**不是** Publication（改走 broker 的实时 `occupancy` 消
 
 | 路径 | 内容 |
 | --- | --- |
-| 仓库根（*.go） | 核心包：`node.go`、`hub.go`、`client.go`、`broker.go`、`broker_memory.go`、`presence.go`、`presence_event.go`、`survey.go`、`acl.go`、`disconnect.go`、`transport.go`、`pool.go`、`heartbeat.go`、`metrics.go`、`marshaler.go`、`defaults.go`、`health.go`、`subscription_saga.go`，以及集群相关 `cluster.go`、`cluster_commands.go`、`cluster_state.go`、`cluster_resume.go`、`cluster_projection_repair.go` |
+| 仓库根（*.go） | 核心包：`node.go`、`hub.go`、`client.go`、`broker.go`、`broker_memory.go`、`presence.go`、`presence_event.go`、`survey.go`、`acl.go`、`disconnect.go`、`transport.go`、`pool.go`、`heartbeat.go`、`marshaler.go`、`defaults.go`、`health.go`、`subscription_saga.go`，以及集群相关 `cluster.go`、`cluster_commands.go`、`cluster_state.go`、`cluster_resume.go`、`cluster_projection_repair.go` |
 | cmd/server/ | 可执行入口：`main.go`（装配与监听器）、`runtime.go`（gRPC 预绑定与启动顺序） |
 | config/ | 配置结构（`config.go`）与校验 |
 | shared/ | 独立 Go 模块：marshaler 实现（`shared/marshaler.go`）与生成的 protobuf 代码（`shared/genproto/`） |
@@ -507,6 +507,8 @@ Occupancy 事件**不是** Publication（改走 broker 的实时 `occupancy` 消
 | pkg/transport/ws/ | WebSocket 传输：`server.go`、`handler.go`、`transport.go` |
 | pkg/transport/grpc/ | gRPC 流传输：`client_server.go`、`server.go`、`handler.go`、`transport.go`、`codec.go` |
 | internal/admin/ | 管理 gRPC API：`admin_server.go`、`api_handler.go` |
+| internal/cluster/ | 集群控制面契约（`contracts.go`、`state.go`、`epoch.go`、`user_index.go`）与子包 `hmac/`、`sim/` |
+| internal/metrics/ | Prometheus 指标定义（`metrics.go`，自根包下沉） |
 | pkg/topics/ | 主题匹配：`matcher.go`、`cstrie.go`、`trie.go`、`naive.go`、`inverted_bitmap.go`、`optimized_inverted_bitmap.go` |
 | pkg/redisbroker/ | Redis Broker（`redis.go`、`pubsub.go`、`history.go`、`options.go`、`message.go`、`client.go`）、Redis Presence（`presence_redis.go`）与集群支撑（`cluster_*`） |
 | proxy/ | RPC 代理：`proxy.go`、`router.go`、`http.go`、`grpc.go` |

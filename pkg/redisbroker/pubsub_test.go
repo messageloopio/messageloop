@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/internal/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
@@ -1062,7 +1062,7 @@ func TestRedisBroker_NoteLiveSeqGap(t *testing.T) {
 	// Nil metrics (memory/single-node assembly never wires the broker): no panic.
 	b.noteLiveSeqGap("ch", 5)
 
-	metrics := messageloop.NewMetrics(prometheus.NewRegistry())
+	metrics := metrics.NewMetrics(prometheus.NewRegistry())
 	b.SetMetrics(metrics)
 
 	// No dense-seq baseline yet: rather miss than libel.
@@ -1097,7 +1097,7 @@ func TestRedisBroker_LiveDrop_SeqGapCounted(t *testing.T) {
 	redisCfg := requireCommandBusRedis(t)
 	broker := New(redisCfg).(*redisBroker)
 	t.Cleanup(func() { _ = broker.client.Close() })
-	metrics := messageloop.NewMetrics(prometheus.NewRegistry())
+	metrics := metrics.NewMetrics(prometheus.NewRegistry())
 	broker.SetMetrics(metrics)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1211,7 +1211,7 @@ func isDegraded(b *redisBroker, ch string) bool {
 // publication occupies the channel's worker until gate is closed, so the
 // test can fill the worker queue deterministically. Closing gate (via the
 // returned func or cleanup) unblocks every handler call.
-func newBlockedWorkerBroker(t *testing.T, metrics *messageloop.Metrics) (b *redisBroker, ch string, release func()) {
+func newBlockedWorkerBroker(t *testing.T, metrics *metrics.Metrics) (b *redisBroker, ch string, release func()) {
 	t.Helper()
 	b = newTestRedisBroker()
 	b.SetMetrics(metrics)
@@ -1258,7 +1258,7 @@ func newBlockedWorkerBroker(t *testing.T, metrics *messageloop.Metrics) (b *redi
 // mark once its enqueue completes.
 func TestRedisBroker_DispatchOccupancy_DropsWhenQueueFull(t *testing.T) {
 	logs := captureSlog(t)
-	metrics := messageloop.NewMetrics(prometheus.NewRegistry())
+	metrics := metrics.NewMetrics(prometheus.NewRegistry())
 	b, ch, release := newBlockedWorkerBroker(t, metrics)
 	idx := deliveryWorkerIndex(ch)
 
@@ -1319,7 +1319,7 @@ func TestRedisBroker_DispatchOccupancy_DropsWhenQueueFull(t *testing.T) {
 // next occupancy event that successfully enters the worker queue clears the
 // mark and returns the gauge to zero.
 func TestRedisBroker_DegradedClearedOnOccupancyEnqueue(t *testing.T) {
-	metrics := messageloop.NewMetrics(prometheus.NewRegistry())
+	metrics := metrics.NewMetrics(prometheus.NewRegistry())
 	b, ch, release := newBlockedWorkerBroker(t, metrics)
 	var occMu sync.Mutex
 	var occDelivered int
@@ -1357,7 +1357,7 @@ func TestRedisBroker_DegradedClearedOnOccupancyEnqueue(t *testing.T) {
 // gauge, and the reset is idempotent on an empty set.
 func TestRedisBroker_SetActivePubSub_ClearsDegraded(t *testing.T) {
 	b := newTestRedisBroker()
-	metrics := messageloop.NewMetrics(prometheus.NewRegistry())
+	metrics := metrics.NewMetrics(prometheus.NewRegistry())
 	b.SetMetrics(metrics)
 
 	b.markDegraded("ch-a", "test")
@@ -1378,7 +1378,7 @@ func TestRedisBroker_SetActivePubSub_ClearsDegraded(t *testing.T) {
 // runs inline, nothing is dropped, counted, or marked.
 func TestRedisBroker_DispatchOccupancy_InlinePathUnchanged(t *testing.T) {
 	b := newTestRedisBroker()
-	metrics := messageloop.NewMetrics(prometheus.NewRegistry())
+	metrics := metrics.NewMetrics(prometheus.NewRegistry())
 	b.SetMetrics(metrics)
 	var delivered int
 	b.occHandler = func(string, occupancy.OccupancyEvent) error {

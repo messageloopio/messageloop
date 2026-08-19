@@ -12,7 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
-	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/internal/metrics"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/messageloopio/messageloop/config"
@@ -110,7 +110,7 @@ type redisBroker struct {
 	// SetMetrics after construction. Nil disables counting (nil-tolerant,
 	// same paradigm as the cluster command bus).
 	metricsMu sync.RWMutex
-	metrics   *messageloop.Metrics
+	metrics   *metrics.Metrics
 
 	// activePubSub is the live pub/sub subscription; tests close it to
 	// simulate a disconnect. Guarded by pubsubMu.
@@ -507,14 +507,14 @@ func (b *redisBroker) SetGapHandler(handler stream.GapHandler) {
 
 // SetMetrics wires the shared Prometheus metrics object (D3). Nil is
 // tolerated and disables counting, so an unwired broker never panics.
-func (b *redisBroker) SetMetrics(metrics *messageloop.Metrics) {
+func (b *redisBroker) SetMetrics(metrics *metrics.Metrics) {
 	b.metricsMu.Lock()
 	defer b.metricsMu.Unlock()
 	b.metrics = metrics
 }
 
 // getMetrics returns the wired metrics object, or nil when none was set.
-func (b *redisBroker) getMetrics() *messageloop.Metrics {
+func (b *redisBroker) getMetrics() *metrics.Metrics {
 	b.metricsMu.RLock()
 	defer b.metricsMu.RUnlock()
 	return b.metrics

@@ -1,4 +1,4 @@
-package messageloop
+package cluster
 
 import (
 	"context"
@@ -89,12 +89,12 @@ func (a *MemoryNodeEpochAllocator) NextNodeEpoch(_ context.Context, nodeID strin
 // sequence within this process.
 var sharedMemoryNodeEpochAllocator = NewMemoryNodeEpochAllocator()
 
-// allocateNodeIncarnation fills an empty IncarnationID from the node epoch
+// AllocateNodeIncarnation fills an empty IncarnationID from the node epoch
 // allocator. A directory that implements NodeEpochAllocator (the Redis
 // session directory) wins; the redis backend without such a directory is a
 // startup error (falling back to a random or process-local ID would silently
 // break fencing); memory/noop backends use the process-local counter.
-func allocateNodeIncarnation(options ClusterOptions, directory SessionDirectory) (string, error) {
+func AllocateNodeIncarnation(options ClusterOptions, directory SessionDirectory) (string, error) {
 	if allocator, ok := directory.(NodeEpochAllocator); ok {
 		epoch, err := allocator.NextNodeEpoch(context.Background(), options.NodeID)
 		if err != nil {

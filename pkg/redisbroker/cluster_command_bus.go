@@ -31,9 +31,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
-	"github.com/messageloopio/messageloop"
 	"github.com/messageloopio/messageloop/config"
+	"github.com/messageloopio/messageloop/internal/cluster"
 	clusterhmac "github.com/messageloopio/messageloop/internal/cluster/hmac"
+	"github.com/messageloopio/messageloop/internal/metrics"
 	"github.com/redis/go-redis/v9"
 	"sync/atomic"
 )
@@ -108,11 +109,11 @@ type redisClusterCommandBus struct {
 	now func() time.Time
 
 	mu        sync.RWMutex
-	handler   messageloop.ClusterCommandHandler
+	handler   cluster.ClusterCommandHandler
 	cancel    context.CancelFunc
 	readerWG  sync.WaitGroup
 	handlerWG sync.WaitGroup
-	metrics   *messageloop.Metrics
+	metrics   *metrics.Metrics
 	start     bool
 	stop      bool
 
@@ -129,7 +130,7 @@ const minClusterCommandHMACKeyBytes = 32
 // NewClusterCommandBus returns a Redis-backed request/reply ClusterCommandBus.
 // hmacKey (at least 32 bytes) signs every outgoing envelope and gates every
 // incoming one; Start fails when it is missing or too short.
-func NewClusterCommandBus(cfg config.RedisConfig, nodeID, incarnationID string, hmacKey []byte) messageloop.ClusterCommandBus {
+func NewClusterCommandBus(cfg config.RedisConfig, nodeID, incarnationID string, hmacKey []byte) cluster.ClusterCommandBus {
 	opts := NewOptions(cfg)
 	return &redisClusterCommandBus{
 		client:        newRedisClient(opts),
@@ -149,13 +150,13 @@ func (b *redisClusterCommandBus) nowTime() time.Time {
 	return time.Now()
 }
 
-func (b *redisClusterCommandBus) SetHandler(handler messageloop.ClusterCommandHandler) {
+func (b *redisClusterCommandBus) SetHandler(handler cluster.ClusterCommandHandler) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.handler = handler
 }
 
-func (b *redisClusterCommandBus) SetMetrics(metrics *messageloop.Metrics) {
+func (b *redisClusterCommandBus) SetMetrics(metrics *metrics.Metrics) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.metrics = metrics
@@ -430,7 +431,7 @@ func (b *redisClusterCommandBus) Shutdown(ctx context.Context) error {
 	return b.client.Close()
 }
 
-func (b *redisClusterCommandBus) SendCommand(ctx context.Context, cmd *messageloop.ClusterCommand) (*messageloop.ClusterCommandResult, error) {
+func (b *redisClusterCommandBus) SendCommand(ctx context.Context, cmd *cluster.ClusterCommand) (*cluster.ClusterCommandResult, error) {
 	if cmd == nil || cmd.TargetNodeID == "" || cmd.TargetIncarnationID == "" {
 		return nil, nil
 	}
@@ -464,12 +465,12 @@ func (b *redisClusterCommandBus) SendCommand(ctx context.Context, cmd *messagelo
 		return nil, err
 	}
 	if !alive {
-		return &messageloop.ClusterCommandResult{
+		return &cluster.ClusterCommandResult{
 			CommandID:     cmd.CommandID,
 			SessionID:     cmd.SessionID,
 			NodeID:        cmd.TargetNodeID,
 			IncarnationID: cmd.TargetIncarnationID,
-			Status:        messageloop.ClusterCommandStatusFailed,
+			Status:        cluster.ClusterCommandStatusFailed,
 			ErrorCode:     "TARGET_NODE_NOT_ALIVE",
 			ErrorMessage:  "target node incarnation has no live lease",
 		}, nil
@@ -522,7 +523,7 @@ func (b *redisClusterCommandBus) targetAlive(ctx context.Context, nodeID, incarn
 	if err != nil {
 		return false, err
 	}
-	lease := &messageloop.ClusterNodeLease{}
+	lease := &cluster.ClusterNodeLease{}
 	if err := json.Unmarshal([]byte(data), lease); err != nil {
 		// Unreadable lease: be permissive and let the normal send path run
 		// (the publish/reply machinery reports the real failure).
@@ -534,7 +535,7 @@ func (b *redisClusterCommandBus) targetAlive(ctx context.Context, nodeID, incarn
 // waitForReply drains the reply channel until a result whose CommandID matches
 // the command arrives. Mismatched replies are logged and skipped as defense in
 // depth; the wait still ends at the command deadline.
-func (b *redisClusterCommandBus) waitForReply(ctx context.Context, cmd *messageloop.ClusterCommand, replies <-chan *redis.Message) (*messageloop.ClusterCommandResult, error) {
+func (b *redisClusterCommandBus) waitForReply(ctx context.Context, cmd *cluster.ClusterCommand, replies <-chan *redis.Message) (*cluster.ClusterCommandResult, error) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -551,7 +552,7 @@ func (b *redisClusterCommandBus) waitForReply(ctx context.Context, cmd *messagel
 				}
 				return nil, fmt.Errorf("cluster command reply channel closed")
 			}
-			result := &messageloop.ClusterCommandResult{}
+			result := &cluster.ClusterCommandResult{}
 			if err := json.Unmarshal([]byte(reply.Payload), result); err != nil {
 				return nil, err
 			}
@@ -575,14 +576,14 @@ func (b *redisClusterCommandBus) waitForReply(ctx context.Context, cmd *messagel
 
 // resolveTimeout records a reply timeout (when the deadline actually expired)
 // and resolves the command through the timed-out path.
-func (b *redisClusterCommandBus) resolveTimeout(ctx context.Context, cmd *messageloop.ClusterCommand) (*messageloop.ClusterCommandResult, error) {
+func (b *redisClusterCommandBus) resolveTimeout(ctx context.Context, cmd *cluster.ClusterCommand) (*cluster.ClusterCommandResult, error) {
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		b.recordCommandTimeout(ctx, cmd)
 	}
 	return b.resolveTimedOutCommand(ctx, cmd)
 }
 
-func (b *redisClusterCommandBus) BroadcastCommand(ctx context.Context, cmd *messageloop.ClusterCommand) ([]*messageloop.ClusterCommandResult, error) {
+func (b *redisClusterCommandBus) BroadcastCommand(ctx context.Context, cmd *cluster.ClusterCommand) ([]*cluster.ClusterCommandResult, error) {
 	if cmd == nil {
 		return nil, nil
 	}
@@ -594,7 +595,7 @@ func (b *redisClusterCommandBus) BroadcastCommand(ctx context.Context, cmd *mess
 		if result == nil || err != nil {
 			return nil, err
 		}
-		return []*messageloop.ClusterCommandResult{result}, nil
+		return []*cluster.ClusterCommandResult{result}, nil
 	}
 
 	keys, err := scanKeys(ctx, b.client, b.opts.ClusterNodePrefix+"*")
@@ -602,9 +603,9 @@ func (b *redisClusterCommandBus) BroadcastCommand(ctx context.Context, cmd *mess
 		return nil, err
 	}
 
-	results := make([]*messageloop.ClusterCommandResult, 0, len(keys))
+	results := make([]*cluster.ClusterCommandResult, 0, len(keys))
 	type broadcastOutcome struct {
-		result *messageloop.ClusterCommandResult
+		result *cluster.ClusterCommandResult
 	}
 	outcomes := make(chan broadcastOutcome, len(keys))
 	var wg sync.WaitGroup
@@ -613,7 +614,7 @@ func (b *redisClusterCommandBus) BroadcastCommand(ctx context.Context, cmd *mess
 		if getErr != nil {
 			continue
 		}
-		lease := &messageloop.ClusterNodeLease{}
+		lease := &cluster.ClusterNodeLease{}
 		if err := json.Unmarshal([]byte(payload), lease); err != nil {
 			continue
 		}
@@ -621,7 +622,7 @@ func (b *redisClusterCommandBus) BroadcastCommand(ctx context.Context, cmd *mess
 			continue
 		}
 		wg.Add(1)
-		go func(lease *messageloop.ClusterNodeLease) {
+		go func(lease *cluster.ClusterNodeLease) {
 			defer wg.Done()
 			// Deep-copy Metadata: every goroutine mutates its own copy inside
 			// SendCommand (e.g. the reply_channel key), and sharing the map
@@ -633,12 +634,12 @@ func (b *redisClusterCommandBus) BroadcastCommand(ctx context.Context, cmd *mess
 			copyCommand.TargetIncarnationID = lease.IncarnationID
 			result, sendErr := b.SendCommand(ctx, &copyCommand)
 			if sendErr != nil {
-				outcomes <- broadcastOutcome{result: &messageloop.ClusterCommandResult{
+				outcomes <- broadcastOutcome{result: &cluster.ClusterCommandResult{
 					CommandID:     copyCommand.CommandID,
 					SessionID:     copyCommand.SessionID,
 					NodeID:        lease.NodeID,
 					IncarnationID: lease.IncarnationID,
-					Status:        messageloop.ClusterCommandStatusFailed,
+					Status:        cluster.ClusterCommandStatusFailed,
 					ErrorCode:     "CLUSTER_COMMAND_SEND_FAILED",
 					ErrorMessage:  sendErr.Error(),
 				}}
@@ -690,7 +691,7 @@ func (b *redisClusterCommandBus) commandStateKey(commandID string) string {
 }
 
 func (b *redisClusterCommandBus) handleMessage(ctx context.Context, payload string) {
-	command := &messageloop.ClusterCommand{}
+	command := &cluster.ClusterCommand{}
 	if err := json.Unmarshal([]byte(payload), command); err != nil {
 		return
 	}
@@ -713,12 +714,12 @@ func (b *redisClusterCommandBus) handleMessage(ctx context.Context, payload stri
 		"node_id", b.nodeID,
 	)
 
-	result := &messageloop.ClusterCommandResult{
+	result := &cluster.ClusterCommandResult{
 		CommandID:     command.CommandID,
 		SessionID:     command.SessionID,
 		NodeID:        b.nodeID,
 		IncarnationID: b.incarnationID,
-		Status:        messageloop.ClusterCommandStatusFailed,
+		Status:        cluster.ClusterCommandStatusFailed,
 		ErrorCode:     "CLUSTER_COMMAND_HANDLER_NOT_CONFIGURED",
 		ErrorMessage:  "cluster command handler is not configured",
 	}
@@ -734,19 +735,19 @@ func (b *redisClusterCommandBus) handleMessage(ctx context.Context, payload stri
 		b.recordDedupeHit(ctx, command, "owner")
 		result = storedResult
 		if result == nil {
-			result = &messageloop.ClusterCommandResult{
+			result = &cluster.ClusterCommandResult{
 				CommandID:     command.CommandID,
 				SessionID:     command.SessionID,
 				NodeID:        b.nodeID,
 				IncarnationID: b.incarnationID,
-				Status:        messageloop.ClusterCommandStatusInProgress,
+				Status:        cluster.ClusterCommandStatusInProgress,
 				ErrorCode:     "COMMAND_IN_PROGRESS",
 				ErrorMessage:  "cluster command is already in progress",
 			}
 		}
-		if result.Status == messageloop.ClusterCommandStatusPending {
+		if result.Status == cluster.ClusterCommandStatusPending {
 			result = cloneClusterCommandResult(result)
-			result.Status = messageloop.ClusterCommandStatusInProgress
+			result.Status = cluster.ClusterCommandStatusInProgress
 			result.ErrorCode = "COMMAND_IN_PROGRESS"
 			result.ErrorMessage = "cluster command is already in progress"
 		}
@@ -774,7 +775,7 @@ func (b *redisClusterCommandBus) handleMessage(ctx context.Context, payload stri
 		handledResult, err := b.executeHandlerBounded(handlerCtx, handler, command)
 		cancel()
 		if err != nil {
-			result.Status = messageloop.ClusterCommandStatusFailed
+			result.Status = cluster.ClusterCommandStatusFailed
 			if errors.Is(err, context.DeadlineExceeded) {
 				result.ErrorCode = "CLUSTER_COMMAND_TIMEOUT"
 				result.ErrorMessage = "cluster command handler exceeded its execution deadline"
@@ -798,12 +799,12 @@ func (b *redisClusterCommandBus) handleMessage(ctx context.Context, payload stri
 	if result.IncarnationID == "" {
 		result.IncarnationID = b.incarnationID
 	}
-	if result.Status == "" || result.Status == messageloop.ClusterCommandStatusPending {
-		result.Status = messageloop.ClusterCommandStatusSucceeded
+	if result.Status == "" || result.Status == cluster.ClusterCommandStatusPending {
+		result.Status = cluster.ClusterCommandStatusSucceeded
 	}
 	if storeErr := b.storeCommandResult(ctx, result); storeErr != nil {
 		result = cloneClusterCommandResult(result)
-		result.Status = messageloop.ClusterCommandStatusUnknownFinalState
+		result.Status = cluster.ClusterCommandStatusUnknownFinalState
 		result.ErrorCode = "UNKNOWN_FINAL_STATE"
 		result.ErrorMessage = fmt.Sprintf("cluster command completed but terminal result could not be persisted: %v", storeErr)
 		b.recordUnknownFinalState(ctx, command, result.ErrorMessage)
@@ -822,7 +823,7 @@ func ensureCommandTimeout(ctx context.Context) (context.Context, context.CancelF
 	return context.WithTimeout(ctx, defaultCommandTimeout)
 }
 
-func (b *redisClusterCommandBus) resolveExistingCommand(ctx context.Context, commandID string) (*messageloop.ClusterCommandResult, error) {
+func (b *redisClusterCommandBus) resolveExistingCommand(ctx context.Context, commandID string) (*cluster.ClusterCommandResult, error) {
 	if commandID == "" {
 		return nil, nil
 	}
@@ -830,26 +831,26 @@ func (b *redisClusterCommandBus) resolveExistingCommand(ctx context.Context, com
 	if err != nil || storedResult == nil {
 		return storedResult, err
 	}
-	if storedResult.Status != messageloop.ClusterCommandStatusPending {
+	if storedResult.Status != cluster.ClusterCommandStatusPending {
 		return storedResult, nil
 	}
 	resolved := cloneClusterCommandResult(storedResult)
-	resolved.Status = messageloop.ClusterCommandStatusInProgress
+	resolved.Status = cluster.ClusterCommandStatusInProgress
 	resolved.ErrorCode = "COMMAND_IN_PROGRESS"
 	resolved.ErrorMessage = "cluster command is already in progress"
 	return resolved, nil
 }
 
-func (b *redisClusterCommandBus) claimCommandExecution(ctx context.Context, command *messageloop.ClusterCommand) (bool, *messageloop.ClusterCommandResult, error) {
+func (b *redisClusterCommandBus) claimCommandExecution(ctx context.Context, command *cluster.ClusterCommand) (bool, *cluster.ClusterCommandResult, error) {
 	if command == nil || command.CommandID == "" {
 		return false, nil, nil
 	}
-	pendingResult := &messageloop.ClusterCommandResult{
+	pendingResult := &cluster.ClusterCommandResult{
 		CommandID:     command.CommandID,
 		SessionID:     command.SessionID,
 		NodeID:        b.nodeID,
 		IncarnationID: b.incarnationID,
-		Status:        messageloop.ClusterCommandStatusPending,
+		Status:        cluster.ClusterCommandStatusPending,
 	}
 	encodedPending, err := json.Marshal(pendingResult)
 	if err != nil {
@@ -883,7 +884,7 @@ func (b *redisClusterCommandBus) claimCommandExecution(ctx context.Context, comm
 	return false, storedResult, err
 }
 
-func (b *redisClusterCommandBus) loadCommandResult(ctx context.Context, commandID string) (*messageloop.ClusterCommandResult, error) {
+func (b *redisClusterCommandBus) loadCommandResult(ctx context.Context, commandID string) (*cluster.ClusterCommandResult, error) {
 	if commandID == "" {
 		return nil, nil
 	}
@@ -894,14 +895,14 @@ func (b *redisClusterCommandBus) loadCommandResult(ctx context.Context, commandI
 	if err != nil {
 		return nil, err
 	}
-	result := &messageloop.ClusterCommandResult{}
+	result := &cluster.ClusterCommandResult{}
 	if err := json.Unmarshal([]byte(data), result); err != nil {
 		return nil, err
 	}
 	return result, nil
 }
 
-func (b *redisClusterCommandBus) storeCommandResult(ctx context.Context, result *messageloop.ClusterCommandResult) error {
+func (b *redisClusterCommandBus) storeCommandResult(ctx context.Context, result *cluster.ClusterCommandResult) error {
 	if result == nil || result.CommandID == "" {
 		return nil
 	}
@@ -912,7 +913,7 @@ func (b *redisClusterCommandBus) storeCommandResult(ctx context.Context, result 
 	return b.client.Set(ctx, b.commandStateKey(result.CommandID), encodedResult, defaultCommandStateTTL).Err()
 }
 
-func (b *redisClusterCommandBus) publishCommandResult(ctx context.Context, command *messageloop.ClusterCommand, result *messageloop.ClusterCommandResult) {
+func (b *redisClusterCommandBus) publishCommandResult(ctx context.Context, command *cluster.ClusterCommand, result *cluster.ClusterCommandResult) {
 	if command == nil || result == nil {
 		return
 	}
@@ -954,7 +955,7 @@ func (b *redisClusterCommandBus) recordHMACReject(ctx context.Context, stage, co
 	)
 }
 
-func (b *redisClusterCommandBus) executeHandler(ctx context.Context, handler messageloop.ClusterCommandHandler, command *messageloop.ClusterCommand) (result *messageloop.ClusterCommandResult, err error) {
+func (b *redisClusterCommandBus) executeHandler(ctx context.Context, handler cluster.ClusterCommandHandler, command *cluster.ClusterCommand) (result *cluster.ClusterCommandResult, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			result = nil
@@ -971,9 +972,9 @@ func (b *redisClusterCommandBus) executeHandler(ctx context.Context, handler mes
 // cannot wedge the command bus. Handlers MUST respond to ctx cancellation: a
 // handler that keeps running past its deadline continues to occupy its
 // clusterCommandHandlerConcurrency slot until it returns.
-func (b *redisClusterCommandBus) executeHandlerBounded(ctx context.Context, handler messageloop.ClusterCommandHandler, command *messageloop.ClusterCommand) (result *messageloop.ClusterCommandResult, err error) {
+func (b *redisClusterCommandBus) executeHandlerBounded(ctx context.Context, handler cluster.ClusterCommandHandler, command *cluster.ClusterCommand) (result *cluster.ClusterCommandResult, err error) {
 	type outcome struct {
-		result *messageloop.ClusterCommandResult
+		result *cluster.ClusterCommandResult
 		err    error
 	}
 	done := make(chan outcome, 1)
@@ -1008,7 +1009,7 @@ func (b *redisClusterCommandBus) renewClaimLease(ctx context.Context, key string
 	}
 }
 
-func (b *redisClusterCommandBus) resolveTimedOutCommand(ctx context.Context, command *messageloop.ClusterCommand) (*messageloop.ClusterCommandResult, error) {
+func (b *redisClusterCommandBus) resolveTimedOutCommand(ctx context.Context, command *cluster.ClusterCommand) (*cluster.ClusterCommandResult, error) {
 	if command == nil {
 		return nil, ctx.Err()
 	}
@@ -1016,28 +1017,28 @@ func (b *redisClusterCommandBus) resolveTimedOutCommand(ctx context.Context, com
 	if err != nil {
 		return nil, err
 	}
-	if storedResult != nil && storedResult.Status != messageloop.ClusterCommandStatusPending {
+	if storedResult != nil && storedResult.Status != cluster.ClusterCommandStatusPending {
 		return storedResult, nil
 	}
 	b.recordUnknownFinalState(ctx, command, "cluster command timed out before a terminal result was observed")
-	return &messageloop.ClusterCommandResult{
+	return &cluster.ClusterCommandResult{
 		CommandID:     command.CommandID,
 		SessionID:     command.SessionID,
 		NodeID:        command.TargetNodeID,
 		IncarnationID: command.TargetIncarnationID,
-		Status:        messageloop.ClusterCommandStatusUnknownFinalState,
+		Status:        cluster.ClusterCommandStatusUnknownFinalState,
 		ErrorCode:     "UNKNOWN_FINAL_STATE",
 		ErrorMessage:  "cluster command timed out before a terminal result was observed",
 	}, nil
 }
 
-func (b *redisClusterCommandBus) getMetrics() *messageloop.Metrics {
+func (b *redisClusterCommandBus) getMetrics() *metrics.Metrics {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	return b.metrics
 }
 
-func (b *redisClusterCommandBus) recordDedupeHit(ctx context.Context, cmd *messageloop.ClusterCommand, stage string) {
+func (b *redisClusterCommandBus) recordDedupeHit(ctx context.Context, cmd *cluster.ClusterCommand, stage string) {
 	if metrics := b.getMetrics(); metrics != nil {
 		metrics.ClusterCommandDedupeHits.Inc()
 	}
@@ -1053,7 +1054,7 @@ func (b *redisClusterCommandBus) recordDedupeHit(ctx context.Context, cmd *messa
 	)
 }
 
-func (b *redisClusterCommandBus) recordCommandTimeout(ctx context.Context, cmd *messageloop.ClusterCommand) {
+func (b *redisClusterCommandBus) recordCommandTimeout(ctx context.Context, cmd *cluster.ClusterCommand) {
 	if metrics := b.getMetrics(); metrics != nil {
 		metrics.ClusterCommandTimeouts.Inc()
 	}
@@ -1068,7 +1069,7 @@ func (b *redisClusterCommandBus) recordCommandTimeout(ctx context.Context, cmd *
 	)
 }
 
-func (b *redisClusterCommandBus) recordUnknownFinalState(ctx context.Context, cmd *messageloop.ClusterCommand, reason string) {
+func (b *redisClusterCommandBus) recordUnknownFinalState(ctx context.Context, cmd *cluster.ClusterCommand, reason string) {
 	if metrics := b.getMetrics(); metrics != nil {
 		metrics.ClusterCommandUnknownFinalState.Inc()
 	}
@@ -1095,7 +1096,7 @@ func cloneCommandMetadata(metadata map[string]string) map[string]string {
 	return clone
 }
 
-func cloneClusterCommandResult(result *messageloop.ClusterCommandResult) *messageloop.ClusterCommandResult {
+func cloneClusterCommandResult(result *cluster.ClusterCommandResult) *cluster.ClusterCommandResult {
 	if result == nil {
 		return nil
 	}
@@ -1109,4 +1110,4 @@ func cloneClusterCommandResult(result *messageloop.ClusterCommandResult) *messag
 	return &clone
 }
 
-var _ messageloop.ClusterCommandBus = (*redisClusterCommandBus)(nil)
+var _ cluster.ClusterCommandBus = (*redisClusterCommandBus)(nil)

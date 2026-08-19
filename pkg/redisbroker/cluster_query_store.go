@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/messageloopio/messageloop"
 	"github.com/messageloopio/messageloop/config"
+	"github.com/messageloopio/messageloop/internal/cluster"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -39,7 +39,7 @@ return next
 `)
 
 // NewClusterQueryStore returns a Redis-backed ClusterQueryStore.
-func NewClusterQueryStore(cfg config.RedisConfig, nodeID, incarnationID string) messageloop.ClusterQueryStore {
+func NewClusterQueryStore(cfg config.RedisConfig, nodeID, incarnationID string) cluster.ClusterQueryStore {
 	opts := NewOptions(cfg)
 	return &redisClusterQueryStore{
 		client:        newRedisClient(opts),
@@ -105,7 +105,7 @@ func (s *redisClusterQueryStore) ReplaceNodeChannels(ctx context.Context, channe
 	return err
 }
 
-func (s *redisClusterQueryStore) ListChannels(ctx context.Context) ([]messageloop.ClusterChannelInfo, error) {
+func (s *redisClusterQueryStore) ListChannels(ctx context.Context) ([]cluster.ClusterChannelInfo, error) {
 	keys, err := scanKeys(ctx, s.client, s.opts.ClusterChannelPrefix+"owner:*")
 	if err != nil {
 		return nil, err
@@ -139,12 +139,12 @@ func (s *redisClusterQueryStore) ListChannels(ctx context.Context) ([]messageloo
 		}
 	}
 
-	channels := make([]messageloop.ClusterChannelInfo, 0, len(aggregated))
+	channels := make([]cluster.ClusterChannelInfo, 0, len(aggregated))
 	for channel, count := range aggregated {
 		if count <= 0 {
 			continue
 		}
-		channels = append(channels, messageloop.ClusterChannelInfo{Name: channel, Subscribers: count})
+		channels = append(channels, cluster.ClusterChannelInfo{Name: channel, Subscribers: count})
 	}
 
 	sort.Slice(channels, func(i, j int) bool {
@@ -155,12 +155,12 @@ func (s *redisClusterQueryStore) ListChannels(ctx context.Context) ([]messageloo
 
 // ListNodeProjections returns the node:incarnation pairs that have owner
 // projections stored.
-func (s *redisClusterQueryStore) ListNodeProjections(ctx context.Context) ([]messageloop.ClusterNodeProjection, error) {
+func (s *redisClusterQueryStore) ListNodeProjections(ctx context.Context) ([]cluster.ClusterNodeProjection, error) {
 	keys, err := scanKeys(ctx, s.client, s.opts.ClusterChannelPrefix+"owner:*")
 	if err != nil {
 		return nil, err
 	}
-	projections := make([]messageloop.ClusterNodeProjection, 0, len(keys))
+	projections := make([]cluster.ClusterNodeProjection, 0, len(keys))
 	prefix := s.opts.ClusterChannelPrefix + "owner:"
 	for _, key := range keys {
 		rest := strings.TrimPrefix(key, prefix)
@@ -168,7 +168,7 @@ func (s *redisClusterQueryStore) ListNodeProjections(ctx context.Context) ([]mes
 		if len(parts) != 2 {
 			continue
 		}
-		projections = append(projections, messageloop.ClusterNodeProjection{NodeID: parts[0], IncarnationID: parts[1]})
+		projections = append(projections, cluster.ClusterNodeProjection{NodeID: parts[0], IncarnationID: parts[1]})
 	}
 	return projections, nil
 }
@@ -199,4 +199,4 @@ func scanKeys(ctx context.Context, client *redis.Client, pattern string) ([]stri
 	return keys, nil
 }
 
-var _ messageloop.ClusterQueryStore = (*redisClusterQueryStore)(nil)
+var _ cluster.ClusterQueryStore = (*redisClusterQueryStore)(nil)

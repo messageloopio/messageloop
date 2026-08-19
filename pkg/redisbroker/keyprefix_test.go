@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/internal/cluster"
 	"github.com/stretchr/testify/require"
 
 	"github.com/messageloopio/messageloop/internal/occupancy"
@@ -49,7 +49,7 @@ func TestKeyPrefixGeneration_Ml2IsolatedFromLegacyMl(t *testing.T) {
 	// Cluster session directory: node_epoch counter (KD-K27).
 	directory := NewSessionDirectory(redisCfg)
 	t.Cleanup(func() { _ = directory.Shutdown(ctx) })
-	allocator, ok := directory.(messageloop.NodeEpochAllocator)
+	allocator, ok := directory.(cluster.NodeEpochAllocator)
 	require.True(t, ok)
 	_, err = allocator.NextNodeEpoch(ctx, nodeID)
 	require.NoError(t, err)

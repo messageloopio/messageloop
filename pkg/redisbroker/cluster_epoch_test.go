@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/internal/cluster"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -17,7 +17,7 @@ func TestRedisSessionDirectory_NextNodeEpoch(t *testing.T) {
 	directory := NewSessionDirectory(redisCfg)
 	t.Cleanup(func() { _ = directory.Shutdown(ctx) })
 
-	allocator, ok := directory.(messageloop.NodeEpochAllocator)
+	allocator, ok := directory.(cluster.NodeEpochAllocator)
 	require.True(t, ok, "redis session directory must implement NodeEpochAllocator")
 
 	first, err := allocator.NextNodeEpoch(ctx, "node-epoch-a")
@@ -25,8 +25,8 @@ func TestRedisSessionDirectory_NextNodeEpoch(t *testing.T) {
 	second, err := allocator.NextNodeEpoch(ctx, "node-epoch-a")
 	require.NoError(t, err)
 	assert.Equal(t, first+1, second, "INCR issues strictly +1 epochs for one nodeID")
-	assert.Equal(t, "1", messageloop.FormatNodeEpoch(first))
-	assert.Equal(t, "2", messageloop.FormatNodeEpoch(second))
+	assert.Equal(t, "1", cluster.FormatNodeEpoch(first))
+	assert.Equal(t, "2", cluster.FormatNodeEpoch(second))
 
 	other, err := allocator.NextNodeEpoch(ctx, "node-epoch-b")
 	require.NoError(t, err)
@@ -47,20 +47,20 @@ func TestRedisSessionDirectory_NodeEpochKeyEscapesNodeLeaseScan(t *testing.T) {
 	directory := NewSessionDirectory(redisCfg)
 	t.Cleanup(func() { _ = directory.Shutdown(ctx) })
 
-	allocator, ok := directory.(messageloop.NodeEpochAllocator)
+	allocator, ok := directory.(cluster.NodeEpochAllocator)
 	require.True(t, ok)
 	epoch, err := allocator.NextNodeEpoch(ctx, "node-epoch-scan")
 	require.NoError(t, err)
 
-	lease := &messageloop.ClusterNodeLease{
+	lease := &cluster.ClusterNodeLease{
 		NodeID:        "node-epoch-scan",
-		IncarnationID: messageloop.FormatNodeEpoch(epoch),
+		IncarnationID: cluster.FormatNodeEpoch(epoch),
 		StartedAt:     time.Now(),
 		ExpiresAt:     time.Now().Add(time.Minute),
 	}
 	require.NoError(t, directory.PutNodeLease(ctx, lease, time.Minute))
 
-	lister, ok := directory.(messageloop.ClusterNodeLeaseLister)
+	lister, ok := directory.(cluster.ClusterNodeLeaseLister)
 	require.True(t, ok)
 	leases, err := lister.ListNodeLeases(ctx)
 	require.NoError(t, err)

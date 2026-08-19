@@ -23,7 +23,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/internal/cluster"
 )
 
 // MaxClockSkew bounds the accepted distance between a command's or result's
@@ -60,7 +60,7 @@ func (e *VerifyError) Error() string {
 // SignCommand stamps cmd.Signature with hex(HMAC-SHA256(key, canonical(cmd))).
 // The caller must have filled CommandID and IssuedAt already; signing fails
 // on a nil command and never mutates any field other than Signature.
-func SignCommand(key []byte, cmd *messageloop.ClusterCommand) error {
+func SignCommand(key []byte, cmd *cluster.ClusterCommand) error {
 	if cmd == nil {
 		return errors.New("cannot sign a nil cluster command")
 	}
@@ -72,7 +72,7 @@ func SignCommand(key []byte, cmd *messageloop.ClusterCommand) error {
 // present, IssuedAt within MaxClockSkew of now, and MAC matching. A failure
 // returns a *VerifyError; the caller must not claim, execute, or answer the
 // command.
-func VerifyCommand(key []byte, cmd *messageloop.ClusterCommand, now time.Time) error {
+func VerifyCommand(key []byte, cmd *cluster.ClusterCommand, now time.Time) error {
 	if cmd == nil {
 		return &VerifyError{Reason: RejectBad, Detail: "nil command"}
 	}
@@ -95,7 +95,7 @@ func VerifyCommand(key []byte, cmd *messageloop.ClusterCommand, now time.Time) e
 
 // SignResult stamps res.Signature with hex(HMAC-SHA256(key,
 // canonical(res))). The caller must have filled IssuedAt already.
-func SignResult(key []byte, res *messageloop.ClusterCommandResult) error {
+func SignResult(key []byte, res *cluster.ClusterCommandResult) error {
 	if res == nil {
 		return errors.New("cannot sign a nil cluster command result")
 	}
@@ -105,7 +105,7 @@ func SignResult(key []byte, res *messageloop.ClusterCommandResult) error {
 
 // VerifyResult checks a received command result. A forged "succeeded" reply
 // fails here and must be treated as if no reply had arrived.
-func VerifyResult(key []byte, res *messageloop.ClusterCommandResult, now time.Time) error {
+func VerifyResult(key []byte, res *cluster.ClusterCommandResult, now time.Time) error {
 	if res == nil {
 		return &VerifyError{Reason: RejectBad, Detail: "nil result"}
 	}
@@ -124,7 +124,7 @@ func VerifyResult(key []byte, res *messageloop.ClusterCommandResult, now time.Ti
 // canonicalCommand is the byte-exact signing payload of a command: UTF-8
 // lines joined by '\n', with a trailing '\n' on the last line. IssuedBy,
 // Channel, Metadata, and TargetNodeID are deliberately excluded.
-func canonicalCommand(cmd *messageloop.ClusterCommand) []byte {
+func canonicalCommand(cmd *cluster.ClusterCommand) []byte {
 	// sha256 of a nil slice and of an empty slice is the same digest.
 	payloadHash := sha256.Sum256(cmd.Payload)
 	var b bytes.Buffer
@@ -140,7 +140,7 @@ func canonicalCommand(cmd *messageloop.ClusterCommand) []byte {
 }
 
 // canonicalResult is the byte-exact signing payload of a command result.
-func canonicalResult(res *messageloop.ClusterCommandResult) []byte {
+func canonicalResult(res *cluster.ClusterCommandResult) []byte {
 	var b bytes.Buffer
 	b.WriteString("v1-result\n")
 	writeLine(&b, res.CommandID)

@@ -6,17 +6,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/internal/cluster"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 var testKey = []byte("0123456789abcdef0123456789abcdef") // 32 bytes
 
-func testCommand() *messageloop.ClusterCommand {
-	return &messageloop.ClusterCommand{
+func testCommand() *cluster.ClusterCommand {
+	return &cluster.ClusterCommand{
 		CommandID:           "cmd-1",
-		Type:                messageloop.ClusterCommandDisconnect,
+		Type:                cluster.ClusterCommandDisconnect,
 		TargetNodeID:        "node-b",
 		TargetIncarnationID: "inc-b",
 		SessionID:           "sess-1",
@@ -67,14 +67,14 @@ func TestVerifyCommand_RoundTrip(t *testing.T) {
 func TestVerifyCommand_FieldTamperingFails(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0).UTC()
 
-	cases := map[string]func(cmd *messageloop.ClusterCommand){
-		"type":         func(cmd *messageloop.ClusterCommand) { cmd.Type = messageloop.ClusterCommandTakeover },
-		"session_id":   func(cmd *messageloop.ClusterCommand) { cmd.SessionID = "sess-other" },
-		"lease_version": func(cmd *messageloop.ClusterCommand) { cmd.LeaseVersion++ },
-		"payload":      func(cmd *messageloop.ClusterCommand) { cmd.Payload = []byte("forged") },
-		"command_id":   func(cmd *messageloop.ClusterCommand) { cmd.CommandID = "cmd-other" },
-		"issued_at":    func(cmd *messageloop.ClusterCommand) { cmd.IssuedAt = cmd.IssuedAt.Add(time.Second) },
-		"target_incarnation": func(cmd *messageloop.ClusterCommand) { cmd.TargetIncarnationID = "inc-other" },
+	cases := map[string]func(cmd *cluster.ClusterCommand){
+		"type":         func(cmd *cluster.ClusterCommand) { cmd.Type = cluster.ClusterCommandTakeover },
+		"session_id":   func(cmd *cluster.ClusterCommand) { cmd.SessionID = "sess-other" },
+		"lease_version": func(cmd *cluster.ClusterCommand) { cmd.LeaseVersion++ },
+		"payload":      func(cmd *cluster.ClusterCommand) { cmd.Payload = []byte("forged") },
+		"command_id":   func(cmd *cluster.ClusterCommand) { cmd.CommandID = "cmd-other" },
+		"issued_at":    func(cmd *cluster.ClusterCommand) { cmd.IssuedAt = cmd.IssuedAt.Add(time.Second) },
+		"target_incarnation": func(cmd *cluster.ClusterCommand) { cmd.TargetIncarnationID = "inc-other" },
 	}
 	for name, tamper := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -153,12 +153,12 @@ func TestVerifyCommand_EmptyCommandIDRejected(t *testing.T) {
 }
 
 func TestSignAndVerifyResult_RoundTrip(t *testing.T) {
-	res := &messageloop.ClusterCommandResult{
+	res := &cluster.ClusterCommandResult{
 		CommandID:     "cmd-1",
 		SessionID:     "sess-1",
 		NodeID:        "node-b",
 		IncarnationID: "inc-b",
-		Status:        messageloop.ClusterCommandStatusSucceeded,
+		Status:        cluster.ClusterCommandStatusSucceeded,
 		ErrorCode:     "",
 		IssuedAt:      time.Unix(1_700_000_000, 0).UTC(),
 	}
@@ -166,7 +166,7 @@ func TestSignAndVerifyResult_RoundTrip(t *testing.T) {
 	require.NoError(t, VerifyResult(testKey, res, res.IssuedAt))
 
 	tampered := *res
-	tampered.Status = messageloop.ClusterCommandStatusFailed
+	tampered.Status = cluster.ClusterCommandStatusFailed
 	assert.Equal(t, RejectBad, rejectReason(t, VerifyResult(testKey, &tampered, res.IssuedAt)))
 
 	unsigned := *res
@@ -187,9 +187,9 @@ func TestSignCommand_NilCommandFails(t *testing.T) {
 func TestCanonicalFormat_StableLines(t *testing.T) {
 	// Pin the canonical layout: a future refactor must not silently change
 	// the signed bytes of a known command.
-	cmd := &messageloop.ClusterCommand{
+	cmd := &cluster.ClusterCommand{
 		CommandID:           "id",
-		Type:                messageloop.ClusterCommandPublish,
+		Type:                cluster.ClusterCommandPublish,
 		TargetIncarnationID: "inc",
 		SessionID:           "sess",
 		LeaseVersion:        0,

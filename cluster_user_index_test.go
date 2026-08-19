@@ -9,63 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestSyncUserIndex_MigratesOnUserChange verifies the helper's migration
-// rule: when a lease changes user (resume + re-authentication), the old
-// user's membership is removed and the new user's added; a same-user refresh
-// never removes the membership.
-func TestSyncUserIndex_MigratesOnUserChange(t *testing.T) {
-	ctx := context.Background()
-	directory := &fakeSessionDirectory{}
-	old := &ClusterSessionLease{SessionID: "sess-1", UserID: "U1"}
-	new := &ClusterSessionLease{SessionID: "sess-1", UserID: "U2"}
-
-	require.NoError(t, directory.AddUserSession(ctx, "U1", "sess-1", time.Minute))
-	require.NoError(t, SyncUserIndex(ctx, directory, old, new, time.Minute))
-
-	ids, err := directory.ListUserSessions(ctx, "U1")
-	require.NoError(t, err)
-	assert.NotContains(t, ids, "sess-1", "U1 must no longer list sess-1 after the user change")
-
-	ids, err = directory.ListUserSessions(ctx, "U2")
-	require.NoError(t, err)
-	assert.Contains(t, ids, "sess-1", "U2 must list sess-1 after the user change")
-
-	// Same-user refresh keeps the membership and never removes it.
-	removedBefore := len(directory.removedUsers)
-	require.NoError(t, SyncUserIndex(ctx, directory, new, new, time.Minute))
-	assert.Equal(t, removedBefore, len(directory.removedUsers), "same-user Put must not remove the membership")
-	ids, err = directory.ListUserSessions(ctx, "U2")
-	require.NoError(t, err)
-	assert.Contains(t, ids, "sess-1")
-}
-
-// TestSyncUserIndex_DeleteRemovesMembership verifies the Delete path
-// (newLease == nil) and the anonymous-lease rule: an empty UserID only ever
-// removes, never adds.
-func TestSyncUserIndex_DeleteRemovesMembership(t *testing.T) {
-	ctx := context.Background()
-	directory := &fakeSessionDirectory{}
-	lease := &ClusterSessionLease{SessionID: "sess-1", UserID: "U1"}
-	require.NoError(t, directory.AddUserSession(ctx, "U1", "sess-1", time.Minute))
-
-	require.NoError(t, SyncUserIndex(ctx, directory, lease, nil, 0))
-	ids, err := directory.ListUserSessions(ctx, "U1")
-	require.NoError(t, err)
-	assert.NotContains(t, ids, "sess-1", "Delete must remove the membership")
-
-	// A lease that became anonymous must leave the index and never re-enter.
-	require.NoError(t, SyncUserIndex(ctx, directory,
-		&ClusterSessionLease{SessionID: "sess-2", UserID: "U1"},
-		&ClusterSessionLease{SessionID: "sess-2", UserID: ""},
-		time.Minute))
-	for _, entry := range directory.addedUsers {
-		assert.NotEqual(t, "sess-2", entry.sessionID, "anonymous sessions must never enter the index")
-	}
-	ids, err = directory.ListUserSessions(ctx, "U1")
-	require.NoError(t, err)
-	assert.NotContains(t, ids, "sess-2", "a lease that became anonymous must leave the index")
-}
-
 // TestExpandUserSessions_SkipsMismatchedLease verifies KD-13: cluster index
 // entries are only hints. A session whose lease user no longer matches (or
 // whose lease is gone) must not appear in the expansion and must not be

@@ -133,7 +133,7 @@ Config structure defined in `config/config.go` with example in `config-example.y
 - Presence aggregation across nodes
 - Handles node join/leave, channel migration, and stale node cleanup
 
-**Metrics** (`metrics.go`) - Prometheus instrumentation:
+**Metrics** (`internal/metrics/metrics.go`) - Prometheus instrumentation:
 - Connection/subscription gauges, message publish/delivery counters
 - Publish and RPC duration histograms, delivery failure counters
 - Cluster-specific metrics (command dedupe hits, timeouts, projection repairs)

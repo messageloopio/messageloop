@@ -5,12 +5,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/messageloopio/messageloop"
+	"github.com/messageloopio/messageloop/internal/cluster"
 	"github.com/stretchr/testify/require"
 )
 
-func testLease(sessionID, nodeID, incarnationID string, version uint64) *messageloop.ClusterSessionLease {
-	return &messageloop.ClusterSessionLease{
+func testLease(sessionID, nodeID, incarnationID string, version uint64) *cluster.ClusterSessionLease {
+	return &cluster.ClusterSessionLease{
 		SessionID:     sessionID,
 		NodeID:        nodeID,
 		IncarnationID: incarnationID,
@@ -165,7 +165,7 @@ func TestDirectory_NodeLeases(t *testing.T) {
 	ctx := context.Background()
 
 	put := func(nodeID, incarnationID string) {
-		require.NoError(t, dir.PutNodeLease(ctx, &messageloop.ClusterNodeLease{
+		require.NoError(t, dir.PutNodeLease(ctx, &cluster.ClusterNodeLease{
 			NodeID:        nodeID,
 			IncarnationID: incarnationID,
 			ExpiresAt:     time.Now().Add(time.Hour),
@@ -194,10 +194,10 @@ func TestDirectory_SnapshotRoundTrip(t *testing.T) {
 	dir := NewDirectory()
 	ctx := context.Background()
 
-	snapshot := &messageloop.ClusterSessionSnapshot{
+	snapshot := &cluster.ClusterSessionSnapshot{
 		SessionID:      "sess-1",
 		UserID:         "user-1",
-		Subscriptions:  []messageloop.ClusterSubscriptionSnapshot{{Channel: "news"}},
+		Subscriptions:  []cluster.ClusterSubscriptionSnapshot{{Channel: "news"}},
 		ChannelOffsets: map[string]uint64{"news": 7},
 	}
 	require.NoError(t, dir.PutSessionSnapshot(ctx, snapshot, time.Minute))
@@ -223,7 +223,7 @@ func TestDirectory_CompareAndSwapSessionStateAtomic(t *testing.T) {
 
 	// First registration: expected == nil on an empty slot writes both.
 	ok, err := dir.CompareAndSwapSessionState(ctx, nil, testLease("sess-1", "node-a", "inc-a", 1),
-		&messageloop.ClusterSessionSnapshot{SessionID: "sess-1", UserID: "user-1"}, time.Minute, time.Hour)
+		&cluster.ClusterSessionSnapshot{SessionID: "sess-1", UserID: "user-1"}, time.Minute, time.Hour)
 	require.NoError(t, err)
 	require.True(t, ok)
 	snapshot, err := dir.GetSessionSnapshot(ctx, "sess-1")
@@ -236,7 +236,7 @@ func TestDirectory_CompareAndSwapSessionStateAtomic(t *testing.T) {
 	refresh := testLease("sess-1", "node-a", "inc-a", 1)
 	refresh.LastActivityAt = 42
 	ok, err = dir.CompareAndSwapSessionState(ctx, current, refresh,
-		&messageloop.ClusterSessionSnapshot{SessionID: "sess-1", UserID: "user-2"}, time.Minute, time.Hour)
+		&cluster.ClusterSessionSnapshot{SessionID: "sess-1", UserID: "user-2"}, time.Minute, time.Hour)
 	require.NoError(t, err)
 	require.True(t, ok)
 	snapshot, err = dir.GetSessionSnapshot(ctx, "sess-1")
@@ -247,7 +247,7 @@ func TestDirectory_CompareAndSwapSessionStateAtomic(t *testing.T) {
 	// and the snapshot keeps the last won view.
 	ok, err = dir.CompareAndSwapSessionState(ctx, testLease("sess-1", "node-a", "inc-a", 99),
 		testLease("sess-1", "node-a", "inc-a", 100),
-		&messageloop.ClusterSessionSnapshot{SessionID: "sess-1", UserID: "user-stale"}, time.Minute, time.Hour)
+		&cluster.ClusterSessionSnapshot{SessionID: "sess-1", UserID: "user-stale"}, time.Minute, time.Hour)
 	require.NoError(t, err)
 	require.False(t, ok)
 	lease, err := dir.GetSessionLease(ctx, "sess-1")

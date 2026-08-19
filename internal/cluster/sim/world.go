@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/messageloopio/messageloop"
+	clusterpkg "github.com/messageloopio/messageloop/internal/cluster"
 )
 
 // World is the deterministic two-node fencing fixture: nodes A and B are real
@@ -25,8 +26,8 @@ type World struct {
 	// RepairerA / RepairerB are the per-node cluster repairers built over the
 	// shared Directory. They are never started; tests drive membership beats
 	// explicitly (messageloop.SimMembershipOnce).
-	RepairerA messageloop.ClusterRepairer
-	RepairerB messageloop.ClusterRepairer
+	RepairerA clusterpkg.ClusterRepairer
+	RepairerB clusterpkg.ClusterRepairer
 }
 
 // NewWorld assembles the two-node fixture: node-a/inc-a and node-b/inc-b on a
@@ -43,7 +44,7 @@ func NewWorld() *World {
 	return world
 }
 
-func (w *World) newNode(nodeID, incarnationID string) (*messageloop.Node, messageloop.ClusterRepairer) {
+func (w *World) newNode(nodeID, incarnationID string) (*messageloop.Node, clusterpkg.ClusterRepairer) {
 	node := messageloop.NewNode(nil)
 	repairer := messageloop.NewClusterRepairer(node, w.Dir, nil, messageloop.ClusterRepairerConfig{
 		NodeID:        nodeID,

@@ -101,6 +101,6 @@ B1-B4、A1-A5 全部由任务书（`docs/review/tasks/`）分派实施完成并�
 5. **node.go 发布兜底校验**：`ValidateTopic` 目前由 hub/broker 各自调用，第三方自定义 Broker 不受保护；Node 层可加防御性校验。
 6. **cluster 测试关闭顺序**：`node.Shutdown()` 关闭 Redis client 后仍有异步 goroutine 发 presence leave（`redis: client is closed` 警告噪音）。
 7. **HTTP proxy 200 路径 protojson 化**（`proxy/http.go` 的 Authenticate/SubscribeAcl/OnConnected 等仍用 encoding/json，与非 200 路径不一致）。
-8. **Redis 集成测试进程隔离**：`TestClusterRedis_*` 固定 DB 15 + 固定 node ID，多进程并发跑测试会互相 `FlushDB`；建议按进程随机 DB 或 key 前缀。
+8. **Redis 集成测试进程隔离**：`TestClusterRedis_*` 固定 DB 15 + 固定 node ID，多进程并发跑测试会互相 `FlushDB`；建议按进程随机 DB 或 key 前缀。补充（2026-08-19 D13 终验实测）：DB 14 同样中招——根包 `TestClusterRedis_CompareAndSwapSessionState_Atomic`（`clusterAtomicWriteTestDB=14`）与 `pkg/redisbroker/cluster_command_bus_test.go`（`clusterCommandBusTestDB=14`，:233/:235 `FlushDB`）在 `go test ./...` 包间并发下互清，曾致 nil lease panic（单测与全量复跑均过，确认 flake 而非回归）。
 9. **Go SDK `handleSubscribeAck` 锁范围统一**（`sdks/go/client.go:570-586`，当前单 goroutine 无实际竞态，样式隐患）。
 10. **B4 热路径压测观察**：broadcast 每 publication 新增一次分片写锁，性能敏感场景留意。

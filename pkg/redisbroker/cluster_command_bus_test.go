@@ -9,9 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/messageloopio/messageloop"
 	"github.com/messageloopio/messageloop/config"
+	"github.com/messageloopio/messageloop/internal/cluster"
 	clusterhmac "github.com/messageloopio/messageloop/internal/cluster/hmac"
+	"github.com/messageloopio/messageloop/internal/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/redis/go-redis/v9"
@@ -32,10 +33,10 @@ func TestClusterCommandBus_DedupesCompletedCommands(t *testing.T) {
 	sender := newTestClusterCommandBus(t, redisCfg, "node-b", "inc-b")
 
 	var handledCount atomic.Int32
-	receiver.SetHandler(func(context.Context, *messageloop.ClusterCommand) (*messageloop.ClusterCommandResult, error) {
+	receiver.SetHandler(func(context.Context, *cluster.ClusterCommand) (*cluster.ClusterCommandResult, error) {
 		handledCount.Add(1)
-		return &messageloop.ClusterCommandResult{
-			Status: messageloop.ClusterCommandStatusSucceeded,
+		return &cluster.ClusterCommandResult{
+			Status: cluster.ClusterCommandStatusSucceeded,
 			Metadata: map[string]string{
 				"result": "ok",
 			},
@@ -46,13 +47,13 @@ func TestClusterCommandBus_DedupesCompletedCommands(t *testing.T) {
 	firstResult, err := sender.SendCommand(ctx, testClusterCommand("dedupe-complete", "node-a", "inc-a"))
 	require.NoError(t, err)
 	require.NotNil(t, firstResult)
-	require.Equal(t, messageloop.ClusterCommandStatusSucceeded, firstResult.Status)
+	require.Equal(t, cluster.ClusterCommandStatusSucceeded, firstResult.Status)
 	require.Equal(t, map[string]string{"result": "ok"}, firstResult.Metadata)
 
 	secondResult, err := sender.SendCommand(ctx, testClusterCommand("dedupe-complete", "node-a", "inc-a"))
 	require.NoError(t, err)
 	require.NotNil(t, secondResult)
-	require.Equal(t, messageloop.ClusterCommandStatusSucceeded, secondResult.Status)
+	require.Equal(t, cluster.ClusterCommandStatusSucceeded, secondResult.Status)
 	require.Equal(t, map[string]string{"result": "ok"}, secondResult.Metadata)
 	require.EqualValues(t, 1, handledCount.Load())
 }
@@ -67,18 +68,18 @@ func TestClusterCommandBus_ReturnsInProgressForDuplicatePendingCommand(t *testin
 	var handledCount atomic.Int32
 	handlerStarted := make(chan struct{}, 1)
 	releaseHandler := make(chan struct{})
-	receiver.SetHandler(func(context.Context, *messageloop.ClusterCommand) (*messageloop.ClusterCommandResult, error) {
+	receiver.SetHandler(func(context.Context, *cluster.ClusterCommand) (*cluster.ClusterCommandResult, error) {
 		handledCount.Add(1)
 		select {
 		case handlerStarted <- struct{}{}:
 		default:
 		}
 		<-releaseHandler
-		return &messageloop.ClusterCommandResult{Status: messageloop.ClusterCommandStatusSucceeded}, nil
+		return &cluster.ClusterCommandResult{Status: cluster.ClusterCommandStatusSucceeded}, nil
 	})
 	receiver.start(t, ctx)
 
-	firstResultCh := make(chan *messageloop.ClusterCommandResult, 1)
+	firstResultCh := make(chan *cluster.ClusterCommandResult, 1)
 	firstErrCh := make(chan error, 1)
 	go func() {
 		result, err := sender.SendCommand(ctx, testClusterCommand("dedupe-pending", "node-a", "inc-a"))
@@ -95,7 +96,7 @@ func TestClusterCommandBus_ReturnsInProgressForDuplicatePendingCommand(t *testin
 	duplicateResult, err := sender.SendCommand(ctx, testClusterCommand("dedupe-pending", "node-a", "inc-a"))
 	require.NoError(t, err)
 	require.NotNil(t, duplicateResult)
-	require.Equal(t, messageloop.ClusterCommandStatusInProgress, duplicateResult.Status)
+	require.Equal(t, cluster.ClusterCommandStatusInProgress, duplicateResult.Status)
 	require.Equal(t, "COMMAND_IN_PROGRESS", duplicateResult.ErrorCode)
 	require.EqualValues(t, 1, handledCount.Load())
 
@@ -103,7 +104,7 @@ func TestClusterCommandBus_ReturnsInProgressForDuplicatePendingCommand(t *testin
 	require.NoError(t, <-firstErrCh)
 	firstResult := <-firstResultCh
 	require.NotNil(t, firstResult)
-	require.Equal(t, messageloop.ClusterCommandStatusSucceeded, firstResult.Status)
+	require.Equal(t, cluster.ClusterCommandStatusSucceeded, firstResult.Status)
 }
 
 func TestClusterCommandBus_ReturnsUnknownFinalStateAfterTimeout(t *testing.T) {
@@ -114,9 +115,9 @@ func TestClusterCommandBus_ReturnsUnknownFinalStateAfterTimeout(t *testing.T) {
 	sender := newTestClusterCommandBus(t, redisCfg, "node-b", "inc-b")
 
 	releaseHandler := make(chan struct{})
-	receiver.SetHandler(func(context.Context, *messageloop.ClusterCommand) (*messageloop.ClusterCommandResult, error) {
+	receiver.SetHandler(func(context.Context, *cluster.ClusterCommand) (*cluster.ClusterCommandResult, error) {
 		<-releaseHandler
-		return &messageloop.ClusterCommandResult{Status: messageloop.ClusterCommandStatusSucceeded}, nil
+		return &cluster.ClusterCommandResult{Status: cluster.ClusterCommandStatusSucceeded}, nil
 	})
 	receiver.start(t, ctx)
 
@@ -126,7 +127,7 @@ func TestClusterCommandBus_ReturnsUnknownFinalStateAfterTimeout(t *testing.T) {
 	result, err := sender.SendCommand(timeoutCtx, testClusterCommand("dedupe-timeout", "node-a", "inc-a"))
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	require.Equal(t, messageloop.ClusterCommandStatusUnknownFinalState, result.Status)
+	require.Equal(t, cluster.ClusterCommandStatusUnknownFinalState, result.Status)
 	require.Equal(t, "UNKNOWN_FINAL_STATE", result.ErrorCode)
 
 	close(releaseHandler)
@@ -143,16 +144,16 @@ func TestClusterCommandBus_SendCommandFillsIssuedBy(t *testing.T) {
 	sender := newTestClusterCommandBus(t, redisCfg, "node-b", "inc-b")
 
 	var issuedBy atomic.Value
-	receiver.SetHandler(func(_ context.Context, cmd *messageloop.ClusterCommand) (*messageloop.ClusterCommandResult, error) {
+	receiver.SetHandler(func(_ context.Context, cmd *cluster.ClusterCommand) (*cluster.ClusterCommandResult, error) {
 		issuedBy.Store(cmd.IssuedBy)
-		return &messageloop.ClusterCommandResult{Status: messageloop.ClusterCommandStatusSucceeded}, nil
+		return &cluster.ClusterCommandResult{Status: cluster.ClusterCommandStatusSucceeded}, nil
 	})
 	receiver.start(t, ctx)
 
 	result, err := sender.SendCommand(ctx, testClusterCommand("issued-by", "node-a", "inc-a"))
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	require.Equal(t, messageloop.ClusterCommandStatusSucceeded, result.Status)
+	require.Equal(t, cluster.ClusterCommandStatusSucceeded, result.Status)
 	require.Equal(t, "node-b", issuedBy.Load(),
 		"the target handler must observe the sender's NodeID in IssuedBy")
 }
@@ -178,7 +179,7 @@ func newTestClusterCommandBus(t *testing.T, redisCfg config.RedisConfig, nodeID,
 // the same key layout as redisSessionDirectory.nodeLeaseKey.
 func registerTestNodeLease(t *testing.T, bus *redisClusterCommandBus, nodeID, incarnationID string) {
 	t.Helper()
-	lease := &messageloop.ClusterNodeLease{
+	lease := &cluster.ClusterNodeLease{
 		NodeID:        nodeID,
 		IncarnationID: incarnationID,
 		StartedAt:     time.Now(),
@@ -196,10 +197,10 @@ func (b *testClusterCommandBus) start(t *testing.T, ctx context.Context) {
 	require.NoError(t, b.Start(ctx))
 }
 
-func testClusterCommand(commandID, targetNodeID, targetIncarnationID string) *messageloop.ClusterCommand {
-	return &messageloop.ClusterCommand{
+func testClusterCommand(commandID, targetNodeID, targetIncarnationID string) *cluster.ClusterCommand {
+	return &cluster.ClusterCommand{
 		CommandID:           commandID,
-		Type:                messageloop.ClusterCommandDisconnect,
+		Type:                cluster.ClusterCommandDisconnect,
 		SessionID:           "sess-" + commandID,
 		TargetNodeID:        targetNodeID,
 		TargetIncarnationID: targetIncarnationID,
@@ -265,18 +266,18 @@ func TestClusterCommandBus_CloneCommandMetadataIsIndependent(t *testing.T) {
 // matching result instead of returning a cross-wired reply.
 func TestClusterCommandBus_WaitsForMatchingReply(t *testing.T) {
 	bus := &redisClusterCommandBus{hmacKey: testClusterCommandBusKey, now: time.Now}
-	cmd := &messageloop.ClusterCommand{CommandID: "expected-command"}
+	cmd := &cluster.ClusterCommand{CommandID: "expected-command"}
 
-	mismatchedResult := &messageloop.ClusterCommandResult{
+	mismatchedResult := &cluster.ClusterCommandResult{
 		CommandID: "other-command",
 		IssuedAt:  time.Now(),
 	}
 	require.NoError(t, clusterhmac.SignResult(testClusterCommandBusKey, mismatchedResult))
 	mismatched, err := json.Marshal(mismatchedResult)
 	require.NoError(t, err)
-	matchingResult := &messageloop.ClusterCommandResult{
+	matchingResult := &cluster.ClusterCommandResult{
 		CommandID: "expected-command",
-		Status:    messageloop.ClusterCommandStatusSucceeded,
+		Status:    cluster.ClusterCommandStatusSucceeded,
 		IssuedAt:  time.Now(),
 	}
 	require.NoError(t, clusterhmac.SignResult(testClusterCommandBusKey, matchingResult))
@@ -295,7 +296,7 @@ func TestClusterCommandBus_WaitsForMatchingReply(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, "expected-command", result.CommandID)
-	require.Equal(t, messageloop.ClusterCommandStatusSucceeded, result.Status)
+	require.Equal(t, cluster.ClusterCommandStatusSucceeded, result.Status)
 }
 
 // TestClusterCommandBus_ReplyWaitTimesOutOnOnlyMismatchedReplies verifies the
@@ -306,9 +307,9 @@ func TestClusterCommandBus_ReplyWaitTimesOutOnOnlyMismatchedReplies(t *testing.T
 		hmacKey: testClusterCommandBusKey,
 		now:     time.Now,
 	}
-	cmd := &messageloop.ClusterCommand{CommandID: "expected-command"}
+	cmd := &cluster.ClusterCommand{CommandID: "expected-command"}
 
-	mismatchedResult := &messageloop.ClusterCommandResult{CommandID: "other-command", IssuedAt: time.Now()}
+	mismatchedResult := &cluster.ClusterCommandResult{CommandID: "other-command", IssuedAt: time.Now()}
 	require.NoError(t, clusterhmac.SignResult(testClusterCommandBusKey, mismatchedResult))
 	mismatched, err := json.Marshal(mismatchedResult)
 	require.NoError(t, err)
@@ -329,12 +330,12 @@ func TestClusterCommandBus_ResolveTimedOutCommandPrefersTerminalResult(t *testin
 	ctx := context.Background()
 
 	bus := newTestClusterCommandBus(t, redisCfg, "node-a", "inc-a")
-	storedResult := &messageloop.ClusterCommandResult{
+	storedResult := &cluster.ClusterCommandResult{
 		CommandID:     "resolve-terminal",
 		SessionID:     "sess-resolve-terminal",
 		NodeID:        "node-a",
 		IncarnationID: "inc-a",
-		Status:        messageloop.ClusterCommandStatusSucceeded,
+		Status:        cluster.ClusterCommandStatusSucceeded,
 	}
 	require.NoError(t, bus.storeCommandResult(ctx, storedResult))
 
@@ -350,11 +351,11 @@ func TestClusterCommandBus_RecordsMetricsForDedupeHits(t *testing.T) {
 	receiver := newTestClusterCommandBus(t, redisCfg, "node-a", "inc-a")
 	sender := newTestClusterCommandBus(t, redisCfg, "node-b", "inc-b")
 	registry := prometheus.NewRegistry()
-	metrics := messageloop.NewMetrics(registry)
+	metrics := metrics.NewMetrics(registry)
 	sender.SetMetrics(metrics)
 
-	receiver.SetHandler(func(context.Context, *messageloop.ClusterCommand) (*messageloop.ClusterCommandResult, error) {
-		return &messageloop.ClusterCommandResult{Status: messageloop.ClusterCommandStatusSucceeded}, nil
+	receiver.SetHandler(func(context.Context, *cluster.ClusterCommand) (*cluster.ClusterCommandResult, error) {
+		return &cluster.ClusterCommandResult{Status: cluster.ClusterCommandStatusSucceeded}, nil
 	})
 	receiver.start(t, ctx)
 
@@ -372,13 +373,13 @@ func TestClusterCommandBus_RecordsMetricsForTimeoutAndUnknownFinalState(t *testi
 	receiver := newTestClusterCommandBus(t, redisCfg, "node-a", "inc-a")
 	sender := newTestClusterCommandBus(t, redisCfg, "node-b", "inc-b")
 	registry := prometheus.NewRegistry()
-	metrics := messageloop.NewMetrics(registry)
+	metrics := metrics.NewMetrics(registry)
 	sender.SetMetrics(metrics)
 
 	releaseHandler := make(chan struct{})
-	receiver.SetHandler(func(context.Context, *messageloop.ClusterCommand) (*messageloop.ClusterCommandResult, error) {
+	receiver.SetHandler(func(context.Context, *cluster.ClusterCommand) (*cluster.ClusterCommandResult, error) {
 		<-releaseHandler
-		return &messageloop.ClusterCommandResult{Status: messageloop.ClusterCommandStatusSucceeded}, nil
+		return &cluster.ClusterCommandResult{Status: cluster.ClusterCommandStatusSucceeded}, nil
 	})
 	receiver.start(t, ctx)
 
@@ -389,7 +390,7 @@ func TestClusterCommandBus_RecordsMetricsForTimeoutAndUnknownFinalState(t *testi
 	close(releaseHandler)
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	require.Equal(t, messageloop.ClusterCommandStatusUnknownFinalState, result.Status)
+	require.Equal(t, cluster.ClusterCommandStatusUnknownFinalState, result.Status)
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.ClusterCommandTimeouts))
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.ClusterCommandUnknownFinalState))
 }
@@ -416,10 +417,10 @@ func TestClusterCommandBus_ReclaimsAfterClaimLeaseExpiry(t *testing.T) {
 
 	var handledCount atomic.Int32
 	releaseHandler := make(chan struct{})
-	receiver.SetHandler(func(context.Context, *messageloop.ClusterCommand) (*messageloop.ClusterCommandResult, error) {
+	receiver.SetHandler(func(context.Context, *cluster.ClusterCommand) (*cluster.ClusterCommandResult, error) {
 		handledCount.Add(1)
 		<-releaseHandler
-		return &messageloop.ClusterCommandResult{Status: messageloop.ClusterCommandStatusSucceeded}, nil
+		return &cluster.ClusterCommandResult{Status: cluster.ClusterCommandStatusSucceeded}, nil
 	})
 	receiver.start(t, ctx)
 
@@ -428,7 +429,7 @@ func TestClusterCommandBus_ReclaimsAfterClaimLeaseExpiry(t *testing.T) {
 	firstResult, err := sender.SendCommand(firstCtx, testClusterCommand("lease-reclaim", "node-a", "inc-a"))
 	require.NoError(t, err)
 	require.NotNil(t, firstResult)
-	require.Equal(t, messageloop.ClusterCommandStatusUnknownFinalState, firstResult.Status,
+	require.Equal(t, cluster.ClusterCommandStatusUnknownFinalState, firstResult.Status,
 		"sender must observe the pending command timing out")
 
 	// The first claim must be held (handler blocked) before we wait it out.
@@ -445,7 +446,7 @@ func TestClusterCommandBus_ReclaimsAfterClaimLeaseExpiry(t *testing.T) {
 		return err == nil && n == 0
 	}, 5*time.Second, 50*time.Millisecond, "the claim lease must expire before re-sending")
 
-	secondResultCh := make(chan *messageloop.ClusterCommandResult, 1)
+	secondResultCh := make(chan *cluster.ClusterCommandResult, 1)
 	secondErrCh := make(chan error, 1)
 	go func() {
 		result, err := sender.SendCommand(ctx, testClusterCommand("lease-reclaim", "node-a", "inc-a"))
@@ -465,7 +466,7 @@ func TestClusterCommandBus_ReclaimsAfterClaimLeaseExpiry(t *testing.T) {
 	require.NoError(t, <-secondErrCh)
 	secondResult := <-secondResultCh
 	require.NotNil(t, secondResult)
-	require.Equal(t, messageloop.ClusterCommandStatusSucceeded, secondResult.Status)
+	require.Equal(t, cluster.ClusterCommandStatusSucceeded, secondResult.Status)
 }
 
 // TestClusterCommandBus_BoundedHandlerConcurrency verifies P2-2 fix 1: at
@@ -485,7 +486,7 @@ func TestClusterCommandBus_BoundedHandlerConcurrency(t *testing.T) {
 	var handledCount atomic.Int32
 	firstStarted := make(chan struct{}, 1)
 	releaseFirst := make(chan struct{})
-	receiver.SetHandler(func(context.Context, *messageloop.ClusterCommand) (*messageloop.ClusterCommandResult, error) {
+	receiver.SetHandler(func(context.Context, *cluster.ClusterCommand) (*cluster.ClusterCommandResult, error) {
 		handledCount.Add(1)
 		if handledCount.Load() == 1 {
 			select {
@@ -494,11 +495,11 @@ func TestClusterCommandBus_BoundedHandlerConcurrency(t *testing.T) {
 			}
 			<-releaseFirst
 		}
-		return &messageloop.ClusterCommandResult{Status: messageloop.ClusterCommandStatusSucceeded}, nil
+		return &cluster.ClusterCommandResult{Status: cluster.ClusterCommandStatusSucceeded}, nil
 	})
 	receiver.start(t, ctx)
 
-	firstResultCh := make(chan *messageloop.ClusterCommandResult, 1)
+	firstResultCh := make(chan *cluster.ClusterCommandResult, 1)
 	firstErrCh := make(chan error, 1)
 	go func() {
 		result, err := sender.SendCommand(ctx, testClusterCommand("sem-1", "node-a", "inc-a"))
@@ -512,7 +513,7 @@ func TestClusterCommandBus_BoundedHandlerConcurrency(t *testing.T) {
 		t.Fatal("timed out waiting for first command to reach handler")
 	}
 
-	secondResultCh := make(chan *messageloop.ClusterCommandResult, 1)
+	secondResultCh := make(chan *cluster.ClusterCommandResult, 1)
 	secondErrCh := make(chan error, 1)
 	go func() {
 		result, err := sender.SendCommand(ctx, testClusterCommand("sem-2", "node-a", "inc-a"))
@@ -530,12 +531,12 @@ func TestClusterCommandBus_BoundedHandlerConcurrency(t *testing.T) {
 	require.NoError(t, <-firstErrCh)
 	firstResult := <-firstResultCh
 	require.NotNil(t, firstResult)
-	require.Equal(t, messageloop.ClusterCommandStatusSucceeded, firstResult.Status)
+	require.Equal(t, cluster.ClusterCommandStatusSucceeded, firstResult.Status)
 
 	require.NoError(t, <-secondErrCh)
 	secondResult := <-secondResultCh
 	require.NotNil(t, secondResult)
-	require.Equal(t, messageloop.ClusterCommandStatusSucceeded, secondResult.Status)
+	require.Equal(t, cluster.ClusterCommandStatusSucceeded, secondResult.Status)
 	require.EqualValues(t, 2, handledCount.Load())
 }
 
@@ -554,9 +555,9 @@ func TestClusterCommandBus_HandlerTimeoutWritesTerminalError(t *testing.T) {
 	sender := newTestClusterCommandBus(t, redisCfg, "node-b", "inc-b")
 
 	releaseHandler := make(chan struct{})
-	receiver.SetHandler(func(context.Context, *messageloop.ClusterCommand) (*messageloop.ClusterCommandResult, error) {
+	receiver.SetHandler(func(context.Context, *cluster.ClusterCommand) (*cluster.ClusterCommandResult, error) {
 		<-releaseHandler
-		return &messageloop.ClusterCommandResult{Status: messageloop.ClusterCommandStatusSucceeded}, nil
+		return &cluster.ClusterCommandResult{Status: cluster.ClusterCommandStatusSucceeded}, nil
 	})
 	receiver.start(t, ctx)
 
@@ -566,7 +567,7 @@ func TestClusterCommandBus_HandlerTimeoutWritesTerminalError(t *testing.T) {
 	result, err := sender.SendCommand(sendCtx, testClusterCommand("handler-timeout", "node-a", "inc-a"))
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	require.Equal(t, messageloop.ClusterCommandStatusFailed, result.Status)
+	require.Equal(t, cluster.ClusterCommandStatusFailed, result.Status)
 	require.Equal(t, "CLUSTER_COMMAND_TIMEOUT", result.ErrorCode)
 
 	close(releaseHandler)
@@ -588,9 +589,9 @@ func TestClusterCommandBus_RecoversAfterConsumerGroupLoss(t *testing.T) {
 	sender := newTestClusterCommandBus(t, redisCfg, "node-b", "inc-b")
 
 	var handled atomic.Int32
-	receiver.SetHandler(func(context.Context, *messageloop.ClusterCommand) (*messageloop.ClusterCommandResult, error) {
+	receiver.SetHandler(func(context.Context, *cluster.ClusterCommand) (*cluster.ClusterCommandResult, error) {
 		handled.Add(1)
-		return &messageloop.ClusterCommandResult{Status: messageloop.ClusterCommandStatusSucceeded}, nil
+		return &cluster.ClusterCommandResult{Status: cluster.ClusterCommandStatusSucceeded}, nil
 	})
 	receiver.start(t, ctx)
 
@@ -599,7 +600,7 @@ func TestClusterCommandBus_RecoversAfterConsumerGroupLoss(t *testing.T) {
 		result, err := sender.SendCommand(ctx, testClusterCommand(commandID, "node-a", "inc-a"))
 		require.NoError(t, err)
 		require.NotNil(t, result)
-		require.Equal(t, messageloop.ClusterCommandStatusSucceeded, result.Status)
+		require.Equal(t, cluster.ClusterCommandStatusSucceeded, result.Status)
 	}
 
 	// First round-trip works.
@@ -644,7 +645,7 @@ func TestClusterCommandBus_DeadlineAndClosedReplyChannelYieldsUnknownFinalState(
 	result, err := bus.waitForReply(expired, cmd, replies)
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	require.Equal(t, messageloop.ClusterCommandStatusUnknownFinalState, result.Status,
+	require.Equal(t, cluster.ClusterCommandStatusUnknownFinalState, result.Status,
 		"an expired deadline with a simultaneously closed reply channel must resolve as unknown final state")
 	require.Equal(t, "UNKNOWN_FINAL_STATE", result.ErrorCode)
 }
@@ -655,7 +656,7 @@ func TestClusterCommandBus_DeadlineAndClosedReplyChannelYieldsUnknownFinalState(
 // inside a timeout).
 func TestClusterCommandBus_ReplyChannelClosedWithoutDeadlineReturnsError(t *testing.T) {
 	bus := &redisClusterCommandBus{}
-	cmd := &messageloop.ClusterCommand{CommandID: "closed-without-deadline"}
+	cmd := &cluster.ClusterCommand{CommandID: "closed-without-deadline"}
 
 	replies := make(chan *redis.Message)
 	close(replies)
@@ -683,7 +684,7 @@ func TestClusterCommandBus_SendCommandFailsFastWhenTargetNotAlive(t *testing.T) 
 	result, err := sender.SendCommand(ctx, testClusterCommand("dead-target", "node-dead", "inc-dead"))
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	require.Equal(t, messageloop.ClusterCommandStatusFailed, result.Status)
+	require.Equal(t, cluster.ClusterCommandStatusFailed, result.Status)
 	require.Equal(t, "TARGET_NODE_NOT_ALIVE", result.ErrorCode)
 	require.Less(t, time.Since(start), 2*time.Second,
 		"the dead-target failure must be immediate, not after the command deadline")
@@ -694,7 +695,7 @@ func TestClusterCommandBus_SendCommandFailsFastWhenTargetNotAlive(t *testing.T) 
 // addRawCommand injects a command envelope directly onto the receiver's
 // inbox stream, bypassing the sending bus (and its signing). It returns the
 // assigned stream entry ID.
-func addRawCommand(t *testing.T, redisCfg config.RedisConfig, receiver *testClusterCommandBus, cmd *messageloop.ClusterCommand) string {
+func addRawCommand(t *testing.T, redisCfg config.RedisConfig, receiver *testClusterCommandBus, cmd *cluster.ClusterCommand) string {
 	t.Helper()
 	payload, err := json.Marshal(cmd)
 	require.NoError(t, err)
@@ -733,13 +734,13 @@ func TestClusterCommandBus_RejectsUnsignedCommand(t *testing.T) {
 
 	receiver := newTestClusterCommandBus(t, redisCfg, "node-a", "inc-a")
 	sender := newTestClusterCommandBus(t, redisCfg, "node-b", "inc-b")
-	metrics := messageloop.NewMetrics(prometheus.NewRegistry())
+	metrics := metrics.NewMetrics(prometheus.NewRegistry())
 	receiver.SetMetrics(metrics)
 
 	var handledCount atomic.Int32
-	receiver.SetHandler(func(context.Context, *messageloop.ClusterCommand) (*messageloop.ClusterCommandResult, error) {
+	receiver.SetHandler(func(context.Context, *cluster.ClusterCommand) (*cluster.ClusterCommandResult, error) {
 		handledCount.Add(1)
-		return &messageloop.ClusterCommandResult{Status: messageloop.ClusterCommandStatusSucceeded}, nil
+		return &cluster.ClusterCommandResult{Status: cluster.ClusterCommandStatusSucceeded}, nil
 	})
 	receiver.start(t, ctx)
 
@@ -751,7 +752,7 @@ func TestClusterCommandBus_RejectsUnsignedCommand(t *testing.T) {
 	// (the stream delivers entries in XADD order).
 	result, err := sender.SendCommand(ctx, testClusterCommand("signed-control-1", "node-a", "inc-a"))
 	require.NoError(t, err)
-	require.Equal(t, messageloop.ClusterCommandStatusSucceeded, result.Status)
+	require.Equal(t, cluster.ClusterCommandStatusSucceeded, result.Status)
 	require.EqualValues(t, 1, handledCount.Load(), "only the signed command may run the handler")
 
 	exists, err := receiver.client.Exists(ctx, receiver.commandStateKey("unsigned-1")).Result()
@@ -770,13 +771,13 @@ func TestClusterCommandBus_RejectsBadSignature(t *testing.T) {
 
 	receiver := newTestClusterCommandBus(t, redisCfg, "node-a", "inc-a")
 	sender := newTestClusterCommandBus(t, redisCfg, "node-b", "inc-b")
-	metrics := messageloop.NewMetrics(prometheus.NewRegistry())
+	metrics := metrics.NewMetrics(prometheus.NewRegistry())
 	receiver.SetMetrics(metrics)
 
 	var handledCount atomic.Int32
-	receiver.SetHandler(func(context.Context, *messageloop.ClusterCommand) (*messageloop.ClusterCommandResult, error) {
+	receiver.SetHandler(func(context.Context, *cluster.ClusterCommand) (*cluster.ClusterCommandResult, error) {
 		handledCount.Add(1)
-		return &messageloop.ClusterCommandResult{Status: messageloop.ClusterCommandStatusSucceeded}, nil
+		return &cluster.ClusterCommandResult{Status: cluster.ClusterCommandStatusSucceeded}, nil
 	})
 	receiver.start(t, ctx)
 
@@ -798,7 +799,7 @@ func TestClusterCommandBus_RejectsBadSignature(t *testing.T) {
 
 	result, err := sender.SendCommand(ctx, testClusterCommand("signed-control-2", "node-a", "inc-a"))
 	require.NoError(t, err)
-	require.Equal(t, messageloop.ClusterCommandStatusSucceeded, result.Status)
+	require.Equal(t, cluster.ClusterCommandStatusSucceeded, result.Status)
 	require.EqualValues(t, 1, handledCount.Load(), "badly signed commands must never run the handler")
 	require.Eventually(t, func() bool {
 		return testutil.ToFloat64(metrics.ClusterCommandHMACRejects.WithLabelValues("bad")) == 2
@@ -813,13 +814,13 @@ func TestClusterCommandBus_ClockSkewGate(t *testing.T) {
 	ctx := context.Background()
 
 	receiver := newTestClusterCommandBus(t, redisCfg, "node-a", "inc-a")
-	metrics := messageloop.NewMetrics(prometheus.NewRegistry())
+	metrics := metrics.NewMetrics(prometheus.NewRegistry())
 	receiver.SetMetrics(metrics)
 
 	var handledCount atomic.Int32
-	receiver.SetHandler(func(context.Context, *messageloop.ClusterCommand) (*messageloop.ClusterCommandResult, error) {
+	receiver.SetHandler(func(context.Context, *cluster.ClusterCommand) (*cluster.ClusterCommandResult, error) {
 		handledCount.Add(1)
-		return &messageloop.ClusterCommandResult{Status: messageloop.ClusterCommandStatusSucceeded}, nil
+		return &cluster.ClusterCommandResult{Status: cluster.ClusterCommandStatusSucceeded}, nil
 	})
 	receiver.start(t, ctx)
 
@@ -856,13 +857,13 @@ func TestClusterCommandBus_RejectsEmptyCommandID(t *testing.T) {
 
 	receiver := newTestClusterCommandBus(t, redisCfg, "node-a", "inc-a")
 	sender := newTestClusterCommandBus(t, redisCfg, "node-b", "inc-b")
-	metrics := messageloop.NewMetrics(prometheus.NewRegistry())
+	metrics := metrics.NewMetrics(prometheus.NewRegistry())
 	receiver.SetMetrics(metrics)
 
 	var handledCount atomic.Int32
-	receiver.SetHandler(func(context.Context, *messageloop.ClusterCommand) (*messageloop.ClusterCommandResult, error) {
+	receiver.SetHandler(func(context.Context, *cluster.ClusterCommand) (*cluster.ClusterCommandResult, error) {
 		handledCount.Add(1)
-		return &messageloop.ClusterCommandResult{Status: messageloop.ClusterCommandStatusSucceeded}, nil
+		return &cluster.ClusterCommandResult{Status: cluster.ClusterCommandStatusSucceeded}, nil
 	})
 	receiver.start(t, ctx)
 
@@ -873,7 +874,7 @@ func TestClusterCommandBus_RejectsEmptyCommandID(t *testing.T) {
 
 	result, err := sender.SendCommand(ctx, testClusterCommand("signed-control-3", "node-a", "inc-a"))
 	require.NoError(t, err)
-	require.Equal(t, messageloop.ClusterCommandStatusSucceeded, result.Status)
+	require.Equal(t, cluster.ClusterCommandStatusSucceeded, result.Status)
 	require.EqualValues(t, 1, handledCount.Load(), "an id-less command must never run the handler")
 	require.Eventually(t, func() bool {
 		return testutil.ToFloat64(metrics.ClusterCommandHMACRejects.WithLabelValues("id")) == 1
@@ -888,14 +889,14 @@ func TestClusterCommandBus_RoundTripResultIsSigned(t *testing.T) {
 
 	receiver := newTestClusterCommandBus(t, redisCfg, "node-a", "inc-a")
 	sender := newTestClusterCommandBus(t, redisCfg, "node-b", "inc-b")
-	receiver.SetHandler(func(context.Context, *messageloop.ClusterCommand) (*messageloop.ClusterCommandResult, error) {
-		return &messageloop.ClusterCommandResult{Status: messageloop.ClusterCommandStatusSucceeded}, nil
+	receiver.SetHandler(func(context.Context, *cluster.ClusterCommand) (*cluster.ClusterCommandResult, error) {
+		return &cluster.ClusterCommandResult{Status: cluster.ClusterCommandStatusSucceeded}, nil
 	})
 	receiver.start(t, ctx)
 
 	result, err := sender.SendCommand(ctx, testClusterCommand("signed-roundtrip", "node-a", "inc-a"))
 	require.NoError(t, err)
-	require.Equal(t, messageloop.ClusterCommandStatusSucceeded, result.Status)
+	require.Equal(t, cluster.ClusterCommandStatusSucceeded, result.Status)
 	require.NotEmpty(t, result.Signature, "replies must be signed")
 	require.False(t, result.IssuedAt.IsZero(), "replies must carry IssuedAt")
 	require.NoError(t, clusterhmac.VerifyResult(testClusterCommandBusKey, result, time.Now()))
@@ -905,24 +906,24 @@ func TestClusterCommandBus_RoundTripResultIsSigned(t *testing.T) {
 // the properly signed one that arrives after them.
 func TestClusterCommandBus_ForgedRepliesAreSkipped(t *testing.T) {
 	bus := &redisClusterCommandBus{hmacKey: testClusterCommandBusKey, now: time.Now}
-	cmd := &messageloop.ClusterCommand{CommandID: "victim"}
+	cmd := &cluster.ClusterCommand{CommandID: "victim"}
 
-	unsigned, err := json.Marshal(&messageloop.ClusterCommandResult{
+	unsigned, err := json.Marshal(&cluster.ClusterCommandResult{
 		CommandID: "victim",
-		Status:    messageloop.ClusterCommandStatusSucceeded,
+		Status:    cluster.ClusterCommandStatusSucceeded,
 	})
 	require.NoError(t, err)
-	forgedSigned := &messageloop.ClusterCommandResult{
+	forgedSigned := &cluster.ClusterCommandResult{
 		CommandID: "victim",
-		Status:    messageloop.ClusterCommandStatusSucceeded,
+		Status:    cluster.ClusterCommandStatusSucceeded,
 		IssuedAt:  time.Now(),
 	}
 	require.NoError(t, clusterhmac.SignResult([]byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), forgedSigned))
 	badMAC, err := json.Marshal(forgedSigned)
 	require.NoError(t, err)
-	genuine := &messageloop.ClusterCommandResult{
+	genuine := &cluster.ClusterCommandResult{
 		CommandID: "victim",
-		Status:    messageloop.ClusterCommandStatusSucceeded,
+		Status:    cluster.ClusterCommandStatusSucceeded,
 		IssuedAt:  time.Now(),
 	}
 	require.NoError(t, clusterhmac.SignResult(testClusterCommandBusKey, genuine))
@@ -939,7 +940,7 @@ func TestClusterCommandBus_ForgedRepliesAreSkipped(t *testing.T) {
 	result, err := bus.waitForReply(ctx, cmd, replies)
 	require.NoError(t, err)
 	require.Equal(t, genuine.Signature, result.Signature, "the signed reply must win over the forged ones")
-	require.Equal(t, messageloop.ClusterCommandStatusSucceeded, result.Status)
+	require.Equal(t, cluster.ClusterCommandStatusSucceeded, result.Status)
 }
 
 // When every reply is forged, the wait ends at the deadline with
@@ -948,9 +949,9 @@ func TestClusterCommandBus_ForgedReplyTimeoutYieldsUnknownFinalState(t *testing.
 	redisCfg := requireCommandBusRedis(t)
 	bus := newTestClusterCommandBus(t, redisCfg, "node-a", "inc-a")
 
-	forged, err := json.Marshal(&messageloop.ClusterCommandResult{
+	forged, err := json.Marshal(&cluster.ClusterCommandResult{
 		CommandID: "victim-timeout",
-		Status:    messageloop.ClusterCommandStatusSucceeded,
+		Status:    cluster.ClusterCommandStatusSucceeded,
 	})
 	require.NoError(t, err)
 	replies := make(chan *redis.Message, 1)
@@ -958,10 +959,10 @@ func TestClusterCommandBus_ForgedReplyTimeoutYieldsUnknownFinalState(t *testing.
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	result, err := bus.waitForReply(ctx, &messageloop.ClusterCommand{CommandID: "victim-timeout"}, replies)
+	result, err := bus.waitForReply(ctx, &cluster.ClusterCommand{CommandID: "victim-timeout"}, replies)
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	require.Equal(t, messageloop.ClusterCommandStatusUnknownFinalState, result.Status,
+	require.Equal(t, cluster.ClusterCommandStatusUnknownFinalState, result.Status,
 		"a forged reply must not count as success; the command resolves via the timeout path")
 }
 
@@ -972,8 +973,8 @@ func TestClusterCommandBus_KeyNeverWrittenToRedis(t *testing.T) {
 
 	receiver := newTestClusterCommandBus(t, redisCfg, "node-a", "inc-a")
 	sender := newTestClusterCommandBus(t, redisCfg, "node-b", "inc-b")
-	receiver.SetHandler(func(context.Context, *messageloop.ClusterCommand) (*messageloop.ClusterCommandResult, error) {
-		return &messageloop.ClusterCommandResult{Status: messageloop.ClusterCommandStatusSucceeded}, nil
+	receiver.SetHandler(func(context.Context, *cluster.ClusterCommand) (*cluster.ClusterCommandResult, error) {
+		return &cluster.ClusterCommandResult{Status: cluster.ClusterCommandStatusSucceeded}, nil
 	})
 	receiver.start(t, ctx)
 
@@ -986,7 +987,7 @@ func TestClusterCommandBus_KeyNeverWrittenToRedis(t *testing.T) {
 
 	result, err := sender.SendCommand(ctx, testClusterCommand("key-hygiene", "node-a", "inc-a"))
 	require.NoError(t, err)
-	require.Equal(t, messageloop.ClusterCommandStatusSucceeded, result.Status)
+	require.Equal(t, cluster.ClusterCommandStatusSucceeded, result.Status)
 
 	// Drain every pub/sub payload the round trip produced (requests travel on
 	// the stream since PR-KA-C3, so only the reply is published).
@@ -1046,8 +1047,8 @@ func TestClusterCommandBus_SendCommandUsesStreamNotPublish(t *testing.T) {
 
 	receiver := newTestClusterCommandBus(t, redisCfg, "node-a", "inc-a")
 	sender := newTestClusterCommandBus(t, redisCfg, "node-b", "inc-b")
-	receiver.SetHandler(func(context.Context, *messageloop.ClusterCommand) (*messageloop.ClusterCommandResult, error) {
-		return &messageloop.ClusterCommandResult{Status: messageloop.ClusterCommandStatusSucceeded}, nil
+	receiver.SetHandler(func(context.Context, *cluster.ClusterCommand) (*cluster.ClusterCommandResult, error) {
+		return &cluster.ClusterCommandResult{Status: cluster.ClusterCommandStatusSucceeded}, nil
 	})
 	receiver.start(t, ctx)
 
@@ -1060,7 +1061,7 @@ func TestClusterCommandBus_SendCommandUsesStreamNotPublish(t *testing.T) {
 
 	result, err := sender.SendCommand(ctx, testClusterCommand("stream-transport", "node-a", "inc-a"))
 	require.NoError(t, err)
-	require.Equal(t, messageloop.ClusterCommandStatusSucceeded, result.Status)
+	require.Equal(t, cluster.ClusterCommandStatusSucceeded, result.Status)
 
 	// The signed command must have been appended to the target inbox stream.
 	streamKey := receiver.streamKey("node-a", "inc-a")
@@ -1104,14 +1105,14 @@ func TestClusterCommandBus_AcksProcessedCommands(t *testing.T) {
 
 	receiver := newTestClusterCommandBus(t, redisCfg, "node-a", "inc-a")
 	sender := newTestClusterCommandBus(t, redisCfg, "node-b", "inc-b")
-	receiver.SetHandler(func(context.Context, *messageloop.ClusterCommand) (*messageloop.ClusterCommandResult, error) {
-		return &messageloop.ClusterCommandResult{Status: messageloop.ClusterCommandStatusSucceeded}, nil
+	receiver.SetHandler(func(context.Context, *cluster.ClusterCommand) (*cluster.ClusterCommandResult, error) {
+		return &cluster.ClusterCommandResult{Status: cluster.ClusterCommandStatusSucceeded}, nil
 	})
 	receiver.start(t, ctx)
 
 	result, err := sender.SendCommand(ctx, testClusterCommand("ack-me", "node-a", "inc-a"))
 	require.NoError(t, err)
-	require.Equal(t, messageloop.ClusterCommandStatusSucceeded, result.Status)
+	require.Equal(t, cluster.ClusterCommandStatusSucceeded, result.Status)
 
 	streamKey := receiver.streamKey("node-a", "inc-a")
 	require.Eventually(t, func() bool {
@@ -1129,13 +1130,13 @@ func TestClusterCommandBus_HMACRejectStillAcks(t *testing.T) {
 	ctx := context.Background()
 
 	receiver := newTestClusterCommandBus(t, redisCfg, "node-a", "inc-a")
-	metrics := messageloop.NewMetrics(prometheus.NewRegistry())
+	metrics := metrics.NewMetrics(prometheus.NewRegistry())
 	receiver.SetMetrics(metrics)
 
 	var handledCount atomic.Int32
-	receiver.SetHandler(func(context.Context, *messageloop.ClusterCommand) (*messageloop.ClusterCommandResult, error) {
+	receiver.SetHandler(func(context.Context, *cluster.ClusterCommand) (*cluster.ClusterCommandResult, error) {
 		handledCount.Add(1)
-		return &messageloop.ClusterCommandResult{Status: messageloop.ClusterCommandStatusSucceeded}, nil
+		return &cluster.ClusterCommandResult{Status: cluster.ClusterCommandStatusSucceeded}, nil
 	})
 	receiver.start(t, ctx)
 
@@ -1187,13 +1188,13 @@ func TestClusterCommandBus_RedeliversPendingAfterCrash(t *testing.T) {
 	ctx := context.Background()
 
 	receiver := newTestClusterCommandBus(t, redisCfg, "node-a", "inc-a")
-	metrics := messageloop.NewMetrics(prometheus.NewRegistry())
+	metrics := metrics.NewMetrics(prometheus.NewRegistry())
 	receiver.SetMetrics(metrics)
 
 	var handledCount atomic.Int32
-	receiver.SetHandler(func(context.Context, *messageloop.ClusterCommand) (*messageloop.ClusterCommandResult, error) {
+	receiver.SetHandler(func(context.Context, *cluster.ClusterCommand) (*cluster.ClusterCommandResult, error) {
 		handledCount.Add(1)
-		return &messageloop.ClusterCommandResult{Status: messageloop.ClusterCommandStatusSucceeded}, nil
+		return &cluster.ClusterCommandResult{Status: cluster.ClusterCommandStatusSucceeded}, nil
 	})
 
 	client := newRedisClient(NewOptions(redisCfg))

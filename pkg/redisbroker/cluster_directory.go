@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/lynx-go/x/log"
-	"github.com/messageloopio/messageloop"
 	"github.com/messageloopio/messageloop/config"
+	"github.com/messageloopio/messageloop/internal/cluster"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -19,7 +19,7 @@ type redisSessionDirectory struct {
 }
 
 // NewSessionDirectory returns a Redis-backed SessionDirectory.
-func NewSessionDirectory(cfg config.RedisConfig) messageloop.SessionDirectory {
+func NewSessionDirectory(cfg config.RedisConfig) cluster.SessionDirectory {
 	opts := NewOptions(cfg)
 	return &redisSessionDirectory{
 		client: newRedisClient(opts),
@@ -51,7 +51,7 @@ func (d *redisSessionDirectory) nodeEpochKey(nodeID string) string {
 
 // NextNodeEpoch allocates the node's next process generation with a single
 // INCR; the first issue for a nodeID is 1. The decimal rendering of the
-// returned epoch (messageloop.FormatNodeEpoch) is the IncarnationID.
+// returned epoch (cluster.FormatNodeEpoch) is the IncarnationID.
 func (d *redisSessionDirectory) NextNodeEpoch(ctx context.Context, nodeID string) (uint64, error) {
 	if nodeID == "" {
 		return 0, errors.New("node_epoch: node_id is required")
@@ -84,18 +84,18 @@ func (d *redisSessionDirectory) userSessionsKey(userID string) string {
 	return fmt.Sprintf("%suser:sessions:%s", d.opts.ClusterPrefix, userID)
 }
 
-func (d *redisSessionDirectory) PutNodeLease(ctx context.Context, lease *messageloop.ClusterNodeLease, ttl time.Duration) error {
+func (d *redisSessionDirectory) PutNodeLease(ctx context.Context, lease *cluster.ClusterNodeLease, ttl time.Duration) error {
 	if lease == nil || lease.NodeID == "" || lease.IncarnationID == "" {
 		return nil
 	}
 	return d.setJSON(ctx, d.nodeLeaseKey(lease.NodeID, lease.IncarnationID), lease, ttl)
 }
 
-func (d *redisSessionDirectory) GetNodeLease(ctx context.Context, nodeID, incarnationID string) (*messageloop.ClusterNodeLease, error) {
+func (d *redisSessionDirectory) GetNodeLease(ctx context.Context, nodeID, incarnationID string) (*cluster.ClusterNodeLease, error) {
 	if nodeID == "" || incarnationID == "" {
 		return nil, nil
 	}
-	lease := &messageloop.ClusterNodeLease{}
+	lease := &cluster.ClusterNodeLease{}
 	found, err := d.getJSON(ctx, d.nodeLeaseKey(nodeID, incarnationID), lease)
 	if err != nil || !found {
 		return nil, err
@@ -103,7 +103,7 @@ func (d *redisSessionDirectory) GetNodeLease(ctx context.Context, nodeID, incarn
 	return lease, nil
 }
 
-func (d *redisSessionDirectory) CompareAndSwapSessionLease(ctx context.Context, expected, desired *messageloop.ClusterSessionLease, ttl time.Duration) (bool, error) {
+func (d *redisSessionDirectory) CompareAndSwapSessionLease(ctx context.Context, expected, desired *cluster.ClusterSessionLease, ttl time.Duration) (bool, error) {
 	if desired == nil || desired.SessionID == "" {
 		return false, nil
 	}
@@ -116,9 +116,9 @@ func (d *redisSessionDirectory) CompareAndSwapSessionLease(ctx context.Context, 
 			return err
 		}
 
-		var currentLease *messageloop.ClusterSessionLease
+		var currentLease *cluster.ClusterSessionLease
 		if !errors.Is(err, redis.Nil) {
-			currentLease = &messageloop.ClusterSessionLease{}
+			currentLease = &cluster.ClusterSessionLease{}
 			if unmarshalErr := json.Unmarshal([]byte(current), currentLease); unmarshalErr != nil {
 				return unmarshalErr
 			}
@@ -197,7 +197,7 @@ return 1
 // snapshot behind. TTLs are unchanged (lease TTL / 24h snapshot TTL), applied
 // as PX — internally the same absolute expiry the EX/PX mix of the plain Set
 // calls produced.
-func (d *redisSessionDirectory) CompareAndSwapSessionState(ctx context.Context, expected, desired *messageloop.ClusterSessionLease, snapshot *messageloop.ClusterSessionSnapshot, leaseTTL, snapshotTTL time.Duration) (bool, error) {
+func (d *redisSessionDirectory) CompareAndSwapSessionState(ctx context.Context, expected, desired *cluster.ClusterSessionLease, snapshot *cluster.ClusterSessionSnapshot, leaseTTL, snapshotTTL time.Duration) (bool, error) {
 	if desired == nil || desired.SessionID == "" {
 		return false, nil
 	}
@@ -243,11 +243,11 @@ func ttlMilliseconds(d time.Duration) int64 {
 	return 1
 }
 
-func (d *redisSessionDirectory) GetSessionLease(ctx context.Context, sessionID string) (*messageloop.ClusterSessionLease, error) {
+func (d *redisSessionDirectory) GetSessionLease(ctx context.Context, sessionID string) (*cluster.ClusterSessionLease, error) {
 	if sessionID == "" {
 		return nil, nil
 	}
-	lease := &messageloop.ClusterSessionLease{}
+	lease := &cluster.ClusterSessionLease{}
 	found, err := d.getJSON(ctx, d.sessionLeaseKey(sessionID), lease)
 	if err != nil || !found {
 		return nil, err
@@ -271,18 +271,18 @@ func (d *redisSessionDirectory) DeleteSessionLease(ctx context.Context, sessionI
 	return d.syncUserIndex(ctx, lease, nil, 0)
 }
 
-func (d *redisSessionDirectory) PutSessionSnapshot(ctx context.Context, snapshot *messageloop.ClusterSessionSnapshot, ttl time.Duration) error {
+func (d *redisSessionDirectory) PutSessionSnapshot(ctx context.Context, snapshot *cluster.ClusterSessionSnapshot, ttl time.Duration) error {
 	if snapshot == nil || snapshot.SessionID == "" {
 		return nil
 	}
 	return d.setJSON(ctx, d.sessionSnapshotKey(snapshot.SessionID), snapshot, ttl)
 }
 
-func (d *redisSessionDirectory) GetSessionSnapshot(ctx context.Context, sessionID string) (*messageloop.ClusterSessionSnapshot, error) {
+func (d *redisSessionDirectory) GetSessionSnapshot(ctx context.Context, sessionID string) (*cluster.ClusterSessionSnapshot, error) {
 	if sessionID == "" {
 		return nil, nil
 	}
-	snapshot := &messageloop.ClusterSessionSnapshot{}
+	snapshot := &cluster.ClusterSessionSnapshot{}
 	found, err := d.getJSON(ctx, d.sessionSnapshotKey(sessionID), snapshot)
 	if err != nil || !found {
 		return nil, err
@@ -359,14 +359,14 @@ func (d *redisSessionDirectory) ListUserSessions(ctx context.Context, userID str
 // ml2:cluster:session:lease:*). It feeds the periodic user-index repair and
 // the membership OnLeave invalidation; a lease that vanished between the
 // scan and the read is skipped.
-func (d *redisSessionDirectory) ListSessionLeases(ctx context.Context) ([]*messageloop.ClusterSessionLease, error) {
+func (d *redisSessionDirectory) ListSessionLeases(ctx context.Context) ([]*cluster.ClusterSessionLease, error) {
 	blobs, err := d.listLeaseJSON(ctx, d.opts.ClusterSessionLeasePrefix)
 	if err != nil {
 		return nil, err
 	}
-	leases := make([]*messageloop.ClusterSessionLease, 0, len(blobs))
+	leases := make([]*cluster.ClusterSessionLease, 0, len(blobs))
 	for _, raw := range blobs {
-		lease := &messageloop.ClusterSessionLease{}
+		lease := &cluster.ClusterSessionLease{}
 		if unmarshalErr := json.Unmarshal(raw, lease); unmarshalErr != nil {
 			continue
 		}
@@ -378,14 +378,14 @@ func (d *redisSessionDirectory) ListSessionLeases(ctx context.Context) ([]*messa
 // ListNodeLeases enumerates every stored node lease (SCAN
 // ml2:cluster:node:*). It feeds the membership repair loop that drives
 // OnLeave; a lease that vanished between the scan and the read is skipped.
-func (d *redisSessionDirectory) ListNodeLeases(ctx context.Context) ([]*messageloop.ClusterNodeLease, error) {
+func (d *redisSessionDirectory) ListNodeLeases(ctx context.Context) ([]*cluster.ClusterNodeLease, error) {
 	blobs, err := d.listLeaseJSON(ctx, d.opts.ClusterNodePrefix)
 	if err != nil {
 		return nil, err
 	}
-	leases := make([]*messageloop.ClusterNodeLease, 0, len(blobs))
+	leases := make([]*cluster.ClusterNodeLease, 0, len(blobs))
 	for _, raw := range blobs {
-		lease := &messageloop.ClusterNodeLease{}
+		lease := &cluster.ClusterNodeLease{}
 		if unmarshalErr := json.Unmarshal(raw, lease); unmarshalErr != nil {
 			continue
 		}
@@ -434,15 +434,15 @@ func (d *redisSessionDirectory) listLeaseJSON(ctx context.Context, prefix string
 // lease itself has already been written or deleted; index maintenance is
 // best-effort — a failure only warns, because the index is a hint (never
 // authoritative) and the periodic repair converges stale entries.
-func (d *redisSessionDirectory) syncUserIndex(ctx context.Context, oldLease, newLease *messageloop.ClusterSessionLease, ttl time.Duration) error {
-	if err := messageloop.SyncUserIndex(ctx, d, oldLease, newLease, ttl); err != nil {
+func (d *redisSessionDirectory) syncUserIndex(ctx context.Context, oldLease, newLease *cluster.ClusterSessionLease, ttl time.Duration) error {
+	if err := cluster.SyncUserIndex(ctx, d, oldLease, newLease, ttl); err != nil {
 		log.WarnContext(ctx, "failed to sync user session index", err, "session_id", leaseSessionID(oldLease, newLease))
 		return nil
 	}
 	return nil
 }
 
-func leaseSessionID(oldLease, newLease *messageloop.ClusterSessionLease) string {
+func leaseSessionID(oldLease, newLease *cluster.ClusterSessionLease) string {
 	if newLease != nil {
 		return newLease.SessionID
 	}
@@ -452,7 +452,7 @@ func leaseSessionID(oldLease, newLease *messageloop.ClusterSessionLease) string 
 	return ""
 }
 
-func clusterSessionLeaseEqual(left, right *messageloop.ClusterSessionLease) bool {
+func clusterSessionLeaseEqual(left, right *cluster.ClusterSessionLease) bool {
 	if left == nil || right == nil {
 		return left == nil && right == nil
 	}
@@ -462,8 +462,8 @@ func clusterSessionLeaseEqual(left, right *messageloop.ClusterSessionLease) bool
 		left.LeaseVersion == right.LeaseVersion
 }
 
-var _ messageloop.SessionDirectory = (*redisSessionDirectory)(nil)
-var _ messageloop.SessionStateCompareAndSwapper = (*redisSessionDirectory)(nil)
-var _ messageloop.ClusterSessionLeaseLister = (*redisSessionDirectory)(nil)
-var _ messageloop.ClusterNodeLeaseLister = (*redisSessionDirectory)(nil)
-var _ messageloop.NodeEpochAllocator = (*redisSessionDirectory)(nil)
+var _ cluster.SessionDirectory = (*redisSessionDirectory)(nil)
+var _ cluster.SessionStateCompareAndSwapper = (*redisSessionDirectory)(nil)
+var _ cluster.ClusterSessionLeaseLister = (*redisSessionDirectory)(nil)
+var _ cluster.ClusterNodeLeaseLister = (*redisSessionDirectory)(nil)
+var _ cluster.NodeEpochAllocator = (*redisSessionDirectory)(nil)

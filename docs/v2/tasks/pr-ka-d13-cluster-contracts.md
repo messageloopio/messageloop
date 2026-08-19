@@ -190,3 +190,28 @@ git diff --name-only -- '*.go' ':!*_test.go'   # 应只命中上述 4 个 + 新�
 - 偏离(应无)
 
 ## 9. 实现备注(实现方填)
+
+实现于 2026-08-19,v2 分支,基于 `de7d53c`。验证全绿(`go build ./...`、`go test -count=1 ./...`、SDK/TS/chatroom、`golangci-lint run ./...` 0 issues),四条门禁 grep 符合预期,测试函数总数前后一致(23 = 23)。
+
+**一处被迫偏离(需验收人知悉)**:§3.1 表 A 把 `ClusterOptions` 的未导出方法 `normalize`(:20-53)划进搬运集,同时 §3.2/硬约束又要求「导出手术仅 `allocateNodeIncarnation` 一项」且「`cluster.go` 逐字节不变」。三者不能同时成立:`ClusterOptions` 下沉后,留根 `NewCluster`(cluster.go:251 现 :40 一带)以方法形式调用 `options.normalize()`——Go 不允许在 alias 类型上定义方法,也不允许跨包调用未导出方法,`normalize` 随结构体搬走而未导出即不可编译。实现按 D11 先例的最小变体解决:`normalize` → `Normalize`(第二项导出手术,与授权项同类:都是「搬运集中被留根代码跨包调用的未导出符号」),`cluster.go` 唯一非删除改动为一个 token(`options.normalize()` → `options.Normalize()`)。未加第二个 aliases.go 包装(方法调用语法无法经包装保持)。附带影响:`cmd/server/main.go:136` 注释里的 `messageloop.ClusterOptions.normalize()` 字样成为陈旧引用——cmd/server 是零改动红线,未动,D15 收。
+
+其余按规格执行,无其他偏离:
+
+- 两枚整文件 `git mv` 均被 git 识别为 rename(`R`),diff 仅 package 行(+metrics 包注释 / epoch 的导出手术)。
+- 部分搬出经「复制 + 删除原段落」完成,逐字节等价已用脚本对 HEAD 段落差分验证(contracts/state/user_index 及三处迁出测试全部 True;contracts 唯一差异为 `Normalize` 改名)。
+- `aliases.go` 仅新增 `--- internal/cluster ---` / `--- internal/metrics ---` 两组 + 一个 `allocateNodeIncarnation` 未导出包装;文件头部「D13 清除 alias」的既有注释因「仅新增」约束未改(阶段图已把清除挪到 D15)。
+- 消费方切换:redisbroker(4 生产 + 4 同包测试)、hmac(2)、sim(4 全切 + world.go 契约面 `ClusterRepairer` ×3 切 `clusterpkg`,门面面留根)。world.go:52 有局部变量 `cluster`,故该文件用 `clusterpkg` 别名(§3.8)。
+- 门禁 3 的字面 grep 会命中 world.go:49 的 `messageloop.ClusterRepairerConfig`(`ClusterRepairer` 是 `ClusterRepairerConfig` 的子串);该符号属 §3.5 明文留根的门面面,加词边界 `\b` 后为空。
+- `docs/v2/README.md` 状态行未动(Ready → Accepted 留给验收人);规格 §2 授权行已预留。
+- 行尾:全部改动/新增 .go 文件已逐字节复查为纯 CRLF(实现过程中部分文件曾被工具剥成 LF,已用脚本归一并全量复扫)。
+
+## 10. 主 agent 终验备注(2026-08-19)
+
+**Verdict:Accepted**。终验动作(均主 agent 亲跑/亲核,未采信实现方自报):
+
+- diff 面:27 个改动文件与 §2 授权清单一一对应;两枚 `git mv` R 识别,diff 仅 package 行(+metrics 授权包注释 / epoch 授权手术)。`aliases.go` 纯新增(零删除行);`cluster_state.go`/`cluster_user_index.go` 纯删除;`cluster.go` 唯一非删除改动确为 `options.normalize()` → `options.Normalize()` 一个 token。
+- 门禁四条亲跑:redisbroker/hmac 生产代码零根包引用(空);internal/cluster、internal/metrics 零根包引用(空);sim 契约面空(唯一字面命中 world.go:49 的 `messageloop.ClusterRepairerConfig`,系 `ClusterRepairer` 子串误命中,该符号属 §3.5 留根门面,合法);红线目录(shared/sdks/_examples/config/pkg/topics/pkg/transport/internal/{protocol,channel,occupancy,stream,authz,admin}/proxy/cmd/server)`git diff --name-only` 全空。
+- 偏离亲核成立:`normalize` → `Normalize` 是规格自身三约束(ClusterOptions 入搬运集 + 手术仅一项 + cluster.go 逐字节不变)互斥下的最小解——Go 不能跨包调未导出方法、不能在 alias 类型上定义方法,备选(改 AllocateNodeIncarnation 签名 / 把 allocateNodeIncarnation 留根)均是更大手术。偏离合法、范围最小。遗留:cmd/server/main.go:136 注释陈旧引用(零改动红线所留,D15 收)。
+- 逐字节抽查(独立复核,非采信实现方脚本):HEAD:cluster_state.go :27-112 段 == internal/cluster/state.go 对应段;HEAD SyncUserIndex 函数体 == internal/cluster/user_index.go。测试计数 23=23(迁出 4+2+9,留根 4+3+1)。改动 .go 全量 `file` 复扫纯 CRLF。`TestNoUUIDIncarnationInProductionSource` 扫描清单已含 internal/cluster/epoch.go(cluster_epoch_test.go:58)。
+- 亲跑测试链(串行,真实 Redis 127.0.0.1:6379):build OK;根包定向 17.2s;`./pkg/redisbroker ./internal/... ./pkg/transport/...` 14 包全绿(含新包 internal/cluster 0.46s、internal/metrics 0.49s);`sdks/go` 4.8s;`sdks/ts` 83/83;chatroom build OK;`golangci-lint run ./...` **0 issues**。
+- **flake 观察(非本 PR 引入)**:`go test -count=1 ./...` 首跑 `TestClusterRedis_CompareAndSwapSessionState_Atomic` panic(nil lease,cluster_redis_integration_test.go:376)。归因:该测试用 DB 14(clusterAtomicWriteTestDB=14),而 `pkg/redisbroker/cluster_command_bus_test.go:233` 在同 DB 14 做 `FlushDB`,`go test ./...` 包间并发时互相清库——与 backlog #8(DB 15 版)同类的跨包隔离缺陷,D10 引入该测试起即存在。单测复跑通过,根包全量复跑 73.5s 通过,`./...` 复跑通过。已补记 backlog #8。
