@@ -24,6 +24,9 @@ import (
 	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
+// NewClient creates a client session bound to a transport connection. The
+// returned close func tears down only this connection's attachment, so a
+// superseded connection does not kill a resumed session.
 func NewClient(ctx context.Context, rt Runtime, t Transport, marshaler Marshaler, opts ...ClientOption) (*Session, ClientCloseFunc, error) {
 	att := &Attachment{
 		Transport: t,
@@ -70,14 +73,17 @@ func NewClient(ctx context.Context, rt Runtime, t Transport, marshaler Marshaler
 // ClientOption is a functional option for Client
 type ClientOption func(*Session)
 
+// WithProtocol sets the transport protocol label recorded in ClientInfo.
 func WithProtocol(protocol string) ClientOption {
 	return func(c *Session) {
 		c.protocol = protocol
 	}
 }
 
+// ClientCloseFunc tears down the attachment the session was created with.
 type ClientCloseFunc func() error
 
+// ClientInfo carries immutable identity information about a connected client.
 type ClientInfo struct {
 	ClientID    string `json:"client_id"`
 	SessionID   string `json:"session_id"`
@@ -122,24 +128,29 @@ func (c *Session) MarkMetricsCharged() {
 	c.metricsCharged = true
 }
 
+// ClientID returns the client-supplied connection ID from the connect request.
 func (c *Session) ClientID() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.client
 }
 
+// SessionID returns the server-assigned session ID.
 func (c *Session) SessionID() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.session
 }
 
+// UserID returns the authenticated user ID, empty before connect.
 func (c *Session) UserID() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.user
 }
 
+// Send enqueues an outbound message for delivery on the session's current
+// attachment.
 func (c *Session) Send(ctx context.Context, msg *clientpb.OutboundMessage) error {
 	s := c.canonical()
 	return s.enqueue(ctx, msg)
@@ -168,6 +179,8 @@ func (c *Session) currentMarshaler() Marshaler {
 	return s.attachmentMarshalerLocked()
 }
 
+// HandleMessage dispatches an inbound message from the client (connect,
+// subscribe, publish, RPC, ...) to its handler.
 func (c *Session) HandleMessage(ctx context.Context, in *clientpb.InboundMessage) error {
 	s := c.canonical()
 	s.mu.Lock()
@@ -866,6 +879,9 @@ func (c *Session) checkSubscribeACL(ctx context.Context, in *clientpb.InboundMes
 	return nil
 }
 
+// MakeOutboundMessage builds an outbound reply envelope for an inbound
+// request: the reply reuses the request ID so the client can correlate it.
+// With a nil request the message gets a fresh UUID (server-initiated push).
 func MakeOutboundMessage(in *clientpb.InboundMessage, bodyFunc func(out *clientpb.OutboundMessage)) *clientpb.OutboundMessage {
 	var out *clientpb.OutboundMessage
 	if in != nil {
@@ -883,6 +899,7 @@ func MakeOutboundMessage(in *clientpb.InboundMessage, bodyFunc func(out *clientp
 	return out
 }
 
+// ClientInfo returns a snapshot of the session's identity information.
 func (c *Session) ClientInfo() *ClientInfo {
 	// c.client/c.session/c.user are written under c.mu by handleConnect and
 	// the cluster resume path, so they must be read under the same lock.
@@ -905,6 +922,7 @@ func (c *Session) ClientInfo() *ClientInfo {
 	return info
 }
 
+// Authenticated reports whether the session completed connect authentication.
 func (c *Session) Authenticated() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()

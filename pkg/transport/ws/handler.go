@@ -14,12 +14,17 @@ import (
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
+// Handler upgrades HTTP requests to WebSocket connections and binds each
+// connection to a session via the Hub.
 type Handler struct {
 	node     *runtime.Node
 	opt      *Options
 	upgrader *websocket.Upgrader
 }
 
+// NewHandler creates a WebSocket handler bound to the node. The negotiated
+// subprotocol (messageloop, messageloop+json, messageloop+proto) selects the
+// marshaler and frame type per connection.
 func NewHandler(node *runtime.Node, opt Options) *Handler {
 	handler := &Handler{
 		node: node,
@@ -37,6 +42,8 @@ func NewHandler(node *runtime.Node, opt Options) *Handler {
 	return handler
 }
 
+// ServeHTTP upgrades the request to WebSocket and runs the client session
+// until the connection closes. It returns only after the session ends.
 func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	conn, err := h.upgrader.Upgrade(rw, r, nil)
 	if err != nil {

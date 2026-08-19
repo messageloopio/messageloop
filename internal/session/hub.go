@@ -44,6 +44,8 @@ func publicationMessageID(channel string, offset uint64) string {
 	return uuid.NewString()
 }
 
+// Hub is the connection registry. Sessions and subscriptions are sharded to
+// reduce lock contention (64 session shards, 16384 subscription shards).
 type Hub struct {
 	mu              sync.RWMutex
 	sessions        map[string]*Session
@@ -57,7 +59,9 @@ type Hub struct {
 	wcSubs   map[string]*topics.Subscription // key: "sessionID:channel"
 }
 
-// newHub initializes Hub.
+// NewHub initializes a Hub. maxTimeLagMilli bounds how far a subscriber's
+// queue may lag before it is dropped; maxConnsPerUser limits concurrent
+// connections per user (0 means unlimited).
 func NewHub(maxTimeLagMilli int64, maxConnsPerUser int) *Hub {
 	h := &Hub{
 		sessions:        map[string]*Session{},
@@ -77,6 +81,9 @@ func isWildcard(ch string) bool {
 	return strings.Contains(ch, "*")
 }
 
+// AddSub registers a subscriber on a channel. Wildcard patterns go to the
+// topic matcher; exact channels are validated and stored in a sub shard.
+// It reports whether the subscriber is new to the channel.
 func (h *Hub) AddSub(ch string, sub Subscriber) (bool, error) {
 	if isWildcard(ch) {
 		return h.addWildcardSub(ch, sub)
