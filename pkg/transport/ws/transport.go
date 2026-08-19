@@ -56,39 +56,22 @@ func (t *Transport) WriteMany(msgs ...[]byte) error {
 
 func (t *Transport) Close(disconnect protocol.Disconnect) error {
 	// Always close the underlying connection, even when the peer has already
-	// torn the socket down (e.g. RST): WriteControl and the read loop below
-	// fail early on such sockets, and skipping conn.Close() would leak the fd.
+	// torn the socket down (e.g. RST): WriteControl fails early on such
+	// sockets, and skipping conn.Close() would leak the fd. Closing the conn
+	// also unblocks the read loop, which owns all reads on this connection —
+	// gorilla/websocket requires a single reader, so Close must not drain
+	// frames itself (that raced with the read loop).
 	defer func() { _ = t.conn.Close() }()
 
 	t.writeMu.Lock()
+	defer t.writeMu.Unlock()
 	// Send a WebSocket close message
 	deadline := time.Now().Add(5 * time.Second)
-	err := t.conn.WriteControl(
+	return t.conn.WriteControl(
 		websocket.CloseMessage,
 		websocket.FormatCloseMessage(closeCode(disconnect), disconnect.Reason),
 		deadline,
 	)
-	t.writeMu.Unlock()
-	if err != nil {
-		return err
-	}
-
-	// Set deadline for reading the next message
-	err = t.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-	if err != nil {
-		return err
-	}
-	// Read messages until the close message is confirmed
-	for {
-		_, _, err = t.conn.NextReader()
-		if websocket.IsCloseError(err, websocket.CloseNormalClosure) {
-			break
-		}
-		if err != nil {
-			break
-		}
-	}
-	return nil
 }
 
 var _ session.Transport = (*Transport)(nil)
