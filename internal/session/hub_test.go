@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"sync"
@@ -533,6 +534,102 @@ func TestHub_BroadcastPublication_MixedEncodings(t *testing.T) {
 		assert.Equal(t, "test-channel", publication.Messages[0].Channel)
 		assert.Equal(t, []byte("test payload"), publication.Messages[0].Payload.GetBinary())
 	}
+}
+
+// TestHub_BroadcastPublication_JSONPassthrough covers the raw-JSON splice on
+// the broadcast path: JSON-encoding subscribers receive the stored payload
+// bytes verbatim (skipping the structpb round trip that would mangle big
+// integers and key order), while protobuf subscribers get the structpb form.
+func TestHub_BroadcastPublication_JSONPassthrough(t *testing.T) {
+	h := newHub(0, 0)
+
+	newEncodedClient := func(sessionID string, m Marshaler) (*Session, *mockTransport) {
+		transport := &mockTransport{}
+		client, _, err := NewClient(context.Background(), newFakeRuntime(), transport, m)
+		require.NoError(t, err)
+		client.mu.Lock()
+		client.session = sessionID
+		client.user = "user-" + sessionID
+		client.client = "client-" + sessionID
+		client.mu.Unlock()
+		require.NoError(t, client.Attach(client.attachment))
+		return client, transport
+	}
+
+	jsonClient, jsonTransport := newEncodedClient("json-1", JSONMarshaler{})
+	protoClient, protoTransport := newEncodedClient("proto-1", ProtobufMarshaler{})
+	for _, client := range []*Session{jsonClient, protoClient} {
+		_, _ = h.AddSub("json-ch", Subscriber{Session: client, Ephemeral: false})
+	}
+
+	// An integer beyond float64 precision and out-of-order keys would not
+	// survive a json.Unmarshal→structpb→protojson round trip verbatim.
+	raw := []byte(`{"z":9007199254740993,"a":{"k":"v"}}`)
+	pub := &Publication{
+		Channel: "json-ch",
+		Kind:    PayloadKindJSON,
+		Offset:  1,
+		Payload: raw,
+		Time:    time.Now().UnixMilli(),
+	}
+	require.NoError(t, h.BroadcastPublication("json-ch", pub))
+
+	require.Equal(t, 1, jsonTransport.getMessageCount())
+	require.Equal(t, 1, protoTransport.getMessageCount())
+
+	// The JSON frame embeds the stored payload bytes verbatim.
+	jsonFrame := jsonTransport.getMessage(0)
+	assert.True(t, bytes.Contains(jsonFrame, raw), "json frame must splice the raw payload: %s", jsonFrame)
+
+	// Both frames still decode with their own encoding and keep the json oneof.
+	var jsonOut, protoOut clientpb.OutboundMessage
+	require.NoError(t, JSONMarshaler{}.Unmarshal(jsonFrame, &jsonOut))
+	require.NoError(t, ProtobufMarshaler{}.Unmarshal(protoTransport.getMessage(0), &protoOut))
+	jsonPayload := jsonOut.GetPublication().GetMessages()[0].GetPayload()
+	protoPayload := protoOut.GetPublication().GetMessages()[0].GetPayload()
+	require.NotNil(t, jsonPayload.GetJson(), "json frame payload must stay the json oneof")
+	require.NotNil(t, protoPayload.GetJson(), "proto frame payload must stay the json oneof")
+	assert.Equal(t, "v", protoPayload.GetJson().GetFields()["a"].GetStructValue().GetFields()["k"].GetStringValue())
+}
+
+// TestHub_BroadcastPublication_JSONNonObjectDegradesToText pins the legacy
+// fallback: JSON-kind payloads that are not JSON objects cannot be spliced
+// (structpb renders as an object), so both encodings get the text variant.
+func TestHub_BroadcastPublication_JSONNonObjectDegradesToText(t *testing.T) {
+	h := newHub(0, 0)
+
+	newEncodedClient := func(sessionID string, m Marshaler) (*Session, *mockTransport) {
+		transport := &mockTransport{}
+		client, _, err := NewClient(context.Background(), newFakeRuntime(), transport, m)
+		require.NoError(t, err)
+		client.mu.Lock()
+		client.session = sessionID
+		client.mu.Unlock()
+		require.NoError(t, client.Attach(client.attachment))
+		return client, transport
+	}
+
+	jsonClient, jsonTransport := newEncodedClient("json-1", JSONMarshaler{})
+	protoClient, protoTransport := newEncodedClient("proto-1", ProtobufMarshaler{})
+	for _, client := range []*Session{jsonClient, protoClient} {
+		_, _ = h.AddSub("json-arr", Subscriber{Session: client, Ephemeral: false})
+	}
+
+	raw := []byte(`[1,2,3]`)
+	pub := &Publication{
+		Channel: "json-arr",
+		Kind:    PayloadKindJSON,
+		Offset:  1,
+		Payload: raw,
+		Time:    time.Now().UnixMilli(),
+	}
+	require.NoError(t, h.BroadcastPublication("json-arr", pub))
+
+	var jsonOut, protoOut clientpb.OutboundMessage
+	require.NoError(t, JSONMarshaler{}.Unmarshal(jsonTransport.getMessage(0), &jsonOut))
+	require.NoError(t, ProtobufMarshaler{}.Unmarshal(protoTransport.getMessage(0), &protoOut))
+	assert.Equal(t, string(raw), jsonOut.GetPublication().GetMessages()[0].GetPayload().GetText())
+	assert.Equal(t, string(raw), protoOut.GetPublication().GetMessages()[0].GetPayload().GetText())
 }
 
 func TestIndex(t *testing.T) {

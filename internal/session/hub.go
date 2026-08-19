@@ -1,7 +1,9 @@
 package session
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"sort"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/messageloopio/messageloop/pkg/topics"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
@@ -365,6 +368,23 @@ func (h *Hub) BroadcastPublication(ch string, pub *Publication) error {
 	// broker StreamEpoch plus the channel offset.
 	payload := pub.PayloadProtoV2()
 
+	// jsonRaw carries the original payload bytes when the publication is a
+	// valid JSON object: JSON-encoding subscribers get them spliced into the
+	// frame verbatim instead of a json.Unmarshal→structpb→protojson round
+	// trip, which loses integer precision beyond 2^53 (float64) and key
+	// order. Non-object JSON (arrays, scalars) cannot be represented by
+	// structpb and keeps the PayloadProtoV2 degrade-to-text behavior.
+	var jsonRaw []byte
+	if pub.Kind == PayloadKindJSON && isJSONObject(pub.Payload) {
+		jsonRaw = bytes.TrimSpace(pub.Payload)
+	}
+	// jsonPlaceholderPayload stands in for the payload while the JSON frame
+	// is marshaled, so protojson emits the empty-Struct splice point.
+	jsonPlaceholderPayload := &sharedv2.Payload{
+		ContentType: pub.ContentType,
+		Data:        &sharedv2.Payload_Json{Json: &structpb.Struct{}},
+	}
+
 	msg := &clientpb.Message{
 		Channel:  ch,
 		Id:       publicationMessageID(ch, pub.Offset),
@@ -402,7 +422,27 @@ func (h *Hub) BroadcastPublication(ch string, pub *Publication) error {
 	marshalErrs := make(map[Marshaler]error, len(encodings))
 	for m := range encodings {
 		buf := getBuffer()
-		b, err := m.MarshalAppend((*buf)[:0], out)
+		var b []byte
+		var err error
+		spliced := false
+		if jsonRaw != nil && m.Name() == (JSONMarshaler{}).Name() {
+			// Swap in the empty-Struct placeholder so protojson emits the
+			// splice point, then graft the raw payload bytes in. The loop is
+			// sequential: the swap is restored before the next encoding
+			// marshals, and sendFrame's re-marshal fallback always sees the
+			// real payload.
+			msg.Payload = jsonPlaceholderPayload
+			b, err = m.MarshalAppend((*buf)[:0], out)
+			msg.Payload = payload
+			if err == nil {
+				// spliceRawJSONPayload returns a fresh slice, so the pooled
+				// buffer needs no copy below.
+				b = spliceRawJSONPayload(b, jsonRaw)
+				spliced = true
+			}
+		} else {
+			b, err = m.MarshalAppend((*buf)[:0], out)
+		}
 		if err != nil {
 			putBuffer(buf)
 			marshalErrs[m] = err
@@ -411,7 +451,11 @@ func (h *Hub) BroadcastPublication(ch string, pub *Publication) error {
 		// The frame bytes are written asynchronously by each session's writer
 		// goroutine, so they must outlive the pooled buffer: copy once per
 		// encoding, then share the copy across that encoding's subscribers.
-		frames[m] = append([]byte(nil), b...)
+		if spliced {
+			frames[m] = b
+		} else {
+			frames[m] = append([]byte(nil), b...)
+		}
 		putBuffer(buf)
 	}
 
@@ -486,6 +530,36 @@ func (h *Hub) BroadcastPublication(ch string, pub *Publication) error {
 	}
 
 	return nil
+}
+
+// isJSONObject reports whether data holds a valid JSON object. It decides
+// whether a JSON-kind payload may pass through to JSON frames verbatim:
+// protojson renders the Payload json oneof (a structpb.Struct) as a JSON
+// object, so only objects can be spliced without changing the wire shape.
+func isJSONObject(data []byte) bool {
+	trimmed := bytes.TrimSpace(data)
+	return len(trimmed) > 0 && trimmed[0] == '{' && json.Valid(trimmed)
+}
+
+// jsonPayloadSplicePoint is the exact protojson rendering of an empty Struct
+// in the Payload json oneof field. protojson escapes quotes inside string
+// values, so this byte sequence can only occur at the payload site.
+const jsonPayloadSplicePoint = `"json":{}`
+
+// spliceRawJSONPayload replaces the empty-Struct placeholder in frame with
+// the raw payload bytes, returning a fresh slice. If the placeholder is
+// missing (defensive), the frame is returned unchanged.
+func spliceRawJSONPayload(frame, raw []byte) []byte {
+	i := bytes.Index(frame, []byte(jsonPayloadSplicePoint))
+	if i < 0 {
+		return frame
+	}
+	// `"json":` is kept from the placeholder; only the `{}` is replaced.
+	out := make([]byte, 0, len(frame)+len(raw)-2)
+	out = append(out, frame[:i+len(jsonPayloadSplicePoint)-2]...)
+	out = append(out, raw...)
+	out = append(out, frame[i+len(jsonPayloadSplicePoint):]...)
+	return out
 }
 
 // recordDeliveredOffsets updates the last successfully delivered offset for
