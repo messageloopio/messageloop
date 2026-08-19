@@ -205,3 +205,45 @@
 - **项目底色很好**：协议/实现一致性、并发锁设计、安全 fail-closed 默认值、测试覆盖面在同规模 Go 服务中属上乘。
 - **最优先三件事**：① 修 C1（proxy JSON 方言混用，安全+正确性双重问题）；② 修 C2（广播序列化去重）；③ 修 C3（WS Close 并发读）。
 - **两条主线债务**：① 文档/注释与代码漂移（protocol.md、deployment.md、断开码区间）；② "平移式重构"未完工（双重别名层、`session.Runtime` 胖接口、测试层级错位）——建议按既定 PR 序列推进，不与本次修复混杂。
+
+---
+
+## 附录：C4 设计评审——广播 `frame.done` 同步等待语义（2026-08-19 复审）
+
+> 针对 C4 条目的深入设计评审。只做分析与建议，本附录不改代码。
+> 注意：自 cca9308（memory broker 异步分片投递）起，原条目"handler 在发布者读循环里同步执行"已过时——memory broker 的广播现运行在分片投递 goroutine 上，发布者 ack 不再被订阅者拖住；redis broker 侧描述（delivery worker 占用）仍然成立。
+
+### 现状链路
+
+1. `Hub.BroadcastPublication`（`internal/session/hub.go:340`）对每个订阅者 `sendFrame → enqueueBytes`（`session.go:713`）：`tryEnqueue` 入队（Control 32 / Data 256 两条有界 lane）后阻塞在 `<-frame.done`，ctx 为硬编码的 `context.Background()`，本层无超时。
+2. 唯一写 goroutine `writerLoop`（`session.go:576`）逐帧 `Transport.Write` 后以结果信号 `frame.done`。
+3. 超时边界在传输层：WS 默认 10s 写截止时间（`DefaultWSWriteTimeout`），gRPC `sendWithBudget` 入队 10s + 送达 ack 10s。两者都可配，WS 允许显式置 0 禁用。
+4. 失败路径收敛：lane 满 → `Close(DisconnectSlowConsumer)`；写错误 → writerLoop 退出并按 §7 表关会话；队列关闭时所有挂起帧立即 `done <- ErrSessionNotAttached`。因此 **`frame.done` 保证最终必然触发**，不存在真正的永久阻塞/goroutine 泄漏——前提是会话最终会被关闭（心跳兜底）。
+
+### 为什么同步等待不能简单删掉
+
+`frame.done` 的等待结果喂给两个正确性消费者：
+
+- **`recordDeliveredOffsets`（hub.go:528）**：只把"确认写上线"的 offset 记入每订阅的 last-delivered 簿记，resume/recovery 依此决定恢复起点。fire-and-forget 会把未上线的 offset 记为已送达 → 客户端 resume 时跳过恢复 → **丢消息**。这是该语义的核心理由。
+- **metrics**：`MessagesDelivered`/`DeliveryFailures` 反映真实写线结果而非入队受理。
+
+### 残留的代价
+
+- 小扇出（≤8）走串行分支，延迟是各订阅者写耗时**累加**，一个 10s 慢写拖住整条广播。
+- 慢而未死的订阅者（TCP 背压但未触发 lane 满）占住其分片/worker 直到写超时触发：memory broker 下是同 shard 其他频道延迟，redis broker 下是 hash 到同一 worker 的频道延迟（有界，≤写超时×队列深度）。
+- WS `WriteTimeout: 0` 时单帧等待无传输层上界，仅靠心跳判死后 `conn.Close` 中断写。
+
+### 方案对比
+
+| 方案 | 语义变化 | 改动面 | 风险 |
+|---|---|---|---|
+| A. 维持现状 | 无 | 无 | 慢订阅者长尾 stall 持续存在 |
+| B. 等待加 ctx 超时（对齐写超时），超时按"未送达"处理 | 超时帧不记 delivered、记 DeliveryFailures；会话由慢消费者机制自行清理 | hub.go 一处 + 测试 | 超时误伤"慢但健康"的客户端 → offset 簿记偏旧 → resume 多恢复（有稳定消息 ID 去重 + C6 gap 检测兜底，**宁可多恢复的方向是安全的**） |
+| C. fire-and-forget + 异步完成回调更新簿记 | delivered 簿记变最终一致，需按订阅者单调取 max-offset 更新；metrics 归属移到 writer 侧 | hub/session 边界重设计 | 回调乱序、簿记一致性、Attach 换队列后旧帧归属——复杂度高 |
+| D. 禁止 `WriteTimeout: 0`（配置校验拒绝） | 无 | config 校验一行 | 消除唯一无界路径；但 sync 等待本身保留 |
+
+### 建议
+
+- **短期**：B + D。B 把单订阅者最坏 stall 从"写超时×队列深度"压到一次广播预算内，且失败方向安全（多恢复、不丢消息）；D 消灭唯一无界配置。两者都是小改动。
+- **中期**：小扇出串行分支可无条件走并行发送（`broadcastParallelLimit` 已有界），消除 ≤8 扇出的延迟累加。
+- **长期**：若 profile 显示广播等待仍是投递延迟主因，再上 C（异步簿记），届时需先补 `recordDeliveredOffsets` 的乱序/单调性测试。
