@@ -672,26 +672,39 @@ func (s *Session) enqueue(ctx context.Context, msg proto.Message) error {
 	}
 	buf := getBuffer()
 	defer putBuffer(buf)
-	var err error
 	s.mu.RLock()
 	marshaler := s.attachmentMarshalerLocked()
+	s.mu.RUnlock()
+	frameBytes, err := marshaler.MarshalAppend((*buf)[:0], msg)
+	if err != nil {
+		return err
+	}
+	*buf = frameBytes
+	// The queued frame is written asynchronously by the writer goroutine, so
+	// the bytes must outlive the pooled buffer: copy before enqueueing.
+	return s.enqueueBytes(ctx, append([]byte(nil), (*buf)...), outboundFrameClass(msg))
+}
+
+// enqueueBytes queues an already-marshaled frame and waits for its write
+// result, following the same paths as enqueue. It backs the broadcast fan-out,
+// which serializes a shared publication once per wire encoding and hands the
+// same bytes to every subscriber with that encoding — the caller must not
+// mutate frameBytes until all enqueueBytes calls sharing it have returned.
+func (s *Session) enqueueBytes(ctx context.Context, frameBytes []byte, control bool) error {
+	// The outbound frame cap applies per queue frame. B3 streams recovery as
+	// single-message replay frames, so there is no Connected batch exemption
+	// anymore: every frame, Connected included, honors MaxMessageSize (§4.3).
+	if max := s.rt.MaxMessageSize(); max > 0 && len(frameBytes) > max {
+		return ErrOutboundTooLarge
+	}
+	s.mu.RLock()
 	att := s.attachment
 	out := s.out
 	state := s.state
 	s.mu.RUnlock()
-	*buf, err = marshaler.MarshalAppend((*buf)[:0], msg)
-	if err != nil {
-		return err
-	}
-	// The outbound frame cap applies per queue frame. B3 streams recovery as
-	// single-message replay frames, so there is no Connected batch exemption
-	// anymore: every frame, Connected included, honors MaxMessageSize (§4.3).
-	if max := s.rt.MaxMessageSize(); max > 0 && len(*buf) > max {
-		return ErrOutboundTooLarge
-	}
 	frame := &queuedFrame{
-		bytes:   append([]byte(nil), (*buf)...),
-		control: outboundFrameClass(msg),
+		bytes:   frameBytes,
+		control: control,
 		done:    make(chan error, 1),
 	}
 	if state == SessionAttached {

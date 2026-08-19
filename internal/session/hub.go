@@ -378,11 +378,62 @@ func (h *Hub) BroadcastPublication(ch string, pub *Publication) error {
 
 	const broadcastParallelThreshold = 8
 
+	// Serialize the publication once per distinct wire encoding: subscribers
+	// sharing a marshaler receive the same frame bytes, so the fan-out pays
+	// one MarshalAppend (and one heap copy) per encoding instead of per
+	// subscriber. clientEncodings[i] is the marshaler of clients[i].
+	clientEncodings := make([]Marshaler, len(clients))
+	encodings := make(map[Marshaler]struct{}, 2)
+	for i, client := range clients {
+		m := client.currentMarshaler()
+		clientEncodings[i] = m
+		encodings[m] = struct{}{}
+	}
+	control := outboundFrameClass(out)
+	frames := make(map[Marshaler][]byte, len(encodings))
+	marshalErrs := make(map[Marshaler]error, len(encodings))
+	for m := range encodings {
+		buf := getBuffer()
+		b, err := m.MarshalAppend((*buf)[:0], out)
+		if err != nil {
+			putBuffer(buf)
+			marshalErrs[m] = err
+			continue
+		}
+		// The frame bytes are written asynchronously by each session's writer
+		// goroutine, so they must outlive the pooled buffer: copy once per
+		// encoding, then share the copy across that encoding's subscribers.
+		frames[m] = append([]byte(nil), b...)
+		putBuffer(buf)
+	}
+
 	// delivered marks the positions of clients that received the publication,
 	// so the last-delivered-offset bookkeeping below only counts successful
 	// sends. One slot per client: each fan-out goroutine writes only its own
 	// index, so no locking is needed.
 	delivered := make([]bool, len(clients))
+
+	// sendOne delivers the pre-marshaled frame to one subscriber and records
+	// the outcome; a marshal failure for the client's encoding fails all of
+	// that encoding's sends with the same error.
+	sendOne := func(i int, client *Session) {
+		m := clientEncodings[i]
+		err, failed := marshalErrs[m]
+		if !failed {
+			err = client.sendFrame(ctx, frames[m], control)
+		}
+		if err != nil {
+			log.ErrorContext(ctx, "send publication error", err)
+			if client.rt.Metrics() != nil {
+				client.rt.Metrics().DeliveryFailures.Inc()
+			}
+		} else {
+			delivered[i] = true
+			if client.rt.Metrics() != nil {
+				client.rt.Metrics().MessagesDelivered.Inc()
+			}
+		}
+	}
 
 	if len(clients) <= broadcastParallelThreshold {
 		// Serial send for small fan-out — avoids goroutine overhead
@@ -395,17 +446,7 @@ func (h *Hub) BroadcastPublication(ch string, pub *Publication) error {
 						log.ErrorContext(ctx, "panic in send publication", fmt.Errorf("panic: %v, channel: %s", r, ch))
 					}
 				}()
-				if err := client.Send(ctx, out); err != nil {
-					log.ErrorContext(ctx, "send publication error", err)
-					if client.rt.Metrics() != nil {
-						client.rt.Metrics().DeliveryFailures.Inc()
-					}
-				} else {
-					delivered[i] = true
-					if client.rt.Metrics() != nil {
-						client.rt.Metrics().MessagesDelivered.Inc()
-					}
-				}
+				sendOne(i, client)
 			}(i)
 		}
 	} else {
@@ -424,17 +465,7 @@ func (h *Hub) BroadcastPublication(ch string, pub *Publication) error {
 					<-sem
 					wg.Done()
 				}()
-				if err := client.Send(ctx, out); err != nil {
-					log.ErrorContext(ctx, "send publication error", err)
-					if client.rt.Metrics() != nil {
-						client.rt.Metrics().DeliveryFailures.Inc()
-					}
-				} else {
-					delivered[i] = true
-					if client.rt.Metrics() != nil {
-						client.rt.Metrics().MessagesDelivered.Inc()
-					}
-				}
+				sendOne(i, client)
 			}(i, client)
 		}
 		wg.Wait()
