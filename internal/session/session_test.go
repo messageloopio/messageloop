@@ -1,4 +1,4 @@
-package messageloop
+package session
 
 import (
 	"context"
@@ -97,7 +97,7 @@ func (t *scriptedTransport) writeEnvelope(i int) *clientpb.OutboundMessage {
 
 func TestSession_NewClient_StateAuthenticating(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode(nil)
+	node := newFakeRuntime()
 
 	sess, _, err := NewClient(ctx, node, newScriptedTransport(), JSONMarshaler{})
 	require.NoError(t, err)
@@ -121,7 +121,7 @@ func TestSession_NewClient_StateAuthenticating(t *testing.T) {
 
 func TestSession_SendQueue_ControlBeforeData(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode(nil)
+	node := newFakeRuntime()
 	transport := newScriptedTransport()
 	transport.unblock()
 	sess, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
@@ -193,7 +193,7 @@ func frameFor(msg *clientpb.OutboundMessage) (*queuedFrame, error) {
 
 func TestSession_SendQueue_DataFullClosesSlowConsumer(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode(nil)
+	node := newFakeRuntime()
 	transport := newScriptedTransport()
 	sess, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	require.NoError(t, err)
@@ -244,7 +244,7 @@ func TestSession_SendQueue_DataFullClosesSlowConsumer(t *testing.T) {
 
 func TestSession_SendQueue_ControlFullClosesSlowConsumer(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode(nil)
+	node := newFakeRuntime()
 	transport := newScriptedTransport()
 	sess, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	require.NoError(t, err)
@@ -287,7 +287,7 @@ func TestSession_SendQueue_ControlFullClosesSlowConsumer(t *testing.T) {
 
 func TestSession_WriteEOF_ClosesWith3000(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode(nil)
+	node := newFakeRuntime()
 	transport := newScriptedTransport()
 	transport.writeErr = io.EOF
 	transport.unblock()
@@ -315,8 +315,7 @@ func TestSession_WriteEOF_ClosesWith3000(t *testing.T) {
 
 func TestSession_AttachFailure_ClosesSession(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode(nil)
-	_ = node.Run(ctx)
+	node := newFakeRuntime()
 
 	goodTransport := newScriptedTransport()
 	goodTransport.unblock()
@@ -354,17 +353,8 @@ func TestSession_AttachFailure_ClosesSession(t *testing.T) {
 
 func TestSession_Fence_NoLeaveNoUnbind(t *testing.T) {
 	ctx := context.Background()
-	directory := &recordingSessionDirectory{fakeSessionDirectory: &fakeSessionDirectory{}}
-	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-a", IncarnationID: "inc-a", Backend: "memory"}, ClusterDependencies{
-		SessionDirectory: directory,
-		CommandBus:       &fakeClusterCommandBus{},
-		QueryStore:       fakeQueryStore{},
-	})
-	require.NoError(t, err)
-
-	node := NewNode(nil)
-	node.SetCluster(runtime)
-	_ = node.Run(ctx)
+	node := newFakeRuntime()
+	directory := node
 
 	transport := newScriptedTransport()
 	transport.unblock()
@@ -391,17 +381,8 @@ func TestSession_Fence_NoLeaveNoUnbind(t *testing.T) {
 
 func TestSession_Close_LeavesAndUnbinds(t *testing.T) {
 	ctx := context.Background()
-	directory := &recordingSessionDirectory{fakeSessionDirectory: &fakeSessionDirectory{}}
-	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-a", IncarnationID: "inc-a", Backend: "memory"}, ClusterDependencies{
-		SessionDirectory: directory,
-		CommandBus:       &fakeClusterCommandBus{},
-		QueryStore:       fakeQueryStore{},
-	})
-	require.NoError(t, err)
-
-	node := NewNode(nil)
-	node.SetCluster(runtime)
-	_ = node.Run(ctx)
+	node := newFakeRuntime()
+	directory := node
 
 	transport := newScriptedTransport()
 	transport.unblock()

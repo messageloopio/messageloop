@@ -85,7 +85,7 @@ Config structure defined in `config/config.go` with example in `config-example.y
 
 **Node** (`node.go`) - Central coordinator that manages Hub, Broker, PresenceStore, Cluster, Proxy, HeartbeatManager, ACL, Metrics, and Surveys.
 
-**Client** (`client.go`) - Represents a single connection. Handles protocol messages:
+**Client** (`internal/session/client.go`) - Represents a single connection. Handles protocol messages:
 - `Connect` - Initial authentication and session establishment
 - `Publish` - Publish messages to channels
 - `Subscribe` / `Unsubscribe` - Manage channel subscriptions
@@ -93,7 +93,7 @@ Config structure defined in `config/config.go` with example in `config-example.y
 - `Survey` / `SurveyResponse` - Broadcast a request to all channel subscribers and collect responses
 - `Ping` / `Pong` - Connection keepalive
 
-**Hub** (`hub.go`) - Sharded connection registry with 64 shards:
+**Hub** (`internal/session/hub.go`) - Sharded connection registry with 64 shards:
 - `connShard` - Maps session IDs and user IDs to active clients
 - `subShard` - Maps channels to subscribed clients
 - `matcher` - Concurrent topic trie (`topics.CSTrieMatcher`) for wildcard subscriptions
@@ -112,7 +112,7 @@ Config structure defined in `config/config.go` with example in `config-example.y
 - `RedisPresenceStore` (`pkg/redisbroker/presence_redis.go`) - Redis-backed for cluster deployments
 - Used for channel occupancy queries and join/leave events
 
-**Survey** (`survey.go`) - Request-response pattern across all subscribers of a channel:
+**Survey** (`internal/survey/survey.go`) - Request-response pattern across all subscribers of a channel:
 - Sender sends a survey message; broker fans it out to all channel subscribers
 - Responses are collected with a configurable timeout
 - Used for member discovery, capability negotiation, distributed queries
@@ -140,11 +140,11 @@ Config structure defined in `config/config.go` with example in `config-example.y
 
 ### Transports
 
-The system abstracts connection handling via the **Transport** interface (`transport.go`):
+The system abstracts connection handling via the **Transport** interface (`internal/session/transport.go`):
 - `Write` / `WriteMany` - Send bytes to client
 - `Close` - Close connection with disconnect reason
 
-**Write buffer pool** (`pool.go`) - Uses `sync.Pool` with 4 KB initial capacity to reduce allocations for outbound messages.
+**Write buffer pool** (`internal/session/pool.go`) - Uses `sync.Pool` with 4 KB initial capacity to reduce allocations for outbound messages.
 
 **WebSocket** (`pkg/transport/ws/`) - HTTP-upgraded WebSocket connections:
 - Handler detects encoding from WebSocket subprotocol (`messageloop`, `messageloop+json`, `messageloop+proto`)
@@ -198,7 +198,9 @@ Typed `Disconnect` errors (`disconnect.go`) signal intentional connection termin
 
 ## Module Structure
 
-- **Root package** (`*.go`) - Core types: Node, Client, Hub, Broker, Transport, Presence, Survey, ACL, Metrics
+- **Root package** (`*.go`) - Node coordinator, cluster orchestration, recover, aliases, session Runtime adapter
+- `internal/session/` - Session Plane: Session, Hub, Transport, Heartbeat, Runtime seam
+- `internal/survey/` - Survey leaf types (orchestration still on Node until D15)
 - `cmd/server/` - Server entry point using `lynx` framework
 - `config/` - Configuration structures
 - `shared/` - Separate Go module (`github.com/messageloopio/messageloop/shared`) with shared marshalers and generated protobuf Go code

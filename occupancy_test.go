@@ -75,7 +75,7 @@ func TestOccupancy_LateEventCountsGenDiscard(t *testing.T) {
 // longer recognize an "ml.type" presence frame, and node.go has no
 // presenceClusterEmit / emitPresence remnant.
 func TestOccupancy_NoForbiddenProductionRemnants(t *testing.T) {
-	hubSrc := readSource(t, "hub.go")
+	hubSrc := readSource(t, "internal/session/hub.go")
 	require.NotContains(t, hubSrc, "node *Node", "Hub must not hold a Node back-reference")
 	require.NotContains(t, hubSrc, "ml.type", "broadcastPublication must not recognize an ml.type frame")
 	require.NotContains(t, hubSrc, "PresenceMetaType", "the ml.type constants must be gone")

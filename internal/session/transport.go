@@ -1,4 +1,4 @@
-package messageloop
+package session
 
 type Transport interface {
 	Write([]byte) error

@@ -230,3 +230,23 @@ git diff --name-only -- '*.go' ':!*_test.go'   # 应只命中:六个迁移源文
 - 偏离(应无)
 
 ## 9. 实现备注(实现方填)
+
+实现于 2026-08-19,v2 分支,基于 `bc02723`(D14 规格已合;D13 tip `a2aa7a2` 的后继)。验证全绿(`go build ./...`、`go test -count=1 ./...`、SDK/TS/chatroom、`golangci-lint run ./...` 0 issues),四条门禁符合预期,测试函数总数前后一致(session 9 + hub 41 = 50,全数随迁)。
+
+**被迫偏离(需验收人知悉)**:§3.6「留根测试对 session 未导出符号零命中」不实。Session/Hub 下沉后,留根测试与 `node.go` 仍跨包点名了一批未导出方法/字段/类型,Go 不允许在 alias 类型上补方法。按 D13 `normalize` 先例做最小补集,否则无法编译:
+
+1. **Hub 返回类型**:`presenceRecipient` 被 `node.go` 点名字段 `client`/`ephemeral`。导出为 `PresenceRecipient{Client, Ephemeral}`(aliases.go 多一条 type alias,§3.7 原文未列)。`broadcastParallelLimit`/`index`/`isWildcard`/`publicationID`/`pingClusterRefreshInterval` 在根 `session_runtime.go` 留未导出副本(D11 叶子副本先例),`node.go`/`recover.go` 调用点零改名。
+2. **`positionFrom`**:定义在留根 `recover.go`,迁入 hub.go/client.go 不能引根。`internal/session/runtime.go` 放逐字节副本。
+3. **`defaultSurveyWaitTimeout`**:Go 不能跨包 alias 可变 var。导出 `survey.DefaultSurveyWaitTimeout`;`survey_test.go` 3 行改 `intsurvey.DefaultSurveyWaitTimeout`(局部变量名 `survey` 占包名,import 用 `intsurvey`)。
+4. **留根测试跨包触点**(§3.6 漏检):Session 增导出包装 `HasSubscription`/`SubscriptionList`/`Attachment`/`MarkAuthenticated`/`SetUserIDForTest`/`SetClientIDForTest`/`Marshal`/`HandleRPC`/`HandleUnsubscribe`/`ThrottledClusterRefresh`/`SetLastClusterSyncNanoForTest`;Hub 增 `Sessions()`(兼 ReplaceRules 读 `hub.sessions`);HeartbeatManager 增 `SetJitterForTest`。对应测试只改构造/限定名,断言语义不变。`hub_test.go` 同包方法调用随导出手术 `h.add`→`h.Add` 等。
+5. **源码扫描**:`occupancy_test.go` `readSource("hub.go")` → `internal/session/hub.go`(文件已搬走,否则 open 失败)。
+6. **`newTestClient`**:随 `hub_test.go` 迁走;根 `testhelpers_test.go` 补同名构造,`cluster_user_index_test.go` 零改调用点。
+7. **session_test 3 个重测试**(AttachFailure/Fence/Close):迁入后不能 `NewNode`/`NewCluster`。构造改为 `newFakeRuntime()`(字段 `hub`/`presence`/`deletedLease`/`deletedSnapshot` 保持断言 `node.hub`/`directory.deletedLease` 逐字可读);`presenceJoin` 未导出包装保留调用点。
+
+其余按规格执行:
+
+- 9 枚 `git mv` 均被 git 识别为 `R`(6 生产 + survey + 2 测试)。
+- `Runtime` 接口成员与 §3.2 全文一致;`var _ session.Runtime = nodeRuntime{}`;`RestoreFailure` 逐条 `channel/err` → `Channel/Err`。
+- Session 授权 7 项 + Hub 授权 6 项导出手术到位;`newHub` 根 var 转发,`NewNode` 调用点零改。
+- 锁序不变量未动:saga 仍 `subLock` 在外,`TrackChannel`/`UntrackChannel`/`ForceTrackChannel`/`AdoptIdentity` 只封最内 `Session.mu`。
+- 新位置零根包引用;红线目录零改动;`.go` 全 CRLF;无 commit/tag/push。

@@ -1,4 +1,4 @@
-package messageloop
+package session
 
 import (
 	"context"
@@ -80,7 +80,7 @@ func newTestClient(t *testing.T, sessionID, userID string) *Session {
 
 func newTestClientWithTransport(t *testing.T, sessionID, userID string, transport Transport) *Session {
 	ctx := context.Background()
-	node := NewNode(nil)
+	node := newFakeRuntime()
 	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
@@ -332,7 +332,7 @@ func TestHub_Add(t *testing.T) {
 	h := newHub(0, 0)
 	client := newTestClient(t, "session-1", "user-1")
 
-	_ = h.add(client)
+	_ = h.Add(client)
 	h.mu.RLock()
 	if len(h.sessions) != 1 {
 		h.mu.RUnlock()
@@ -375,7 +375,7 @@ func TestHub_AddSub(t *testing.T) {
 	h := newHub(0, 0)
 	client := newTestClient(t, "session-1", "user-1")
 
-	first, err := h.addSub("test-channel", Subscriber{Session: client, Ephemeral: false})
+	first, err := h.AddSub("test-channel", Subscriber{Session: client, Ephemeral: false})
 	if err != nil {
 		t.Fatalf("addSub() error = %v", err)
 	}
@@ -393,9 +393,9 @@ func TestHub_RemoveSub(t *testing.T) {
 	h := newHub(0, 0)
 	client := newTestClient(t, "session-1", "user-1")
 
-	_, _ = h.addSub("test-channel", Subscriber{Session: client, Ephemeral: false})
+	_, _ = h.AddSub("test-channel", Subscriber{Session: client, Ephemeral: false})
 
-	empty, found := h.removeSub("test-channel", client)
+	empty, found := h.RemoveSub("test-channel", client)
 	if !empty {
 		t.Error("removeSub() should return true for empty")
 	}
@@ -422,7 +422,7 @@ func TestHub_BroadcastPublication_NoSubscribers(t *testing.T) {
 		Time:    time.Now().UnixMilli(),
 	}
 
-	err := h.broadcastPublication("test-channel", pub)
+	err := h.BroadcastPublication("test-channel", pub)
 	if err != nil {
 		t.Fatalf("broadcastPublication() error = %v", err)
 	}
@@ -438,7 +438,7 @@ func TestHub_BroadcastPublication_ShardLevelNoSubscribers(t *testing.T) {
 		Time:    time.Now().UnixMilli(),
 	}
 
-	err := h.broadcastPublication("test-channel", pub)
+	err := h.BroadcastPublication("test-channel", pub)
 	if err != nil {
 		t.Fatalf("broadcastPublication() error = %v", err)
 	}
@@ -452,8 +452,8 @@ func TestHub_BroadcastPublication(t *testing.T) {
 	client1 := newTestClientWithTransport(t, "session-1", "user-1", transport1)
 	client2 := newTestClientWithTransport(t, "session-2", "user-2", transport2)
 
-	_, _ = h.addSub("test-channel", Subscriber{Session: client1, Ephemeral: false})
-	_, _ = h.addSub("test-channel", Subscriber{Session: client2, Ephemeral: false})
+	_, _ = h.AddSub("test-channel", Subscriber{Session: client1, Ephemeral: false})
+	_, _ = h.AddSub("test-channel", Subscriber{Session: client2, Ephemeral: false})
 
 	pub := &Publication{
 		Channel: "test-channel",
@@ -462,7 +462,7 @@ func TestHub_BroadcastPublication(t *testing.T) {
 		Time:    time.Now().UnixMilli(),
 	}
 
-	err := h.broadcastPublication("test-channel", pub)
+	err := h.BroadcastPublication("test-channel", pub)
 	if err != nil {
 		t.Fatalf("broadcastPublication() error = %v", err)
 	}
@@ -572,7 +572,7 @@ func TestHub_ConcurrentAdd(t *testing.T) {
 		go func(n int) {
 			defer wg.Done()
 			client := newTestClient(t, fmt.Sprintf("session-%d", n), fmt.Sprintf("user-%d", n))
-			_ = h.add(client)
+			_ = h.Add(client)
 		}(i)
 	}
 
@@ -596,7 +596,7 @@ func TestHub_ConcurrentSubscribe(t *testing.T) {
 		go func(n int) {
 			defer wg.Done()
 			client := newTestClient(t, fmt.Sprintf("session-%d", n), fmt.Sprintf("user-%d", n))
-			_, _ = h.addSub("test-channel", Subscriber{Session: client, Ephemeral: false})
+			_, _ = h.AddSub("test-channel", Subscriber{Session: client, Ephemeral: false})
 		}(i)
 	}
 
@@ -639,8 +639,8 @@ func TestHub_BroadcastPublication_MultipleChannels(t *testing.T) {
 	client1 := newTestClientWithTransport(t, "session-1", "user-1", transport1)
 	client2 := newTestClientWithTransport(t, "session-2", "user-2", transport2)
 
-	_, _ = h.addSub("channel-1", Subscriber{Session: client1, Ephemeral: false})
-	_, _ = h.addSub("channel-2", Subscriber{Session: client2, Ephemeral: false})
+	_, _ = h.AddSub("channel-1", Subscriber{Session: client1, Ephemeral: false})
+	_, _ = h.AddSub("channel-2", Subscriber{Session: client2, Ephemeral: false})
 
 	pub1 := &Publication{
 		Channel: "channel-1",
@@ -649,7 +649,7 @@ func TestHub_BroadcastPublication_MultipleChannels(t *testing.T) {
 		Time:    time.Now().UnixMilli(),
 	}
 
-	err := h.broadcastPublication("channel-1", pub1)
+	err := h.BroadcastPublication("channel-1", pub1)
 	if err != nil {
 		t.Fatalf("broadcastPublication() error = %v", err)
 	}
@@ -696,7 +696,7 @@ func TestHub_MultipleChannels(t *testing.T) {
 
 	channels := []string{"channel-1", "channel-2", "channel-3"}
 	for _, ch := range channels {
-		_, _ = h.addSub(ch, Subscriber{Session: client, Ephemeral: false})
+		_, _ = h.AddSub(ch, Subscriber{Session: client, Ephemeral: false})
 	}
 
 	for _, ch := range channels {
@@ -717,15 +717,15 @@ func TestHub_GetActiveChannels_ExcludesWildcardPatterns(t *testing.T) {
 	client1 := newTestClientWithTransport(t, "session-1", "user-1", transport1)
 	client2 := newTestClientWithTransport(t, "session-2", "user-2", transport2)
 
-	require.NoError(t, h.add(client1))
-	require.NoError(t, h.add(client2))
+	require.NoError(t, h.Add(client1))
+	require.NoError(t, h.Add(client2))
 
 	// client1 subscribes to chat.x exactly and via chat.*; client2 to chat.y.
-	_, err := h.addSub("chat.x", Subscriber{Session: client1, Ephemeral: false})
+	_, err := h.AddSub("chat.x", Subscriber{Session: client1, Ephemeral: false})
 	require.NoError(t, err)
-	_, err = h.addSub("chat.*", Subscriber{Session: client1, Ephemeral: false})
+	_, err = h.AddSub("chat.*", Subscriber{Session: client1, Ephemeral: false})
 	require.NoError(t, err)
-	_, err = h.addSub("chat.y", Subscriber{Session: client2, Ephemeral: false})
+	_, err = h.AddSub("chat.y", Subscriber{Session: client2, Ephemeral: false})
 	require.NoError(t, err)
 
 	channels := h.GetActiveChannels()
@@ -765,12 +765,12 @@ func TestHub_BroadcastPublication_DedupExactAndWildcard(t *testing.T) {
 	transport := &mockTransport{}
 	client := newTestClientWithTransport(t, "session-1", "user-1", transport)
 
-	_, err := h.addSub("chat.x", Subscriber{Session: client, Ephemeral: false})
+	_, err := h.AddSub("chat.x", Subscriber{Session: client, Ephemeral: false})
 	require.NoError(t, err)
-	_, err = h.addSub("chat.*", Subscriber{Session: client, Ephemeral: false})
+	_, err = h.AddSub("chat.*", Subscriber{Session: client, Ephemeral: false})
 	require.NoError(t, err)
 
-	err = h.broadcastPublication("chat.x", newTestPublication("chat.x", 1))
+	err = h.BroadcastPublication("chat.x", newTestPublication("chat.x", 1))
 	require.NoError(t, err)
 
 	// Subscribed both exactly and via wildcard: exactly one copy is delivered.
@@ -796,11 +796,11 @@ func TestHub_BroadcastPublication_DedupExactAndWildcard_MixedSubscribers(t *test
 		{"chat.*", clientWildcard},
 		{"chat.x", clientExact},
 	} {
-		_, err := h.addSub(sub.channel, Subscriber{Session: sub.client, Ephemeral: false})
+		_, err := h.AddSub(sub.channel, Subscriber{Session: sub.client, Ephemeral: false})
 		require.NoError(t, err)
 	}
 
-	err := h.broadcastPublication("chat.x", newTestPublication("chat.x", 1))
+	err := h.BroadcastPublication("chat.x", newTestPublication("chat.x", 1))
 	require.NoError(t, err)
 
 	// Every client receives exactly one copy regardless of how it subscribed.
@@ -814,10 +814,10 @@ func TestHub_BroadcastPublication_ExactOnly_SingleDelivery(t *testing.T) {
 	transport := &mockTransport{}
 	client := newTestClientWithTransport(t, "session-1", "user-1", transport)
 
-	_, err := h.addSub("chat.x", Subscriber{Session: client, Ephemeral: false})
+	_, err := h.AddSub("chat.x", Subscriber{Session: client, Ephemeral: false})
 	require.NoError(t, err)
 
-	err = h.broadcastPublication("chat.x", newTestPublication("chat.x", 1))
+	err = h.BroadcastPublication("chat.x", newTestPublication("chat.x", 1))
 	require.NoError(t, err)
 
 	assertSinglePublication(t, transport, "chat.x")
@@ -828,10 +828,10 @@ func TestHub_BroadcastPublication_WildcardOnly_SingleDelivery(t *testing.T) {
 	transport := &mockTransport{}
 	client := newTestClientWithTransport(t, "session-1", "user-1", transport)
 
-	_, err := h.addSub("chat.*", Subscriber{Session: client, Ephemeral: false})
+	_, err := h.AddSub("chat.*", Subscriber{Session: client, Ephemeral: false})
 	require.NoError(t, err)
 
-	err = h.broadcastPublication("chat.x", newTestPublication("chat.x", 1))
+	err = h.BroadcastPublication("chat.x", newTestPublication("chat.x", 1))
 	require.NoError(t, err)
 
 	assertSinglePublication(t, transport, "chat.x")
@@ -846,11 +846,11 @@ func TestHub_BroadcastPublication_LargeFanOut(t *testing.T) {
 	for i := 0; i < n; i++ {
 		transports[i] = &mockTransport{}
 		client := newTestClientWithTransport(t, fmt.Sprintf("session-%d", i), fmt.Sprintf("user-%d", i), transports[i])
-		_, err := h.addSub("fan.ch", Subscriber{Session: client, Ephemeral: false})
+		_, err := h.AddSub("fan.ch", Subscriber{Session: client, Ephemeral: false})
 		require.NoError(t, err)
 	}
 
-	err := h.broadcastPublication("fan.ch", newTestPublication("fan.ch", 1))
+	err := h.BroadcastPublication("fan.ch", newTestPublication("fan.ch", 1))
 	require.NoError(t, err)
 
 	for i, transport := range transports {
@@ -865,10 +865,10 @@ func TestHub_BroadcastPublication_StableMessageID(t *testing.T) {
 	transport := &mockTransport{}
 	client := newTestClientWithTransport(t, "session-1", "user-1", transport)
 
-	_, err := h.addSub("stable.ch", Subscriber{Session: client, Ephemeral: false})
+	_, err := h.AddSub("stable.ch", Subscriber{Session: client, Ephemeral: false})
 	require.NoError(t, err)
 
-	err = h.broadcastPublication("stable.ch", newTestPublication("stable.ch", 42))
+	err = h.BroadcastPublication("stable.ch", newTestPublication("stable.ch", 42))
 	require.NoError(t, err)
 
 	var out clientpb.OutboundMessage
@@ -912,10 +912,10 @@ func TestHub_Resume_KeepsSessionPointerStable(t *testing.T) {
 	oldTransport := &mockTransport{}
 	newTransport := &mockTransport{}
 	session := newTestClientWithTransport(t, "session-1", "user-1", oldTransport)
-	require.NoError(t, h.add(session))
-	_, err := h.addSub("chat.exact", Subscriber{Session: session, Ephemeral: false})
+	require.NoError(t, h.Add(session))
+	_, err := h.AddSub("chat.exact", Subscriber{Session: session, Ephemeral: false})
 	require.NoError(t, err)
-	_, err = h.addSub("chat.*", Subscriber{Session: session, Ephemeral: false})
+	_, err = h.AddSub("chat.*", Subscriber{Session: session, Ephemeral: false})
 	require.NoError(t, err)
 
 	// Snapshot the matcher subscription count after setup.
@@ -944,7 +944,7 @@ func TestHub_Resume_KeepsSessionPointerStable(t *testing.T) {
 	assert.Equal(t, unsubscribesBefore, matcher.unsubscribes, "resume must not unsubscribe matcher entries")
 
 	// 4. Deliveries reach the new attachment.
-	err = h.broadcastPublication("chat.exact", newTestPublication("chat.exact", 1))
+	err = h.BroadcastPublication("chat.exact", newTestPublication("chat.exact", 1))
 	require.NoError(t, err)
 	assert.Equal(t, 1, newTransport.getMessageCount(), "the new attachment must receive deliveries")
 	assert.Equal(t, 0, oldTransport.getMessageCount(), "the old attachment must not receive deliveries")
@@ -958,9 +958,9 @@ func TestHub_PrepareSessionUser_EnforcesMaxConnsPerUser(t *testing.T) {
 
 	// user-a owns session-1; user-b already occupies its single slot.
 	clientA := newTestClientWithTransport(t, "session-1", "user-a", &mockTransport{})
-	require.NoError(t, h.add(clientA))
+	require.NoError(t, h.Add(clientA))
 	clientB := newTestClientWithTransport(t, "session-2", "user-b", &mockTransport{})
-	require.NoError(t, h.add(clientB))
+	require.NoError(t, h.Add(clientB))
 
 	// Moving session-1 to user-b must hit the connection limit.
 	err := h.PrepareSessionUser("session-1", clientA, "user-b")
@@ -980,12 +980,12 @@ func TestHub_PrepareSessionUser_FailureKeepsOldSessionIntact(t *testing.T) {
 
 	transportA := &mockTransport{}
 	clientA := newTestClientWithTransport(t, "session-1", "user-a", transportA)
-	require.NoError(t, h.add(clientA))
-	_, err := h.addSub("zombie-ch", Subscriber{Session: clientA, Ephemeral: false})
+	require.NoError(t, h.Add(clientA))
+	_, err := h.AddSub("zombie-ch", Subscriber{Session: clientA, Ephemeral: false})
 	require.NoError(t, err)
 
 	clientB := newTestClientWithTransport(t, "session-2", "user-b", &mockTransport{})
-	require.NoError(t, h.add(clientB))
+	require.NoError(t, h.Add(clientB))
 
 	// user-b sits at the limit, so this migration must fail before any
 	// mutation.
@@ -1007,7 +1007,7 @@ func TestHub_PrepareSessionUser_FailureKeepsOldSessionIntact(t *testing.T) {
 	assert.Same(t, clientA, sub.Session)
 
 	// ...and still receives deliveries.
-	err = h.broadcastPublication("zombie-ch", newTestPublication("zombie-ch", 1))
+	err = h.BroadcastPublication("zombie-ch", newTestPublication("zombie-ch", 1))
 	require.NoError(t, err)
 	assert.Equal(t, 1, transportA.getMessageCount(), "old session must keep receiving deliveries")
 
@@ -1024,7 +1024,7 @@ func TestHubAddSubRejectsMalformedExactChannel(t *testing.T) {
 	sub := Subscriber{Session: client, Ephemeral: false}
 
 	for _, ch := range []string{"a.", ".a", "a..b", ""} {
-		_, err := h.addSub(ch, sub)
+		_, err := h.AddSub(ch, sub)
 		assert.ErrorIs(t, err, topics.ErrBadTopic, "addSub(%q)", ch)
 	}
 
@@ -1035,12 +1035,12 @@ func TestHubAddSubRejectsMalformedExactChannel(t *testing.T) {
 
 	// Valid exact channels still work, including wildcard-pattern channels
 	// that go through the matcher.
-	first, err := h.addSub("valid.channel", sub)
+	first, err := h.AddSub("valid.channel", sub)
 	assert.NoError(t, err)
 	assert.True(t, first)
-	_, err = h.addSub("a.**", sub)
+	_, err = h.AddSub("a.**", sub)
 	assert.NoError(t, err)
-	_, err = h.addSub("a.**.b", sub)
+	_, err = h.AddSub("a.**.b", sub)
 	assert.ErrorIs(t, err, topics.ErrBadTopic, "addSub(%q)", "a.**.b")
 }
 
@@ -1054,7 +1054,7 @@ func TestHub_SessionsByUser(t *testing.T) {
 	clientB := newTestClient(t, "session-b", "user-b")
 	anon := newTestClient(t, "session-anon", "")
 	for _, c := range []*Client{clientA, clientA2, clientB, anon} {
-		require.NoError(t, h.add(c))
+		require.NoError(t, h.Add(c))
 	}
 
 	sessions := h.SessionsByUser("user-a")

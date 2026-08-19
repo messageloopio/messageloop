@@ -299,41 +299,36 @@ func (n *Node) adjustClusterChannelSubscriptions(ctx context.Context, channel st
 }
 
 func (n *Node) clusterSessionLease(client *Client) *ClusterSessionLease {
-	client.mu.RLock()
-	defer client.mu.RUnlock()
+	id := client.SnapshotIdentity()
 
-	leaseVersion := client.clusterLeaseVersion
+	leaseVersion := id.LeaseVersion
 	if leaseVersion == 0 {
 		leaseVersion = 1
 	}
 
 	return &ClusterSessionLease{
-		SessionID:      client.session,
+		SessionID:      id.SessionID,
 		NodeID:         n.ClusterNodeID(),
 		IncarnationID:  n.ClusterIncarnationID(),
-		UserID:         client.user,
-		ClientID:       client.client,
+		UserID:         id.UserID,
+		ClientID:       id.ClientID,
 		LeaseVersion:   leaseVersion,
-		Authenticated:  client.authenticated,
-		ConnectedAt:    client.connectedAt.UnixMilli(),
-		LastActivityAt: client.lastActivity.UnixMilli(),
+		Authenticated:  id.Authenticated,
+		ConnectedAt:    id.ConnectedAt.UnixMilli(),
+		LastActivityAt: id.LastActivity.UnixMilli(),
 		ExpiresAt:      time.Now().Add(n.sessionLeaseTTL()),
 	}
 }
 
 func (n *Node) clusterSessionSnapshot(client *Client) *ClusterSessionSnapshot {
-	client.mu.RLock()
-	channels := make([]string, 0, len(client.subscribedChannels))
-	for channel := range client.subscribedChannels {
-		channels = append(channels, channel)
-	}
-	authenticated := client.authenticated
-	sessionID := client.session
-	userID := client.user
-	clientID := client.client
-	protocol := client.protocol
-	connectedAt := client.connectedAt.UnixMilli()
-	client.mu.RUnlock()
+	id := client.SnapshotIdentity()
+	channels := client.SubscribedChannels()
+	authenticated := id.Authenticated
+	sessionID := id.SessionID
+	userID := id.UserID
+	clientID := id.ClientID
+	protocol := id.Protocol
+	connectedAt := id.ConnectedAt.UnixMilli()
 
 	sort.Strings(channels)
 	subscriptions := make([]ClusterSubscriptionSnapshot, 0, len(channels))

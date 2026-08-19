@@ -1,4 +1,4 @@
-package messageloop
+package session
 
 import (
 	"context"
@@ -57,7 +57,7 @@ type Hub struct {
 }
 
 // newHub initializes Hub.
-func newHub(maxTimeLagMilli int64, maxConnsPerUser int) *Hub {
+func NewHub(maxTimeLagMilli int64, maxConnsPerUser int) *Hub {
 	h := &Hub{
 		sessions:        map[string]*Session{},
 		maxConnsPerUser: maxConnsPerUser,
@@ -76,7 +76,7 @@ func isWildcard(ch string) bool {
 	return strings.Contains(ch, "*")
 }
 
-func (h *Hub) addSub(ch string, sub Subscriber) (bool, error) {
+func (h *Hub) AddSub(ch string, sub Subscriber) (bool, error) {
 	if isWildcard(ch) {
 		return h.addWildcardSub(ch, sub)
 	}
@@ -107,7 +107,7 @@ func (h *Hub) addWildcardSub(ch string, sub Subscriber) (bool, error) {
 }
 
 // removeSub removes connection from clientHub subscriptions registry.
-func (h *Hub) removeSub(ch string, c *Session) (bool, bool) {
+func (h *Hub) RemoveSub(ch string, c *Session) (bool, bool) {
 	if isWildcard(ch) {
 		return h.removeWildcardSub(ch, c)
 	}
@@ -304,7 +304,7 @@ func (h *subShard) removeSub(ch string, c *Session) (bool, bool) {
 }
 
 // add adds a connection into the hub, enforcing per-user connection limits.
-func (h *Hub) add(c *Session) error {
+func (h *Hub) Add(c *Session) error {
 	// h.mu is taken before the connShard lock, matching RemoveSessionIfMatches
 	// and PrepareSessionUser: addWithLimit checks the per-user limit and registers
 	// the connection atomically under the shard lock, and the sessions map
@@ -326,7 +326,7 @@ func (h *Hub) NumSubscribers(ch string) int {
 	return h.subShards[index(ch, numHubShards)].NumSubscribers(ch)
 }
 
-func (h *Hub) broadcastPublication(ch string, pub *Publication) error {
+func (h *Hub) BroadcastPublication(ch string, pub *Publication) error {
 	// Merge exact and wildcard subscribers by session ID: a client subscribed
 	// to the channel exactly and via a wildcard pattern must receive the
 	// publication only once, with a single message ID.
@@ -397,13 +397,13 @@ func (h *Hub) broadcastPublication(ch string, pub *Publication) error {
 				}()
 				if err := client.Send(ctx, out); err != nil {
 					log.ErrorContext(ctx, "send publication error", err)
-					if client.node.metrics != nil {
-						client.node.metrics.DeliveryFailures.Inc()
+					if client.rt.Metrics() != nil {
+						client.rt.Metrics().DeliveryFailures.Inc()
 					}
 				} else {
 					delivered[i] = true
-					if client.node.metrics != nil {
-						client.node.metrics.MessagesDelivered.Inc()
+					if client.rt.Metrics() != nil {
+						client.rt.Metrics().MessagesDelivered.Inc()
 					}
 				}
 			}(i)
@@ -426,13 +426,13 @@ func (h *Hub) broadcastPublication(ch string, pub *Publication) error {
 				}()
 				if err := client.Send(ctx, out); err != nil {
 					log.ErrorContext(ctx, "send publication error", err)
-					if client.node.metrics != nil {
-						client.node.metrics.DeliveryFailures.Inc()
+					if client.rt.Metrics() != nil {
+						client.rt.Metrics().DeliveryFailures.Inc()
 					}
 				} else {
 					delivered[i] = true
-					if client.node.metrics != nil {
-						client.node.metrics.MessagesDelivered.Inc()
+					if client.rt.Metrics() != nil {
+						client.rt.Metrics().MessagesDelivered.Inc()
 					}
 				}
 			}(i, client)
@@ -563,17 +563,17 @@ func (h *Hub) GetMatchingSubscribers(ch string) []*Session {
 // presenceRecipient couples a subscriber client with its subscription's
 // ephemeral flag. GetMatchingSubscribers loses the flag, so the presence
 // delivery path collects recipients here instead.
-type presenceRecipient struct {
-	client    *Session
-	ephemeral bool
+type PresenceRecipient struct {
+	Client    *Session
+	Ephemeral bool
 }
 
 // presenceRecipients returns the clients covered by ch — subscribed exactly
 // (read from the channel's subShard) or via a matching wildcard pattern
 // (matcher lookup) — deduplicated by session ID, together with each
 // subscription's ephemeral flag.
-func (h *Hub) presenceRecipients(ch string) []presenceRecipient {
-	recipients := make(map[string]presenceRecipient)
+func (h *Hub) PresenceRecipients(ch string) []PresenceRecipient {
+	recipients := make(map[string]PresenceRecipient)
 	add := func(client *Session, ephemeral bool) {
 		if client == nil {
 			return
@@ -583,12 +583,12 @@ func (h *Hub) presenceRecipients(ch string) []presenceRecipient {
 			// A session covered by any non-ephemeral subscription must
 			// receive events. An ephemeral exact sub must not hide a
 			// tracked wildcard (or the reverse).
-			if existing.ephemeral && !ephemeral {
-				recipients[sid] = presenceRecipient{client: client, ephemeral: false}
+			if existing.Ephemeral && !ephemeral {
+				recipients[sid] = PresenceRecipient{Client: client, Ephemeral: false}
 			}
 			return
 		}
-		recipients[sid] = presenceRecipient{client: client, ephemeral: ephemeral}
+		recipients[sid] = PresenceRecipient{Client: client, Ephemeral: ephemeral}
 	}
 
 	shard := h.subShards[index(ch, numHubShards)]
@@ -608,12 +608,12 @@ func (h *Hub) presenceRecipients(ch string) []presenceRecipient {
 		add(sub.Session, sub.Ephemeral)
 	}
 
-	result := make([]presenceRecipient, 0, len(recipients))
+	result := make([]PresenceRecipient, 0, len(recipients))
 	for _, r := range recipients {
 		result = append(result, r)
 	}
 	sort.Slice(result, func(i, j int) bool {
-		return result[i].client.SessionID() < result[j].client.SessionID()
+		return result[i].Client.SessionID() < result[j].Client.SessionID()
 	})
 	return result
 }

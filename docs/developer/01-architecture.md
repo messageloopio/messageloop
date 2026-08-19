@@ -43,11 +43,11 @@ MessageLoop 的核心设计目标可以归纳为四点：
 | 组件 | 文件 | 职责 |
 | --- | --- | --- |
 | `Node` | node.go | 中央协调者，持有并装配所有子系统，对外暴露发布、订阅、Survey、代理等入口 |
-| `Hub` | hub.go | 连接与会话注册表（64 分片），通道订阅注册表（64 分片），通配符订阅匹配，每用户连接数限制 |
-| `Session` | session.go、client.go | 单条连接的生命周期与消息处理：状态机（Authenticating/Attached/Detached/Closed）、鉴权、resume、写队列、限制执行、入站消息路由 |
+| `Hub` | internal/session/hub.go | 连接与会话注册表（64 分片），通道订阅注册表（64 分片），通配符订阅匹配，每用户连接数限制 |
+| `Session` | internal/session/session.go、client.go | 单条连接的生命周期与消息处理：状态机（Authenticating/Attached/Detached/Closed）、鉴权、resume、写队列、限制执行、入站消息路由 |
 | `Broker` | broker.go、broker_memory.go、pkg/redisbroker/ | 发布/订阅与历史存储；内存实现与 Redis 实现 |
 | `Presence` | presence.go、presence_event.go、pkg/redisbroker/presence_redis.go | 频道内在线成员追踪与 join/leave 事件分发 |
-| `Survey` | survey.go、node.go | 向频道订阅者广播请求并带超时收集响应 |
+| `Survey` | internal/survey/survey.go、node.go | 向频道订阅者广播请求并带超时收集响应 |
 | `Authorizer` | authorizer.go | 单一授权求值器：一个 Decide、一张 server.authorizer 表、一种通配语言；频道策略 Effects 与 Admin Capability 闭集 |
 | `Proxy` | proxy/ | RPC 转发与鉴权/ACL/生命周期钩子的后端集成 |
 | `Cluster` | cluster.go、cluster_*.go | 可选的 Redis 支撑分布式控制面（详见[《分布式集群指南》](04-cluster.md)） |
@@ -63,8 +63,8 @@ MessageLoop 的核心设计目标可以归纳为四点：
 
 | 方法 | 说明 |
 | --- | --- |
-| `NewNode(cfg *config.Server)` | 构造默认装配：`newHub(0, MaxConnectionsPerUser)`、`NewMemoryBroker`、`NewMemoryPresenceStore`，从配置构建 Authorizer（`server.authorizer` 一张表，永不 nil）与心跳管理器 |
-| `Run(ctx)` | 先启动集群（若启用），再以 `go n.broker.Start(ctx, handler)` 启动 broker，handler 即 `n.hub.broadcastPublication`；若 broker 实现 `Ready()` 则等待其就绪 |
+| `NewNode(cfg *config.Server)` | 构造默认装配：`newHub(0, MaxConnectionsPerUser)`（`aliases.go` 转发 `session.NewHub`）、`NewMemoryBroker`、`NewMemoryPresenceStore`，从配置构建 Authorizer（`server.authorizer` 一张表，永不 nil）与心跳管理器 |
+| `Run(ctx)` | 先启动集群（若启用），再以 `go n.broker.Start(ctx, handler)` 启动 broker，handler 即 `n.hub.BroadcastPublication`；若 broker 实现 `Ready()` 则等待其就绪 |
 | `Shutdown()` | 以 `DisconnectForceNoReconnect` 排空全部连接，受 `DefaultShutdownTimeout`（10s）约束，然后关闭集群 |
 | `AddClient(c)` | 注册连接（超限返回 `DisconnectConnectionLimit`），集群模式下同步会话状态 |
 | `AddSubscription` / `RemoveSubscription` | 通过订阅 Saga 提交订阅变更（见下） |
@@ -94,7 +94,7 @@ MessageLoop 的核心设计目标可以归纳为四点：
 
 `prepareGRPCServers`（runtime.go）在 `node.Run` 之前预绑定监听器，保证端口在服务启动前即被占用，避免启动窗口期端口被抢占。
 
-### 3.2 Hub（hub.go）
+### 3.2 Hub（internal/session/hub.go）
 
 `Hub` 维护三类注册表：
 
@@ -108,8 +108,8 @@ MessageLoop 的核心设计目标可以归纳为四点：
 | --- | --- |
 | `index(s, n)` | FNV-64a 哈希取模分片 |
 | `addWithLimit` | 在 `connShard` 内注册会话；`maxConnsPerUser > 0` 且用户连接数已满时返回 `DisconnectConnectionLimit` |
-| `addSub` / `removeSub` | 通配符订阅走 `wcSubs`（键为 `sessionID:channel`）+ `matcher`，精确订阅走 `subShard` |
-| `broadcastPublication` | 合并精确与通配符订阅者（按会话 ID 去重，保证同一客户端只收到一次），小扇出（≤8）串行发送，大扇出用受 `broadcastParallelLimit`（64）限流的并发发送 |
+| `AddSub` / `RemoveSub` | 通配符订阅走 `wcSubs`（键为 `sessionID:channel`）+ `matcher`，精确订阅走 `subShard` |
+| `BroadcastPublication` | 合并精确与通配符订阅者（按会话 ID 去重，保证同一客户端只收到一次），小扇出（≤8）串行发送，大扇出用受 `broadcastParallelLimit`（64）限流的并发发送 |
 | `LookupSession` / `LookupSubscriber` | 会话与订阅查找（返回 `*Session`） |
 | `PrepareSessionUser` | 跨用户本机 resume 前原子执行：目标用户 `maxConnsPerUser` 限额检查 + `connShard` 用户归属迁移；失败不改动任何状态（旧会话保持 Attached） |
 | `RemoveSessionIfMatches` | 仅在注册的会话与当前会话一致时移除，防止失败的旧连接把已接管/已恢复的会话驱逐出去 |
@@ -118,7 +118,7 @@ MessageLoop 的核心设计目标可以归纳为四点：
 
 消息 ID 规则：实时投递与恢复共用 `publicationID(channel, offset)`（`"频道-offset"`），客户端据此去重；瞬时事件（offset 为 0）回退为随机 UUID，避免同一频道所有瞬时事件共享同一个 ID。
 
-### 3.3 Session（session.go、client.go）
+### 3.3 Session（internal/session/session.go、client.go）
 
 PR-KA-B1 起内核对象是 `Session`（可恢复逻辑连接，`type Client = Session` 仅作过渡别名）。状态机钉死为 `SessionAuthenticating → SessionAttached ⇄ SessionDetached → SessionClosed`：
 
@@ -168,7 +168,7 @@ PR-KA-B1 起内核对象是 `Session`（可恢复逻辑连接，`type Client = S
 - 发布速率：`limits.MaxPublishesPerSecond` 构造 `rate.Limiter`，超限回 `RATE_LIMITED` 错误信封（不断连）。
 - 消息大小：`node.MaxMessageSize()`（默认 64 KB），WebSocket 端经 `SetReadLimit` 强制，gRPC 端经 `MaxRecvMsgSize` 强制，两个传输读取同一入口保证一致。
 
-**写路径（`Send`/`enqueue`）**：从 `sync.Pool`（pool.go，初始容量 4096）取缓冲 → `marshaler.MarshalAppend` 序列化 → 入 Session 写队列（Control/Data 双车道，下一帧优先 Control）并等待该帧落线；写入失败按 §7 码表映射（`io.EOF` 等对端走 → 3000，写超时/队列满 → 3512，fenced → 3502）。Attached 期间由唯一 writer goroutine 排空；Detach/Fence/Close 停 writer 并丢弃队列。gRPC 传输对缓冲做拷贝后再交给 worker，因为池化缓冲在 `Write` 返回后可能被复用。
+**写路径（`Send`/`enqueue`）**：从 `sync.Pool`（internal/session/pool.go，初始容量 4096）取缓冲 → `marshaler.MarshalAppend` 序列化 → 入 Session 写队列（Control/Data 双车道，下一帧优先 Control）并等待该帧落线；写入失败按 §7 码表映射（`io.EOF` 等对端走 → 3000，写超时/队列满 → 3512，fenced → 3502）。Attached 期间由唯一 writer goroutine 排空；Detach/Fence/Close 停 writer 并丢弃队列。gRPC 传输对缓冲做拷贝后再交给 worker，因为池化缓冲在 `Write` 返回后可能被复用。
 
 **断开（`Close`/`Fence`/`Detach`）**：真走 `Close`：标记 Closed → 取消心跳 → 停 writer → 并发（≤16）移除全部订阅 → presence 清理 + 逐个发布 leave 事件 → `RemoveSessionIfMatches` 后删除集群会话状态 → 递减连接指标 → 通知代理 `OnDisconnected` → 关附件。被抢只准 `Fence`（无 Leave、无 Unbind）；本机交接用 `Detach`（只关附件、Session 留在 Hub）。
 
@@ -208,7 +208,7 @@ join/leave 事件以 **Occupancy** 概念分发（B2）：每次 Join/Leave 取�
 
 只有频道策略 `legacy_presence_channel=true` 时，才额外把旧 JSON 格式（`__type: "presence"`、`action`、`channel`、`client_id`、`user_id`、`timestamp`）瞬时发布到 `presenceChannel(ch) = ch + "/__presence"` 伴生频道（`PublishPresenceJoin`/`PublishPresenceLeave`，仅精确频道，通配从不写伴生）。Redis 端 presence store `Get` 清理 TTL 蒸发的幽灵成员时，对该 session 合成一条 leave 并取新 gen 再 `PublishOccupancy`（B2 §5.3；memory store 无 TTL 无合成）。
 
-### 3.6 Survey（survey.go、node.go）
+### 3.6 Survey（internal/survey/survey.go、node.go）
 
 `Node.Survey` 流程：
 
@@ -219,7 +219,7 @@ join/leave 事件以 **Occupancy** 概念分发（B2）：每次 Join/Leave 取�
 5. `survey.Wait(ctx)` 收集应答直到超时或 ctx 取消；`timeout <= 0` 时回退到 `defaultSurveyWaitTimeout`（5s）；
 6. 集群模式下经命令总线广播 `ClusterCommandSurvey`，汇总各节点结果并统一排序。
 
-**客户端发起的 Survey（`handleSurvey`，client.go，PR-07）**：客户端可对**精确频道**发起 Survey 并异步收集应答，与 Admin 流程独立：
+**客户端发起的 Survey（`handleSurvey`，internal/session/client.go，PR-07）**：客户端可对**精确频道**发起 Survey 并异步收集应答，与 Admin 流程独立：
 
 1. 同步校验，任一失败即回顶层 Error 信封（不断连、不撤订阅）：channel 为空或是通配 → `BAD_REQUEST`；`sessionCoversChannel` 未覆盖（精确订阅或通配命中，授权放行不能偷看未加入的频道）→ `PERMISSION_DENIED`；Authorizer `Decide(Survey)` 拒绝——`Effects.Survey=false`（默认关，KD-6）→ `SURVEY_DISABLED`，未配 `allow_survey` 或 deny 命中 → `PERMISSION_DENIED`；同会话已有一笔在途 Survey 或超过 1/s 限流 → `RATE_LIMITED`。
 2. 通过校验后**不阻塞读循环**（KD-15）：标记 in-flight，worker goroutine 先做 `countMatchingSubscribers` 集群 `count_only` 预检（本地快路径 + 广播，超过 `max_survey_subscribers` → `SURVEY_TOO_MANY_SUBSCRIBERS`，**零**条 outbound `SurveyRequest`），再调 `Node.Survey`，汇总后异步回 `SurveyResult`（回显发起方 `request_id`）。
@@ -263,7 +263,7 @@ join/leave 事件以 **Occupancy** 概念分发（B2）：每次 Join/Leave 取�
 
 ## 4. 传输层
 
-### 4.1 Transport 接口（transport.go）
+### 4.1 Transport 接口（internal/session/transport.go）
 
 ```go
 type Transport interface {
@@ -483,10 +483,10 @@ Occupancy 事件**不是** Publication（改走 broker 的实时 `occupancy` 消
 
 ## 8. 并发模型
 
-- **64 分片**：`connShards` 与 `subShards` 各 64 个分片（`numHubShards`），`index()` 用 FNV-64a 哈希取模路由。连接操作只锁目标分片与 `hub.mu`（会话 map），订阅操作只锁目标频道分片，互不干扰；`broadcastPublication` 在分片锁内拷贝订阅者列表后释放锁再发送，避免长持有锁。
+- **64 分片**：`connShards` 与 `subShards` 各 64 个分片（`numHubShards`），`index()` 用 FNV-64a 哈希取模路由。连接操作只锁目标分片与 `hub.mu`（会话 map），订阅操作只锁目标频道分片，互不干扰；`BroadcastPublication` 在分片锁内拷贝订阅者列表后释放锁再发送，避免长持有锁。
 - **16384 把订阅锁**：`Node.subLocks`（`numSubLocks`）按频道哈希为订阅变更（`AddSubscription`/`RemoveSubscription`）串行化，配合 Saga 保证同一频道的并发订阅/退订不会交错破坏 broker 订阅计数；16384 把锁让高冲突频道之间几乎不互相阻塞。
 - **无锁主题匹配**：`CSTrieMatcher` 用原子指针与 CAS 实现无锁并发字典树（写操作复制路径节点后 CAS 切换，读操作失败自旋重试），通配符订阅的增删查不依赖全局锁；Hub 侧仅用 `wcSubsMu` 保护注册表本身。
-- **写缓冲池**：`pool.go` 的 `sync.Pool` 提供初始容量 4096 的字节缓冲，`write` 经 `MarshalAppend` 就地复用缓冲，gRPC 传输在入队时拷贝以适配池化复用。
+- **写缓冲池**：`internal/session/pool.go` 的 `sync.Pool` 提供初始容量 4096 的字节缓冲，`write` 经 `MarshalAppend` 就地复用缓冲，gRPC 传输在入队时拷贝以适配池化复用。
 - **广播限流**：订阅者 ≤ 8 时串行发送，超过则并发发送但并发数封顶 `broadcastParallelLimit`（64），防止超大频道的广播产生无界 goroutine。
 
 ## 9. 集群概述
@@ -499,7 +499,9 @@ Occupancy 事件**不是** Publication（改走 broker 的实时 `occupancy` 消
 
 | 路径 | 内容 |
 | --- | --- |
-| 仓库根（*.go） | 核心包：`node.go`、`hub.go`、`client.go`、`broker.go`、`broker_memory.go`、`presence.go`、`presence_event.go`、`survey.go`、`acl.go`、`disconnect.go`、`transport.go`、`pool.go`、`heartbeat.go`、`marshaler.go`、`defaults.go`、`health.go`、`subscription_saga.go`，以及集群相关 `cluster.go`、`cluster_commands.go`、`cluster_state.go`、`cluster_resume.go`、`cluster_projection_repair.go` |
+| 仓库根（*.go） | 核心包：`node.go`、`session_runtime.go`、`aliases.go`、`marshaler.go`、`defaults.go`、`health.go`、`subscription_saga.go`、`recover.go`，以及集群相关 `cluster.go`、`cluster_commands.go`、`cluster_state.go`、`cluster_resume.go`、`cluster_repair.go` |
+| internal/session/ | Session Plane：`session.go`、`client.go`、`hub.go`、`heartbeat.go`、`pool.go`、`transport.go`、`runtime.go`（`Runtime` 缝） |
+| internal/survey/ | Survey 叶子类型（编排仍在根 `node.go`，D15 再收） |
 | cmd/server/ | 可执行入口：`main.go`（装配与监听器）、`runtime.go`（gRPC 预绑定与启动顺序） |
 | config/ | 配置结构（`config.go`）与校验 |
 | shared/ | 独立 Go 模块：marshaler 实现（`shared/marshaler.go`）与生成的 protobuf 代码（`shared/genproto/`） |

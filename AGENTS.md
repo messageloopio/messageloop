@@ -145,8 +145,8 @@ func TestCSTrieMatcher(t *testing.T) {
 
 ## Key Files
 
-- `client.go`: Client session handling, message routing
-- `hub.go`: Connection registry with sharding
+- `internal/session/client.go`: Client session handling, message routing
+- `internal/session/hub.go`: Connection registry with sharding
 - `broker.go`: Pub/sub interface with memory/Redis implementations
 - `node.go`: Central coordinator
 - `cmd/server/main.go`: Bootstrap wiring and listener setup

@@ -165,19 +165,13 @@ func TestNewClient(t *testing.T) {
 	if closeFunc == nil {
 		t.Fatal("NewClient() should return a close function")
 	}
-	if client.ctx != ctx {
-		t.Error("client context should match provided context")
-	}
-	if client.node != node {
-		t.Error("client node should match provided node")
-	}
-	if client.attachment.Transport != transport {
+	if client.Attachment().Transport != transport {
 		t.Error("client transport should match provided transport")
 	}
-	if client.attachment.Marshaler != marshaler {
+	if client.Attachment().Marshaler != marshaler {
 		t.Error("client marshaler should match provided marshaler")
 	}
-	if client.session == "" {
+	if client.SessionID() == "" {
 		t.Error("client should have a session ID generated")
 	}
 }
@@ -1149,7 +1143,7 @@ func TestClientSession_Marshal(t *testing.T) {
 		},
 	}
 
-	data, err := client.marshal(msg)
+	data, err := client.Marshal(msg)
 	if err != nil {
 		t.Fatalf("marshal() error = %v", err)
 	}
@@ -1184,7 +1178,7 @@ func TestClientSession_Marshal_Protobuf(t *testing.T) {
 		},
 	}
 
-	data, err := client.marshal(msg)
+	data, err := client.Marshal(msg)
 	if err != nil {
 		t.Fatalf("marshal() error = %v", err)
 	}
@@ -1561,7 +1555,7 @@ func BenchmarkClientSession_Marshal_JSON(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = client.marshal(msg)
+		_, _ = client.Marshal(msg)
 	}
 }
 
@@ -1584,6 +1578,6 @@ func BenchmarkClientSession_Marshal_Protobuf(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = client.marshal(msg)
+		_, _ = client.Marshal(msg)
 	}
 }

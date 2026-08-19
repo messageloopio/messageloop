@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/messageloopio/messageloop/config"
+	intsurvey "github.com/messageloopio/messageloop/internal/survey"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"github.com/stretchr/testify/assert"
@@ -713,10 +714,8 @@ func TestHub_GetSubscribers(t *testing.T) {
 			t.Fatalf("NewClient() error = %v", err)
 		}
 
-		clients[i].mu.Lock()
-		clients[i].authenticated = true
-		clients[i].mu.Unlock()
-		require.NoError(t, clients[i].Attach(clients[i].attachment))
+		clients[i].MarkAuthenticated()
+		require.NoError(t, clients[i].Attach(clients[i].Attachment()))
 
 		_ = node.AddClient(clients[i])
 		err = node.AddSubscription(ctx, "test-channel", Subscriber{Session: clients[i], Ephemeral: false})
@@ -844,9 +843,9 @@ func TestNode_Survey_BlockedWriteTimesOutInsteadOfHanging(t *testing.T) {
 // TestSurvey_Wait_ZeroTimeoutFallsBackToDefault verifies P2-3 fix 3: a
 // timeout <= 0 must not make Wait expire immediately.
 func TestSurvey_Wait_ZeroTimeoutFallsBackToDefault(t *testing.T) {
-	originalDefault := defaultSurveyWaitTimeout
-	defaultSurveyWaitTimeout = 100 * time.Millisecond
-	t.Cleanup(func() { defaultSurveyWaitTimeout = originalDefault })
+	originalDefault := intsurvey.DefaultSurveyWaitTimeout
+	intsurvey.DefaultSurveyWaitTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { intsurvey.DefaultSurveyWaitTimeout = originalDefault })
 
 	survey := NewSurvey("wait-zero", "ch", []byte("payload"), 0)
 	start := time.Now()

@@ -98,10 +98,8 @@ func TestHandlePublish_PolicyForcesTransient(t *testing.T) {
 	subTransport := &capturingTransport{}
 	subscriber, _, err := NewClient(ctx, node, subTransport, JSONMarshaler{})
 	require.NoError(t, err)
-	subscriber.mu.Lock()
-	subscriber.authenticated = true
-	subscriber.mu.Unlock()
-	require.NoError(t, subscriber.Attach(subscriber.attachment))
+	subscriber.MarkAuthenticated()
+	require.NoError(t, subscriber.Attach(subscriber.Attachment()))
 	require.NoError(t, node.AddClient(subscriber))
 	require.NoError(t, node.AddSubscription(ctx, "game.tick.fps", Subscriber{Session: subscriber, Ephemeral: false}))
 	subTransport.messages = nil

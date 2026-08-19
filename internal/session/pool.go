@@ -1,4 +1,4 @@
-package messageloop
+package session
 
 import "sync"
 

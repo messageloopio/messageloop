@@ -1,4 +1,4 @@
-package messageloop
+package survey
 
 import (
 	"context"
@@ -110,7 +110,7 @@ func (s *Survey) AddResponse(sessionID string, payload []byte, err error) {
 // defaultSurveyWaitTimeout is the fallback wait duration when the survey
 // timeout is <= 0, which would otherwise make Wait expire immediately.
 // Variable for testability.
-var defaultSurveyWaitTimeout = 5 * time.Second
+var DefaultSurveyWaitTimeout = 5 * time.Second
 
 // Wait waits for responses until timeout or context cancellation.
 // Returns collected results.
@@ -119,7 +119,7 @@ func (s *Survey) Wait(ctx context.Context) []*SurveyResult {
 	// survey into a no-op; fall back to the default wait instead.
 	timeout := s.timeout
 	if timeout <= 0 {
-		timeout = defaultSurveyWaitTimeout
+		timeout = DefaultSurveyWaitTimeout
 	}
 
 	// Create timeout context if not already timed

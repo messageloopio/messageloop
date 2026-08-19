@@ -496,7 +496,7 @@ func TestPresence_BroadcastIgnoresMlTypeAnnotations(t *testing.T) {
 		Offset:   7,
 		Metadata: map[string]string{"ml.type": "presence"},
 	}
-	require.NoError(t, node.hub.broadcastPublication(ch, legacyFrame))
+	require.NoError(t, node.hub.BroadcastPublication(ch, legacyFrame))
 
 	require.Equal(t, 1, publicationsOf(t, transport),
 		"with the ml.type rewrite gone the frame must flow as a publication")
@@ -504,7 +504,7 @@ func TestPresence_BroadcastIgnoresMlTypeAnnotations(t *testing.T) {
 		"the hub must never rewrite a publication into a presence event")
 
 	// A normal publication still flows unchanged.
-	require.NoError(t, node.hub.broadcastPublication(ch, &Publication{
+	require.NoError(t, node.hub.BroadcastPublication(ch, &Publication{
 		Payload: []byte("hello"),
 		Kind:    PayloadKindText,
 		Offset:  8,

@@ -113,7 +113,7 @@ func TestNode_EvictSessionForTakeover_RollsBackPartiallyRemovedChannels(t *testi
 	for _, ch := range []string{"evict.ch.1", "evict.ch.2", "evict.ch.3"} {
 		_, exists := node.hub.LookupSubscriber(ch, client)
 		assert.True(t, exists, "channel %s should be restored in the hub", ch)
-		assert.True(t, client.hasSubscription(ch), "client should track channel %s", ch)
+		assert.True(t, client.HasSubscription(ch), "client should track channel %s", ch)
 	}
 
 	// Broker-side bookkeeping matches the hub state again.
@@ -147,7 +147,7 @@ func TestNode_EvictSessionForTakeover_RollbackPreservesEphemeral(t *testing.T) {
 		require.True(t, stored.Ephemeral, "rollback must preserve the ephemeral flag of channel %s", ch)
 	}
 
-	require.NoError(t, client.handleUnsubscribe(context.Background(), &clientpb.InboundMessage{
+	require.NoError(t, client.HandleUnsubscribe(context.Background(), &clientpb.InboundMessage{
 		Id: "msg-1",
 	}, &clientpb.Unsubscribe{
 		Subscriptions: []*clientpb.Subscription{{Channel: "evict.eph"}},
@@ -236,8 +236,8 @@ func TestNode_RestoreSessionSubscriptions_AdjustsSharedProjection(t *testing.T) 
 		}
 		assert.True(t, found, "channel %s missing from projection", name)
 	}
-	assert.True(t, client.hasSubscription("news"))
-	assert.True(t, client.hasSubscription("sports"))
+	assert.True(t, client.HasSubscription("news"))
+	assert.True(t, client.HasSubscription("sports"))
 }
 
 // Task 10: remote resume must claim the session lease via CAS with the old
@@ -322,7 +322,7 @@ func TestResumeRemoteSession_CASConflictAborts(t *testing.T) {
 	require.Equal(t, DisconnectStale.Code, dis.Code)
 	require.False(t, resumed)
 	require.Empty(t, bus.commands, "no takeover command may be issued after a CAS conflict")
-	require.False(t, client.hasSubscription("news"), "no subscriptions may be restored after a CAS conflict")
+	require.False(t, client.HasSubscription("news"), "no subscriptions may be restored after a CAS conflict")
 }
 // failSubscribeBroker fails every Subscribe so remote subscription restore
 // aborts midway.
@@ -446,8 +446,8 @@ func TestClient_RemoteResume_RestorePartialFailureKeepsSession(t *testing.T) {
 
 	require.False(t, transport.isClosed(), "the connection must survive a partial hydrate failure")
 	require.Same(t, client, node.Hub().LookupSession("sess-remote"), "the session must stay registered")
-	require.True(t, client.hasSubscription("news"), "the healthy channel must stay restored")
-	require.False(t, client.hasSubscription("broken.ch"), "the failed channel must not be restored")
+	require.True(t, client.HasSubscription("news"), "the healthy channel must stay restored")
+	require.False(t, client.HasSubscription("broken.ch"), "the failed channel must not be restored")
 	_, subscribed := node.hub.LookupSubscriber("broken.ch", client)
 	require.False(t, subscribed, "the failed channel must not be in the hub")
 	require.False(t, directory.deletedLease, "hydrate soft-fail never deletes the lease")
@@ -489,7 +489,7 @@ func TestClient_RemoteResume_RestoreAllChannelsFailKeepsSession(t *testing.T) {
 
 	require.False(t, transport.isClosed(), "an all-failed hydrate must not disconnect the client")
 	require.Same(t, client, node.Hub().LookupSession("sess-remote"))
-	require.False(t, client.hasSubscription("news"))
+	require.False(t, client.HasSubscription("news"))
 	require.False(t, directory.deletedLease)
 	require.False(t, directory.deletedSnapshot)
 
@@ -640,8 +640,8 @@ func TestNode_RestoreSessionSubscriptions_PartialFailureKeepsRestoredChannels(t 
 	require.NoError(t, getErr)
 	require.Contains(t, present, "sess-restore-soft",
 		"a restored channel must keep its presence entry after a later channel fails")
-	require.True(t, client.hasSubscription("soft.ch.1"))
-	require.False(t, client.hasSubscription("soft.ch.2"))
+	require.True(t, client.HasSubscription("soft.ch.1"))
+	require.False(t, client.HasSubscription("soft.ch.2"))
 }
 
 // TestNode_Fence_DoesNotDeleteNewSession verifies P1-C6 under PR-KA-B1

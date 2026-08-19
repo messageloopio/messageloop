@@ -199,7 +199,7 @@ func (n *Node) Run(ctx context.Context) error {
 		// same second-pipe pattern as occupancy (the broker knows no sessions).
 		n.broker.SetGapHandler(n.onGap)
 		if err := n.broker.Start(ctx, func(ch string, pub *Publication) error {
-			return n.hub.broadcastPublication(ch, pub)
+			return n.hub.BroadcastPublication(ch, pub)
 		}); err != nil {
 			log.ErrorContext(ctx, "broker stopped with error", err)
 			startErr <- err
@@ -288,7 +288,7 @@ func (n *Node) SetPresenceForSession(ctx context.Context, ch string, c *Client) 
 		SessionID:       c.SessionID(),
 		ConnectClientID: c.ClientID(),
 		UserID:          c.UserID(),
-		ConnectedAt:     c.connectedAt.UnixMilli(),
+		ConnectedAt:     c.ConnectedAt().UnixMilli(),
 	})
 }
 
@@ -348,20 +348,10 @@ func (n *Node) ReplaceRules(cfg config.AuthorizerConfig) error {
 	if err := n.authorizer.ReplaceRules(cfg); err != nil {
 		return err
 	}
-	n.hub.mu.RLock()
-	sessions := make([]*Client, 0, len(n.hub.sessions))
-	for _, c := range n.hub.sessions {
-		sessions = append(sessions, c)
-	}
-	n.hub.mu.RUnlock()
+	sessions := n.hub.Sessions()
 	for _, client := range sessions {
-		client.mu.RLock()
-		channels := make([]string, 0, len(client.subscribedChannels))
-		for ch := range client.subscribedChannels {
-			channels = append(channels, ch)
-		}
-		userID := client.user
-		client.mu.RUnlock()
+		channels := client.SubscribedChannels()
+		userID := client.UserID()
 		p := Principal{Kind: PrincipalUser, UserID: userID}
 		for _, ch := range n.authorizer.PatternsToRevoke(p, channels) {
 			if err := n.RemoveSubscription(ch, client); err != nil {
@@ -376,7 +366,7 @@ func (n *Node) ReplaceRules(cfg config.AuthorizerConfig) error {
 // AddClient adds a client session to the node's hub.
 // Returns an error (DisconnectConnectionLimit) if the per-user connection limit is exceeded.
 func (n *Node) AddClient(c *Client) error {
-	if err := n.hub.add(c); err != nil {
+	if err := n.hub.Add(c); err != nil {
 		return err
 	}
 	if err := n.syncClusterSessionState(context.Background(), c); err != nil {
@@ -406,32 +396,27 @@ func (n *Node) AddSubscription(ctx context.Context, ch string, sub Subscriber) e
 		{
 			name: "hub.addSub",
 			commit: func() (err error) {
-				first, err = n.hub.addSub(ch, sub)
+				first, err = n.hub.AddSub(ch, sub)
 				return err
 			},
 			rollback: func() {
-				_, _ = n.hub.removeSub(ch, sub.Session)
+				_, _ = n.hub.RemoveSub(ch, sub.Session)
 			},
 		},
 		{
 			name: "track.client",
 			commit: func() error {
-				sub.Session.mu.Lock()
-				defer sub.Session.mu.Unlock()
 				// Reject subscriptions on a closing/closed client: close()
 				// snapshots subscribedChannels under this same lock, so a
 				// subscribe admitted here after the snapshot would never be
 				// cleaned up and would leak in the hub (P1-A3).
-				if sub.Session.state == SessionClosed {
+				if sub.Session.TrackChannel(ch) {
 					return fmt.Errorf("client is closed")
 				}
-				sub.Session.subscribedChannels[ch] = struct{}{}
 				return nil
 			},
 			rollback: func() {
-				sub.Session.mu.Lock()
-				delete(sub.Session.subscribedChannels, ch)
-				sub.Session.mu.Unlock()
+				sub.Session.UntrackChannel(ch)
 			},
 		},
 		{
@@ -507,28 +492,24 @@ func (n *Node) RemoveSubscription(ch string, c *Client) error {
 		{
 			name: "hub.removeSub",
 			commit: func() (err error) {
-				last, removed = n.hub.removeSub(ch, c)
+				last, removed = n.hub.RemoveSub(ch, c)
 				if !removed {
 					return fmt.Errorf("subscription not found for channel %s", ch)
 				}
 				return nil
 			},
 			rollback: func() {
-				_, _ = n.hub.addSub(ch, subscriber)
+				_, _ = n.hub.AddSub(ch, subscriber)
 			},
 		},
 		{
 			name: "untrack.client",
 			commit: func() error {
-				c.mu.Lock()
-				delete(c.subscribedChannels, ch)
-				c.mu.Unlock()
+				c.UntrackChannel(ch)
 				return nil
 			},
 			rollback: func() {
-				c.mu.Lock()
-				c.subscribedChannels[ch] = struct{}{}
-				c.mu.Unlock()
+				c.ForceTrackChannel(ch)
 			},
 		},
 		{
@@ -1244,7 +1225,7 @@ func (n *Node) presenceJoin(ctx context.Context, ch string, c *Client) {
 				SessionId:   c.SessionID(),
 				UserId:      c.UserID(),
 				ClientId:    c.ClientID(),
-				ConnectedAt: c.connectedAt.UnixMilli(),
+				ConnectedAt: c.ConnectedAt().UnixMilli(),
 			},
 		},
 	})
@@ -1274,7 +1255,7 @@ func (n *Node) presenceLeave(ctx context.Context, ch, sessionID, userID string, 
 	}
 	if sess := n.hub.LookupSession(sessionID); sess != nil {
 		info.ClientId = sess.ClientID()
-		info.ConnectedAt = sess.connectedAt.UnixMilli()
+		info.ConnectedAt = sess.ConnectedAt().UnixMilli()
 	}
 	n.publishOccupancy(ch, OccupancyEvent{
 		Event: &clientpb.PresenceEvent{
@@ -1402,7 +1383,7 @@ func (n *Node) deliverPresenceEvent(ch string, evt *clientpb.PresenceEvent, gen 
 	if evt == nil {
 		return
 	}
-	recipients := n.hub.presenceRecipients(ch)
+	recipients := n.hub.PresenceRecipients(ch)
 	if len(recipients) == 0 {
 		return
 	}
@@ -1415,9 +1396,9 @@ func (n *Node) deliverPresenceEvent(ch string, evt *clientpb.PresenceEvent, gen 
 		out.Envelope = &clientpb.OutboundMessage_PresenceEvent{PresenceEvent: evt}
 	})
 	ctx := context.Background()
-	send := func(r presenceRecipient) {
-		if err := r.client.Send(ctx, out); err != nil {
-			log.WarnContext(ctx, "failed to send presence event", err, "channel", ch, "session", r.client.SessionID())
+	send := func(r PresenceRecipient) {
+		if err := r.Client.Send(ctx, out); err != nil {
+			log.WarnContext(ctx, "failed to send presence event", err, "channel", ch, "session", r.Client.SessionID())
 			if n.metrics != nil {
 				n.metrics.PresenceFailures.WithLabelValues("deliver").Inc()
 				n.metrics.DeliveryFailures.Inc()
@@ -1431,7 +1412,7 @@ func (n *Node) deliverPresenceEvent(ch string, evt *clientpb.PresenceEvent, gen 
 	const presenceParallelThreshold = 8
 	if len(recipients) <= presenceParallelThreshold {
 		for _, r := range recipients {
-			if r.ephemeral || r.client.SessionID() == excludeSession {
+			if r.Ephemeral || r.Client.SessionID() == excludeSession {
 				continue
 			}
 			send(r)
@@ -1441,12 +1422,12 @@ func (n *Node) deliverPresenceEvent(ch string, evt *clientpb.PresenceEvent, gen 
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, broadcastParallelLimit)
 	for _, r := range recipients {
-		if r.ephemeral || r.client.SessionID() == excludeSession {
+		if r.Ephemeral || r.Client.SessionID() == excludeSession {
 			continue
 		}
 		sem <- struct{}{}
 		wg.Add(1)
-		go func(r presenceRecipient) {
+		go func(r PresenceRecipient) {
 			defer func() {
 				<-sem
 				wg.Done()

@@ -7,7 +7,9 @@ import (
 	"github.com/messageloopio/messageloop/internal/metrics"
 	"github.com/messageloopio/messageloop/internal/occupancy"
 	"github.com/messageloopio/messageloop/internal/protocol"
+	"github.com/messageloopio/messageloop/internal/session"
 	"github.com/messageloopio/messageloop/internal/stream"
+	"github.com/messageloopio/messageloop/internal/survey"
 )
 
 // PR-KA-D11/D12 过渡转发(D13 清除;新代码不准引根 alias)。
@@ -248,3 +250,56 @@ var (
 	NewMetrics            = metrics.NewMetrics
 	MetricsTransportLabel = metrics.MetricsTransportLabel
 )
+
+// --- internal/session ---
+
+type (
+	Session          = session.Session
+	Client           = session.Client
+	SessionState     = session.SessionState
+	Attachment       = session.Attachment
+	Subscriber       = session.Subscriber
+	Hub              = session.Hub
+	ChannelInfo      = session.ChannelInfo
+	Transport        = session.Transport
+	HeartbeatManager = session.HeartbeatManager
+	HeartbeatConfig  = session.HeartbeatConfig
+	ClientOption     = session.ClientOption
+	ClientCloseFunc  = session.ClientCloseFunc
+	ClientInfo       = session.ClientInfo
+	RestoreFailure   = session.RestoreFailure
+	Runtime          = session.Runtime
+	IdentitySnapshot = session.IdentitySnapshot
+	// PresenceRecipient is exported with Hub.PresenceRecipients; node.go names
+	// the type (forced extra alias, see spec §9).
+	PresenceRecipient = session.PresenceRecipient
+)
+
+const (
+	SessionAuthenticating    = session.SessionAuthenticating
+	SessionAttached          = session.SessionAttached
+	SessionDetached          = session.SessionDetached
+	SessionClosed            = session.SessionClosed
+	SystemMethodAuthenticate = session.SystemMethodAuthenticate
+)
+
+var (
+	NewSubscriber         = session.NewSubscriber
+	NewHeartbeatManager   = session.NewHeartbeatManager
+	WithProtocol          = session.WithProtocol
+	MakeOutboundMessage   = session.MakeOutboundMessage
+	MarshalJSONStruct     = session.MarshalJSONStruct
+	ErrSendQueueFull      = session.ErrSendQueueFull
+	ErrSessionNotAttached = session.ErrSessionNotAttached
+	ErrOutboundTooLarge   = session.ErrOutboundTooLarge
+	newHub                = session.NewHub
+)
+
+// --- internal/survey ---
+
+type (
+	Survey       = survey.Survey
+	SurveyResult = survey.SurveyResult
+)
+
+var NewSurvey = survey.NewSurvey

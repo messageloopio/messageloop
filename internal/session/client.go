@@ -1,4 +1,4 @@
-package messageloop
+package session
 
 import (
 	"context"
@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
+	"github.com/messageloopio/messageloop/internal/protocol"
 	"github.com/messageloopio/messageloop/pkg/topics"
 	"github.com/messageloopio/messageloop/proxy"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
@@ -22,14 +23,14 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-func NewClient(ctx context.Context, node *Node, t Transport, marshaler Marshaler, opts ...ClientOption) (*Session, ClientCloseFunc, error) {
+func NewClient(ctx context.Context, rt Runtime, t Transport, marshaler Marshaler, opts ...ClientOption) (*Session, ClientCloseFunc, error) {
 	att := &Attachment{
 		Transport: t,
 		Marshaler: marshaler,
 	}
 	client := &Session{
 		ctx:                ctx,
-		node:               node,
+		rt:                 rt,
 		attachment:         att,
 		loopAtt:            att,
 		state:              SessionAuthenticating,
@@ -52,8 +53,8 @@ func NewClient(ctx context.Context, node *Node, t Transport, marshaler Marshaler
 
 	// Start heartbeat if configured. It is restarted by Attach (a resume
 	// replaces both the attachment and the connection context).
-	if node.heartbeatManager != nil {
-		node.heartbeatManager.Start(ctx, client)
+	if rt.Heartbeat() != nil {
+		rt.Heartbeat().Start(ctx, client)
 	}
 
 	// The close func is bound to this connection's attachment: when a local
@@ -112,8 +113,8 @@ func (c *Session) MarkMetricsCharged() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.state == SessionClosed {
-		if c.node.metrics != nil {
-			c.node.metrics.ConnectionsTotal.WithLabelValues(c.TransportLabel()).Dec()
+		if c.rt.Metrics() != nil {
+			c.rt.Metrics().ConnectionsTotal.WithLabelValues(c.TransportLabel()).Dec()
 		}
 		return
 	}
@@ -258,7 +259,7 @@ func (c *Session) handleConnect(ctx context.Context, in *clientpb.InboundMessage
 	// generation 2 before staging the client-supplied session ID or touching
 	// the authentication path. The Error goes out first so the client sees
 	// why it was disconnected, then the transport is closed with 3514.
-	if !protocolGenerationOK(connect.GetVersion()) {
+	if !protocol.GenerationOK(connect.GetVersion()) {
 		_ = c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 			out.Envelope = &clientpb.OutboundMessage_Error{
 				Error: &sharedv2.Error{
@@ -288,8 +289,8 @@ func (c *Session) handleConnect(ctx context.Context, in *clientpb.InboundMessage
 	var p proxy.Proxy
 	var authUser string
 	if connect.Token != "" {
-		p = c.node.FindProxy("", SystemMethodAuthenticate)
-		if p == nil && c.node.requireAuth {
+		p = c.rt.FindProxy("", SystemMethodAuthenticate)
+		if p == nil && c.rt.RequireAuth() {
 			// requireAuth is on but no proxy can verify the token: a non-empty
 			// token must not bypass authentication.
 			log.WarnContext(ctx, "authentication required but no auth proxy configured for token",
@@ -305,7 +306,7 @@ func (c *Session) handleConnect(ctx context.Context, in *clientpb.InboundMessage
 			}))
 			return DisconnectInvalidToken
 		}
-	} else if c.node.requireAuth {
+	} else if c.rt.RequireAuth() {
 		_ = c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 			out.Envelope = &clientpb.OutboundMessage_Error{
 				Error: &sharedv2.Error{
@@ -372,7 +373,7 @@ func (c *Session) handleConnect(ctx context.Context, in *clientpb.InboundMessage
 	// (require_auth + a verified token via the auth proxy). In anonymous mode
 	// a session id cannot be trusted — anyone could guess it — so it is
 	// ignored and the connect starts a fresh session.
-	resumeAllowed := c.node.requireAuth && p != nil
+	resumeAllowed := c.rt.RequireAuth() && p != nil
 	if connect.SessionId != "" && !resumeAllowed {
 		c.mu.Lock()
 		c.session = originalSessionID
@@ -389,7 +390,7 @@ func (c *Session) handleConnect(ctx context.Context, in *clientpb.InboundMessage
 	var resumeSnapshot *ClusterSessionSnapshot
 	if connect.SessionId != "" && resumeAllowed {
 		// Try to find the old session
-		existing := c.node.hub.LookupSession(connect.SessionId)
+		existing := c.rt.Hub().LookupSession(connect.SessionId)
 		if existing != nil {
 			resumed = true
 			resumedLocal = true
@@ -399,7 +400,7 @@ func (c *Session) handleConnect(ctx context.Context, in *clientpb.InboundMessage
 			// session down when the target user has no slot left. On failure
 			// the old session stays Attached and this connection is closed.
 			if authUser != "" && authUser != existing.UserID() {
-				if err := c.node.hub.PrepareSessionUser(connect.SessionId, existing, authUser); err != nil {
+				if err := c.rt.Hub().PrepareSessionUser(connect.SessionId, existing, authUser); err != nil {
 					return c.disconnectOnConnectError(ctx, err)
 				}
 			}
@@ -458,7 +459,7 @@ func (c *Session) handleConnect(ctx context.Context, in *clientpb.InboundMessage
 			return existing.finishConnect(ctx, in, connect, resumed, resumedLocal, nil, p, authUser)
 		} else {
 			var err error
-			resumeSnapshot, resumed, err = c.node.resumeRemoteSession(ctx, c, connect.SessionId)
+			resumeSnapshot, resumed, err = c.rt.ResumeRemoteSession(ctx, c, connect.SessionId)
 			if err != nil {
 				return c.disconnectOnConnectError(ctx, err)
 			}
@@ -504,30 +505,30 @@ func (c *Session) finishConnect(ctx context.Context, in *clientpb.InboundMessage
 	if c.clusterLeaseVersion == 0 {
 		c.clusterLeaseVersion = 1
 	}
-	if limit := c.node.limits.MaxPublishesPerSecond; limit > 0 {
+	if limit := c.rt.Limits().MaxPublishesPerSecond; limit > 0 {
 		c.publishLimiter = rate.NewLimiter(rate.Limit(limit), limit)
 	}
 	c.mu.Unlock()
 
 	if !resumed || !resumedLocal {
-		if err := c.node.AddClient(c); err != nil {
+		if err := c.rt.AddClient(c); err != nil {
 			return c.disconnectOnConnectError(ctx, err)
 		}
 		// Only a client that passed AddClient is counted in ConnectionsTotal;
 		// Close decrements the gauge solely for such clients.
 		c.MarkMetricsCharged()
-	} else if err := c.node.syncClusterSessionState(ctx, c); err != nil {
+	} else if err := c.rt.SyncClusterSessionState(ctx, c); err != nil {
 		return c.disconnectOnConnectError(ctx, err)
 	}
 
-	var restoreFailures []clusterRestoreFailure
+	var restoreFailures []RestoreFailure
 	if resumeSnapshot != nil {
 		// Hydrate is per-channel soft-fail (PR-KA-D10 §1.1): a channel that
 		// fails to restore is skipped and reported to the client with a
 		// RECOVER_FAILED envelope after Connected — the session lives on with
 		// the restored subset; there is no saga, no hub/lease/snapshot
 		// teardown and no 3502.
-		restoreFailures = c.node.restoreSessionSubscriptions(ctx, c, resumeSnapshot.Subscriptions)
+		restoreFailures = c.rt.RestoreSessionSubscriptions(ctx, c, resumeSnapshot.Subscriptions)
 	}
 
 	// Notify proxy about client connection
@@ -546,7 +547,7 @@ func (c *Session) finishConnect(ctx context.Context, in *clientpb.InboundMessage
 	addedPresence := make([]string, 0, len(subs))
 
 	// Get current broker epoch for recovery validation and Connected.
-	currentEpoch := c.node.streamEpoch()
+	currentEpoch := c.rt.StreamEpoch()
 
 	// Ordered recovery union (PR-03): ACL-passed request subscriptions first,
 	// then snapshot-only channels from a resumed session. Snapshot-only
@@ -577,7 +578,7 @@ func (c *Session) finishConnect(ctx context.Context, in *clientpb.InboundMessage
 		// Enforce the per-client subscription limit, counting only channels
 		// that would actually be added: duplicates, ACL-denied channels, and
 		// channels inherited from a resumed session do not count.
-		if limit := c.node.limits.MaxSubscriptionsPerClient; limit > 0 && !alreadySubscribed {
+		if limit := c.rt.Limits().MaxSubscriptionsPerClient; limit > 0 && !alreadySubscribed {
 			c.mu.RLock()
 			currentCount := len(c.subscribedChannels)
 			c.mu.RUnlock()
@@ -585,16 +586,16 @@ func (c *Session) finishConnect(ctx context.Context, in *clientpb.InboundMessage
 				// Roll back the channels already added in this round so the
 				// hub is not left half-registered until close() runs.
 				for _, channel := range addedChannels {
-					_ = c.node.RemoveSubscription(channel, c)
+					_ = c.rt.RemoveSubscription(channel, c)
 				}
 				for _, channel := range addedPresence {
-					_ = c.node.presence.Remove(ctx, channel, c.session)
+					_ = c.rt.Presence().Remove(ctx, channel, c.session)
 				}
 				return DisconnectChannelLimit
 			}
 		}
 
-		if err := c.node.AddSubscription(ctx, sub.Channel, NewSubscriber(c, sub.Ephemeral)); err != nil {
+		if err := c.rt.AddSubscription(ctx, sub.Channel, NewSubscriber(c, sub.Ephemeral)); err != nil {
 			// Unroutable patterns and malformed topics fail the single
 			// channel softly: an error envelope, the channel is skipped (it
 			// stays out of Connected.Subscriptions), the channels already
@@ -607,10 +608,10 @@ func (c *Session) finishConnect(ctx context.Context, in *clientpb.InboundMessage
 				continue
 			}
 			for _, channel := range addedChannels {
-				_ = c.node.RemoveSubscription(channel, c)
+				_ = c.rt.RemoveSubscription(channel, c)
 			}
 			for _, channel := range addedPresence {
-				_ = c.node.presence.Remove(ctx, channel, c.session)
+				_ = c.rt.Presence().Remove(ctx, channel, c.session)
 			}
 			return err
 		}
@@ -620,9 +621,9 @@ func (c *Session) finishConnect(ctx context.Context, in *clientpb.InboundMessage
 			// patterns, ephemeral subscriptions and presence=false channels
 			// never enter the store and never emit join events, so the
 			// addedPresence rollback list only holds tracked channels.
-			if c.node.shouldTrackPresence(sub.Channel, sub.Ephemeral) {
+			if c.rt.ShouldTrackPresence(sub.Channel, sub.Ephemeral) {
 				addedPresence = append(addedPresence, sub.Channel)
-				c.node.presenceJoin(ctx, sub.Channel, c)
+				c.rt.PresenceJoin(ctx, sub.Channel, c)
 			}
 		}
 	}
@@ -636,7 +637,7 @@ func (c *Session) finishConnect(ctx context.Context, in *clientpb.InboundMessage
 	if resumeSnapshot != nil {
 		failed := make(map[string]struct{}, len(restoreFailures))
 		for _, failure := range restoreFailures {
-			failed[failure.channel] = struct{}{}
+			failed[failure.Channel] = struct{}{}
 		}
 		for _, snap := range resumeSnapshot.Subscriptions {
 			if _, dup := seenRecovery[snap.Channel]; dup {
@@ -676,10 +677,10 @@ func (c *Session) finishConnect(ctx context.Context, in *clientpb.InboundMessage
 	// top-level error path. A channel the Connect request itself managed to
 	// subscribe is no longer failed and is not reported.
 	for _, failure := range restoreFailures {
-		if c.hasSubscription(failure.channel) {
+		if c.hasSubscription(failure.Channel) {
 			continue
 		}
-		metadata, metaErr := structpb.NewStruct(map[string]interface{}{"channel": failure.channel})
+		metadata, metaErr := structpb.NewStruct(map[string]interface{}{"channel": failure.Channel})
 		if metaErr != nil {
 			continue // unreachable for a string-only map
 		}
@@ -688,7 +689,7 @@ func (c *Session) finishConnect(ctx context.Context, in *clientpb.InboundMessage
 				Error: &sharedv2.Error{
 					Code:     "RECOVER_FAILED",
 					Type:     "recover_error",
-					Message:  fmt.Sprintf("failed to restore subscription to channel %q: %v", failure.channel, failure.err),
+					Message:  fmt.Sprintf("failed to restore subscription to channel %q: %v", failure.Channel, failure.Err),
 					Metadata: metadata,
 				},
 			}
@@ -704,7 +705,7 @@ func (c *Session) finishConnect(ctx context.Context, in *clientpb.InboundMessage
 
 	// One quota per Connect request shared by every channel in the union,
 	// streamed in union order (request channels first, then snapshot-only).
-	c.node.streamRecoveries(ctx, c, in, recoverySubs, resumeSnapshot, "connect")
+	c.rt.StreamRecoveries(ctx, c, in, recoverySubs, resumeSnapshot, "connect")
 	return nil
 }
 
@@ -716,13 +717,13 @@ func (c *Session) presenceSnapshots(ctx context.Context) []*clientpb.PresenceSna
 	var snapshots []*clientpb.PresenceSnapshot
 	for _, sub := range c.subscriptionList() {
 		ephemeral := false
-		if stored, ok := c.node.hub.LookupSubscriber(sub.Channel, c); ok {
+		if stored, ok := c.rt.Hub().LookupSubscriber(sub.Channel, c); ok {
 			ephemeral = stored.Ephemeral
 		}
-		if !c.node.shouldTrackPresence(sub.Channel, ephemeral) {
+		if !c.rt.ShouldTrackPresence(sub.Channel, ephemeral) {
 			continue
 		}
-		snapshots = append(snapshots, c.node.presenceSnapshot(ctx, sub.Channel))
+		snapshots = append(snapshots, c.rt.PresenceSnapshot(ctx, sub.Channel))
 	}
 	return snapshots
 }
@@ -786,7 +787,7 @@ func (c *Session) checkSubscribeACL(ctx context.Context, in *clientpb.InboundMes
 	// 2. Static authorization: language inclusion against the authorizer
 	// rules. This runs before the proxy, so a proxy that allows can never
 	// punch a hole in a static deny.
-	if dec := c.node.authorizer.Decide(c.node.userPrincipal(c.user), ActionSubscribePattern, ch.Channel); !dec.Allow {
+	if dec := c.rt.Authorizer().Decide(c.rt.UserPrincipal(c.user), ActionSubscribePattern, ch.Channel); !dec.Allow {
 		log.WarnContext(ctx, "ACL denied subscribe", "channel", ch.Channel, "user", c.user, "reason", dec.Reason)
 		return &sharedv2.Error{
 			Code:    "PERMISSION_DENIED",
@@ -798,7 +799,7 @@ func (c *Session) checkSubscribeACL(ctx context.Context, in *clientpb.InboundMes
 	// 3. Proxy: an additional gate asked only when a route matches. The
 	// proxy may reject this single request, but its approval does not
 	// replace step 2 (no TOCTOU into AllowLang).
-	p := c.node.FindProxy(ch.Channel, "subscribe")
+	p := c.rt.FindProxy(ch.Channel, "subscribe")
 	if p != nil {
 		aclReq := &proxy.SubscribeAclProxyRequest{
 			Channel:   ch.Channel,
@@ -878,7 +879,7 @@ func (c *Session) handleRPC(ctx context.Context, in *clientpb.InboundMessage, rp
 	}
 
 	// Apply RPC timeout from configuration or use default
-	rpcTimeout := c.node.GetRPCTimeout()
+	rpcTimeout := c.rt.GetRPCTimeout()
 	rpcCtx, cancel := context.WithTimeout(ctx, rpcTimeout)
 	defer cancel()
 
@@ -901,11 +902,11 @@ func (c *Session) handleRPC(ctx context.Context, in *clientpb.InboundMessage, rp
 	}
 
 	startTime := time.Now()
-	proxyResp, err := c.node.ProxyRPC(rpcCtx, channel, method, proxyReq)
+	proxyResp, err := c.rt.ProxyRPC(rpcCtx, channel, method, proxyReq)
 	duration := time.Since(startTime)
 
-	if c.node.metrics != nil {
-		c.node.metrics.RPCDuration.Observe(duration.Seconds())
+	if c.rt.Metrics() != nil {
+		c.rt.Metrics().RPCDuration.Observe(duration.Seconds())
 	}
 
 	if err != nil {
@@ -1010,7 +1011,7 @@ func (c *Session) handlePublish(ctx context.Context, in *clientpb.InboundMessage
 
 	// Static authorization first (PR-KA-A4 §8.1): a proxy that allows must
 	// never override a static deny.
-	if dec := c.node.authorizer.Decide(c.node.userPrincipal(c.user), ActionPublish, channel); !dec.Allow {
+	if dec := c.rt.Authorizer().Decide(c.rt.UserPrincipal(c.user), ActionPublish, channel); !dec.Allow {
 		log.WarnContext(ctx, "ACL denied publish", "channel", channel, "user", c.user, "reason", dec.Reason)
 		return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 			out.Envelope = &clientpb.OutboundMessage_Error{
@@ -1026,7 +1027,7 @@ func (c *Session) handlePublish(ctx context.Context, in *clientpb.InboundMessage
 	// Proxy ACL check: an additional gate, asked only when a route matches.
 	// The proxy may reject this single request; its approval cannot bypass
 	// the static Decide above.
-	p := c.node.FindProxy(channel, "publish")
+	p := c.rt.FindProxy(channel, "publish")
 	if p != nil {
 		aclReq := &proxy.PublishAclProxyRequest{
 			Channel:   channel,
@@ -1066,17 +1067,17 @@ func (c *Session) handlePublish(ctx context.Context, in *clientpb.InboundMessage
 		pub.Metadata = publish.Metadata.Entries
 	}
 
-	pol := c.node.ChannelPolicy(channel)
+	pol := c.rt.ChannelPolicy(channel)
 	forceTransient := publish.Transient || pol.TransientOnly || !pol.History
 	if forceTransient {
 		// Channel policy forces transient delivery (e.g. game tick
 		// channels): the publish must still succeed — no error, ack with
 		// offset 0 — it just never writes history. Count the forced
 		// conversions (a client-declared transient is not forced).
-		if !publish.Transient && c.node.metrics != nil {
-			c.node.metrics.ChannelPolicyTransientForced.Inc()
+		if !publish.Transient && c.rt.Metrics() != nil {
+			c.rt.Metrics().ChannelPolicyTransientForced.Inc()
 		}
-		if err := c.node.PublishTransient(channel, pub); err != nil {
+		if err := c.rt.PublishTransient(channel, pub); err != nil {
 			return err
 		}
 		return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
@@ -1085,13 +1086,13 @@ func (c *Session) handlePublish(ctx context.Context, in *clientpb.InboundMessage
 					Id: in.Id,
 					// Transient / no-history: the position offset stays unset
 					// (KD-K11), never 0-means-offset.
-					Position: positionFrom(c.node.streamEpoch(), 0, false),
+					Position: positionFrom(c.rt.StreamEpoch(), 0, false),
 				},
 			}
 		}))
 	}
 
-	offset, err := c.node.Publish(channel, pub)
+	offset, err := c.rt.Publish(channel, pub)
 	if err != nil {
 		return err
 	}
@@ -1099,7 +1100,7 @@ func (c *Session) handlePublish(ctx context.Context, in *clientpb.InboundMessage
 		out.Envelope = &clientpb.OutboundMessage_PublishAck{
 			PublishAck: &clientpb.PublishAck{
 				Id:       in.Id,
-				Position: positionFrom(c.node.streamEpoch(), offset, true),
+				Position: positionFrom(c.rt.StreamEpoch(), offset, true),
 			},
 		}
 	}))
@@ -1111,7 +1112,7 @@ func (c *Session) handleSubscribe(ctx context.Context, in *clientpb.InboundMessa
 	addedPresence := make([]string, 0, len(sub.Subscriptions))
 
 	// Get current broker epoch for the SubscribeAck.
-	currentEpoch := c.node.streamEpoch()
+	currentEpoch := c.rt.StreamEpoch()
 
 	for _, ch := range sub.Subscriptions {
 		alreadySubscribed := c.hasSubscription(ch.Channel)
@@ -1128,7 +1129,7 @@ func (c *Session) handleSubscribe(ctx context.Context, in *clientpb.InboundMessa
 		// Enforce the per-client subscription limit, counting only channels
 		// that would actually be added: duplicates and ACL-denied channels
 		// do not count toward the limit.
-		if limit := c.node.limits.MaxSubscriptionsPerClient; limit > 0 && !alreadySubscribed {
+		if limit := c.rt.Limits().MaxSubscriptionsPerClient; limit > 0 && !alreadySubscribed {
 			c.mu.RLock()
 			currentCount := len(c.subscribedChannels)
 			c.mu.RUnlock()
@@ -1137,7 +1138,7 @@ func (c *Session) handleSubscribe(ctx context.Context, in *clientpb.InboundMessa
 			}
 		}
 
-		if err := c.node.AddSubscription(ctx, ch.Channel, Subscriber{Session: c, Ephemeral: ch.Ephemeral}); err != nil {
+		if err := c.rt.AddSubscription(ctx, ch.Channel, Subscriber{Session: c, Ephemeral: ch.Ephemeral}); err != nil {
 			// Unroutable patterns and malformed topics fail the single
 			// channel softly: a top-level error envelope, no rollback of
 			// the channels already added in this request, no disconnect
@@ -1147,12 +1148,12 @@ func (c *Session) handleSubscribe(ctx context.Context, in *clientpb.InboundMessa
 				continue
 			}
 			for _, channel := range addedChannels {
-				if err := c.node.RemoveSubscription(channel, c); err != nil {
+				if err := c.rt.RemoveSubscription(channel, c); err != nil {
 					log.WarnContext(ctx, "failed to rollback subscription", "channel", channel, "error", err)
 				}
 			}
 			for _, channel := range addedPresence {
-				_ = c.node.presence.Remove(ctx, channel, c.session)
+				_ = c.rt.Presence().Remove(ctx, channel, c.session)
 			}
 			return err
 		}
@@ -1164,13 +1165,13 @@ func (c *Session) handleSubscribe(ctx context.Context, in *clientpb.InboundMessa
 		// Track presence for tracked subscriptions only (shouldTrackPresence
 		// excludes ephemeral, wildcard and presence=false channels): they
 		// never publish a join event. A re-subscribe does not join again.
-		if !alreadySubscribed && c.node.shouldTrackPresence(ch.Channel, ch.Ephemeral) {
+		if !alreadySubscribed && c.rt.ShouldTrackPresence(ch.Channel, ch.Ephemeral) {
 			addedPresence = append(addedPresence, ch.Channel)
-			c.node.presenceJoin(ctx, ch.Channel, c)
+			c.rt.PresenceJoin(ctx, ch.Channel, c)
 		}
 
 		// Notify proxy about subscription
-		if p := c.node.FindProxy(ch.Channel, "subscribe"); p != nil {
+		if p := c.rt.FindProxy(ch.Channel, "subscribe"); p != nil {
 			subscribedReq := &proxy.OnSubscribedProxyRequest{
 				SessionID: c.session,
 				Channel:   ch.Channel,
@@ -1187,7 +1188,7 @@ func (c *Session) handleSubscribe(ctx context.Context, in *clientpb.InboundMessa
 	if err := c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 		ack := &clientpb.SubscribeAck{
 			Subscriptions: subs,
-			Recover:       c.node.recoverState(c, subs, nil),
+			Recover:       c.rt.RecoverState(c, subs, nil),
 			StreamEpoch:   currentEpoch,
 			// Catch-up snapshot for every channel in this request that
 			// is tracked for presence, including re-subscribes.
@@ -1197,7 +1198,7 @@ func (c *Session) handleSubscribe(ctx context.Context, in *clientpb.InboundMessa
 	})); err != nil {
 		return err
 	}
-	c.node.streamRecoveries(ctx, c, in, subs, nil, "subscribe")
+	c.rt.StreamRecoveries(ctx, c, in, subs, nil, "subscribe")
 	return nil
 }
 
@@ -1207,13 +1208,13 @@ func (c *Session) snapshotForChannels(ctx context.Context, subs []*clientpb.Subs
 	var snapshots []*clientpb.PresenceSnapshot
 	for _, sub := range subs {
 		ephemeral := false
-		if stored, ok := c.node.hub.LookupSubscriber(sub.Channel, c); ok {
+		if stored, ok := c.rt.Hub().LookupSubscriber(sub.Channel, c); ok {
 			ephemeral = stored.Ephemeral
 		}
-		if !c.node.shouldTrackPresence(sub.Channel, ephemeral) {
+		if !c.rt.ShouldTrackPresence(sub.Channel, ephemeral) {
 			continue
 		}
-		snapshots = append(snapshots, c.node.presenceSnapshot(ctx, sub.Channel))
+		snapshots = append(snapshots, c.rt.PresenceSnapshot(ctx, sub.Channel))
 	}
 	return snapshots
 }
@@ -1230,17 +1231,17 @@ func (c *Session) handleUnsubscribe(ctx context.Context, in *clientpb.InboundMes
 		// subscription decides: ephemeral subscriptions never registered
 		// presence and must not publish a leave event.
 		ephemeral := false
-		if stored, ok := c.node.hub.LookupSubscriber(sub.Channel, c); ok {
+		if stored, ok := c.rt.Hub().LookupSubscriber(sub.Channel, c); ok {
 			ephemeral = stored.Ephemeral
 		}
 		// Remove subscription
-		_ = c.node.RemoveSubscription(sub.Channel, c)
+		_ = c.rt.RemoveSubscription(sub.Channel, c)
 
 		// Remove presence and publish leave only when this subscription was
 		// actually tracked (shouldTrackPresence excludes ephemeral, wildcard
 		// and presence=false channels). The unsubscribe request carries no
 		// ephemeral flag, so the stored subscription decides.
-		if alreadySubscribed && c.node.shouldTrackPresence(sub.Channel, ephemeral) {
+		if alreadySubscribed && c.rt.ShouldTrackPresence(sub.Channel, ephemeral) {
 			sem <- struct{}{}
 			wg.Add(1)
 			go func(channel string) {
@@ -1248,12 +1249,12 @@ func (c *Session) handleUnsubscribe(ctx context.Context, in *clientpb.InboundMes
 					<-sem
 					wg.Done()
 				}()
-				c.node.presenceLeave(ctx, channel, c.session, c.user, ephemeral)
+				c.rt.PresenceLeave(ctx, channel, c.session, c.user, ephemeral)
 			}(sub.Channel)
 		}
 
 		// Notify proxy about unsubscription
-		p := c.node.FindProxy(sub.Channel, "unsubscribe")
+		p := c.rt.FindProxy(sub.Channel, "unsubscribe")
 		if p != nil {
 			unsubscribedReq := &proxy.OnUnsubscribedProxyRequest{
 				SessionID: c.session,
@@ -1314,7 +1315,7 @@ func (c *Session) throttledClusterRefresh() {
 		go func() {
 			clusterCtx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
 			defer cancel()
-			if err := c.node.syncClusterSessionState(clusterCtx, c); err != nil {
+			if err := c.rt.SyncClusterSessionState(clusterCtx, c); err != nil {
 				if errors.Is(err, ErrSessionFenced) {
 					// Another node claimed the session: this attachment's
 					// fencing is gone. Disconnect (3502) without unbinding
@@ -1347,7 +1348,7 @@ func (c *Session) handleSubRefresh(ctx context.Context, in *clientpb.InboundMess
 	sem := make(chan struct{}, maxConcurrentPresenceEvents)
 	var wg sync.WaitGroup
 	for _, ch := range refresh.Channels {
-		p := c.node.FindProxy(ch, "subscribe")
+		p := c.rt.FindProxy(ch, "subscribe")
 		if p == nil {
 			continue
 		}
@@ -1356,11 +1357,11 @@ func (c *Session) handleSubRefresh(ctx context.Context, in *clientpb.InboundMess
 		if err != nil || aclResp.Error != nil {
 			// ACL check failed — revoke subscription for this channel.
 			ephemeral := false
-			if stored, ok := c.node.hub.LookupSubscriber(ch, c); ok {
+			if stored, ok := c.rt.Hub().LookupSubscriber(ch, c); ok {
 				ephemeral = stored.Ephemeral
 			}
-			_ = c.node.RemoveSubscription(ch, c)
-			if c.node.shouldTrackPresence(ch, ephemeral) {
+			_ = c.rt.RemoveSubscription(ch, c)
+			if c.rt.ShouldTrackPresence(ch, ephemeral) {
 				sem <- struct{}{}
 				wg.Add(1)
 				go func(channel string) {
@@ -1368,7 +1369,7 @@ func (c *Session) handleSubRefresh(ctx context.Context, in *clientpb.InboundMess
 						<-sem
 						wg.Done()
 					}()
-					c.node.presenceLeave(ctx, channel, c.session, c.user, ephemeral)
+					c.rt.PresenceLeave(ctx, channel, c.session, c.user, ephemeral)
 				}(ch)
 			}
 		}
@@ -1398,7 +1399,7 @@ func (c *Session) handleSurvey(ctx context.Context, in *clientpb.InboundMessage,
 	}
 	// Authorizer decides survey: it already combines the Effects.Survey
 	// gate with the allow_survey rules and deny_all (PR-KA-A4 §8.1).
-	dec := c.node.authorizer.Decide(c.node.userPrincipal(c.user), ActionSurvey, ch)
+	dec := c.rt.Authorizer().Decide(c.rt.UserPrincipal(c.user), ActionSurvey, ch)
 	if !dec.Allow {
 		if !dec.Effects.Survey {
 			return c.sendSurveyError(ctx, in, "SURVEY_DISABLED", "policy_error", "survey disabled by channel policy")
@@ -1447,7 +1448,7 @@ func (c *Session) handleSurvey(ctx context.Context, in *clientpb.InboundMessage,
 	// Fast path: the local subscriber set already exceeds the cap, so the
 	// survey can never run — reject synchronously with zero outbound
 	// SurveyRequests. The worker re-checks the cluster-wide count.
-	if limit := pol.MaxSurveySubscribers; limit > 0 && len(c.node.hub.GetMatchingSubscribers(ch)) > limit {
+	if limit := pol.MaxSurveySubscribers; limit > 0 && len(c.rt.Hub().GetMatchingSubscribers(ch)) > limit {
 		c.surveyInFlight.Store(false)
 		return c.sendSurveyError(ctx, in, "SURVEY_TOO_MANY_SUBSCRIBERS", "survey_error", "survey refused: too many subscribers")
 	}
@@ -1463,8 +1464,8 @@ func (c *Session) handleSurvey(ctx context.Context, in *clientpb.InboundMessage,
 // sendSurveyError sends a top-level error envelope for a rejected client
 // survey, counts it in survey_client_total, and returns nil (no disconnect).
 func (c *Session) sendSurveyError(ctx context.Context, in *clientpb.InboundMessage, code, errType, message string) error {
-	if c.node.metrics != nil {
-		c.node.metrics.SurveyClientTotal.WithLabelValues(code).Inc()
+	if c.rt.Metrics() != nil {
+		c.rt.Metrics().SurveyClientTotal.WithLabelValues(code).Inc()
 	}
 	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_Error{
@@ -1476,8 +1477,8 @@ func (c *Session) sendSurveyError(ctx context.Context, in *clientpb.InboundMessa
 // sendSurveyTopError is the worker-side twin of sendSurveyError for
 // asynchronously discovered failures (no inbound message id to echo).
 func (c *Session) sendSurveyTopError(code, errType, message string) {
-	if c.node.metrics != nil {
-		c.node.metrics.SurveyClientTotal.WithLabelValues(code).Inc()
+	if c.rt.Metrics() != nil {
+		c.rt.Metrics().SurveyClientTotal.WithLabelValues(code).Inc()
 	}
 	_ = c.Send(c.ctx, MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_Error{
@@ -1495,27 +1496,27 @@ func (c *Session) runSurveyWorker(requestID, channel string, payload []byte, tim
 		defer c.surveyInFlight.Store(false)
 		ctx := c.ctx
 
-		total, err := c.node.countMatchingSubscribers(ctx, channel)
+		total, err := c.rt.CountMatchingSubscribers(ctx, channel)
 		if err != nil {
 			log.WarnContext(ctx, "survey subscriber count failed", "channel", channel, "error", err)
 			c.sendSurveyTopError("INTERNAL_ERROR", "server_error", "survey subscriber count failed: "+err.Error())
 			return
 		}
-		if limit := c.node.ChannelPolicy(channel).MaxSurveySubscribers; limit > 0 && total > limit {
+		if limit := c.rt.ChannelPolicy(channel).MaxSurveySubscribers; limit > 0 && total > limit {
 			c.sendSurveyTopError("SURVEY_TOO_MANY_SUBSCRIBERS", "survey_error", "survey refused: too many subscribers")
 			return
 		}
 
-		results, err := c.node.Survey(ctx, channel, payload, timeout)
+		results, err := c.rt.Survey(ctx, channel, payload, timeout)
 		if err != nil {
 			log.WarnContext(ctx, "survey execution failed", "channel", channel, "error", err)
 			c.sendSurveyTopError("INTERNAL_ERROR", "server_error", err.Error())
 			return
 		}
-		if c.node.metrics != nil {
-			c.node.metrics.SurveyClientTotal.WithLabelValues("ok").Inc()
+		if c.rt.Metrics() != nil {
+			c.rt.Metrics().SurveyClientTotal.WithLabelValues("ok").Inc()
 		}
-		result := c.node.buildClientSurveyResult(requestID, channel, results)
+		result := c.rt.BuildClientSurveyResult(requestID, channel, results)
 		if err := c.Send(ctx, MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
 			out.Envelope = &clientpb.OutboundMessage_SurveyResult{SurveyResult: result}
 		})); err != nil {
@@ -1558,7 +1559,7 @@ func (c *Session) handleSurveyReply(ctx context.Context, in *clientpb.InboundMes
 	}
 
 	// Add the response to the survey (if the survey is still active)
-	c.node.AddSurveyResponse(ctx, c.session, reply.RequestId, payload, err)
+	c.rt.AddSurveyResponse(ctx, c.session, reply.RequestId, payload, err)
 
 	return nil
 }
@@ -1663,7 +1664,7 @@ func (c *Session) handlePresenceQuery(ctx context.Context, in *clientpb.InboundM
 			}
 		}))
 	}
-	dec := c.node.authorizer.Decide(c.node.userPrincipal(c.user), ActionPresence, ch)
+	dec := c.rt.Authorizer().Decide(c.rt.UserPrincipal(c.user), ActionPresence, ch)
 	if !dec.Allow {
 		if !dec.Effects.Presence {
 			return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
@@ -1688,7 +1689,7 @@ func (c *Session) handlePresenceQuery(ctx context.Context, in *clientpb.InboundM
 	}
 	return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_Presence{
-			Presence: c.node.presenceSnapshot(ctx, ch),
+			Presence: c.rt.PresenceSnapshot(ctx, ch),
 		}
 	}))
 }
@@ -1719,12 +1720,12 @@ func (c *Session) refreshPresence() {
 		// Ephemeral, wildcard and presence=false subscriptions never
 		// register presence, so their TTL must not be refreshed here either.
 		ephemeral := false
-		if stored, ok := c.node.hub.LookupSubscriber(ch, c); ok {
+		if stored, ok := c.rt.Hub().LookupSubscriber(ch, c); ok {
 			ephemeral = stored.Ephemeral
 		}
-		if !c.node.shouldTrackPresence(ch, ephemeral) {
+		if !c.rt.ShouldTrackPresence(ch, ephemeral) {
 			continue
 		}
-		_ = c.node.presence.Add(c.ctx, ch, info)
+		_ = c.rt.Presence().Add(c.ctx, ch, info)
 	}
 }

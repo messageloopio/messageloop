@@ -12,9 +12,6 @@ const (
 	clusterCommandMetaNewNodeID        = "new_node_id"
 	clusterCommandMetaNewIncarnationID = "new_incarnation_id"
 
-	// clusterEvictRollbackTimeout bounds the re-subscription rollback after a
-	// partially failed session takeover eviction.
-	clusterEvictRollbackTimeout = 5 * time.Second
 	// clusterProjectionAdjustTimeout bounds each shared channel projection
 	// adjustment; failures are logged but never block the eviction/restore path.
 	clusterProjectionAdjustTimeout = 2 * time.Second
@@ -124,24 +121,15 @@ func (n *Node) resumeRemoteSession(ctx context.Context, client *Client, sessionI
 		}
 	}
 
-	client.mu.Lock()
-	client.session = sessionID
-	if snapshot.UserID != "" {
-		client.user = snapshot.UserID
-	}
-	if snapshot.ClientID != "" {
-		client.client = snapshot.ClientID
-	}
-	client.subscribedChannels = make(map[string]struct{}, len(snapshot.Subscriptions))
+	subs := make([]string, 0, len(snapshot.Subscriptions))
 	for _, sub := range snapshot.Subscriptions {
-		client.subscribedChannels[sub.Channel] = struct{}{}
+		subs = append(subs, sub.Channel)
 	}
+	var nextLease uint64
 	if lease.LeaseVersion > 0 {
-		client.clusterLeaseVersion = lease.LeaseVersion + 1
-	} else if client.clusterLeaseVersion == 0 {
-		client.clusterLeaseVersion = 1
+		nextLease = lease.LeaseVersion + 1
 	}
-	client.mu.Unlock()
+	client.AdoptIdentity(sessionID, snapshot.UserID, snapshot.ClientID, subs, nextLease)
 
 	return snapshot, true, nil
 }
@@ -203,9 +191,7 @@ func (n *Node) restoreSessionSubscriptions(ctx context.Context, client *Client, 
 			// resumeRemoteSession pre-seeds the session's channel set from the
 			// snapshot; an unrestored channel must leave it again so the
 			// session view (and Connected.Subscriptions) reflects reality.
-			client.mu.Lock()
-			delete(client.subscribedChannels, sub.Channel)
-			client.mu.Unlock()
+			client.UntrackChannel(sub.Channel)
 			failures = append(failures, clusterRestoreFailure{channel: sub.Channel, err: err})
 			continue
 		}
@@ -244,22 +230,20 @@ func (n *Node) restoreLocalSubscription(ctx context.Context, ch string, sub Subs
 		return nil
 	}
 
-	first, err := n.hub.addSub(ch, sub)
+	first, err := n.hub.AddSub(ch, sub)
 	if err != nil {
 		return err
 	}
 	if first {
 		if err := n.broker.Subscribe(ch); err != nil {
-			n.hub.removeSub(ch, sub.Session)
+			n.hub.RemoveSub(ch, sub.Session)
 			return err
 		}
 		if n.metrics != nil {
 			n.metrics.ActiveChannels.Inc()
 		}
 	}
-	sub.Session.mu.Lock()
-	sub.Session.subscribedChannels[ch] = struct{}{}
-	sub.Session.mu.Unlock()
+	sub.Session.ForceTrackChannel(ch)
 	if n.metrics != nil {
 		n.metrics.SubscriptionsTotal.Inc()
 	}
@@ -275,13 +259,11 @@ func (n *Node) removeLocalSubscriptionOnly(ch string, session *Session, updateMe
 	mu.Lock()
 	defer mu.Unlock()
 
-	last, removed := n.hub.removeSub(ch, session)
+	last, removed := n.hub.RemoveSub(ch, session)
 	if !removed {
 		return false, nil
 	}
-	session.mu.Lock()
-	delete(session.subscribedChannels, ch)
-	session.mu.Unlock()
+	session.UntrackChannel(ch)
 	if last {
 		if err := n.broker.Unsubscribe(ch); err != nil {
 			return true, err

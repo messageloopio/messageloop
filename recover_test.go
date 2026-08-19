@@ -463,7 +463,7 @@ func TestSubscribe_ResubscribeCatchUp(t *testing.T) {
 	first, msgs1 := subscribeAckMsgs(t, client, transport, "sub-1", []*clientpb.Subscription{{Channel: "resub.ch"}})
 	assert.Equal(t, clientpb.RecoverState_RECOVER_STATE_NONE, first.GetRecover())
 	assert.Empty(t, recoverCompletes(msgs1))
-	require.True(t, client.hasSubscription("resub.ch"))
+	require.True(t, client.HasSubscription("resub.ch"))
 	assert.Equal(t, 1, node.Hub().NumSubscribers("resub.ch"))
 
 	_, msgs2 := subscribeAckMsgs(t, client, transport, "sub-2", []*clientpb.Subscription{
@@ -721,9 +721,9 @@ func TestSubscribe_NoCursorResumesFromDeliveredOffset(t *testing.T) {
 
 	// Deliver three live publications: the hub records DeliveredOffset=3.
 	transport.resetMessages()
-	require.NoError(t, node.hub.broadcastPublication("del.ch", &Publication{Channel: "del.ch", Offset: 1, Payload: []byte("a")}))
-	require.NoError(t, node.hub.broadcastPublication("del.ch", &Publication{Channel: "del.ch", Offset: 2, Payload: []byte("b")}))
-	require.NoError(t, node.hub.broadcastPublication("del.ch", &Publication{Channel: "del.ch", Offset: 3, Payload: []byte("c")}))
+	require.NoError(t, node.hub.BroadcastPublication("del.ch", &Publication{Channel: "del.ch", Offset: 1, Payload: []byte("a")}))
+	require.NoError(t, node.hub.BroadcastPublication("del.ch", &Publication{Channel: "del.ch", Offset: 2, Payload: []byte("b")}))
+	require.NoError(t, node.hub.BroadcastPublication("del.ch", &Publication{Channel: "del.ch", Offset: 3, Payload: []byte("c")}))
 	sub, ok := node.Hub().LookupSubscriber("del.ch", client)
 	require.True(t, ok)
 	require.Equal(t, uint64(3), sub.DeliveredOffset)

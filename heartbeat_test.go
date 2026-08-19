@@ -41,7 +41,7 @@ func newHeartbeatClient(t *testing.T, node *Node) (*Client, *capturingTransport)
 // after the node exists and before any client is created on it.
 func disableHeartbeatJitter(t *testing.T, node *Node) {
 	t.Helper()
-	node.heartbeatManager.jitter = func(d time.Duration) time.Duration { return d }
+	node.heartbeatManager.SetJitterForTest(func(d time.Duration) time.Duration { return d })
 }
 
 // waitForOutboundPing blocks until the transport has captured at least one

@@ -1,6 +1,7 @@
 package messageloop
 
 import (
+	"context"
 	"testing"
 
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
@@ -14,6 +15,17 @@ const testProtocolVersion = "2.0.0"
 
 // publishPub builds a Publication from the legacy (payload, isText) tuple so
 // tests keep their intent after the Publication model extension (Task 12).
+// newTestClient is the root copy of the helper that moved with hub_test.go
+// (PR-KA-D14). Leave-root tests keep the same constructor name.
+func newTestClient(t *testing.T, sessionID, userID string) *Session {
+	t.Helper()
+	ctx := context.Background()
+	client, _, err := NewClient(ctx, NewNode(nil), &capturingTransport{}, JSONMarshaler{})
+	require.NoError(t, err)
+	client.ForceTestIDs(sessionID, userID, "client-"+sessionID)
+	return client
+}
+
 func publishPub(payload []byte, isText bool) *Publication {
 	kind := PayloadKindBinary
 	if isText {

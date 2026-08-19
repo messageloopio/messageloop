@@ -369,14 +369,12 @@ func TestClientSession_RPC_ProxyErrorMetadataPassthrough(t *testing.T) {
 	require.NoError(t, err)
 
 	// Simulate authenticated client (same pattern as rpc_timeout_test.go).
-	client.mu.Lock()
-	client.authenticated = true
-	client.client = "test-client"
-	client.mu.Unlock()
-	require.NoError(t, client.Attach(client.attachment))
+	client.MarkAuthenticated()
+	client.SetClientIDForTest("test-client")
+	require.NoError(t, client.Attach(client.Attachment()))
 	transport.messages = nil
 
-	require.NoError(t, client.handleRPC(ctx, &clientpb.InboundMessage{Id: "rpc-1"}, &clientpb.RpcRequest{
+	require.NoError(t, client.HandleRPC(ctx, &clientpb.InboundMessage{Id: "rpc-1"}, &clientpb.RpcRequest{
 		Channel: "rpc.meta",
 		Method:  "boom",
 	}))
@@ -762,7 +760,7 @@ func TestClientSession_HandleMessage_Connect_ResumeRemoteSendsTakeover(t *testin
 	assert.Equal(t, uint64(7), bus.commands[0].LeaseVersion)
 	assert.Equal(t, "user-1", client.UserID())
 	assert.Equal(t, "client-1", client.ClientID())
-	assert.True(t, client.hasSubscription("news"))
+	assert.True(t, client.HasSubscription("news"))
 }
 
 // --- P1-2: deleteClusterSessionState ownership check ---
@@ -950,7 +948,7 @@ func TestClient_Close_RemovesAllSubscriptions(t *testing.T) {
 		assert.Zero(t, node.Hub().NumSubscribers(fmt.Sprintf("bulk-ch-%d", i)),
 			"channel bulk-ch-%d must be cleaned up on close", i)
 	}
-	assert.Empty(t, client.subscriptionList())
+	assert.Empty(t, client.SubscriptionList())
 }
 
 // --- P2-21: pings must throttle the presence/cluster refresh work ---
@@ -1028,7 +1026,7 @@ func TestClient_HandlePing_ThrottlesClusterRefresh(t *testing.T) {
 		"a burst of pings within the interval must trigger exactly one refresh")
 
 	// Simulate the interval elapsing: the next ping refreshes again.
-	client.lastClusterSyncNano.Store(time.Now().Add(-pingClusterRefreshInterval).UnixNano())
+	client.SetLastClusterSyncNanoForTest(time.Now().Add(-pingClusterRefreshInterval).UnixNano())
 	latePing := &clientpb.InboundMessage{
 		Id:       "ping-late",
 		Envelope: &clientpb.InboundMessage_Ping{Ping: &clientpb.Ping{}},
@@ -1072,7 +1070,7 @@ func TestClient_PingRefresh_FencedDisconnects(t *testing.T) {
 	// synchronization point): the sync must detect the fencing and close
 	// the connection with DisconnectStale (3502) without unbinding the
 	// directory lease.
-	client.throttledClusterRefresh()
+	client.ThrottledClusterRefresh()
 	require.Eventually(t, func() bool { return transport.isClosed() }, time.Second, 10*time.Millisecond)
 	assert.Equal(t, DisconnectStale.Code, transport.getCloseReason().Code)
 
@@ -1813,7 +1811,7 @@ func TestNode_AddSubscription_RejectedWhenClientClosed(t *testing.T) {
 	err = node.AddSubscription(ctx, "closed-ch", NewSubscriber(client, false))
 	require.Error(t, err, "subscribing a closed client must fail")
 	assert.Zero(t, node.Hub().NumSubscribers("closed-ch"))
-	assert.Empty(t, client.subscriptionList())
+	assert.Empty(t, client.SubscriptionList())
 }
 
 func TestClient_Close_ConcurrentSubscribe_NoLeak(t *testing.T) {
@@ -1860,7 +1858,7 @@ func TestClient_Close_ConcurrentSubscribe_NoLeak(t *testing.T) {
 		assert.Zero(t, node.Hub().NumSubscribers(fmt.Sprintf("race-ch-%d", j)),
 			"no subscription may leak in the hub after close")
 	}
-	assert.Empty(t, client.subscriptionList())
+	assert.Empty(t, client.SubscriptionList())
 }
 
 // --- Fix task 5 (P1-A4): ClientInfo must not read fields unlocked ---
@@ -2159,8 +2157,8 @@ func TestClient_SubscribeUnroutablePattern_SoftFail(t *testing.T) {
 	require.Equal(t, "good.ch", ack.GetSubscriptions()[0].GetChannel())
 
 	// The unroutable pattern left no hub subscription behind.
-	require.False(t, client.hasSubscription("*.room"))
-	require.True(t, client.hasSubscription("good.ch"))
+	require.False(t, client.HasSubscription("*.room"))
+	require.True(t, client.HasSubscription("good.ch"))
 	require.Empty(t, node.Hub().GetMatchingSubscribers("x.room"),
 		"the unroutable pattern must not be registered in the hub matcher")
 }
@@ -2211,8 +2209,8 @@ func TestClient_ConnectWithUnroutableSubscription_SoftFail(t *testing.T) {
 	}
 	require.Contains(t, channels, "good.ch")
 	require.NotContains(t, channels, "*.room")
-	require.False(t, client.hasSubscription("*.room"))
-	require.True(t, client.hasSubscription("good.ch"))
+	require.False(t, client.HasSubscription("*.room"))
+	require.True(t, client.HasSubscription("good.ch"))
 
 	require.NoError(t, (JSONMarshaler{}).Unmarshal(msgs[2], &out))
 	presence := out.GetPresence()

@@ -1,4 +1,4 @@
-package messageloop
+package session
 
 import (
 	"context"
@@ -162,8 +162,8 @@ func (c *Client) disconnectHeartbeatTimeout() {
 		return
 	}
 	_ = c.Close(DisconnectIdleTimeout)
-	if c.node.metrics != nil {
-		c.node.metrics.HeartbeatIdleDisconnects.Inc()
+	if c.rt.Metrics() != nil {
+		c.rt.Metrics().HeartbeatIdleDisconnects.Inc()
 	}
 }
 

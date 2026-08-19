@@ -1,4 +1,4 @@
-package messageloop
+package session
 
 import (
 	"context"
@@ -93,7 +93,7 @@ type Session struct {
 	// current attachment belongs to a detached connection and must not tear
 	// the session down.
 	loopAtt *Attachment
-	node    *Node
+	rt      Runtime
 
 	// Connection metadata
 	protocol    string // ws, grpc, or quic
@@ -364,10 +364,10 @@ func (s *Session) Fence(reason Disconnect) error {
 	removed := make([]string, 0, len(channels))
 	ephemeralByChannel := make(map[string]bool, len(channels))
 	for _, ch := range channels {
-		if stored, ok := s.node.hub.LookupSubscriber(ch, s); ok {
+		if stored, ok := s.rt.Hub().LookupSubscriber(ch, s); ok {
 			ephemeralByChannel[ch] = stored.Ephemeral
 		}
-		wasRemoved, err := s.node.removeLocalSubscriptionOnly(ch, s, true)
+		wasRemoved, err := s.rt.RemoveLocalSubscriptionOnly(ch, s, true)
 		if err != nil {
 			fenceErrs = append(fenceErrs, fmt.Errorf("remove channel %s: %w", ch, err))
 		}
@@ -375,7 +375,7 @@ func (s *Session) Fence(reason Disconnect) error {
 			continue
 		}
 		removed = append(removed, ch)
-		s.node.adjustClusterChannelSubscriptionsTimeout(ch, -1)
+		s.rt.AdjustClusterChannelSubscriptionsTimeout(ch, -1)
 	}
 
 	if len(fenceErrs) > 0 {
@@ -385,10 +385,10 @@ func (s *Session) Fence(reason Disconnect) error {
 		// and must keep serving. Report the aggregated error.
 		rollbackCtx, cancel := context.WithTimeout(context.Background(), clusterEvictRollbackTimeout)
 		for _, ch := range removed {
-			if err := s.node.restoreLocalSubscription(rollbackCtx, ch, NewSubscriber(s, ephemeralByChannel[ch])); err != nil {
+			if err := s.rt.RestoreLocalSubscription(rollbackCtx, ch, NewSubscriber(s, ephemeralByChannel[ch])); err != nil {
 				fenceErrs = append(fenceErrs, fmt.Errorf("rollback channel %s: %w", ch, err))
 			}
-			s.node.adjustClusterChannelSubscriptionsTimeout(ch, 1)
+			s.rt.AdjustClusterChannelSubscriptionsTimeout(ch, 1)
 		}
 		cancel()
 
@@ -414,7 +414,7 @@ func (s *Session) Fence(reason Disconnect) error {
 		// one: a newer connection may have taken over the session ID between
 		// LookupSession and this removal, and RemoveSessionIfMatches
 		// protects it from being evicted by a stale takeover.
-		s.node.hub.RemoveSessionIfMatches(sessionID, s)
+		s.rt.Hub().RemoveSessionIfMatches(sessionID, s)
 	}
 	if att != nil && att.Transport != nil {
 		if err := att.Transport.Close(reason); err != nil {
@@ -466,10 +466,10 @@ func (s *Session) Close(reason Disconnect) error {
 				defer wg.Done()
 				for ch := range work {
 					ephemeral := false
-					if stored, ok := s.node.hub.LookupSubscriber(ch, s); ok {
+					if stored, ok := s.rt.Hub().LookupSubscriber(ch, s); ok {
 						ephemeral = stored.Ephemeral
 					}
-					s.node.presenceLeave(presCtx, ch, sessionID, userID, ephemeral)
+					s.rt.PresenceLeave(presCtx, ch, sessionID, userID, ephemeral)
 				}
 			}()
 		}
@@ -490,7 +490,7 @@ func (s *Session) Close(reason Disconnect) error {
 			go func() {
 				defer wg.Done()
 				for ch := range work {
-					if err := s.node.RemoveSubscription(ch, s); err != nil {
+					if err := s.rt.RemoveSubscription(ch, s); err != nil {
 						log.WarnContext(context.Background(), "failed to remove subscription during close", "channel", ch, "session", sessionID, "error", err)
 					}
 				}
@@ -507,19 +507,19 @@ func (s *Session) Close(reason Disconnect) error {
 	// session still owns it: a failed resume or a takeover must not evict
 	// the session currently being served.
 	if sessionID != "" {
-		if s.node.hub.RemoveSessionIfMatches(sessionID, s) {
-			if err := s.node.deleteClusterSessionState(context.Background(), sessionID); err != nil {
+		if s.rt.Hub().RemoveSessionIfMatches(sessionID, s) {
+			if err := s.rt.DeleteClusterSessionState(context.Background(), sessionID); err != nil {
 				log.WarnContext(context.Background(), "failed to delete cluster session state", "session", sessionID, "error", err)
 			}
 		}
 	}
 
-	if s.node.metrics != nil && metricsCharged {
-		s.node.metrics.ConnectionsTotal.WithLabelValues(s.TransportLabel()).Dec()
+	if s.rt.Metrics() != nil && metricsCharged {
+		s.rt.Metrics().ConnectionsTotal.WithLabelValues(s.TransportLabel()).Dec()
 	}
 
 	// Notify proxy about disconnection
-	p := s.node.FindProxy("", "disconnect")
+	p := s.rt.FindProxy("", "disconnect")
 	if p != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -554,10 +554,10 @@ func (s *Session) stopHeartbeatLocked() {
 // startHeartbeat starts the heartbeat loop bound to ctx (restarting it after
 // a resume: Detach cancelled the previous loop).
 func (s *Session) startHeartbeat(ctx context.Context) {
-	if s.node == nil || s.node.heartbeatManager == nil {
+	if s.rt == nil || s.rt.Heartbeat() == nil {
 		return
 	}
-	s.node.heartbeatManager.Start(ctx, s)
+	s.rt.Heartbeat().Start(ctx, s)
 }
 
 // writerLoop is the session's single writer goroutine: it drains the send
@@ -686,7 +686,7 @@ func (s *Session) enqueue(ctx context.Context, msg proto.Message) error {
 	// The outbound frame cap applies per queue frame. B3 streams recovery as
 	// single-message replay frames, so there is no Connected batch exemption
 	// anymore: every frame, Connected included, honors MaxMessageSize (§4.3).
-	if max := s.node.MaxMessageSize(); max > 0 && len(*buf) > max {
+	if max := s.rt.MaxMessageSize(); max > 0 && len(*buf) > max {
 		return ErrOutboundTooLarge
 	}
 	frame := &queuedFrame{

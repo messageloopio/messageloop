@@ -113,11 +113,9 @@ func TestRPCTimeout_FastResponse(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Simulate authenticated client
-	client.mu.Lock()
-	client.authenticated = true
-	client.client = "test-client"
-	client.mu.Unlock()
-	assert.NoError(t, client.Attach(client.attachment))
+	client.MarkAuthenticated()
+	client.SetClientIDForTest("test-client")
+	assert.NoError(t, client.Attach(client.Attachment()))
 
 	// Send RPC request
 	s, _ := structpb.NewStruct(map[string]interface{}{"data": "test"})
@@ -136,7 +134,7 @@ func TestRPCTimeout_FastResponse(t *testing.T) {
 	}
 
 	start := time.Now()
-	err = client.handleRPC(ctx, in, rpcReq)
+	err = client.HandleRPC(ctx, in, rpcReq)
 	duration := time.Since(start)
 
 	// Should succeed without timeout
@@ -163,11 +161,9 @@ func TestRPCTimeout_SlowResponse(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Simulate authenticated client
-	client.mu.Lock()
-	client.authenticated = true
-	client.client = "test-client"
-	client.mu.Unlock()
-	assert.NoError(t, client.Attach(client.attachment))
+	client.MarkAuthenticated()
+	client.SetClientIDForTest("test-client")
+	assert.NoError(t, client.Attach(client.Attachment()))
 
 	// Send RPC request
 	s, _ := structpb.NewStruct(map[string]interface{}{"data": "test"})
@@ -186,7 +182,7 @@ func TestRPCTimeout_SlowResponse(t *testing.T) {
 	}
 
 	start := time.Now()
-	err = client.handleRPC(ctx, in, rpcReq)
+	err = client.HandleRPC(ctx, in, rpcReq)
 	duration := time.Since(start)
 
 	// Should not return error (error is sent to client via Send)

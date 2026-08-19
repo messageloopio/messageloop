@@ -296,9 +296,7 @@ func (n *Node) handleClusterTakeoverCommand(ctx context.Context, cmd *ClusterCom
 		return result
 	}
 
-	client.mu.RLock()
-	currentLeaseVersion := client.clusterLeaseVersion
-	client.mu.RUnlock()
+	currentLeaseVersion := client.SnapshotIdentity().LeaseVersion
 	if currentLeaseVersion == 0 {
 		currentLeaseVersion = 1
 	}

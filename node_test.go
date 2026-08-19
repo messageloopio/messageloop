@@ -119,10 +119,8 @@ func TestNode_HandlePublication(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient() error = %v", err)
 	}
-	client.mu.Lock()
-	client.authenticated = true
-	client.mu.Unlock()
-	require.NoError(t, client.Attach(client.attachment))
+	client.MarkAuthenticated()
+	require.NoError(t, client.Attach(client.Attachment()))
 
 	_ = node.AddClient(client)
 	_ = node.AddSubscription(ctx, "test-channel", Subscriber{Session: client, Ephemeral: false})
@@ -164,10 +162,8 @@ func TestNode_Publish(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient() error = %v", err)
 	}
-	client.mu.Lock()
-	client.authenticated = true
-	client.mu.Unlock()
-	require.NoError(t, client.Attach(client.attachment))
+	client.MarkAuthenticated()
+	require.NoError(t, client.Attach(client.Attachment()))
 
 	_ = node.AddClient(client)
 	_ = node.AddSubscription(ctx, "test-channel", Subscriber{Session: client, Ephemeral: false})
@@ -285,9 +281,7 @@ func TestNode_AddClient(t *testing.T) {
 
 	// Check that client was added to hub
 	hub := node.Hub()
-	hub.mu.RLock()
-	_, exists := hub.sessions[client.SessionID()]
-	hub.mu.RUnlock()
+	exists := hub.LookupSession(client.SessionID()) != nil
 
 	if !exists {
 		t.Error("Client should be added to hub sessions")
@@ -604,10 +598,8 @@ func TestNode_ConcurrentPublish(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient() error = %v", err)
 	}
-	client.mu.Lock()
-	client.authenticated = true
-	client.mu.Unlock()
-	require.NoError(t, client.Attach(client.attachment))
+	client.MarkAuthenticated()
+	require.NoError(t, client.Attach(client.Attachment()))
 
 	_ = node.AddClient(client)
 	_ = node.AddSubscription(ctx, "test-channel", Subscriber{Session: client, Ephemeral: false})
@@ -704,19 +696,15 @@ func TestNode_Publish_MultipleChannels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient() error = %v", err)
 	}
-	client1.mu.Lock()
-	client1.authenticated = true
-	client1.mu.Unlock()
-	require.NoError(t, client1.Attach(client1.attachment))
+	client1.MarkAuthenticated()
+	require.NoError(t, client1.Attach(client1.Attachment()))
 
 	client2, _, err := NewClient(ctx, node, transport2, JSONMarshaler{})
 	if err != nil {
 		t.Fatalf("NewClient() error = %v", err)
 	}
-	client2.mu.Lock()
-	client2.authenticated = true
-	client2.mu.Unlock()
-	require.NoError(t, client2.Attach(client2.attachment))
+	client2.MarkAuthenticated()
+	require.NoError(t, client2.Attach(client2.Attachment()))
 
 	_ = node.AddClient(client1)
 	_ = node.AddClient(client2)
@@ -805,10 +793,8 @@ func BenchmarkNode_Publish(b *testing.B) {
 	ctx := context.Background()
 
 	client, _, _ := NewClient(ctx, node, transport, JSONMarshaler{})
-	client.mu.Lock()
-	client.authenticated = true
-	client.mu.Unlock()
-	_ = client.Attach(client.attachment)
+	client.MarkAuthenticated()
+	_ = client.Attach(client.Attachment())
 
 	_ = node.AddClient(client)
 	_ = node.AddSubscription(ctx, "test-channel", Subscriber{Session: client, Ephemeral: false})

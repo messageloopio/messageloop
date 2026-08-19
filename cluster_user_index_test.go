@@ -58,9 +58,7 @@ func TestExpandUserSessions_LocalOnlyWithoutCluster(t *testing.T) {
 	// Local hub entries are still trusted: a client whose UserID() no longer
 	// matches the request (stale shard entry) is filtered by the authoritative
 	// client check.
-	client.mu.Lock()
-	client.user = "other"
-	client.mu.Unlock()
+	client.SetUserIDForTest("other")
 	assert.Empty(t, node.ExpandUserSessions(ctx, "U"),
 		"Client.UserID is authoritative even for local hub entries")
 
