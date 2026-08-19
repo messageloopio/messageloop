@@ -59,6 +59,12 @@ var (
 	// exceeds MaxMessageSize (§7: the outbound path honors the same cap as
 	// the inbound path).
 	ErrOutboundTooLarge = errors.New("outbound frame exceeds MaxMessageSize")
+	// errMarshalerChanged is returned by enqueueBytes when the session's
+	// current attachment encoding no longer matches the marshaler the frame
+	// bytes were produced with (a resume/reattach swapped the attachment
+	// between marshaling and enqueueing). Callers holding the original
+	// message re-marshal and retry; it never reaches clients.
+	errMarshalerChanged = errors.New("marshaler changed during send")
 )
 
 // Session is the recoverable logical connection (KD-K2). The Hub holds this
@@ -672,17 +678,25 @@ func (s *Session) enqueue(ctx context.Context, msg proto.Message) error {
 	}
 	buf := getBuffer()
 	defer putBuffer(buf)
-	s.mu.RLock()
-	marshaler := s.attachmentMarshalerLocked()
-	s.mu.RUnlock()
-	frameBytes, err := marshaler.MarshalAppend((*buf)[:0], msg)
-	if err != nil {
-		return err
+	for {
+		s.mu.RLock()
+		marshaler := s.attachmentMarshalerLocked()
+		s.mu.RUnlock()
+		frameBytes, err := marshaler.MarshalAppend((*buf)[:0], msg)
+		if err != nil {
+			return err
+		}
+		*buf = frameBytes
+		// The queued frame is written asynchronously by the writer goroutine, so
+		// the bytes must outlive the pooled buffer: copy before enqueueing.
+		err = s.enqueueBytes(ctx, append([]byte(nil), (*buf)...), outboundFrameClass(msg), marshaler)
+		if !errors.Is(err, errMarshalerChanged) {
+			return err
+		}
+		// A resume/reattach swapped the attachment to a different encoding
+		// between marshaling and enqueueing: re-marshal with the current
+		// marshaler and retry.
 	}
-	*buf = frameBytes
-	// The queued frame is written asynchronously by the writer goroutine, so
-	// the bytes must outlive the pooled buffer: copy before enqueueing.
-	return s.enqueueBytes(ctx, append([]byte(nil), (*buf)...), outboundFrameClass(msg))
 }
 
 // enqueueBytes queues an already-marshaled frame and waits for its write
@@ -690,7 +704,12 @@ func (s *Session) enqueue(ctx context.Context, msg proto.Message) error {
 // which serializes a shared publication once per wire encoding and hands the
 // same bytes to every subscriber with that encoding — the caller must not
 // mutate frameBytes until all enqueueBytes calls sharing it have returned.
-func (s *Session) enqueueBytes(ctx context.Context, frameBytes []byte, control bool) error {
+//
+// marshaler must be the marshaler frameBytes were produced with; it is checked
+// against the session's current attachment under the same lock that reads the
+// attachment/queue/state, so a mid-flight encoding change fails with
+// errMarshalerChanged instead of delivering bytes in the wrong encoding.
+func (s *Session) enqueueBytes(ctx context.Context, frameBytes []byte, control bool, marshaler Marshaler) error {
 	// The outbound frame cap applies per queue frame. B3 streams recovery as
 	// single-message replay frames, so there is no Connected batch exemption
 	// anymore: every frame, Connected included, honors MaxMessageSize (§4.3).
@@ -698,6 +717,10 @@ func (s *Session) enqueueBytes(ctx context.Context, frameBytes []byte, control b
 		return ErrOutboundTooLarge
 	}
 	s.mu.RLock()
+	if s.attachmentMarshalerLocked() != marshaler {
+		s.mu.RUnlock()
+		return errMarshalerChanged
+	}
 	att := s.attachment
 	out := s.out
 	state := s.state

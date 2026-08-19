@@ -147,9 +147,16 @@ func (c *Session) Send(ctx context.Context, msg *clientpb.OutboundMessage) error
 // sendFrame enqueues an already-marshaled frame. The broadcast fan-out uses
 // it to serialize a shared publication once per wire encoding instead of once
 // per subscriber; frameBytes must stay unchanged until the call returns.
-func (c *Session) sendFrame(ctx context.Context, frameBytes []byte, control bool) error {
+// marshaler is the marshaler frameBytes were produced with: if the session's
+// attachment changed to a different encoding in the meantime (resume/reattach
+// race), the send falls back to re-marshaling msg with the current encoding.
+func (c *Session) sendFrame(ctx context.Context, frameBytes []byte, control bool, marshaler Marshaler, msg *clientpb.OutboundMessage) error {
 	s := c.canonical()
-	return s.enqueueBytes(ctx, frameBytes, control)
+	err := s.enqueueBytes(ctx, frameBytes, control, marshaler)
+	if errors.Is(err, errMarshalerChanged) {
+		return s.enqueue(ctx, msg)
+	}
+	return err
 }
 
 // currentMarshaler returns the marshaler of the session's current attachment.

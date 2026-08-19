@@ -420,7 +420,7 @@ func (h *Hub) BroadcastPublication(ch string, pub *Publication) error {
 		m := clientEncodings[i]
 		err, failed := marshalErrs[m]
 		if !failed {
-			err = client.sendFrame(ctx, frames[m], control)
+			err = client.sendFrame(ctx, frames[m], control, m, out)
 		}
 		if err != nil {
 			log.ErrorContext(ctx, "send publication error", err)
