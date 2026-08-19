@@ -36,6 +36,11 @@
 - **修复建议**
 - **置信度**：high / medium / low（low 表示需要主 agent 重点核实）
 
+## 评审报告
+
+- `summary.md`：第一轮评审（2026-08-12）原始报告集。
+- `2026-08-19-comprehensive-review.md`：第二轮全面评审（D15 重构完成后），9 个维度并行评审的核实汇总，含 Critical 4 项。
+
 ## 评审基线
 
 评审开始前要求 agent 先跑 `go build ./...` 和 `go test ./...`（TS SDK 跑 `npm test`）确认基线是否全绿，findings 中区分"基线已红"与"代码评审发现"两类问题。
