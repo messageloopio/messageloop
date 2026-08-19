@@ -131,10 +131,8 @@ func TestNode_HandlePublication(t *testing.T) {
 		t.Fatalf("Publish() error = %v", err)
 	}
 
-	// Client should receive a message
-	if transport.getMessageCount() != 1 {
-		t.Errorf("Client should receive 1 message, got %d", transport.getMessageCount())
-	}
+	// Client should receive a message (delivery is asynchronous).
+	waitMessageCount(t, transport, 1)
 }
 
 func TestNode_HandlePublication_NoSubscribers(t *testing.T) {
@@ -176,10 +174,8 @@ func TestNode_Publish(t *testing.T) {
 		t.Fatalf("Publish() error = %v", err)
 	}
 
-	// Client should receive a message
-	if transport.getMessageCount() != 1 {
-		t.Errorf("Client should receive 1 message, got %d", transport.getMessageCount())
-	}
+	// Client should receive a message (delivery is asynchronous).
+	waitMessageCount(t, transport, 1)
 }
 
 func TestNode_Publish_WithOptions(t *testing.T) {
@@ -249,9 +245,10 @@ func TestNode_PublishPresenceJoin_DistinctMessageIDs(t *testing.T) {
 	node.PublishPresenceJoin("presence-id.ch", "client-1", "user-1")
 	node.PublishPresenceJoin("presence-id.ch", "client-2", "user-2")
 
-	require.Len(t, transport.messages, 2)
-	id1 := capturedPublicationID(t, transport.messages[0])
-	id2 := capturedPublicationID(t, transport.messages[1])
+	waitMessageCount(t, transport, 2)
+	msgs := transport.snapshotMessages()
+	id1 := capturedPublicationID(t, msgs[0])
+	id2 := capturedPublicationID(t, msgs[1])
 	assert.NotEqual(t, id1, id2, "each presence event must carry a distinct message ID")
 	assert.NotEqual(t, presenceChannel("presence-id.ch")+"-0", id1,
 		"transient events must not reuse the channel-0 ID")
@@ -621,11 +618,9 @@ func TestNode_ConcurrentPublish(t *testing.T) {
 
 	wg.Wait()
 
-	// Client should receive messages (may be less due to race conditions, but should be close)
-	count := transport.getMessageCount()
-	if count < numPubs/2 {
-		t.Errorf("Client should receive at least half of %d messages, got %d", numPubs, count)
-	}
+	// All 100 publications land on the same channel's dispatch shard and are
+	// delivered in order (delivery is asynchronous).
+	waitMessageCount(t, transport, numPubs)
 }
 
 func TestNode_ConcurrentSubscriptions(t *testing.T) {
@@ -718,10 +713,8 @@ func TestNode_Publish_MultipleChannels(t *testing.T) {
 	// Publish to channel-1
 	_, _ = node.Publish("channel-1", publishPub([]byte("payload-1"), false))
 
-	// Only client1 should receive
-	if transport1.getMessageCount() != 1 {
-		t.Errorf("client1 should receive 1 message, got %d", transport1.getMessageCount())
-	}
+	// Only client1 should receive (delivery is asynchronous).
+	waitMessageCount(t, transport1, 1)
 	if transport2.getMessageCount() != 0 {
 		t.Errorf("client2 should receive 0 messages, got %d", transport2.getMessageCount())
 	}

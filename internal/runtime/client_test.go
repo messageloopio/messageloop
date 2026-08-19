@@ -77,6 +77,16 @@ func (c *capturingTransport) getMessageCount() int {
 	return len(c.messages)
 }
 
+// waitMessageCount waits until the transport captured n messages. Broker
+// delivery is asynchronous (per-channel dispatch shards), so tests must wait
+// instead of asserting counts right after Publish returns.
+func waitMessageCount(t *testing.T, transport *capturingTransport, n int) {
+	t.Helper()
+	require.Eventually(t, func() bool { return transport.getMessageCount() == n },
+		2*time.Second, time.Millisecond,
+		"messages: got %d, want %d", transport.getMessageCount(), n)
+}
+
 // resetMessages clears the captured messages under the transport lock.
 // Concurrent fan-out (e.g. presence events between simultaneous
 // subscribers) may write to the transport while a test resets it, so the
@@ -1332,7 +1342,7 @@ func TestNode_Connect_RecoveryIDsMatchRealtime(t *testing.T) {
 		_, err := node.Broker().Publish("recovery.ch", publishPub([]byte(fmt.Sprintf("m%d", i+1)), false))
 		require.NoError(t, err)
 	}
-	require.Equal(t, 3, transport1.getMessageCount())
+	waitMessageCount(t, transport1, 3)
 	for i := 0; i < 3; i++ {
 		var out clientpb.OutboundMessage
 		require.NoError(t, JSONMarshaler{}.Unmarshal(transport1.getMessage(i), &out))

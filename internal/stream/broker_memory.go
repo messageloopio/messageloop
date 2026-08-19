@@ -3,6 +3,7 @@ package stream
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -16,6 +17,30 @@ import (
 )
 
 const defaultMemoryHistorySize = 256
+
+const (
+	// dispatchShardCount is the number of serial delivery workers. Delivery is
+	// sharded by channel, so per-channel publication order is preserved while
+	// a stalled handler only stalls the channels hashing to the same shard.
+	dispatchShardCount = 64
+	// dispatchShardDepth bounds queued-but-undelivered publications per shard;
+	// a full shard applies backpressure by blocking the publishing caller.
+	dispatchShardDepth = 256
+)
+
+// dispatchTask is one accepted publication awaiting delivery to the handler.
+type dispatchTask struct {
+	ch  string
+	pub *Publication
+}
+
+// chShard maps a channel to its delivery shard (same channel → same shard →
+// in-order delivery by that shard's single worker).
+func chShard(ch string) uint64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(ch))
+	return h.Sum64() % dispatchShardCount
+}
 
 // MemoryBrokerOptions configures the memory broker.
 type MemoryBrokerOptions struct {
@@ -31,16 +56,21 @@ func NewMemoryBroker(opts MemoryBrokerOptions) Broker {
 	if size == 0 {
 		size = defaultMemoryHistorySize
 	}
-	return &memoryBroker{
+	b := &memoryBroker{
 		historySize: size,
 		history:     make(map[string]*channelHistory),
 		subs:        make(map[string]int),
 		wcCounts:    make(map[string]int),
 		wcHandles:   make(map[string]*topics.Subscription),
 		matcher:     topics.NewCSTrieMatcher(),
+		done:        make(chan struct{}),
 		ready:       make(chan struct{}),
 		epoch:       uuid.NewString(),
 	}
+	for i := range b.dispatch {
+		b.dispatch[i] = make(chan dispatchTask, dispatchShardDepth)
+	}
+	return b
 }
 
 // channelHistory is a fixed-capacity ring buffer for one channel.
@@ -68,17 +98,68 @@ type memoryBroker struct {
 	wcCounts  map[string]int                 // wildcard pattern refcount
 	wcHandles map[string]*topics.Subscription // pattern -> matcher handle
 	matcher   topics.Matcher                 // wildcard pattern matching
+	dispatch  [dispatchShardCount]chan dispatchTask
+	done      chan struct{} // closed when Start's context is cancelled
 	ready     chan struct{}
 	once      sync.Once
 }
 
-// Start stores the handler and blocks until ctx is cancelled.
-// The memory broker requires no background goroutines.
+// Start stores the handler, runs the delivery workers, and blocks until ctx
+// is cancelled. Publications accepted but not yet delivered at shutdown are
+// dropped; their history entries stand, so recovering clients still see them.
 func (b *memoryBroker) Start(ctx context.Context, handler PublicationHandler) error {
 	b.handler.Store(&handler)
 	b.once.Do(func() { close(b.ready) })
+	var wg sync.WaitGroup
+	for i := range b.dispatch {
+		wg.Add(1)
+		go func(q chan dispatchTask) {
+			defer wg.Done()
+			for {
+				select {
+				case task := <-q:
+					b.deliver(task.ch, task.pub)
+				case <-ctx.Done():
+					return
+				}
+			}
+		}(b.dispatch[i])
+	}
 	<-ctx.Done()
+	close(b.done)
+	wg.Wait()
 	return nil
+}
+
+// deliver invokes the publication handler for one accepted publication. The
+// handler's error or panic never negates the publish: the offset was already
+// assigned and the history entry written, so failures are logged only.
+func (b *memoryBroker) deliver(ch string, pub *Publication) {
+	ctx := context.Background()
+	defer func() {
+		if r := recover(); r != nil {
+			log.ErrorContext(ctx, "memory broker: publish handler panicked; publish stands",
+				fmt.Errorf("panic: %v", r), "channel", ch, "offset", pub.Offset)
+		}
+	}()
+	handler := b.handler.Load()
+	if handler == nil {
+		return
+	}
+	if err := (*handler)(ch, pub); err != nil {
+		log.ErrorContext(ctx, "memory broker: publish handler failed; publish stands",
+			err, "channel", ch, "offset", pub.Offset)
+	}
+}
+
+// enqueue hands an accepted publication to the channel's delivery shard. It
+// blocks when the shard queue is full (backpressure) and drops the delivery
+// once the broker is shutting down — the history entry stands either way.
+func (b *memoryBroker) enqueue(ch string, pub *Publication) {
+	select {
+	case b.dispatch[chShard(ch)] <- dispatchTask{ch: ch, pub: pub}:
+	case <-b.done:
+	}
 }
 
 // Ready returns a channel that is closed once the handler has been registered.
@@ -174,10 +255,14 @@ func (b *memoryBroker) interested(ch string) bool {
 }
 
 // Publish writes the publication to the channel ring and, only when this
-// node is interested (exact or wildcard match), delivers it to the handler.
-// The handler's error or panic never negates the publish: the offset is
-// already assigned and the history entry written, so the failure is logged
-// and Publish still returns (offset, nil).
+// node is interested (exact or wildcard match), hands it to the channel's
+// delivery shard for asynchronous handler invocation: a slow subscriber can
+// never stall the publishing caller behind a write (a full shard queue
+// applies bounded backpressure instead). Delivery is serialized per channel,
+// so subscribers observe publications in offset order. The handler's error or
+// panic never negates the publish: the offset is already assigned and the
+// history entry written, so the failure is logged and Publish still returns
+// (offset, nil).
 func (b *memoryBroker) Publish(ch string, pub *Publication) (uint64, error) {
 	// Channels with explicit empty segments ("a.", ".a", "a..b") and the
 	// empty channel are rejected up front so malformed channels never produce
@@ -185,22 +270,29 @@ func (b *memoryBroker) Publish(ch string, pub *Publication) (uint64, error) {
 	if err := topics.ValidateTopic(ch); err != nil {
 		return 0, err
 	}
-	b.mu.Lock()
+	// Fast path: the ring already exists for this channel — a read lock is
+	// enough, so concurrent publishes on distinct channels never serialize.
+	b.mu.RLock()
 	h, ok := b.history[ch]
+	b.mu.RUnlock()
 	if !ok {
-		// The ring capacity is decided on the channel's first publish: a
-		// per-publication HistorySize wins, otherwise the broker global.
-		// Existing rings are never resized by later HistorySize values;
-		// they are reclaimed (and re-created with the new size) only when
-		// the last subscriber leaves and the ring is empty.
-		cap := b.historySize
-		if pub.HistorySize > 0 {
-			cap = pub.HistorySize
+		b.mu.Lock()
+		h, ok = b.history[ch]
+		if !ok {
+			// The ring capacity is decided on the channel's first publish: a
+			// per-publication HistorySize wins, otherwise the broker global.
+			// Existing rings are never resized by later HistorySize values;
+			// they are reclaimed (and re-created with the new size) only when
+			// the last subscriber leaves and the ring is empty.
+			cap := b.historySize
+			if pub.HistorySize > 0 {
+				cap = pub.HistorySize
+			}
+			h = &channelHistory{entries: make([]*Publication, cap), size: cap}
+			b.history[ch] = h
 		}
-		h = &channelHistory{entries: make([]*Publication, cap), size: cap}
-		b.history[ch] = h
+		b.mu.Unlock()
 	}
-	b.mu.Unlock()
 
 	if pub.HistoryTTL != 0 {
 		// The memory broker has no history TTL; the warning is emitted once
@@ -231,20 +323,8 @@ func (b *memoryBroker) Publish(ch string, pub *Publication) (uint64, error) {
 	}
 	h.mu.Unlock()
 
-	if handler := b.handler.Load(); handler != nil && b.interested(ch) {
-		ctx := context.Background()
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.ErrorContext(ctx, "memory broker: publish handler panicked; publish stands",
-						fmt.Errorf("panic: %v", r), "channel", ch, "offset", offset)
-				}
-			}()
-			if err := (*handler)(ch, &stored); err != nil {
-				log.ErrorContext(ctx, "memory broker: publish handler failed; publish stands",
-					err, "channel", ch, "offset", offset)
-			}
-		}()
+	if b.handler.Load() != nil && b.interested(ch) {
+		b.enqueue(ch, &stored)
 	}
 	return offset, nil
 }
@@ -291,7 +371,9 @@ func (b *memoryBroker) PublishOccupancy(ch string, evt occupancy.OccupancyEvent)
 // PublishTransient delivers payload to subscribers in real time without
 // writing history. The offset is always 0 because transient publications
 // have no history entry. Like Publish, the handler is only invoked when this
-// node is interested, and a handler error/panic never propagates.
+// node is interested, and a handler error/panic never propagates. Delivery
+// shares the channel's delivery shard with Publish, so transient and
+// persisted publications stay ordered relative to each other per channel.
 func (b *memoryBroker) PublishTransient(ch string, pub *Publication) error {
 	if err := topics.ValidateTopic(ch); err != nil {
 		return err
@@ -301,20 +383,8 @@ func (b *memoryBroker) PublishTransient(ch string, pub *Publication) error {
 	stored.Offset = 0
 	stored.Epoch = b.epoch
 	stored.Time = time.Now().UnixMilli()
-	if handler := b.handler.Load(); handler != nil && b.interested(ch) {
-		ctx := context.Background()
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.ErrorContext(ctx, "memory broker: transient handler panicked; publish stands",
-						fmt.Errorf("panic: %v", r), "channel", ch)
-				}
-			}()
-			if err := (*handler)(ch, &stored); err != nil {
-				log.ErrorContext(ctx, "memory broker: transient handler failed; publish stands",
-					err, "channel", ch)
-			}
-		}()
+	if b.handler.Load() != nil && b.interested(ch) {
+		b.enqueue(ch, &stored)
 	}
 	return nil
 }

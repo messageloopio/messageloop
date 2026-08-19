@@ -80,6 +80,15 @@ func (c *collectedPubs) last() *Publication {
 	return c.pubs[len(c.pubs)-1]
 }
 
+// waitCount waits for n handler invocations. Delivery is asynchronous
+// (per-channel dispatch shards), so tests must wait instead of asserting
+// counts right after Publish returns.
+func (c *collectedPubs) waitCount(t *testing.T, n int) {
+	t.Helper()
+	require.Eventually(t, func() bool { return c.count() == n }, 2*time.Second, time.Millisecond,
+		"handler invocations: got %d, want %d", c.count(), n)
+}
+
 // --- interface / lifecycle ---
 
 func TestNewMemoryBroker(t *testing.T) {
@@ -203,9 +212,7 @@ func TestMemoryBroker_Publish_CallsHandler(t *testing.T) {
 	if offset == 0 {
 		t.Error("expected non-zero offset")
 	}
-	if cp.count() != 1 {
-		t.Fatalf("handler called %d times, want 1", cp.count())
-	}
+	cp.waitCount(t, 1)
 	pub := cp.last()
 	if pub.Channel != "ch" {
 		t.Errorf("Channel = %q, want \"ch\"", pub.Channel)
@@ -224,10 +231,12 @@ func TestMemoryBroker_Publish_Kind(t *testing.T) {
 	require.NoError(t, b.Subscribe("ch"))
 
 	_, _ = b.Publish("ch", publishPub([]byte("text"), true))
+	cp.waitCount(t, 1)
 	if pub := cp.last(); pub.Kind != PayloadKindText {
 		t.Error("Kind should be Text")
 	}
 	_, _ = b.Publish("ch", publishPub([]byte("bin"), false))
+	cp.waitCount(t, 2)
 	if pub := cp.last(); pub.Kind != PayloadKindBinary {
 		t.Error("Kind should be Binary")
 	}
@@ -242,6 +251,7 @@ func TestMemoryBroker_Publish_TimeSet(t *testing.T) {
 	_, _ = b.Publish("ch", publishPub([]byte("x"), false))
 	after := time.Now().UnixMilli()
 
+	cp.waitCount(t, 1)
 	pub := cp.last()
 	if pub.Time < before || pub.Time > after {
 		t.Errorf("Time %d not in [%d, %d]", pub.Time, before, after)
@@ -295,9 +305,7 @@ func TestMemoryBroker_Publish_MultipleChannels(t *testing.T) {
 		require.NoError(t, b.Subscribe(ch))
 		_, _ = b.Publish(ch, publishPub([]byte(ch), false))
 	}
-	if cp.count() != 3 {
-		t.Errorf("got %d publications, want 3", cp.count())
-	}
+	cp.waitCount(t, 3)
 }
 
 // TestMemoryBroker_Publish_RejectsMalformedChannel pins B1: the publish entry
@@ -335,9 +343,7 @@ func TestMemoryBroker_Publish_ConcurrentSafe(t *testing.T) {
 	}
 	wg.Wait()
 
-	if cp.count() != n {
-		t.Errorf("got %d publications, want %d", cp.count(), n)
-	}
+	cp.waitCount(t, n)
 }
 
 // --- offset monotonicity ---
@@ -576,8 +582,9 @@ func TestMemoryBroker_WildcardInterest(t *testing.T) {
 	_, err = b.Publish("stocks.us", publishPub([]byte("us"), false))
 	require.NoError(t, err)
 
-	require.Equal(t, 1, cp.count(), "only the wildcard-matched publish may reach the handler")
-	require.Equal(t, "forex.eur", cp.last().Channel)
+	cp.waitCount(t, 1)
+	require.Equal(t, "forex.eur", cp.last().Channel,
+		"only the wildcard-matched publish may reach the handler")
 }
 
 // TestMemoryBroker_WildcardUnsubscribeToZero verifies a wildcard pattern is
@@ -591,10 +598,12 @@ func TestMemoryBroker_WildcardUnsubscribeToZero(t *testing.T) {
 	require.NoError(t, b.Unsubscribe("forex.*"))
 	_, err := b.Publish("forex.eur", publishPub([]byte("eur"), false))
 	require.NoError(t, err)
-	require.Equal(t, 1, cp.count(), "a refcounted wildcard still has interest while one subscriber remains")
+	cp.waitCount(t, 1)
 	require.NoError(t, b.Unsubscribe("forex.*"))
 	_, err = b.Publish("forex.eur", publishPub([]byte("eur2"), false))
 	require.NoError(t, err)
+	// Interest is gone, so the second publish never reaches a dispatch queue;
+	// an immediate check is safe.
 	require.Equal(t, 1, cp.count(), "interest must be gone after the last wildcard unsubscribe")
 }
 
@@ -608,8 +617,9 @@ func TestMemoryBroker_ExactAndWildcardInterest(t *testing.T) {
 
 	_, err := b.Publish("im.room.1", publishPub([]byte("m1"), false))
 	require.NoError(t, err)
-	require.Equal(t, 1, cp.count(), "Publish(\"im.room.1\") must reach the handler with only Subscribe(\"im.**\")")
-	require.Equal(t, "im.room.1", cp.last().Channel)
+	cp.waitCount(t, 1)
+	require.Equal(t, "im.room.1", cp.last().Channel,
+		"Publish(\"im.room.1\") must reach the handler with only Subscribe(\"im.**\")")
 }
 
 // TestMemoryBroker_History_HeadTrimmed verifies §10.4: with a size-2 ring
@@ -786,14 +796,14 @@ func TestMemoryBroker_Subscribe_RejectsUnroutablePatterns(t *testing.T) {
 	require.NoError(t, b.Subscribe("im.**"))
 	_, err = b.Publish("im.room.1", publishPub([]byte("m2"), false))
 	require.NoError(t, err)
-	require.Equal(t, 1, cp.count(), "Subscribe(\"im.**\") must deliver im.room.1")
-	require.Equal(t, "im.room.1", cp.last().Channel)
+	cp.waitCount(t, 1)
+	require.Equal(t, "im.room.1", cp.last().Channel, "Subscribe(\"im.**\") must deliver im.room.1")
 
 	// And the zero-segment case still matches: Publish("im") reaches the
 	// handler under the "im.**" interest.
 	_, err = b.Publish("im", publishPub([]byte("m3"), false))
 	require.NoError(t, err)
-	require.Equal(t, 2, cp.count(), "Subscribe(\"im.**\") must deliver \"im\" too")
+	cp.waitCount(t, 2)
 }
 
 // TestMemoryBroker_PublishOccupancy_InterestGate pins B2 §5.2: the memory

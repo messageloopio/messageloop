@@ -33,19 +33,24 @@ func TestHub_Broadcast_RecordsDeliveredOffset(t *testing.T) {
 	offset, err := node.Publish("off.ch", publishPub([]byte("m1"), false))
 	require.NoError(t, err)
 	require.Equal(t, uint64(1), offset)
-	sub, ok := node.hub.LookupSubscriber("off.ch", client)
-	require.True(t, ok)
-	require.Equal(t, uint64(1), sub.DeliveredOffset, "broadcast must record the delivered offset")
+	// Delivery (and with it the offset bookkeeping) is asynchronous.
+	require.Eventually(t, func() bool {
+		sub, ok := node.hub.LookupSubscriber("off.ch", client)
+		return ok && sub.DeliveredOffset == 1
+	}, 2*time.Second, time.Millisecond, "broadcast must record the delivered offset")
 
 	offset, err = node.Publish("off.ch", publishPub([]byte("m2"), false))
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), offset)
-	sub, _ = node.hub.LookupSubscriber("off.ch", client)
-	require.Equal(t, uint64(2), sub.DeliveredOffset, "offsets must keep advancing")
+	require.Eventually(t, func() bool {
+		sub, ok := node.hub.LookupSubscriber("off.ch", client)
+		return ok && sub.DeliveredOffset == 2
+	}, 2*time.Second, time.Millisecond, "offsets must keep advancing")
 
 	// Transient publications (offset 0) never update the bookkeeping.
 	require.NoError(t, node.PublishTransient("off.ch", publishPub([]byte("evt"), false)))
-	sub, _ = node.hub.LookupSubscriber("off.ch", client)
+	sub, ok := node.hub.LookupSubscriber("off.ch", client)
+	require.True(t, ok)
 	require.Equal(t, uint64(2), sub.DeliveredOffset, "transient publications must not move the offset")
 }
 
@@ -90,16 +95,18 @@ func TestNode_RemoveSubscription_ClearsDeliveredOffset(t *testing.T) {
 
 	_, err = node.Publish("clean.ch", publishPub([]byte("m1"), false))
 	require.NoError(t, err)
-	sub, ok := node.hub.LookupSubscriber("clean.ch", client)
-	require.True(t, ok)
-	require.Equal(t, uint64(1), sub.DeliveredOffset)
+	// Delivery (and with it the offset bookkeeping) is asynchronous.
+	require.Eventually(t, func() bool {
+		sub, ok := node.hub.LookupSubscriber("clean.ch", client)
+		return ok && sub.DeliveredOffset == 1
+	}, 2*time.Second, time.Millisecond)
 
 	require.NoError(t, node.RemoveSubscription("clean.ch", client))
-	_, ok = node.hub.LookupSubscriber("clean.ch", client)
+	_, ok := node.hub.LookupSubscriber("clean.ch", client)
 	require.False(t, ok, "unsubscribe must remove the subscription record")
 
 	require.NoError(t, node.AddSubscription(ctx, "clean.ch", NewSubscriber(client, false)))
-	sub, ok = node.hub.LookupSubscriber("clean.ch", client)
+	sub, ok := node.hub.LookupSubscriber("clean.ch", client)
 	require.True(t, ok)
 	require.Zero(t, sub.DeliveredOffset, "re-subscription must not inherit the old offset")
 }
@@ -146,16 +153,18 @@ func TestNode_EvictSessionForTakeover_RollbackClearsDeliveredOffsets(t *testing.
 
 	_, err = node.Publish("evict.off", publishPub([]byte("m1"), false))
 	require.NoError(t, err)
-	sub, ok := node.hub.LookupSubscriber("evict.off", client)
-	require.True(t, ok)
-	require.Equal(t, uint64(1), sub.DeliveredOffset)
+	// Delivery (and with it the offset bookkeeping) is asynchronous.
+	require.Eventually(t, func() bool {
+		sub, ok := node.hub.LookupSubscriber("evict.off", client)
+		return ok && sub.DeliveredOffset == 1
+	}, 2*time.Second, time.Millisecond)
 
 	// Swap in a broker that fails Unsubscribe so the fence rolls back.
 	node.SetBroker(&evictTestBroker{failUnsubCh: "evict.off", subscribed: make(map[string]bool)})
 	err = client.Fence(DisconnectStale)
 	require.Error(t, err)
 
-	sub, ok = node.hub.LookupSubscriber("evict.off", client)
+	sub, ok := node.hub.LookupSubscriber("evict.off", client)
 	require.True(t, ok, "eviction rollback must restore the subscription")
 	require.Zero(t, sub.DeliveredOffset, "rollback must clear the delivered offset bookkeeping")
 }
@@ -178,9 +187,11 @@ func TestNode_ClusterSessionSnapshot_IncludesChannelOffsets(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(1), offset)
 
-	snapshot := node.clusterSessionSnapshot(client)
-	require.Contains(t, snapshot.ChannelOffsets, "snap.ch", "snapshot must carry per-channel delivered offsets")
-	require.Equal(t, uint64(1), snapshot.ChannelOffsets["snap.ch"])
+	// Delivery (and with it the offset bookkeeping) is asynchronous.
+	require.Eventually(t, func() bool {
+		snapshot := node.clusterSessionSnapshot(client)
+		return snapshot.ChannelOffsets["snap.ch"] == 1
+	}, 2*time.Second, time.Millisecond, "snapshot must carry per-channel delivered offsets")
 }
 
 // TestClusterSessionSnapshot_ChannelOffsets_RoundTrip verifies that
