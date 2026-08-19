@@ -131,6 +131,7 @@ cluster:
   enabled: true
   node_id: node-a    # Must be unique per node
   backend: redis
+  hmac_key_file: /run/secrets/cluster-hmac.key    # Or hmac_key; required, >= 32 bytes (see below)
 ```
 
 Cluster capabilities:
@@ -224,7 +225,7 @@ The server handles `SIGINT` and `SIGTERM` signals:
 1. Stops accepting new connections.
 2. Drains existing connections (sends disconnect with `ForceNoReconnect` code).
 3. Shuts down the cluster control plane (if enabled).
-4. Exits after a configurable timeout (default 10 seconds).
+4. Exits after a fixed shutdown timeout of 30 seconds (`cmd/server/main.go`; not currently configurable).
 
 ## Docker
 

@@ -343,7 +343,7 @@ func TestTransport_CloseWithFullQueueReturnsPromptly(t *testing.T) {
 }
 
 // TestTransport_CloseCarriesDisconnectCode verifies that the numeric
-// disconnect code (3500-3512) is encoded into the DISCONNECT_ERROR envelope
+// disconnect code (3500-3514) is encoded into the DISCONNECT_ERROR envelope
 // metadata, so gRPC clients can distinguish disconnect reasons the way WS
 // clients do via the close frame.
 func TestTransport_CloseCarriesDisconnectCode(t *testing.T) {

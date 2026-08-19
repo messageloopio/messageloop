@@ -144,7 +144,7 @@ func (t *Transport) Close(disconnect protocol.Disconnect) error {
 }
 
 func (t *Transport) writeError(code int32, reason string) error {
-	// The numeric disconnect code (3500-3512) is encoded into the error
+	// The numeric disconnect code (3500-3514) is encoded into the error
 	// envelope metadata because the gRPC stream has no close frame: the WS
 	// path carries the code in the close frame, and without this the gRPC
 	// client cannot tell the disconnect reasons apart.

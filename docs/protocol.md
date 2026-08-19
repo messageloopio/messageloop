@@ -14,7 +14,7 @@ Connect to the WebSocket endpoint and request a subprotocol:
 | --- | --- |
 | `messageloop+json` | JSON (protobuf-compatible JSON mapping) |
 | `messageloop+proto` | Protobuf binary |
-| `messageloop` | Protobuf binary (default) |
+| `messageloop` | JSON (default; only `messageloop+proto` selects binary frames) |
 
 Example:
 
@@ -73,6 +73,7 @@ Envelope types:
 | `survey_request` | SurveyRequest | Initiate a survey on a channel (client-initiated, PR-07) |
 | `survey_reply` | SurveyReply | Reply to a survey the session was asked |
 | `sub_refresh` | SubRefresh | Refresh subscription tokens |
+| `presence_query` | PresenceQuery | Query presence of an exact channel |
 
 ### OutboundMessage (Server → Client)
 
@@ -93,6 +94,8 @@ Envelope types:
 | `survey_reply` | SurveyReply | Survey response |
 | `survey_result` | SurveyResult | Aggregated survey answers (async reply to a client-initiated survey) |
 | `gap_notice` | GapNotice | Catch-up gap notification (`channel`, `position`, `gap_reason`); `gap_reason` is `GAP_REASON_MIDDLE` or `GAP_REASON_REPLAY_TRUNCATED`; `position` is the last known safe position (offset omitted when unknown); at most one per channel per catch-up |
+| `presence` | PresenceSnapshot | Presence snapshot answering a `presence_query` (exact, non-ephemeral channels) |
+| `presence_event` | PresenceEvent | Presence join/leave event on an exact channel (`action` is `join` or `leave`, carries the occupancy generation `gen`) |
 
 ## Connection Lifecycle
 
@@ -522,7 +525,7 @@ Common error codes (this table mirrors the `Error.code` comment in `protocol/sha
 
 ## Disconnect Codes
 
-When the server closes a connection, it sends a disconnect with a numeric code. Codes are defined in `disconnect.go`; the client should treat them as advisory (reconnect unless told not to):
+When the server closes a connection, it sends a disconnect with a numeric code. Codes are defined in `internal/protocol/disconnect.go`; the client should treat them as advisory (reconnect unless told not to):
 
 | Code | Name | Reconnect | Description |
 | --- | --- | --- | --- |
