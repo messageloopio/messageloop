@@ -181,6 +181,7 @@ internal/occupancy
 internal/authz
 internal/rpc
 internal/survey
+internal/metrics
 internal/cluster
 internal/admin
 pkg/transport/{ws,grpc,quic}
@@ -668,6 +669,7 @@ Session 与 Stream 同区域。**跨区域 Directory Bind 直接禁止。** 只�
 | **D10** | Hydrate 去 saga（逐频道软失败 + RECOVER_FAILED 信封）+ lease CAS 与 snapshot 原子写（Lua）+ 同节点旧世代跳过 takeover。规格：[pr-ka-d10-hydrate.md](tasks/pr-ka-d10-hydrate.md) | 无删库回滚、无 3502;CAS+snapshot 一步;C1 语义不变 |
 | **D11** | KD-K26 阶段一:叶子契约下沉 internal/{protocol,channel,occupancy,stream} + 根 alias 过渡 + redisbroker 改引。规格：[pr-ka-d11-packages.md](tasks/pr-ka-d11-packages.md) | 零行为变化;接口形状逐字节等价;alias 单点过渡 |
 | **D12** | KD-K26 阶段二:authz/channel_policy 下沉(最小导出手术)+ transport 改名 pkg/transport/{ws,grpc,quic} + grpcstream admin 面剥 internal/admin。规格：[pr-ka-d12-packages.md](tasks/pr-ka-d12-packages.md) | 旧路径全灭;接口变化仅 Authorizer 加一个方法;alias 仍单点 |
+| **D13** | KD-K26 阶段三(a):cluster 控制面契约 + epoch + SyncUserIndex 下沉 internal/cluster + metrics 下沉 internal/metrics;redisbroker/hmac 切断根包依赖。规格：[pr-ka-d13-cluster-contracts.md](tasks/pr-ka-d13-cluster-contracts.md) | 零行为变化;导出手术仅 AllocateNodeIncarnation;alias 单点延续 |
 
 A0–A4 可在仍叫 `*Client` 的代码上先改合同；B1 再改对象名。不必等「旧 RC」。
 
