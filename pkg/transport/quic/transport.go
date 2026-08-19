@@ -6,13 +6,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/messageloopio/messageloop/internal/session"
+	"github.com/quic-go/quic-go"
+	"google.golang.org/protobuf/types/known/structpb"
+
 	"github.com/messageloopio/messageloop/internal/protocol"
+	"github.com/messageloopio/messageloop/internal/session"
 	"github.com/messageloopio/messageloop/shared"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
-	"github.com/quic-go/quic-go"
-	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // ErrTransportClosed is returned by Write after the transport has been closed.

@@ -10,8 +10,9 @@ import (
 
 	"github.com/lynx-go/lynx"
 	"github.com/lynx-go/x/log"
-	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/quic-go/quic-go"
+
+	"github.com/messageloopio/messageloop/internal/runtime"
 )
 
 // Options configures the QUIC client listener.

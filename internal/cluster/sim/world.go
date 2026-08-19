@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"time"
 
+	clusterpkg "github.com/messageloopio/messageloop/internal/cluster"
+	"github.com/messageloopio/messageloop/internal/protocol"
 	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/internal/session"
-	"github.com/messageloopio/messageloop/internal/protocol"
 	"github.com/messageloopio/messageloop/shared"
-	clusterpkg "github.com/messageloopio/messageloop/internal/cluster"
 )
 
 // World is the deterministic two-node fencing fixture: nodes A and B are real
@@ -111,9 +111,9 @@ func (w *World) AttachResumed(node *runtime.Node, client *session.Session, sessi
 // — fencing assertions read Session.State, not the wire.
 type noopTransport struct{}
 
-func (noopTransport) Write([]byte) error                 { return nil }
-func (noopTransport) WriteMany(...[]byte) error          { return nil }
+func (noopTransport) Write([]byte) error              { return nil }
+func (noopTransport) WriteMany(...[]byte) error       { return nil }
 func (noopTransport) Close(protocol.Disconnect) error { return nil }
-func (noopTransport) RemoteAddr() string                 { return "sim" }
+func (noopTransport) RemoteAddr() string              { return "sim" }
 
 var _ session.Transport = noopTransport{}

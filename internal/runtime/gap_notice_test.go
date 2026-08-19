@@ -4,11 +4,12 @@ import (
 	"context"
 	"testing"
 
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
+
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
 // gapNoticesOf decodes every gap_notice envelope captured by the transport.

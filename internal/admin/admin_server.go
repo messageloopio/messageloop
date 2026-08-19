@@ -8,10 +8,11 @@ import (
 	"context"
 
 	"github.com/lynx-go/x/log"
+	googlegrpc "google.golang.org/grpc"
+
 	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/pkg/transport/grpc"
 	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
-	googlegrpc "google.golang.org/grpc"
 )
 
 // PrepareAdminServer pre-binds a listener and registers the server-side admin API.

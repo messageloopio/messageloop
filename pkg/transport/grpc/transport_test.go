@@ -9,12 +9,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/messageloopio/messageloop/internal/protocol"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"github.com/stretchr/testify/require"
 	googlegrpc "google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/messageloopio/messageloop/internal/protocol"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
 // fakeBidiStream is an in-memory gRPC bidi stream that records concurrent

@@ -72,7 +72,7 @@ func main() {
 		messageloopgo.WithAutoReconnect(true),
 		messageloopgo.WithReconnectBackoff(500*time.Millisecond, 10*time.Second, 2.0),
 		messageloopgo.WithReconnectMaxAttempts(10),
-		messageloopgo.WithRPCTimeout(10*time.Second),
+		messageloopgo.WithRPCTimeout(10 * time.Second),
 	}
 	if *transport == "quic" {
 		opts = append(opts, messageloopgo.WithInsecureSkipVerify())

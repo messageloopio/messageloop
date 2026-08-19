@@ -6,10 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/messageloopio/messageloop/config"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/messageloopio/messageloop/config"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 )
 
 // --- B4: ClusterSessionSnapshot.ChannelOffsets ---
@@ -269,7 +270,7 @@ func connectOffsets(t *testing.T, node *Node, transport *capturingTransport, cli
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_Connect{
 			Connect: &clientpb.Connect{
-				Version: testProtocolVersion,
+				Version:   testProtocolVersion,
 				ClientId:  "client-1",
 				Token:     "t",
 				SessionId: "sess-off-resume",

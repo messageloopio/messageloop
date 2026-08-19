@@ -9,10 +9,11 @@ import (
 	"testing"
 	"time"
 
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v2"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v2"
 )
 
 // TestClientHandleConnectedCloseRace reproduces P0-2: handleConnected and

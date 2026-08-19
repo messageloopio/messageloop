@@ -7,13 +7,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/messageloopio/messageloop/config"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/messageloopio/messageloop/config"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
 func policyBoolPtr(v bool) *bool { return &v }

@@ -8,20 +8,21 @@ import (
 	"testing"
 	"time"
 
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 )
 
 // scriptedTransport is a test Transport whose Write behavior is scripted:
 // it records every write (in order), optionally returns a fixed error, and
 // can block on a gate so the session's writer goroutine stalls.
 type scriptedTransport struct {
-	mu       sync.Mutex
-	writes   [][]byte
+	mu           sync.Mutex
+	writes       [][]byte
 	closeReasons []Disconnect
-	writeErr error
-	probeErr error
+	writeErr     error
+	probeErr     error
 	// gate blocks Write until closed (for queue-fill tests).
 	gate chan struct{}
 }

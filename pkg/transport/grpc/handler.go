@@ -5,12 +5,13 @@ import (
 	"time"
 
 	"github.com/lynx-go/x/log"
+	googlegrpc "google.golang.org/grpc"
+	"google.golang.org/grpc/peer"
+
 	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/internal/session"
 	"github.com/messageloopio/messageloop/shared"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	googlegrpc "google.golang.org/grpc"
-	"google.golang.org/grpc/peer"
 )
 
 type gRPCHandler struct {

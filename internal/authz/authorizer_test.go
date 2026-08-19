@@ -4,9 +4,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/messageloopio/messageloop/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/messageloopio/messageloop/config"
 )
 
 func newTestAuthorizer(t *testing.T, cfg config.AuthorizerConfig) *Authorizer {

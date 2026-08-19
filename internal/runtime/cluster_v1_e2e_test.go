@@ -6,15 +6,16 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
+
+	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/internal/session"
 	"github.com/messageloopio/messageloop/internal/stream"
-	"github.com/messageloopio/messageloop/shared"
-	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/pkg/redisbroker"
+	"github.com/messageloopio/messageloop/shared"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
-	"github.com/stretchr/testify/require"
 )
 
 // cluster_v1_e2e_test.go covers the four PR-10 cluster paths: admin

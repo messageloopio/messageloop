@@ -5,16 +5,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/messageloopio/messageloop/internal/runtime"
-	"github.com/messageloopio/messageloop/pkg/transport/grpc"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
 	"github.com/stretchr/testify/require"
 	googlegrpc "google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+
+	"github.com/messageloopio/messageloop/internal/runtime"
+	"github.com/messageloopio/messageloop/pkg/transport/grpc"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
 )
 
 func startPreparedServer(t *testing.T, server *grpc.Server) {

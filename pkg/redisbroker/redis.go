@@ -12,8 +12,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
-	"github.com/messageloopio/messageloop/internal/metrics"
 	"github.com/redis/go-redis/v9"
+
+	"github.com/messageloopio/messageloop/internal/metrics"
 
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/internal/channel"
@@ -48,10 +49,10 @@ type redisBroker struct {
 	// last=true), so the broker must keep the interest until the count
 	// reaches zero.
 	subMu      sync.RWMutex
-	subscribed map[string]int                 // exact channel -> refcount
-	wcCounts   map[string]int                 // wildcard pattern -> refcount
+	subscribed map[string]int                  // exact channel -> refcount
+	wcCounts   map[string]int                  // wildcard pattern -> refcount
 	wcHandles  map[string]*topics.Subscription // pattern -> matcher handle
-	matcher    topics.Matcher                 // wildcard pattern matching
+	matcher    topics.Matcher                  // wildcard pattern matching
 
 	// readyCh is closed once the pub/sub subscription has been confirmed
 	// (Ready semantics, aligned with the memory broker).

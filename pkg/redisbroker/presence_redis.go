@@ -7,8 +7,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/messageloopio/messageloop/config"
 	"github.com/redis/go-redis/v9"
+
+	"github.com/messageloopio/messageloop/config"
 
 	"github.com/messageloopio/messageloop/internal/occupancy"
 )

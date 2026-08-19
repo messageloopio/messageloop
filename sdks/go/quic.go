@@ -8,9 +8,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/quic-go/quic-go"
+
 	"github.com/messageloopio/messageloop/shared"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	"github.com/quic-go/quic-go"
 )
 
 const defaultQUICMaxFrameSize = 16 << 20

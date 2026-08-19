@@ -4,16 +4,17 @@ import (
 	"context"
 	"testing"
 
-	"github.com/messageloopio/messageloop/internal/runtime"
-	"github.com/messageloopio/messageloop/internal/admin"
-	"github.com/messageloopio/messageloop/pkg/transport/grpc"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
 	"github.com/stretchr/testify/require"
 	googlegrpc "google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+
+	"github.com/messageloopio/messageloop/internal/admin"
+	"github.com/messageloopio/messageloop/internal/runtime"
+	"github.com/messageloopio/messageloop/pkg/transport/grpc"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
 )
 
 // TestPrepareAdminServer_RegistersOnlyAPIService verifies the admin listener

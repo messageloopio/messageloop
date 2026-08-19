@@ -6,10 +6,11 @@ import (
 	"errors"
 	"testing"
 
-	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v2"
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
 func newTestTextPayload(t *testing.T, s string) *sharedv2.Payload {

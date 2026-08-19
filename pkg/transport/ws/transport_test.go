@@ -13,8 +13,9 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/messageloopio/messageloop/internal/protocol"
 	"github.com/stretchr/testify/require"
+
+	"github.com/messageloopio/messageloop/internal/protocol"
 )
 
 // TestTransport_CloseClosesFDWhenPeerRST is the regression test for P1-B6: a

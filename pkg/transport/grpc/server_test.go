@@ -3,10 +3,11 @@ package grpc
 import (
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/messageloopio/messageloop/internal/runtime"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
-	"github.com/stretchr/testify/require"
 )
 
 func TestPrepareClientServer_RegistersOnlyMessageLoopService(t *testing.T) {

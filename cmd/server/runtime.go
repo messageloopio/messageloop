@@ -3,11 +3,12 @@ package main
 import (
 	"time"
 
-	"github.com/messageloopio/messageloop/internal/runtime"
+	"github.com/lynx-go/lynx"
+
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/internal/admin"
+	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/pkg/transport/grpc"
-	"github.com/lynx-go/lynx"
 )
 
 type preparedGRPCServers struct {

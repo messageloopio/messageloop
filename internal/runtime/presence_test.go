@@ -10,13 +10,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/messageloopio/messageloop/config"
-	"github.com/messageloopio/messageloop/pkg/topics"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/messageloopio/messageloop/config"
+	"github.com/messageloopio/messageloop/pkg/topics"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 )
 
 // connectAndSubscribe wires a fresh client with the given client ID and
@@ -318,7 +319,7 @@ func TestPresence_ConnectedSnapshotFilled(t *testing.T) {
 		Id: "connect-with-subs",
 		Envelope: &clientpb.InboundMessage_Connect{
 			Connect: &clientpb.Connect{
-				Version: testProtocolVersion,
+				Version:       testProtocolVersion,
 				ClientId:      "client-c",
 				Subscriptions: []*clientpb.Subscription{{Channel: ch}},
 			},

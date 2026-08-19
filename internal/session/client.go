@@ -12,15 +12,16 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
+	"github.com/samber/lo"
+	"golang.org/x/time/rate"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/structpb"
+
 	"github.com/messageloopio/messageloop/internal/protocol"
 	"github.com/messageloopio/messageloop/pkg/topics"
 	"github.com/messageloopio/messageloop/proxy"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
-	"github.com/samber/lo"
-	"golang.org/x/time/rate"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/structpb"
 )
 
 func NewClient(ctx context.Context, rt Runtime, t Transport, marshaler Marshaler, opts ...ClientOption) (*Session, ClientCloseFunc, error) {

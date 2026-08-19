@@ -7,14 +7,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/messageloopio/messageloop/config"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/messageloopio/messageloop/config"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
 // evictTestBroker tracks broker-side subscribe/unsubscribe bookkeeping and can
@@ -52,9 +53,9 @@ func (b *evictTestBroker) PublishTransient(ch string, _ *Publication) error {
 	b.transients = append(b.transients, ch)
 	return nil
 }
-func (b *evictTestBroker) PublishOccupancy(string, OccupancyEvent) error { return nil }
-func (b *evictTestBroker) SetOccupancyHandler(OccupancyHandler) error    { return nil }
-func (b *evictTestBroker) SetGapHandler(GapHandler)                      {}
+func (b *evictTestBroker) PublishOccupancy(string, OccupancyEvent) error     { return nil }
+func (b *evictTestBroker) SetOccupancyHandler(OccupancyHandler) error        { return nil }
+func (b *evictTestBroker) SetGapHandler(GapHandler)                          {}
 func (b *evictTestBroker) History(string, uint64, int) (*HistoryPage, error) { return nil, nil }
 
 // projectionQueryStore accumulates shared channel projection deltas and lists
@@ -324,18 +325,21 @@ func TestResumeRemoteSession_CASConflictAborts(t *testing.T) {
 	require.Empty(t, bus.commands, "no takeover command may be issued after a CAS conflict")
 	require.False(t, client.HasSubscription("news"), "no subscriptions may be restored after a CAS conflict")
 }
+
 // failSubscribeBroker fails every Subscribe so remote subscription restore
 // aborts midway.
 type failSubscribeBroker struct{}
 
 func (b *failSubscribeBroker) Start(context.Context, PublicationHandler) error { return nil }
-func (b *failSubscribeBroker) Subscribe(ch string) error                        { return errors.New("injected subscribe failure") }
-func (b *failSubscribeBroker) Unsubscribe(ch string) error                      { return nil }
-func (b *failSubscribeBroker) Publish(string, *Publication) (uint64, error)     { return 0, nil }
-func (b *failSubscribeBroker) PublishTransient(string, *Publication) error      { return nil }
-func (b *failSubscribeBroker) PublishOccupancy(string, OccupancyEvent) error    { return nil }
-func (b *failSubscribeBroker) SetOccupancyHandler(OccupancyHandler) error       { return nil }
-func (b *failSubscribeBroker) SetGapHandler(GapHandler)                         {}
+func (b *failSubscribeBroker) Subscribe(ch string) error {
+	return errors.New("injected subscribe failure")
+}
+func (b *failSubscribeBroker) Unsubscribe(ch string) error                   { return nil }
+func (b *failSubscribeBroker) Publish(string, *Publication) (uint64, error)  { return 0, nil }
+func (b *failSubscribeBroker) PublishTransient(string, *Publication) error   { return nil }
+func (b *failSubscribeBroker) PublishOccupancy(string, OccupancyEvent) error { return nil }
+func (b *failSubscribeBroker) SetOccupancyHandler(OccupancyHandler) error    { return nil }
+func (b *failSubscribeBroker) SetGapHandler(GapHandler)                      {}
 func (b *failSubscribeBroker) History(string, uint64, int) (*HistoryPage, error) {
 	return nil, nil
 }
@@ -510,6 +514,7 @@ func TestClient_RemoteResume_RestoreAllChannelsFailKeepsSession(t *testing.T) {
 	require.Len(t, failures, 1)
 	require.Equal(t, "news", failures[0].GetMetadata().GetFields()["channel"].GetStringValue())
 }
+
 // Task 13e: session snapshots must preserve the per-subscription ephemeral
 // flag so a cross-node resume does not turn ephemeral subscriptions into
 // permanent ones (which would trigger presence join/leave).
@@ -601,7 +606,7 @@ func (b *failSecondSubscribeBroker) Subscribe(ch string) error {
 	}
 	return nil
 }
-func (b *failSecondSubscribeBroker) Unsubscribe(ch string) error                { return nil }
+func (b *failSecondSubscribeBroker) Unsubscribe(ch string) error                  { return nil }
 func (b *failSecondSubscribeBroker) Publish(string, *Publication) (uint64, error) { return 0, nil }
 func (b *failSecondSubscribeBroker) PublishTransient(string, *Publication) error  { return nil }
 func (b *failSecondSubscribeBroker) PublishOccupancy(string, OccupancyEvent) error {
@@ -831,6 +836,7 @@ func TestResumeRemoteSession_NodeLeaseLookupErrorStillRollsBack(t *testing.T) {
 	require.Equal(t, "node-b", lease.NodeID)
 	require.Equal(t, uint64(7), lease.LeaseVersion)
 }
+
 // --- PR-KA-D3: takeover observability (bind_fenced_total / evict_lag / session_dual_activation_seconds) ---
 
 // resumeMetricsTestNode builds a cluster-enabled node wired with metrics and

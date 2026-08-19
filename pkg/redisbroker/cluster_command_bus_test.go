@@ -9,14 +9,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/messageloopio/messageloop/config"
-	"github.com/messageloopio/messageloop/internal/cluster"
-	clusterhmac "github.com/messageloopio/messageloop/internal/cluster/hmac"
-	"github.com/messageloopio/messageloop/internal/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
+
+	"github.com/messageloopio/messageloop/config"
+	"github.com/messageloopio/messageloop/internal/cluster"
+	clusterhmac "github.com/messageloopio/messageloop/internal/cluster/hmac"
+	"github.com/messageloopio/messageloop/internal/metrics"
 )
 
 // DB 16 keeps these FlushDB calls off the runtime atomic-write tests (DB 14)

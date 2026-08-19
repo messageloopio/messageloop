@@ -19,11 +19,12 @@ import (
 	"strings"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/messageloopio/messageloop/_examples/chatroom/internal/chatroom"
 	messageloopgo "github.com/messageloopio/messageloop/sdks/go"
 	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 // adminAddr points at the demo server's admin gRPC API; align with config.yaml.

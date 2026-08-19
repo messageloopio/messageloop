@@ -5,10 +5,11 @@ import (
 	"os"
 	"testing"
 
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
+
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 )
 
 // TestOccupancy_GenZeroOrNilEventDropped pins B2 §4/§5.2: gen==0 and nil
@@ -94,4 +95,4 @@ func readSource(t *testing.T, file string) string {
 	data, err := os.ReadFile(file)
 	require.NoError(t, err)
 	return string(data)
-}
+}

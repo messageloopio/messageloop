@@ -3,8 +3,9 @@ package messageloopgo
 import (
 	"fmt"
 
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"google.golang.org/protobuf/types/known/structpb"
+
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
 // DisconnectError is a typed disconnect error signaled by the server. The

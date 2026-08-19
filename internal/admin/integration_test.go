@@ -7,19 +7,20 @@ import (
 	"testing"
 	"time"
 
-	"github.com/messageloopio/messageloop/internal/runtime"
-	"github.com/messageloopio/messageloop/internal/session"
-	"github.com/messageloopio/messageloop/internal/protocol"
-	"github.com/messageloopio/messageloop/internal/stream"
-	"github.com/messageloopio/messageloop/shared"
-	"github.com/messageloopio/messageloop/internal/admin"
-	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/types/known/structpb"
+
+	"github.com/messageloopio/messageloop/internal/admin"
+	"github.com/messageloopio/messageloop/internal/protocol"
+	"github.com/messageloopio/messageloop/internal/runtime"
+	"github.com/messageloopio/messageloop/internal/session"
+	"github.com/messageloopio/messageloop/internal/stream"
+	"github.com/messageloopio/messageloop/shared"
+	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
 const bufSize = 1024 * 1024
@@ -48,10 +49,10 @@ func startTestGRPCServer(t *testing.T, node *runtime.Node) serverv2.APIServiceCl
 // mockTransport is a minimal no-op transport for test clients.
 type mockTransport struct{ closed bool }
 
-func (m *mockTransport) Write([]byte) error                 { return nil }
-func (m *mockTransport) WriteMany(...[]byte) error          { return nil }
+func (m *mockTransport) Write([]byte) error              { return nil }
+func (m *mockTransport) WriteMany(...[]byte) error       { return nil }
 func (m *mockTransport) Close(protocol.Disconnect) error { m.closed = true; return nil }
-func (m *mockTransport) RemoteAddr() string                 { return "127.0.0.1:0" }
+func (m *mockTransport) RemoteAddr() string              { return "127.0.0.1:0" }
 
 func addTestClient(t *testing.T, node *runtime.Node, sessionID, userID string) *session.Client {
 	t.Helper()

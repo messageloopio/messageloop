@@ -7,15 +7,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/messageloopio/messageloop/config"
-	"github.com/messageloopio/messageloop/proxy"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/structpb"
+
+	"github.com/messageloopio/messageloop/config"
+	"github.com/messageloopio/messageloop/proxy"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
 func TestNewNode(t *testing.T) {
@@ -895,6 +896,7 @@ func TestNode_ClusterPublishCommand_MessagesDeliveredMetric(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.MessagesDelivered))
 }
+
 // failTransientBroker fails every transient publish so presence events fail.
 type failTransientBroker struct{}
 

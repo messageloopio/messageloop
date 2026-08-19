@@ -6,9 +6,10 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"google.golang.org/protobuf/types/known/structpb"
+
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
-	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // Data represents message payload data with content type (MIME type).

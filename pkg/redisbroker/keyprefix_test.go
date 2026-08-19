@@ -6,8 +6,9 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/messageloopio/messageloop/internal/cluster"
 	"github.com/stretchr/testify/require"
+
+	"github.com/messageloopio/messageloop/internal/cluster"
 
 	"github.com/messageloopio/messageloop/internal/occupancy"
 	"github.com/messageloopio/messageloop/internal/stream"

@@ -11,21 +11,22 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/messageloopio/messageloop/internal/runtime"
-	"github.com/messageloopio/messageloop/internal/session"
-	"github.com/messageloopio/messageloop/internal/protocol"
-	clusterpkg "github.com/messageloopio/messageloop/internal/cluster"
-	"github.com/messageloopio/messageloop/internal/survey"
-	"github.com/messageloopio/messageloop/shared"
+	"github.com/redis/go-redis/v9"
+	"github.com/stretchr/testify/require"
+
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/internal/admin"
+	clusterpkg "github.com/messageloopio/messageloop/internal/cluster"
+	"github.com/messageloopio/messageloop/internal/protocol"
+	"github.com/messageloopio/messageloop/internal/runtime"
+	"github.com/messageloopio/messageloop/internal/session"
+	"github.com/messageloopio/messageloop/internal/survey"
 	"github.com/messageloopio/messageloop/pkg/redisbroker"
 	"github.com/messageloopio/messageloop/proxy"
+	"github.com/messageloopio/messageloop/shared"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
-	"github.com/redis/go-redis/v9"
-	"github.com/stretchr/testify/require"
 )
 
 const clusterRedisIntegrationDB = 15

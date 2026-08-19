@@ -4,13 +4,14 @@ import (
 	"context"
 	"math"
 	"sort"
-	"strings"
 	"strconv"
+	"strings"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/internal/cluster"
-	"github.com/redis/go-redis/v9"
 )
 
 type redisClusterQueryStore struct {

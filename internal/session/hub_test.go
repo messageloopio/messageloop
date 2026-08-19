@@ -7,10 +7,11 @@ import (
 	"testing"
 	"time"
 
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	"github.com/messageloopio/messageloop/pkg/topics"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/messageloopio/messageloop/pkg/topics"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 )
 
 // mockTransport is a mock implementation of Transport for testing
@@ -1073,6 +1074,7 @@ func TestHub_PrepareSessionUser_FailureKeepsOldSessionIntact(t *testing.T) {
 	// The unrelated B session is untouched.
 	assert.Same(t, clientB, h.LookupSession("session-2"))
 }
+
 // TestHubAddSubRejectsMalformedExactChannel pins B1: the exact-subscription
 // entry must reject channels with explicit empty segments ("a.", ".a",
 // "a..b") and the empty channel with ErrBadTopic instead of silently

@@ -4,9 +4,10 @@ import (
 	"net"
 	"testing"
 
-	"github.com/messageloopio/messageloop/internal/runtime"
-	"github.com/messageloopio/messageloop/config"
 	"github.com/stretchr/testify/require"
+
+	"github.com/messageloopio/messageloop/config"
+	"github.com/messageloopio/messageloop/internal/runtime"
 )
 
 func TestPrepareGRPCServers_CleansUpClientListenerOnAdminFailure(t *testing.T) {

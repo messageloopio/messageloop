@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
+
 	"github.com/messageloopio/messageloop/pkg/topics"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"

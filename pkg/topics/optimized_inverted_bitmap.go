@@ -51,10 +51,10 @@ type optimizedInvertedBitmapMatcher struct {
 	subscribers        map[uint32]Subscriber
 	// subTopics retains the original subscription pattern per position; it is
 	// used to verify bitmap candidates against the topic segment-by-segment.
-	subTopics          map[uint32]string
-	subPos             uint32
-	deletedPositions   []uint32
-	mu                 sync.RWMutex
+	subTopics        map[uint32]string
+	subPos           uint32
+	deletedPositions []uint32
+	mu               sync.RWMutex
 }
 
 func NewOptimizedInvertedBitmapMatcher(topicSpaceSize uint) Matcher {

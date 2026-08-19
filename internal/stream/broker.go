@@ -9,8 +9,9 @@ import (
 	"encoding/json"
 	"time"
 
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"google.golang.org/protobuf/types/known/structpb"
+
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 
 	"github.com/messageloopio/messageloop/internal/occupancy"
 )
@@ -41,9 +42,9 @@ type Publication struct {
 	// atomically with the history stream append (Redis broker, C4). It is 0
 	// for transient publications, legacy entries written before C4, and the
 	// memory broker (whose Offset already is the dense seq).
-	Seq         uint64
-	Time        int64 // Unix milliseconds
-	Epoch       string
+	Seq   uint64
+	Time  int64 // Unix milliseconds
+	Epoch string
 	// HistorySize caps this publication's channel history ring/stream when
 	// the channel is first created. 0 = the broker global default. Only
 	// Publish uses it; PublishTransient never writes history.
@@ -151,10 +152,10 @@ const (
 // HistoryPage is one page of channel history plus gap metadata.
 type HistoryPage struct {
 	Publications  []*Publication
-	Truncated     bool            // len(Publications) == limit && limit > 0
-	Gap           bool            // GapReason != HistoryGapNone
+	Truncated     bool // len(Publications) == limit && limit > 0
+	Gap           bool // GapReason != HistoryGapNone
 	GapReason     HistoryGapReason
-	FirstRetained uint64          // oldest retained offset; 0 = unknown / never published
+	FirstRetained uint64 // oldest retained offset; 0 = unknown / never published
 }
 
 // Pubs returns the page publications, nil for a nil page.

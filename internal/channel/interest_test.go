@@ -4,8 +4,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/messageloopio/messageloop/pkg/topics"
 	"github.com/stretchr/testify/require"
+
+	"github.com/messageloopio/messageloop/pkg/topics"
 )
 
 // TestCompileInterest_Table pins the §4 table of PR-KA-A3: every row must

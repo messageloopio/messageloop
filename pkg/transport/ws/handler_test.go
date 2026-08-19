@@ -7,12 +7,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/lynx-go/x/encoding/json"
-	"github.com/messageloopio/messageloop/shared"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/structpb"
+
+	"github.com/messageloopio/messageloop/shared"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
 // TestHandler_NegotiationMatrix is the regression test for P1-B2: the
@@ -26,10 +27,10 @@ func TestHandler_NegotiationMatrix(t *testing.T) {
 	h := NewHandler(nil, DefaultOptions())
 
 	cases := []struct {
-		name         string
-		subProtocol  string // conn.Subprotocol() after negotiation
-		wantBinary   bool
-		wantType     func(t *testing.T, m shared.Marshaler)
+		name        string
+		subProtocol string // conn.Subprotocol() after negotiation
+		wantBinary  bool
+		wantType    func(t *testing.T, m shared.Marshaler)
 	}{
 		{
 			name:        "plain messageloop",
@@ -151,11 +152,11 @@ func TestHandler_marshaler(t *testing.T) {
 // heartbeat keeps 60s (no 10s floor) with configured as hard override.
 func TestHeartbeat_ReadTimeoutFloorWhenProbing(t *testing.T) {
 	cases := []struct {
-		name           string
-		idle           time.Duration
-		ping           time.Duration
-		configured     time.Duration
-		want           time.Duration
+		name       string
+		idle       time.Duration
+		ping       time.Duration
+		configured time.Duration
+		want       time.Duration
 	}{
 		{
 			name: "idle=15s ping=5s unconfigured floors at 2*idle",

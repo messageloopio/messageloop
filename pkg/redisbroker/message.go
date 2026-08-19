@@ -5,8 +5,9 @@ import (
 	"errors"
 	"fmt"
 
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	"google.golang.org/protobuf/encoding/protojson"
+
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 
 	"github.com/messageloopio/messageloop/internal/occupancy"
 	"github.com/messageloopio/messageloop/internal/stream"
@@ -26,18 +27,18 @@ const (
 // travel in the live pub/sub payload — the stream's data JSON carries
 // neither (the dense seq lives in the entry's "s" field instead).
 type redisMessage struct {
-	Type        string            `json:"t"`
-	Channel     string            `json:"ch"`
-	Payload     []byte            `json:"p"`
-	IsText      bool              `json:"isText,omitempty"`
+	Type        string             `json:"t"`
+	Channel     string             `json:"ch"`
+	Payload     []byte             `json:"p"`
+	IsText      bool               `json:"isText,omitempty"`
 	Kind        stream.PayloadKind `json:"kind,omitempty"`
-	ContentType string            `json:"ct,omitempty"`
-	Id          string            `json:"id,omitempty"`
-	Metadata    map[string]string `json:"md,omitempty"`
-	Time        int64             `json:"ts,omitempty"`
-	Offset      uint64            `json:"off,omitempty"`
-	Seq         uint64            `json:"seq,omitempty"`
-	Epoch       string            `json:"epoch,omitempty"`
+	ContentType string             `json:"ct,omitempty"`
+	Id          string             `json:"id,omitempty"`
+	Metadata    map[string]string  `json:"md,omitempty"`
+	Time        int64              `json:"ts,omitempty"`
+	Offset      uint64             `json:"off,omitempty"`
+	Seq         uint64             `json:"seq,omitempty"`
+	Epoch       string             `json:"epoch,omitempty"`
 }
 
 func serializeMessage(msg *redisMessage) ([]byte, error) {

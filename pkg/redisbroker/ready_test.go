@@ -7,9 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/messageloopio/messageloop/config"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
+
+	"github.com/messageloopio/messageloop/config"
 
 	"github.com/messageloopio/messageloop/internal/stream"
 )
@@ -134,6 +135,7 @@ func TestRedisBroker_Ready_ClosesAfterSubscribe(t *testing.T) {
 		t.Fatal("broker did not stop")
 	}
 }
+
 // TestRedisBroker_Reconnect_CatchesUpMissedMessages verifies that messages
 // published while the pub/sub connection was down are replayed from the
 // stream after the reconnect, without duplicates.
@@ -238,4 +240,4 @@ func TestRedisBroker_Reconnect_CatchesUpMissedMessages(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for catch-up, have %v want %v", received, offsets)
-}
+}

@@ -95,9 +95,9 @@ type memoryBroker struct {
 	subs    map[string]int // exact channel subscriber count
 	// Wildcard interest mirrors the Redis broker: patterns are reference
 	// counted and matched against concrete channels via the topic matcher.
-	wcCounts  map[string]int                 // wildcard pattern refcount
+	wcCounts  map[string]int                  // wildcard pattern refcount
 	wcHandles map[string]*topics.Subscription // pattern -> matcher handle
-	matcher   topics.Matcher                 // wildcard pattern matching
+	matcher   topics.Matcher                  // wildcard pattern matching
 	dispatch  [dispatchShardCount]chan dispatchTask
 	done      chan struct{} // closed when Start's context is cancelled
 	ready     chan struct{}

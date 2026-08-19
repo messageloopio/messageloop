@@ -6,13 +6,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/messageloopio/messageloop/internal/session"
-	"github.com/messageloopio/messageloop/internal/protocol"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	googlegrpc "google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
+
+	"github.com/messageloopio/messageloop/internal/protocol"
+	"github.com/messageloopio/messageloop/internal/session"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
 // ErrTransportClosed is returned by WriteMany after the transport has been closed.

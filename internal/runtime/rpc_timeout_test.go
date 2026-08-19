@@ -5,12 +5,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"google.golang.org/protobuf/types/known/structpb"
+
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/proxy"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
-	"github.com/stretchr/testify/assert"
-	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // MockSlowProxy simulates a slow RPC backend

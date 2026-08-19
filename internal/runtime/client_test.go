@@ -9,10 +9,11 @@ import (
 	"testing"
 	"time"
 
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
 // capturingTransport captures all written messages for inspection
@@ -1366,7 +1367,7 @@ func TestNode_Connect_RecoveryIDsMatchRealtime(t *testing.T) {
 		Id: "msg-3",
 		Envelope: &clientpb.InboundMessage_Connect{
 			Connect: &clientpb.Connect{
-				Version: testProtocolVersion,
+				Version:  testProtocolVersion,
 				ClientId: "client-2",
 				Subscriptions: []*clientpb.Subscription{
 					{Channel: "recovery.ch", Recover: true, Cursor: cursorOf(epoch, 1)},
@@ -1418,7 +1419,7 @@ func TestNode_Connect_RecoveryCap(t *testing.T) {
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_Connect{
 			Connect: &clientpb.Connect{
-				Version: testProtocolVersion,
+				Version:  testProtocolVersion,
 				ClientId: "client-1",
 				Subscriptions: []*clientpb.Subscription{
 					{Channel: "cap-ch", Recover: true, Cursor: cursorOf("", 1)},

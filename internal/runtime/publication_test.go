@@ -4,9 +4,10 @@ import (
 	"math"
 	"testing"
 
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/structpb"
+
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
 // --- A1: PublicationFromPayloadV2 shared.v2 conversion ---

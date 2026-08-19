@@ -9,20 +9,21 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/messageloopio/messageloop/internal/runtime"
-	"github.com/messageloopio/messageloop/internal/session"
-	"github.com/messageloopio/messageloop/internal/protocol"
-	"github.com/messageloopio/messageloop/internal/stream"
-	"github.com/messageloopio/messageloop/internal/occupancy"
-	"github.com/messageloopio/messageloop/shared"
-	"github.com/messageloopio/messageloop/config"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
+
+	"github.com/messageloopio/messageloop/config"
+	"github.com/messageloopio/messageloop/internal/occupancy"
+	"github.com/messageloopio/messageloop/internal/protocol"
+	"github.com/messageloopio/messageloop/internal/runtime"
+	"github.com/messageloopio/messageloop/internal/session"
+	"github.com/messageloopio/messageloop/internal/stream"
+	"github.com/messageloopio/messageloop/shared"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
 // captureTransport 捕获客户端写出的所有消息（会话组合用例用）。

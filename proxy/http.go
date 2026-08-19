@@ -11,10 +11,11 @@ import (
 	"time"
 
 	"github.com/lynx-go/x/log"
-	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v2"
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+
+	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
 // maxResponseBodySize caps how much of a backend response body is read into

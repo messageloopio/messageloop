@@ -1,9 +1,10 @@
 package grpc
 
 import (
+	googlegrpc "google.golang.org/grpc"
+
 	"github.com/messageloopio/messageloop/internal/runtime"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	googlegrpc "google.golang.org/grpc"
 )
 
 // PrepareClientServer pre-binds a listener and registers the client streaming gRPC service.

@@ -29,14 +29,16 @@ import (
 	"sync"
 	"time"
 
+	"sync/atomic"
+
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
+	"github.com/redis/go-redis/v9"
+
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/internal/cluster"
 	clusterhmac "github.com/messageloopio/messageloop/internal/cluster/hmac"
 	"github.com/messageloopio/messageloop/internal/metrics"
-	"github.com/redis/go-redis/v9"
-	"sync/atomic"
 )
 
 const (

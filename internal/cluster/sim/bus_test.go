@@ -5,8 +5,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/messageloopio/messageloop/internal/cluster"
 	"github.com/stretchr/testify/require"
+
+	"github.com/messageloopio/messageloop/internal/cluster"
 )
 
 func takeoverCommand(targetNode, targetIncarnation string) *cluster.ClusterCommand {

@@ -6,10 +6,11 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/messageloopio/messageloop/internal/runtime"
-	"github.com/messageloopio/messageloop/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/messageloopio/messageloop/config"
+	"github.com/messageloopio/messageloop/internal/runtime"
 )
 
 // TestWebSocket_MultiClientBroadcast verifies that a message published to a

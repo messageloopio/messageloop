@@ -9,12 +9,13 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/messageloopio/messageloop/internal/runtime"
-	"github.com/messageloopio/messageloop/shared"
-	"github.com/messageloopio/messageloop/config"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	ws "github.com/messageloopio/messageloop/pkg/transport/ws"
 	"github.com/stretchr/testify/require"
+
+	"github.com/messageloopio/messageloop/config"
+	"github.com/messageloopio/messageloop/internal/runtime"
+	ws "github.com/messageloopio/messageloop/pkg/transport/ws"
+	"github.com/messageloopio/messageloop/shared"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 )
 
 func startTestWSServer(t *testing.T, node *runtime.Node) *httptest.Server {

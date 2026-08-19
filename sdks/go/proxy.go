@@ -6,12 +6,13 @@ import (
 	"log/slog"
 	"net"
 
-	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v2"
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+
+	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
 // RPCHandler defines the interface for handling RPC requests from the MessageLoop server.

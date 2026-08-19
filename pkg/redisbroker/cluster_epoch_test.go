@@ -5,9 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/messageloopio/messageloop/internal/cluster"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/messageloopio/messageloop/internal/cluster"
 )
 
 func TestRedisSessionDirectory_NextNodeEpoch(t *testing.T) {

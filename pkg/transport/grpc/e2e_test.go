@@ -5,12 +5,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+	googlegrpc "google.golang.org/grpc"
+
 	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/pkg/transport/grpc"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
-	"github.com/stretchr/testify/require"
-	googlegrpc "google.golang.org/grpc"
 )
 
 // TestGRPC_ClientStream_PubSub verifies the full gRPC client-streaming pub/sub

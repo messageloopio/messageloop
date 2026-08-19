@@ -10,12 +10,13 @@ import (
 	"syscall"
 	"time"
 
-	messageloopgo "github.com/messageloopio/messageloop/sdks/go"
-	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v2"
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	messageloopgo "github.com/messageloopio/messageloop/sdks/go"
+	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
 // ============================================================================

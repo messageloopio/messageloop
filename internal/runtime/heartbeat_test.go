@@ -6,14 +6,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/messageloopio/messageloop/config"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/structpb"
+
+	"github.com/messageloopio/messageloop/config"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
 // newHeartbeatNode builds a node with the given heartbeat config plus a fresh
@@ -207,7 +208,7 @@ func TestHeartbeat_PongRefreshesPresenceAndLease(t *testing.T) {
 	client, _ := newHeartbeatClient(t, node)
 	client.ForceTestIDs("sess-pong", "user-pong", "client-pong")
 	require.NoError(t, client.HandleMessage(ctx, &clientpb.InboundMessage{
-		Id:       "sub-1",
+		Id: "sub-1",
 		Envelope: &clientpb.InboundMessage_Subscribe{
 			Subscribe: &clientpb.Subscribe{
 				Subscriptions: []*clientpb.Subscription{{Channel: "hb.pong"}},

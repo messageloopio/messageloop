@@ -7,9 +7,10 @@ import (
 	"testing"
 	"time"
 
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 
 	"github.com/messageloopio/messageloop/internal/channel"
 	"github.com/messageloopio/messageloop/internal/occupancy"

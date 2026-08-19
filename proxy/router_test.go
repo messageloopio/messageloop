@@ -82,11 +82,11 @@ func TestRouter_Match(t *testing.T) {
 	require.NoError(t, r.Add(p3, "*", "*"))
 
 	tests := []struct {
-		name           string
-		channel        string
-		method         string
-		expectedProxy  string
-		shouldMatch    bool
+		name          string
+		channel       string
+		method        string
+		expectedProxy string
+		shouldMatch   bool
 	}{
 		{
 			name:          "user service get",

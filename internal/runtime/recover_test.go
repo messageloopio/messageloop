@@ -7,13 +7,14 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/messageloopio/messageloop/config"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/messageloopio/messageloop/config"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
 // countingRecoveryBroker wraps fakeEpochHistoryBroker with a History call
@@ -251,7 +252,7 @@ func TestConnect_RecoverTruncated(t *testing.T) {
 	require.NoError(t, node.Run(ctx))
 
 	msgs := connectOn(t, node, &capturingTransport{}, &clientpb.Connect{
-		Version: testProtocolVersion,
+		Version:  testProtocolVersion,
 		ClientId: "client-1",
 		Subscriptions: []*clientpb.Subscription{
 			{Channel: "trunc.ch", Recover: true, Fresh: true},
@@ -391,7 +392,7 @@ func TestConnect_ResumeMissingOffsetSkipped(t *testing.T) {
 	node := remoteResumeTestNode(t, snapshot, recoveryPubs("miss.ch", 1, 10), "v2")
 
 	msgs := connectOn(t, node, &capturingTransport{}, &clientpb.Connect{
-		Version: testProtocolVersion,
+		Version:   testProtocolVersion,
 		ClientId:  "client-1",
 		Token:     "t",
 		SessionId: "sess-off-resume",
@@ -427,7 +428,7 @@ func TestConnect_ResumeSnapshotChannelNotInConnect(t *testing.T) {
 	// The Connect request does not list off.news: the snapshot union must
 	// still recover it from offset 6.
 	msgs := connectOn(t, node, &capturingTransport{}, &clientpb.Connect{
-		Version: testProtocolVersion,
+		Version:   testProtocolVersion,
 		ClientId:  "client-1",
 		Token:     "t",
 		SessionId: "sess-off-resume",

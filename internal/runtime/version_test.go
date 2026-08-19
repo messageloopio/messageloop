@@ -4,10 +4,11 @@ import (
 	"context"
 	"testing"
 
-	"github.com/messageloopio/messageloop/internal/protocol"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/messageloopio/messageloop/internal/protocol"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 )
 
 // TestVersionGate_RejectsUnsupportedVersions proves the Connect version gate

@@ -7,29 +7,29 @@ import (
 
 func TestDisconnect_String(t *testing.T) {
 	tests := []struct {
-		name     string
+		name       string
 		disconnect Disconnect
-		want     string
+		want       string
 	}{
 		{
-			name: "with code and reason",
+			name:       "with code and reason",
 			disconnect: Disconnect{Code: 3000, Reason: "connection closed"},
-			want: "code: 3000, reason: connection closed",
+			want:       "code: 3000, reason: connection closed",
 		},
 		{
-			name: "with code only",
+			name:       "with code only",
 			disconnect: Disconnect{Code: 3500, Reason: ""},
-			want: "code: 3500, reason: ",
+			want:       "code: 3500, reason: ",
 		},
 		{
-			name: "with reason only",
+			name:       "with reason only",
 			disconnect: Disconnect{Code: 0, Reason: "custom reason"},
-			want: "code: 0, reason: custom reason",
+			want:       "code: 0, reason: custom reason",
 		},
 		{
-			name:     "empty disconnect",
+			name:       "empty disconnect",
 			disconnect: Disconnect{},
-			want:     "code: 0, reason: ",
+			want:       "code: 0, reason: ",
 		},
 	}
 	for _, tt := range tests {
@@ -69,75 +69,75 @@ func TestDisconnect_ErrorIs(t *testing.T) {
 
 func TestBuiltinDisconnectCodes(t *testing.T) {
 	tests := []struct {
-		name     string
+		name       string
 		disconnect Disconnect
-		wantCode uint32
+		wantCode   uint32
 		wantReason string
 	}{
 		{
-			name:     "DisconnectConnectionClosed",
+			name:       "DisconnectConnectionClosed",
 			disconnect: DisconnectConnectionClosed,
-			wantCode: 3000,
+			wantCode:   3000,
 			wantReason: "connection closed",
 		},
 		{
-			name:     "DisconnectInvalidToken",
+			name:       "DisconnectInvalidToken",
 			disconnect: DisconnectInvalidToken,
-			wantCode: 3500,
+			wantCode:   3500,
 			wantReason: "invalid token",
 		},
 		{
-			name:     "DisconnectBadRequest",
+			name:       "DisconnectBadRequest",
 			disconnect: DisconnectBadRequest,
-			wantCode: 3501,
+			wantCode:   3501,
 			wantReason: "bad request",
 		},
 		{
-			name:     "DisconnectStale",
+			name:       "DisconnectStale",
 			disconnect: DisconnectStale,
-			wantCode: 3502,
+			wantCode:   3502,
 			wantReason: "stale",
 		},
 		{
-			name:     "DisconnectForceNoReconnect",
+			name:       "DisconnectForceNoReconnect",
 			disconnect: DisconnectForceNoReconnect,
-			wantCode: 3503,
+			wantCode:   3503,
 			wantReason: "force disconnect",
 		},
 		{
-			name:     "DisconnectConnectionLimit",
+			name:       "DisconnectConnectionLimit",
 			disconnect: DisconnectConnectionLimit,
-			wantCode: 3504,
+			wantCode:   3504,
 			wantReason: "connection limit",
 		},
 		{
-			name:     "DisconnectChannelLimit",
+			name:       "DisconnectChannelLimit",
 			disconnect: DisconnectChannelLimit,
-			wantCode: 3505,
+			wantCode:   3505,
 			wantReason: "channel limit",
 		},
 		{
-			name:     "DisconnectInappropriateProtocol",
+			name:       "DisconnectInappropriateProtocol",
 			disconnect: DisconnectInappropriateProtocol,
-			wantCode: 3506,
+			wantCode:   3506,
 			wantReason: "inappropriate protocol",
 		},
 		{
-			name:     "DisconnectPermissionDenied",
+			name:       "DisconnectPermissionDenied",
 			disconnect: DisconnectPermissionDenied,
-			wantCode: 3507,
+			wantCode:   3507,
 			wantReason: "permission denied",
 		},
 		{
-			name:     "DisconnectNotAvailable",
+			name:       "DisconnectNotAvailable",
 			disconnect: DisconnectNotAvailable,
-			wantCode: 3508,
+			wantCode:   3508,
 			wantReason: "not available",
 		},
 		{
-			name:     "DisconnectTooManyErrors",
+			name:       "DisconnectTooManyErrors",
 			disconnect: DisconnectTooManyErrors,
-			wantCode: 3509,
+			wantCode:   3509,
 			wantReason: "too many errors",
 		},
 	}

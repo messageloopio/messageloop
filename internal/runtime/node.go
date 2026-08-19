@@ -11,14 +11,15 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
+	"github.com/prometheus/client_golang/prometheus"
+	"google.golang.org/protobuf/proto"
+
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/internal/occupancy"
 	"github.com/messageloopio/messageloop/internal/session"
 	"github.com/messageloopio/messageloop/proxy"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
-	"github.com/prometheus/client_golang/prometheus"
-	"google.golang.org/protobuf/proto"
 )
 
 type Node struct {

@@ -12,22 +12,23 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
+	"github.com/messageloopio/messageloop/internal/cluster"
+	"github.com/messageloopio/messageloop/internal/cluster/sim"
+	"github.com/messageloopio/messageloop/internal/protocol"
 	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/internal/session"
-	"github.com/messageloopio/messageloop/internal/protocol"
-	"github.com/messageloopio/messageloop/internal/cluster"
 	"github.com/messageloopio/messageloop/shared"
-	"github.com/messageloopio/messageloop/internal/cluster/sim"
-	"github.com/stretchr/testify/require"
 )
 
 // simNoopTransport backs the re-attachment in the LocalDetachAttach scenario.
 type simNoopTransport struct{}
 
-func (simNoopTransport) Write([]byte) error                 { return nil }
-func (simNoopTransport) WriteMany(...[]byte) error          { return nil }
+func (simNoopTransport) Write([]byte) error              { return nil }
+func (simNoopTransport) WriteMany(...[]byte) error       { return nil }
 func (simNoopTransport) Close(protocol.Disconnect) error { return nil }
-func (simNoopTransport) RemoteAddr() string                 { return "sim" }
+func (simNoopTransport) RemoteAddr() string              { return "sim" }
 
 // attachedCount counts, across both nodes, how many hubs hold sessionID in
 // the Attached state. The fencing contract allows at most one at any time.

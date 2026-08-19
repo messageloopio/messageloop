@@ -8,12 +8,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/messageloopio/messageloop/config"
 	intsurvey "github.com/messageloopio/messageloop/internal/survey"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // userPrincipal is a local copy of the helper that moved with the authorizer

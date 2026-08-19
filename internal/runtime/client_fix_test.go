@@ -9,15 +9,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/messageloopio/messageloop/config"
-	"github.com/messageloopio/messageloop/proxy"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/structpb"
+
+	"github.com/messageloopio/messageloop/config"
+	"github.com/messageloopio/messageloop/proxy"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
 func (c *capturingTransport) getMessage(i int) []byte {
@@ -166,7 +167,7 @@ func TestClientSession_HandleMessage_Connect_ACLDeniedSubscription(t *testing.T)
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_Connect{
 			Connect: &clientpb.Connect{
-				Version: testProtocolVersion,
+				Version:  testProtocolVersion,
 				ClientId: "client-1",
 				Subscriptions: []*clientpb.Subscription{
 					{Channel: "private.secret"},
@@ -406,7 +407,7 @@ func TestClientSession_HandleMessage_Connect_SubscriptionLimit(t *testing.T) {
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_Connect{
 			Connect: &clientpb.Connect{
-				Version: testProtocolVersion,
+				Version:  testProtocolVersion,
 				ClientId: "client-1",
 				Subscriptions: []*clientpb.Subscription{
 					{Channel: "ch1"},
@@ -466,7 +467,7 @@ func TestClientSession_HandleMessage_Connect_SubscriptionLimitWithResume(t *test
 		Id: "msg-3",
 		Envelope: &clientpb.InboundMessage_Connect{
 			Connect: &clientpb.Connect{
-				Version: testProtocolVersion,
+				Version:   testProtocolVersion,
 				ClientId:  "client-1",
 				Token:     "t",
 				SessionId: sessionID,
@@ -499,7 +500,7 @@ func TestClientSession_HandleMessage_Connect_ConcurrentWithClose(t *testing.T) {
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_Connect{
 			Connect: &clientpb.Connect{
-				Version: testProtocolVersion,
+				Version:   testProtocolVersion,
 				ClientId:  "client-1",
 				Token:     "token-1",
 				SessionId: "sess-1",
@@ -537,7 +538,7 @@ func TestClientSession_HandleMessage_Connect_RequireAuthNoProxyTokenRejected(t *
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_Connect{
 			Connect: &clientpb.Connect{
-				Version: testProtocolVersion,
+				Version:  testProtocolVersion,
 				ClientId: "client-1",
 				Token:    "any-token",
 			},
@@ -572,7 +573,7 @@ func TestClientSession_HandleMessage_Connect_TokenNoProxyNoRequireAuth_Allowed(t
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_Connect{
 			Connect: &clientpb.Connect{
-				Version: testProtocolVersion,
+				Version:  testProtocolVersion,
 				ClientId: "client-1",
 				Token:    "any-token",
 			},
@@ -625,7 +626,7 @@ func TestClientSession_HandleMessage_Connect_InvalidTokenNoTakeover(t *testing.T
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_Connect{
 			Connect: &clientpb.Connect{
-				Version: testProtocolVersion,
+				Version:   testProtocolVersion,
 				ClientId:  "client-x",
 				Token:     "bad-token",
 				SessionId: "sess-remote",
@@ -687,7 +688,7 @@ func TestClientSession_HandleMessage_Connect_ResumeAuthFailureKeepsOldSession(t 
 		Id: "msg-3",
 		Envelope: &clientpb.InboundMessage_Connect{
 			Connect: &clientpb.Connect{
-				Version: testProtocolVersion,
+				Version:   testProtocolVersion,
 				ClientId:  "client-1",
 				Token:     "bad-token",
 				SessionId: sessionID,
@@ -746,7 +747,7 @@ func TestClientSession_HandleMessage_Connect_ResumeRemoteSendsTakeover(t *testin
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_Connect{
 			Connect: &clientpb.Connect{
-				Version: testProtocolVersion,
+				Version:   testProtocolVersion,
 				ClientId:  "client-1",
 				Token:     "ok-token",
 				SessionId: "sess-remote",
@@ -1153,7 +1154,7 @@ func TestClient_Connect_RecoveryFreshFromStart(t *testing.T) {
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_Connect{
 			Connect: &clientpb.Connect{
-				Version: testProtocolVersion,
+				Version:  testProtocolVersion,
 				ClientId: "client-1",
 				Subscriptions: []*clientpb.Subscription{
 					{Channel: "epoch-ch", Recover: true, Fresh: true},
@@ -1191,7 +1192,7 @@ func TestClient_Connect_RecoveryFromOffsetWhenEpochMatches(t *testing.T) {
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_Connect{
 			Connect: &clientpb.Connect{
-				Version: testProtocolVersion,
+				Version:  testProtocolVersion,
 				ClientId: "client-1",
 				Subscriptions: []*clientpb.Subscription{
 					{Channel: "epoch-ch", Recover: true, Cursor: cursorOf("v2", 2)},
@@ -1358,7 +1359,7 @@ func TestClient_Recovery_PreservesPayloadType(t *testing.T) {
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_Connect{
 			Connect: &clientpb.Connect{
-				Version: testProtocolVersion,
+				Version:  testProtocolVersion,
 				ClientId: "client-1",
 				Subscriptions: []*clientpb.Subscription{
 					{Channel: "recovery.types", Recover: true, Cursor: cursorOf(epocher.Epoch(), first)},
@@ -1449,7 +1450,7 @@ func TestClient_EphemeralSubscription_NoPresenceOrEvents(t *testing.T) {
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_Connect{
 			Connect: &clientpb.Connect{
-				Version: testProtocolVersion,
+				Version:  testProtocolVersion,
 				ClientId: "client-1",
 				Subscriptions: []*clientpb.Subscription{
 					{Channel: ch, Ephemeral: true},
@@ -1526,7 +1527,7 @@ func TestClient_NonEphemeralSubscription_PresenceAndEvents(t *testing.T) {
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_Connect{
 			Connect: &clientpb.Connect{
-				Version: testProtocolVersion,
+				Version:  testProtocolVersion,
 				ClientId: "client-1",
 				Subscriptions: []*clientpb.Subscription{
 					{Channel: ch},
@@ -2084,7 +2085,7 @@ func TestClient_Connect_AuthProxyReceivesServerSessionID(t *testing.T) {
 		Id: "msg-1",
 		Envelope: &clientpb.InboundMessage_Connect{
 			Connect: &clientpb.Connect{
-				Version: testProtocolVersion,
+				Version:   testProtocolVersion,
 				ClientId:  "client-1",
 				Token:     "t",
 				SessionId: "client-forged-session",
@@ -2224,7 +2225,7 @@ func TestClient_ConnectWithUnroutableSubscription_SoftFail(t *testing.T) {
 		Id: "connect-1",
 		Envelope: &clientpb.InboundMessage_Connect{
 			Connect: &clientpb.Connect{
-				Version: testProtocolVersion,
+				Version:  testProtocolVersion,
 				ClientId: "client-1",
 				Subscriptions: []*clientpb.Subscription{
 					{Channel: "*.room"},

@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/internal/authz"
 	"github.com/messageloopio/messageloop/internal/channel"
@@ -14,7 +16,6 @@ import (
 	"github.com/messageloopio/messageloop/internal/survey"
 	"github.com/messageloopio/messageloop/proxy"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 // fakeRuntime is the in-package Runtime stub (PR-KA-D14 §3.6). Default

@@ -5,8 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/messageloopio/messageloop/internal/cluster"
 	"github.com/stretchr/testify/require"
+
+	"github.com/messageloopio/messageloop/internal/cluster"
 )
 
 func testLease(sessionID, nodeID, incarnationID string, version uint64) *cluster.ClusterSessionLease {

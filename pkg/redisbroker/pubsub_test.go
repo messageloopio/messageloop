@@ -10,10 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/messageloopio/messageloop/internal/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
+
+	"github.com/messageloopio/messageloop/internal/metrics"
 
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/internal/channel"

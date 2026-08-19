@@ -6,9 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/messageloopio/messageloop/internal/cluster"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/messageloopio/messageloop/internal/cluster"
 )
 
 var testKey = []byte("0123456789abcdef0123456789abcdef") // 32 bytes
@@ -68,12 +69,12 @@ func TestVerifyCommand_FieldTamperingFails(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0).UTC()
 
 	cases := map[string]func(cmd *cluster.ClusterCommand){
-		"type":         func(cmd *cluster.ClusterCommand) { cmd.Type = cluster.ClusterCommandTakeover },
-		"session_id":   func(cmd *cluster.ClusterCommand) { cmd.SessionID = "sess-other" },
-		"lease_version": func(cmd *cluster.ClusterCommand) { cmd.LeaseVersion++ },
-		"payload":      func(cmd *cluster.ClusterCommand) { cmd.Payload = []byte("forged") },
-		"command_id":   func(cmd *cluster.ClusterCommand) { cmd.CommandID = "cmd-other" },
-		"issued_at":    func(cmd *cluster.ClusterCommand) { cmd.IssuedAt = cmd.IssuedAt.Add(time.Second) },
+		"type":               func(cmd *cluster.ClusterCommand) { cmd.Type = cluster.ClusterCommandTakeover },
+		"session_id":         func(cmd *cluster.ClusterCommand) { cmd.SessionID = "sess-other" },
+		"lease_version":      func(cmd *cluster.ClusterCommand) { cmd.LeaseVersion++ },
+		"payload":            func(cmd *cluster.ClusterCommand) { cmd.Payload = []byte("forged") },
+		"command_id":         func(cmd *cluster.ClusterCommand) { cmd.CommandID = "cmd-other" },
+		"issued_at":          func(cmd *cluster.ClusterCommand) { cmd.IssuedAt = cmd.IssuedAt.Add(time.Second) },
 		"target_incarnation": func(cmd *cluster.ClusterCommand) { cmd.TargetIncarnationID = "inc-other" },
 	}
 	for name, tamper := range cases {

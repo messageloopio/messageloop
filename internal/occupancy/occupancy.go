@@ -44,4 +44,4 @@ type SyntheticLeaveReporter interface {
 	// member pruned by an existing Get/refresh path. Must be called before the
 	// store is used concurrently.
 	SetSyntheticLeaveHook(hook func(ctx context.Context, ch, clientID string))
-}
+}

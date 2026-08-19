@@ -2,16 +2,16 @@
 // ChatRoom demo stack (backend + MessageLoop server). It exercises every
 // core feature of the platform with real assertions:
 //
-//	1.  connect/auth       4 clients + 1 invalid token rejection
-//	2.  subscribe/publish   publish-with-ack offsets, broadcast delivery
-//	3.  RPC                roll / stats / whoami via the backend
-//	4.  presence           snapshot queries
-//	5.  survey             channel poll with aggregated answers
-//	6.  transient          non-persisted messages reach nobody and no history
-//	7.  recovery           new subscriber replays channel history (recover)
-//	8.  admin API          server-side publish / channels / presence
-//	9.  ACL                private channel requires a subscription token
-//	10. resume             auto-reconnect after admin kick, no message loss
+//  1. connect/auth       4 clients + 1 invalid token rejection
+//  2. subscribe/publish   publish-with-ack offsets, broadcast delivery
+//  3. RPC                roll / stats / whoami via the backend
+//  4. presence           snapshot queries
+//  5. survey             channel poll with aggregated answers
+//  6. transient          non-persisted messages reach nobody and no history
+//  7. recovery           new subscriber replays channel history (recover)
+//  8. admin API          server-side publish / channels / presence
+//  9. ACL                private channel requires a subscription token
+//  10. resume             auto-reconnect after admin kick, no message loss
 //
 // Start the stack first:
 //
@@ -133,7 +133,7 @@ func (t *testClient) connect(ctx context.Context, opts ...messageloopgo.Option) 
 		messageloopgo.WithAutoReconnect(true),
 		messageloopgo.WithReconnectBackoff(300*time.Millisecond, 5*time.Second, 2.0),
 		messageloopgo.WithReconnectMaxAttempts(20),
-		messageloopgo.WithRPCTimeout(10*time.Second),
+		messageloopgo.WithRPCTimeout(10 * time.Second),
 	}
 	opts = append(base, opts...)
 

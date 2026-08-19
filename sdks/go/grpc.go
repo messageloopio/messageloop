@@ -5,10 +5,11 @@ import (
 	"fmt"
 	"sync"
 
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/proto"
+
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 )
 
 // rawFrame is a type alias for raw protobuf bytes.

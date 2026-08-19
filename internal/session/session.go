@@ -13,12 +13,13 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/lynx-go/x/log"
-	"github.com/messageloopio/messageloop/proxy"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	"golang.org/x/time/rate"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/messageloopio/messageloop/proxy"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 )
 
 // SessionState is the lifecycle state of a Session (KD-K2). Detached is only

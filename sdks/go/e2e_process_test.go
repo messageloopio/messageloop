@@ -16,10 +16,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+
+	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
 )
 
 // This file is the two-process black-box smoke e2e (PR-KA-D9): the test builds

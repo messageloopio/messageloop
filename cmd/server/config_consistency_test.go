@@ -7,10 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/messageloopio/messageloop/internal/runtime"
-	"github.com/messageloopio/messageloop/config"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
+
+	"github.com/messageloopio/messageloop/config"
+	"github.com/messageloopio/messageloop/internal/runtime"
 )
 
 // TestRepositoryConfigsValidateAndPrebind parses every YAML config shipped in
