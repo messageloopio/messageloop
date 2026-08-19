@@ -244,10 +244,14 @@ func TestNode_Survey_Basic(t *testing.T) {
 		surveyResults, surveyErr = node.Survey(ctx, "survey-channel-basic", surveyPayload, 5*time.Second)
 	}()
 
-	// Give survey requests time to be sent and processed
-	t.Log("Waiting for survey requests...")
-	time.Sleep(500 * time.Millisecond)
-	t.Log("After waiting, checking messages...")
+	require.Eventually(t, func() bool {
+		for i := 0; i < numClients; i++ {
+			if transports[i].getMessageCount() == 0 {
+				return false
+			}
+		}
+		return true
+	}, 2*time.Second, 10*time.Millisecond, "survey requests must reach every subscriber")
 
 	// Debug: check if survey has registered
 	subscribers := node.Hub().GetSubscribers("survey-channel-basic")
@@ -374,10 +378,15 @@ func TestNode_Survey_AllClientsRespond(t *testing.T) {
 		surveyResults, surveyErr = node.Survey(ctx, "survey-channel-respond", surveyPayload, 2*time.Second)
 	}()
 
-	// Give survey requests time to be sent
-	time.Sleep(500 * time.Millisecond)
+	require.Eventually(t, func() bool {
+		for i := 0; i < numClients; i++ {
+			if transports[i].getMessageCount() == 0 {
+				return false
+			}
+		}
+		return true
+	}, 2*time.Second, 10*time.Millisecond, "survey requests must reach every subscriber")
 
-	// Debug: Check message counts
 	requestIDs := make([]string, numClients)
 	for i := 0; i < numClients; i++ {
 		msgCount := transports[i].getMessageCount()
@@ -542,8 +551,14 @@ func TestNode_Survey_ConcurrentClients(t *testing.T) {
 		surveyResults, surveyErr = node.Survey(ctx, "survey-channel-concurrent", surveyPayload, 5*time.Second)
 	}()
 
-	// Give survey requests time to be sent
-	time.Sleep(500 * time.Millisecond)
+	require.Eventually(t, func() bool {
+		for i := 0; i < numClients; i++ {
+			if transports[i].getMessageCount() == 0 {
+				return false
+			}
+		}
+		return true
+	}, 2*time.Second, 10*time.Millisecond, "survey requests must reach every subscriber")
 
 	// Read the outbound SurveyRequest ids, then respond to each survey.
 	requestIDs := make([]string, numClients)

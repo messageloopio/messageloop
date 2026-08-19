@@ -1,7 +1,6 @@
 // Package metrics holds the Prometheus instrumentation of the MessageLoop
-// server (KD-K26 phase three (a), PR-KA-D13), sunk unchanged from the root
-// messageloop package; root callers reach it through the aliases in
-// aliases.go until D15.
+// server (KD-K26 phase three (a), PR-KA-D13), sunk from the root
+// messageloop package. Callers import this package directly (D15).
 package metrics
 
 import "github.com/prometheus/client_golang/prometheus"

@@ -1,3 +1,5 @@
+import type { ChannelOrSpec } from "./types";
+
 /**
  * Client connection options.
  */
@@ -12,8 +14,8 @@ export interface ClientOptions {
   token: string;
   /** Client version */
   version: string;
-  /** Channels to auto-subscribe on connect */
-  autoSubscribe: string[];
+  /** Channels to auto-subscribe on connect (plain names or per-channel specs) */
+  autoSubscribe: ChannelOrSpec[];
   /** Heartbeat interval in milliseconds (0 to disable) */
   pingInterval: number;
   /** Pong timeout in milliseconds */
@@ -115,9 +117,10 @@ export function setVersion(version: string): ClientOption {
 }
 
 /**
- * Set auto-subscribe channels option.
+ * Set auto-subscribe channels option. Each entry may be a channel name or a
+ * SubscriptionSpec carrying a per-channel token (same shape as subscribe()).
  */
-export function setAutoSubscribe(...channels: string[]): ClientOption {
+export function setAutoSubscribe(...channels: ChannelOrSpec[]): ClientOption {
   return (options: ClientOptions) => {
     options.autoSubscribe = channels;
   };

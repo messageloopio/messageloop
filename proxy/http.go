@@ -14,20 +14,40 @@ import (
 	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v2"
 	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 )
-
-// notificationErrorResponse is the JSON wire format of the notification
-// endpoint responses (OnConnected/OnSubscribed/OnUnsubscribed/OnDisconnected).
-// The protobuf notification response messages carry no fields, so the optional
-// backend error must be parsed from the raw JSON body.
-type notificationErrorResponse struct {
-	Error *sharedv2.Error `json:"error"`
-}
 
 // maxResponseBodySize caps how much of a backend response body is read into
 // memory: a misbehaving or compromised backend must not be able to exhaust
 // server memory with an unbounded body.
 const maxResponseBodySize = 4 << 20 // 4 MiB
+
+// proxyJSONMarshal emits proto field names (snake_case) so HTTP backends that
+// already consume the hand-rolled maps keep working, while still using the
+// proto3 JSON encoder.
+var proxyJSONMarshal = protojson.MarshalOptions{UseProtoNames: true}
+
+func marshalProxyJSON(msg proto.Message) ([]byte, error) {
+	return proxyJSONMarshal.Marshal(msg)
+}
+
+// notificationErrorFromBody reads the optional Error object on a 200
+// notification response. The proto response messages have no fields, so the
+// backend error is an extra JSON member parsed with protojson.
+func notificationErrorFromBody(respBody []byte) (*sharedv2.Error, error) {
+	var envelope struct {
+		Error json.RawMessage `json:"error"`
+	}
+	if json.Unmarshal(respBody, &envelope) != nil || len(envelope.Error) == 0 {
+		return nil, nil
+	}
+	var structured sharedv2.Error
+	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
+	if err := opts.Unmarshal(envelope.Error, &structured); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+	return &structured, nil
+}
 
 // HTTPStatusError is returned by the HTTP proxy when the backend answers with
 // a non-200 status. When the body carries a structured sharedv2.Error it is
@@ -145,13 +165,7 @@ func (p *HTTPProxy) Authenticate(ctx context.Context, req *AuthenticateProxyRequ
 	defer cancel()
 
 	protoReq := req.ToProtoRequest()
-	body, err := json.Marshal(map[string]any{
-		"client_id":   protoReq.ClientId,
-		"token":       protoReq.Token,
-		"client_type": protoReq.ClientType,
-		"session_id":  protoReq.SessionId,
-		"remote_addr": protoReq.RemoteAddr,
-	})
+	body, err := marshalProxyJSON(protoReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
@@ -187,12 +201,7 @@ func (p *HTTPProxy) SubscribeAcl(ctx context.Context, req *SubscribeAclProxyRequ
 	defer cancel()
 
 	protoReq := req.ToProtoRequest()
-	body, err := json.Marshal(map[string]any{
-		"channel":    protoReq.Channel,
-		"token":      protoReq.Token,
-		"user_id":    protoReq.UserId,
-		"session_id": protoReq.SessionId,
-	})
+	body, err := marshalProxyJSON(protoReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
@@ -224,12 +233,7 @@ func (p *HTTPProxy) PublishAcl(ctx context.Context, req *PublishAclProxyRequest)
 	defer cancel()
 
 	protoReq := req.ToProtoRequest()
-	body, err := json.Marshal(map[string]any{
-		"channel":    protoReq.Channel,
-		"token":      protoReq.Token,
-		"user_id":    protoReq.UserId,
-		"session_id": protoReq.SessionId,
-	})
+	body, err := marshalProxyJSON(protoReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
@@ -261,10 +265,7 @@ func (p *HTTPProxy) OnConnected(ctx context.Context, req *OnConnectedProxyReques
 	defer cancel()
 
 	protoReq := req.ToProtoRequest()
-	body, err := json.Marshal(map[string]any{
-		"session_id": protoReq.SessionId,
-		"username":   protoReq.Username,
-	})
+	body, err := marshalProxyJSON(protoReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
@@ -276,11 +277,11 @@ func (p *HTTPProxy) OnConnected(ctx context.Context, req *OnConnectedProxyReques
 
 	result, err := p.doRequest(ctx, httpReq, "OnConnected", req.SessionID, "",
 		func(respBody []byte) (any, error) {
-			var payload notificationErrorResponse
-			if err := json.Unmarshal(respBody, &payload); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+			errObj, err := notificationErrorFromBody(respBody)
+			if err != nil {
+				return nil, err
 			}
-			return &OnConnectedProxyResponse{Error: payload.Error}, nil
+			return &OnConnectedProxyResponse{Error: errObj}, nil
 		},
 	)
 	if err != nil {
@@ -295,11 +296,7 @@ func (p *HTTPProxy) OnSubscribed(ctx context.Context, req *OnSubscribedProxyRequ
 	defer cancel()
 
 	protoReq := req.ToProtoRequest()
-	body, err := json.Marshal(map[string]any{
-		"session_id": protoReq.SessionId,
-		"channel":    protoReq.Channel,
-		"username":   protoReq.Username,
-	})
+	body, err := marshalProxyJSON(protoReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
@@ -311,11 +308,11 @@ func (p *HTTPProxy) OnSubscribed(ctx context.Context, req *OnSubscribedProxyRequ
 
 	result, err := p.doRequest(ctx, httpReq, "OnSubscribed", req.SessionID, req.Channel,
 		func(respBody []byte) (any, error) {
-			var payload notificationErrorResponse
-			if err := json.Unmarshal(respBody, &payload); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+			errObj, err := notificationErrorFromBody(respBody)
+			if err != nil {
+				return nil, err
 			}
-			return &OnSubscribedProxyResponse{Error: payload.Error}, nil
+			return &OnSubscribedProxyResponse{Error: errObj}, nil
 		},
 	)
 	if err != nil {
@@ -330,11 +327,7 @@ func (p *HTTPProxy) OnUnsubscribed(ctx context.Context, req *OnUnsubscribedProxy
 	defer cancel()
 
 	protoReq := req.ToProtoRequest()
-	body, err := json.Marshal(map[string]any{
-		"session_id": protoReq.SessionId,
-		"channel":    protoReq.Channel,
-		"username":   protoReq.Username,
-	})
+	body, err := marshalProxyJSON(protoReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
@@ -346,11 +339,11 @@ func (p *HTTPProxy) OnUnsubscribed(ctx context.Context, req *OnUnsubscribedProxy
 
 	result, err := p.doRequest(ctx, httpReq, "OnUnsubscribed", req.SessionID, req.Channel,
 		func(respBody []byte) (any, error) {
-			var payload notificationErrorResponse
-			if err := json.Unmarshal(respBody, &payload); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+			errObj, err := notificationErrorFromBody(respBody)
+			if err != nil {
+				return nil, err
 			}
-			return &OnUnsubscribedProxyResponse{Error: payload.Error}, nil
+			return &OnUnsubscribedProxyResponse{Error: errObj}, nil
 		},
 	)
 	if err != nil {
@@ -365,10 +358,7 @@ func (p *HTTPProxy) OnDisconnected(ctx context.Context, req *OnDisconnectedProxy
 	defer cancel()
 
 	protoReq := req.ToProtoRequest()
-	body, err := json.Marshal(map[string]any{
-		"session_id": protoReq.SessionId,
-		"username":   protoReq.Username,
-	})
+	body, err := marshalProxyJSON(protoReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
@@ -380,11 +370,11 @@ func (p *HTTPProxy) OnDisconnected(ctx context.Context, req *OnDisconnectedProxy
 
 	result, err := p.doRequest(ctx, httpReq, "OnDisconnected", req.SessionID, "",
 		func(respBody []byte) (any, error) {
-			var payload notificationErrorResponse
-			if err := json.Unmarshal(respBody, &payload); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+			errObj, err := notificationErrorFromBody(respBody)
+			if err != nil {
+				return nil, err
 			}
-			return &OnDisconnectedProxyResponse{Error: payload.Error}, nil
+			return &OnDisconnectedProxyResponse{Error: errObj}, nil
 		},
 	)
 	if err != nil {

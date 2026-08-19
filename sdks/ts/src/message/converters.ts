@@ -332,10 +332,10 @@ export function createSurveyRequestMessage(
  * Create an InboundMessage with SubRefresh envelope.
  */
 export function createSubRefreshMessage(
-  subscriptions: { channel: string; token: string }[]
+  channels: string[]
 ): InboundMessage {
   const subRefresh = create(SubRefreshSchema, {
-    channels: subscriptions.map((sub) => sub.channel),
+    channels,
   });
 
   return create(InboundMessageSchema, {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -127,6 +128,7 @@ func TestTransport_ConcurrentWriteManyAndClose(t *testing.T) {
 	stream := newFakeBidiStream()
 	transport := newGRPCTransport(stream, "fake-addr", 5*time.Second)
 
+	var started atomic.Int32
 	stop := make(chan struct{})
 	var wg sync.WaitGroup
 	for i := 0; i < 16; i++ {
@@ -138,12 +140,15 @@ func TestTransport_ConcurrentWriteManyAndClose(t *testing.T) {
 				case <-stop:
 					return
 				default:
+					started.Add(1)
 					_ = transport.WriteMany([]byte("payload"))
 				}
 			}
 		}()
 	}
-	time.Sleep(50 * time.Millisecond)
+	// Payloads are not valid protobuf, so SendMsg never records them.
+	// Wait until every writer has entered WriteMany, then race Close.
+	require.Eventually(t, func() bool { return started.Load() >= 16 }, time.Second, time.Millisecond)
 	require.NoError(t, transport.Close(protocol.Disconnect{Code: 3500, Reason: "test disconnect"}))
 	require.NoError(t, transport.Close(protocol.Disconnect{Code: 3501, Reason: "second close is a no-op"}))
 	close(stop)
@@ -170,6 +175,7 @@ func TestTransport_ConcurrentWriteManyAndClose_DefaultWriteTimeout(t *testing.T)
 	stream := newFakeBidiStream()
 	transport := newGRPCTransport(stream, "fake-addr", 0)
 
+	var started atomic.Int32
 	stop := make(chan struct{})
 	var wg sync.WaitGroup
 	for i := 0; i < 16; i++ {
@@ -181,12 +187,13 @@ func TestTransport_ConcurrentWriteManyAndClose_DefaultWriteTimeout(t *testing.T)
 				case <-stop:
 					return
 				default:
+					started.Add(1)
 					_ = transport.WriteMany([]byte("payload"))
 				}
 			}
 		}()
 	}
-	time.Sleep(50 * time.Millisecond)
+	require.Eventually(t, func() bool { return started.Load() >= 16 }, time.Second, time.Millisecond)
 	require.NoError(t, transport.Close(protocol.Disconnect{Code: 3500, Reason: "test disconnect"}))
 	close(stop)
 	wg.Wait()
@@ -259,7 +266,14 @@ func TestTransport_SlowEnqueueGetsFreshAckBudget(t *testing.T) {
 	go func() { writeC <- transport.WriteMany(queuedFrame) }()
 
 	// Make sure the enqueue is actually stalled before releasing the worker.
-	time.Sleep(450 * time.Millisecond)
+	require.Never(t, func() bool {
+		select {
+		case <-writeC:
+			return true
+		default:
+			return false
+		}
+	}, 300*time.Millisecond, 10*time.Millisecond, "frame C must stay blocked on the full handoff slot")
 	stream.release()
 
 	select {
@@ -272,7 +286,7 @@ func TestTransport_SlowEnqueueGetsFreshAckBudget(t *testing.T) {
 	// The write must have waited out the handoff backpressure: it succeeded
 	// only after the slot freed up.
 	elapsed := time.Since(slowStart)
-	require.GreaterOrEqual(t, elapsed, 400*time.Millisecond,
+	require.GreaterOrEqual(t, elapsed, 250*time.Millisecond,
 		"write returned too early; it must wait for the handoff slot")
 
 	// The earlier writers complete once the worker drains.

@@ -3,7 +3,7 @@
 | 字段 | 值 |
 | --- | --- |
 | 标题 | `refactor: sink Node and cluster facade into internal/runtime, delete root aliases` |
-| 状态 | **Ready** |
+| 状态 | **Accepted**(2026-08-19 已合 `fd5ef8d`+`77c8b78`) |
 | 依赖 | D14 已合(`6e17bdb`)。在 `v2` 分支上做 |
 | 设计来源 | [kernel-architecture.md](../kernel-architecture.md) :173-191(目标包图)、KD-K26;D14 规格 §7 阶段图 |
 | 验收人 | 主 agent |

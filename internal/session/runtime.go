@@ -1,8 +1,7 @@
 // Package session is the Session Plane (KD-K26 phase three (b), PR-KA-D14):
 // Session/Hub/Transport/Heartbeat plus the Runtime seam that inverts
-// Session's former *Node field. Root callers reach these types through the
-// aliases in aliases.go until D15; new production code in this package
-// imports internal/* and shared directly.
+// Session's former *Node field. Callers import this package directly
+// (D15 deleted the root aliases).
 package session
 
 import (

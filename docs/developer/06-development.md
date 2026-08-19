@@ -74,8 +74,10 @@ go test -v ./pkg/topics/... -run TestCSTrieMatcher
 
 以下测试在启动时通过 Redis `Ping` 探测可用性，失败则调用 `t.Skipf` 自动跳过，无需 build tag 或环境变量开关：
 
-- `internal/runtime/cluster_redis_integration_test.go`：多节点集群的会话管理、查询与在线状态聚合，使用 **DB 15**，测试前后执行 `FlushDB`。
-- `pkg/redisbroker/cluster_command_bus_test.go`（命令总线）、`pkg/redisbroker/publish_transient_test.go`（瞬时发布不进历史）、`pkg/redisbroker/history_test.go`：使用 **DB 14**。
+- `sdks/go/e2e_process_test.go`：Go SDK 黑盒 e2e，使用 **DB 13**。
+- `internal/runtime/cluster_redis_integration_test.go` 原子写测（`clusterAtomicWriteTestDB`）：使用 **DB 14**。
+- `internal/runtime/cluster_redis_integration_test.go` 多节点会话/查询/在线状态：使用 **DB 15**，测试前后执行 `FlushDB`。
+- `pkg/redisbroker/` 集成测试（命令总线、history、presence、pubsub 等，经 `requireCommandBusRedis`）：使用 **DB 16**。测试前后 `FlushDB`。与 DB 14/15 隔离，避免 `go test ./...` 包间并发互清库。
 
 连接参数通过环境变量配置：
 

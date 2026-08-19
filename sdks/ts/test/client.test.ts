@@ -82,6 +82,26 @@ describe("Client Options", () => {
       const options = buildClientOptions([setAutoSubscribe("ch1", "ch2")]);
       expect(options.autoSubscribe).toEqual(["ch1", "ch2"]);
     });
+
+    it("accepts per-channel tokens", () => {
+      const options = buildClientOptions([
+        setAutoSubscribe("open.ch", { channel: "gated.ch", token: "tok-1" }),
+      ]);
+      expect(options.autoSubscribe).toEqual([
+        "open.ch",
+        { channel: "gated.ch", token: "tok-1" },
+      ]);
+    });
+
+    it("seeds subscribedChannels tokens from auto-subscribe specs", () => {
+      const client = new (MessageLoopClient as any)(
+        buildClientOptions([
+          setAutoSubscribe("open.ch", { channel: "gated.ch", token: "tok-1" }),
+        ])
+      );
+      expect((client as any).subscribedChannels.get("open.ch")).toEqual("");
+      expect((client as any).subscribedChannels.get("gated.ch")).toEqual("tok-1");
+    });
   });
 
   describe("setPingInterval", () => {

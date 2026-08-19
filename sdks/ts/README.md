@@ -73,7 +73,7 @@ await client.close();
 | `setClientType(string)` | `"sdk"` | Set client type metadata |
 | `setToken(string)` | `""` | Authentication token passed in `Connect` |
 | `setVersion(string)` | `"2.0.0"` | Client version metadata (protocol generation; server rejects non-2) |
-| `setAutoSubscribe(...channels)` | `[]` | Subscribe automatically on connect |
+| `setAutoSubscribe(...channels)` | `[]` | Subscribe automatically on connect; each entry may be a channel name or `{ channel, token? }` |
 | `setPingInterval(number)` | `30000` | Ping interval in milliseconds |
 | `setPingTimeout(number)` | `10000` | Pong timeout in milliseconds |
 | `setConnectTimeout(number)` | `30000` | Initial WebSocket connect timeout |

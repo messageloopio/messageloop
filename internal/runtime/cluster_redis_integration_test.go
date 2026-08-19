@@ -31,7 +31,8 @@ import (
 const clusterRedisIntegrationDB = 15
 
 // clusterAtomicWriteTestDB isolates the PR-KA-D10 atomic-write tests from the
-// other cluster integration scenarios.
+// other cluster integration scenarios (DB 15) and from redisbroker command
+// bus tests (DB 16).
 const clusterAtomicWriteTestDB = 14
 
 // testClusterHMACKey is the 32-byte HMAC key shared by the buses of the

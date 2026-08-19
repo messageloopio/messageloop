@@ -19,7 +19,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const clusterCommandBusTestDB = 14
+// DB 16 keeps these FlushDB calls off the runtime atomic-write tests (DB 14)
+// and the cluster redis integration suite (DB 15). sdks/go e2e uses DB 13.
+const clusterCommandBusTestDB = 16
 
 // testClusterCommandBusKey is the 32-byte HMAC key shared by every bus in
 // these tests (spec allows a 32-byte literal in tests).

@@ -164,9 +164,11 @@ export class MessageLoopClient implements IClient {
     this.codec = options.encoding === "proto" ? protobufCodec : jsonCodec;
     this.autoReconnectEnabled = options.autoReconnect;
 
-    // Add auto-subscribe channels to subscribed set
-    for (const channel of options.autoSubscribe) {
-      this.subscribedChannels.set(channel, "");
+    // Add auto-subscribe channels to subscribed set (token rides Connect).
+    for (const spec of options.autoSubscribe) {
+      const channel = typeof spec === "string" ? spec : spec.channel;
+      const token = typeof spec === "string" ? "" : spec.token ?? "";
+      this.subscribedChannels.set(channel, token);
     }
   }
 
@@ -1203,9 +1205,7 @@ export class MessageLoopClient implements IClient {
    * special handling, mirroring the Go SDK.
    */
   async subRefresh(...channels: string[]): Promise<void> {
-    const msg = createSubRefreshMessage(
-      channels.map((channel) => ({ channel, token: "" }))
-    );
+    const msg = createSubRefreshMessage(channels);
     await this.send(msg);
   }
 

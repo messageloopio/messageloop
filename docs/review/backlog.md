@@ -90,17 +90,26 @@ B1-B4、A1-A5 全部由任务书（`docs/review/tasks/`）分派实施完成并�
 - 命名偏离：Go SDK 订阅 token 选项定名 `WithSubscriptionToken`（`WithToken` 已被 Dial 鉴权选项占用，`sdks/go/options.go:129`）。
 - 任务书前提修正：Go SDK WS 侧原本没有断连码处理，实施时已把 WS close frame 与 gRPC 信封统一接线为 `*DisconnectError`。
 
-## 六、下一轮候选（验收新增发现 + 已接受遗留，未排期）
+## 六、下一轮候选（2026-08-19 对照现码复核）
 
-按建议优先级排序：
+一、二节的 B1–B4 / A1–A5 已在 §五落地，现码仍在（`ValidateTopic`、matcher `**`、SDK token/PublishAck/Survey/SubRefresh、`ChannelOffsets`、`PublicationFromPayloadV2`、gRPC `disconnect_code`、`connections_total{transport}`、非 200 protojson）。本节只跟踪验收当时新增的 10 条。
 
-1. **presence × `**` 冲突修复**（行为副作用）：通配订阅 `a.**` 的 presence join/leave 事件被 `ValidateTopic` 拒绝（`a.**/__presence` 末段含 `**` 但不等于 `**`），仅 warning + `PresencePublishFailures` 指标兜底，无测试覆盖。方向：`node.go` 对通配订阅跳过 presence 发布，或定义通配 presence 的正式语义。
-2. **时序脆弱测试改造**（8 处，A5 调查报告）：如 `client_fix_test.go` 的 50ms 固定睡眠等待异步 presence、`survey_test.go:240` 的 500ms 睡眠、`pkg/grpcstream/transport_test.go:265` 与 1s deadline 耦合的 450ms 睡眠——改为同步点式或 `assert.Eventually`。
-3. **TS `setAutoSubscribe` 携带 token**（`sdks/ts/src/client/options.ts`）：首次连接自动订阅目前只接受 `string[]`，无法带每频道 token（重连/手动订阅已支持）。需扩展 options 类型。
-4. **`SubscriptionSpec`/`ChannelOrSpec` 重复定义收敛**（`sdks/ts/src/client/types.ts` 与 `message/converters.ts` 各一份）；`createSubRefreshMessage` 的死参数 token 标注或移除。
-5. **node.go 发布兜底校验**：`ValidateTopic` 目前由 hub/broker 各自调用，第三方自定义 Broker 不受保护；Node 层可加防御性校验。
-6. **cluster 测试关闭顺序**：`node.Shutdown()` 关闭 Redis client 后仍有异步 goroutine 发 presence leave（`redis: client is closed` 警告噪音）。
-7. **HTTP proxy 200 路径 protojson 化**（`proxy/http.go` 的 Authenticate/SubscribeAcl/OnConnected 等仍用 encoding/json，与非 200 路径不一致）。
-8. **Redis 集成测试进程隔离**：`TestClusterRedis_*` 固定 DB 15 + 固定 node ID，多进程并发跑测试会互相 `FlushDB`；建议按进程随机 DB 或 key 前缀。补充（2026-08-19 D13 终验实测）：DB 14 同样中招——根包 `TestClusterRedis_CompareAndSwapSessionState_Atomic`（`clusterAtomicWriteTestDB=14`）与 `pkg/redisbroker/cluster_command_bus_test.go`（`clusterCommandBusTestDB=14`，:233/:235 `FlushDB`）在 `go test ./...` 包间并发下互清，曾致 nil lease panic（单测与全量复跑均过，确认 flake 而非回归）。
-9. **Go SDK `handleSubscribeAck` 锁范围统一**（`sdks/go/client.go:570-586`，当前单 goroutine 无实际竞态，样式隐患）。
-10. **B4 热路径压测观察**：broadcast 每 publication 新增一次分片写锁，性能敏感场景留意。
+### 已落地（不再排期）
+
+1. **presence × `**`**：`shouldTrackPresence` 跳过通配；`TestPresence_LegacyCompanionExactOnly` 锁死 `im.**` 不写伴生频道。
+4a. **`SubscriptionSpec`/`ChannelOrSpec` 重复定义**：`converters.ts` 已从 `client/types.ts` re-export。
+
+### 本轮修复（2026-08-19）
+
+2. **时序脆弱测试**：`client_fix_test` 的 50ms presence 睡眠、`survey_test` 三处 500ms、`pkg/transport/grpc/transport_test.go` 的 SlowEnqueue 450ms 改为 `Eventually`/`Never`。并发 WriteMany+Close 不等 `sentMessages`（测试载荷不是合法 protobuf，SendMsg 不会入账），改为等所有 writer 进入 `WriteMany` 再 Close。
+3. **TS `setAutoSubscribe` 携带 token**：`autoSubscribe` 改为 `ChannelOrSpec[]`，首次 Connect 可带每频道 token。
+4b. **`createSubRefreshMessage` 死参数 `token`**：签名改为 `string[]`，只组 `channels`。
+7. **HTTP proxy 200 路径 protojson**：Authenticate/ACL/通知请求体改 `protojson`（`UseProtoNames` 保持 snake_case 兼容）；通知 200 的 `error` 成员用 protojson 解析（与非 200 一致）。
+8. **Redis 集成测试 DB 隔离**：command bus 测改 DB 16，不再与 runtime 原子写测（DB 14）互 `FlushDB`。多进程仍可能撞固定 DB，未做随机 DB。
+
+### 仍挂着（未排期）
+
+5. **`Node.Publish` 兜底 `ValidateTopic`**：校验仍在 hub + memory/redis broker；`Node.Publish` 本身不调，自定义 Broker 无防护。
+6. **cluster 测试关闭顺序**：`Shutdown` 后异步 presence leave 打 `redis: client is closed`（噪音，非功能缺陷）。
+9. **Go SDK `handleSubscribeAck` 锁范围**：仍每频道 `Lock/Unlock`，单 goroutine 无实际竞态。
+10. **B4 热路径压测观察**：不是缺陷。

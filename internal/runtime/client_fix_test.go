@@ -1020,8 +1020,8 @@ func TestClient_HandlePing_ThrottlesClusterRefresh(t *testing.T) {
 		require.NoError(t, client.HandleMessage(ctx, pingMsg))
 	}
 	require.Eventually(t, func() bool { return directory.count() >= baseline+2 }, time.Second, 10*time.Millisecond)
-	// Give any stragglers a chance to over-sync, then assert nothing more ran.
-	time.Sleep(100 * time.Millisecond)
+	require.Never(t, func() bool { return directory.count() > baseline+2 }, 150*time.Millisecond, 10*time.Millisecond,
+		"a burst of pings within the interval must trigger exactly one refresh")
 	assert.Equal(t, baseline+2, directory.count(),
 		"a burst of pings within the interval must trigger exactly one refresh")
 
@@ -1468,8 +1468,8 @@ func TestClient_EphemeralSubscription_NoPresenceOrEvents(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, presence, 1, "ephemeral subscription must not register presence (only the observer may be present)")
 	require.Contains(t, presence, observer.client.SessionID())
-	time.Sleep(50 * time.Millisecond) // presence events are published async
-	assert.Zero(t, observer.eventCount(), "ephemeral connect subscription must not publish a join event")
+	require.Never(t, func() bool { return observer.eventCount() > 0 }, 200*time.Millisecond, 10*time.Millisecond,
+		"ephemeral connect subscription must not publish a join event")
 
 	// An ephemeral Subscribe must behave the same.
 	subMsg := &clientpb.InboundMessage{
@@ -1485,8 +1485,8 @@ func TestClient_EphemeralSubscription_NoPresenceOrEvents(t *testing.T) {
 	presence, err = node.Presence(ctx, ch+"-2")
 	require.NoError(t, err)
 	assert.Empty(t, presence)
-	time.Sleep(50 * time.Millisecond)
-	assert.Zero(t, observer.eventCount(), "ephemeral subscribe must not publish a join event")
+	require.Never(t, func() bool { return observer.eventCount() > 0 }, 200*time.Millisecond, 10*time.Millisecond,
+		"ephemeral subscribe must not publish a join event")
 
 	// Unsubscribing an ephemeral channel must not publish a leave event.
 	unsubMsg := &clientpb.InboundMessage{
@@ -1498,14 +1498,14 @@ func TestClient_EphemeralSubscription_NoPresenceOrEvents(t *testing.T) {
 		},
 	}
 	require.NoError(t, client.HandleMessage(ctx, unsubMsg))
-	time.Sleep(50 * time.Millisecond)
-	assert.Zero(t, observer.eventCount(), "ephemeral unsubscribe must not publish a leave event")
+	require.Never(t, func() bool { return observer.eventCount() > 0 }, 200*time.Millisecond, 10*time.Millisecond,
+		"ephemeral unsubscribe must not publish a leave event")
 
 	// Closing a client with only ephemeral subscriptions must not publish
 	// leave events either.
 	require.NoError(t, client.Close(Disconnect{}))
-	time.Sleep(50 * time.Millisecond)
-	assert.Zero(t, observer.eventCount(), "close of ephemeral subscriptions must not publish leave events")
+	require.Never(t, func() bool { return observer.eventCount() > 0 }, 200*time.Millisecond, 10*time.Millisecond,
+		"close of ephemeral subscriptions must not publish leave events")
 	assert.Zero(t, node.Hub().NumSubscribers(ch+"-2"), "the ephemeral subscription must be removed on close")
 }
 
