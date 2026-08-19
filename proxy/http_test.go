@@ -104,6 +104,30 @@ func TestHTTPProxy_Authenticate_RequestCarriesSessionAndRemoteAddr(t *testing.T)
 	assert.Equal(t, "10.0.0.1:4321", body["remote_addr"])
 }
 
+// Regression: a backend emitting the proto3 JSON contract (camelCase field
+// names such as userInfo) must populate the parsed response. encoding/json
+// silently dropped those fields against the generated snake_case json tags.
+func TestHTTPProxy_Authenticate_ProtoJSONContractResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"userInfo":{"id":"user-1","username":"alice","clientType":"web","clientId":"client-1"}}`))
+	}))
+	defer server.Close()
+
+	p := newTestHTTPProxy(t, server)
+
+	resp, err := p.Authenticate(context.Background(), &AuthenticateProxyRequest{
+		ClientID: "client-1",
+		Token:    "token-1",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp.UserInfo)
+	assert.Equal(t, "user-1", resp.UserInfo.ID)
+	assert.Equal(t, "alice", resp.UserInfo.Username)
+	assert.Equal(t, "web", resp.UserInfo.ClientType)
+	assert.Equal(t, "client-1", resp.UserInfo.ClientID)
+}
+
 func TestHTTPProxy_SubscribeAcl_RequestCarriesUserAndSession(t *testing.T) {
 	bodyCh := make(chan map[string]any, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -159,7 +159,12 @@ func (p *HTTPProxy) Authenticate(ctx context.Context, req *AuthenticateProxyRequ
 	result, err := p.doRequest(ctx, httpReq, "Authenticate", req.ClientID, "",
 		func(respBody []byte) (any, error) {
 			var protoResp proxypb.AuthenticateResponse
-			if err := json.Unmarshal(respBody, &protoResp); err != nil {
+			// Parse with protojson like the RPC path: encoding/json cannot match
+			// the proto3 JSON contract (camelCase names such as userInfo),
+			// silently dropping fields when the backend emits it. protojson
+			// accepts both the JSON name and the original proto field name.
+			opts := protojson.UnmarshalOptions{DiscardUnknown: true}
+			if err := opts.Unmarshal(respBody, &protoResp); err != nil {
 				return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 			}
 			return FromProtoAuthenticateResponse(&protoResp), nil
@@ -195,7 +200,8 @@ func (p *HTTPProxy) SubscribeAcl(ctx context.Context, req *SubscribeAclProxyRequ
 	result, err := p.doRequest(ctx, httpReq, "SubscribeAcl", req.Channel, "",
 		func(respBody []byte) (any, error) {
 			var protoResp proxypb.SubscribeAclResponse
-			if err := json.Unmarshal(respBody, &protoResp); err != nil {
+			opts := protojson.UnmarshalOptions{DiscardUnknown: true}
+			if err := opts.Unmarshal(respBody, &protoResp); err != nil {
 				return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 			}
 			return FromProtoSubscribeAclResponse(&protoResp), nil
@@ -231,7 +237,8 @@ func (p *HTTPProxy) PublishAcl(ctx context.Context, req *PublishAclProxyRequest)
 	result, err := p.doRequest(ctx, httpReq, "PublishAcl", req.Channel, "",
 		func(respBody []byte) (any, error) {
 			var protoResp proxypb.PublishAclResponse
-			if err := json.Unmarshal(respBody, &protoResp); err != nil {
+			opts := protojson.UnmarshalOptions{DiscardUnknown: true}
+			if err := opts.Unmarshal(respBody, &protoResp); err != nil {
 				return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 			}
 			return FromProtoPublishAclResponse(&protoResp), nil
