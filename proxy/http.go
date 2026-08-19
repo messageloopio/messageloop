@@ -24,6 +24,11 @@ type notificationErrorResponse struct {
 	Error *sharedv2.Error `json:"error"`
 }
 
+// maxResponseBodySize caps how much of a backend response body is read into
+// memory: a misbehaving or compromised backend must not be able to exhaust
+// server memory with an unbounded body.
+const maxResponseBodySize = 4 << 20 // 4 MiB
+
 // HTTPStatusError is returned by the HTTP proxy when the backend answers with
 // a non-200 status. When the body carries a structured sharedv2.Error it is
 // preserved in Err; otherwise the raw body text is kept in Body. Callers may
@@ -410,10 +415,14 @@ func (p *HTTPProxy) doRequest(ctx context.Context, httpReq *http.Request, method
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	// Read response
-	respBody, err := io.ReadAll(resp.Body)
+	// Read response, bounded: a misbehaving or compromised backend must not
+	// exhaust server memory with an unbounded body.
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodySize+1))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+	if len(respBody) > maxResponseBodySize {
+		return nil, fmt.Errorf("response body exceeds %d bytes", maxResponseBodySize)
 	}
 
 	// Check status code
