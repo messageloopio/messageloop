@@ -40,6 +40,7 @@
 
 - `summary.md`：第一轮评审（2026-08-12）原始报告集。
 - `2026-08-19-comprehensive-review.md`：第二轮全面评审（D15 重构完成后），9 个维度并行评审的核实汇总，含 Critical 4 项。
+- `2026-08-21-comprehensive-review.md`：第三轮全面评审（C1–C3 修复与性能提交之后，基线 `254eceb`），复核上轮 65 项发现（18 FIXED / 11 PARTIAL / 36 OPEN）并新增 Critical 1 项、Important 约 11 项。
 
 ## 评审基线
 
