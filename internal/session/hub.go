@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/lynx-go/x/log"
@@ -26,6 +27,17 @@ const (
 	// growth on channels with thousands of subscribers.
 	broadcastParallelLimit = 64
 )
+
+// broadcastWriteBudget bounds how long one BroadcastPublication call waits
+// for a subscriber's write confirmation (the queued frame's done signal). It
+// aligns with the default transport write budgets (WS write deadline, gRPC
+// send budget — both 10s and never 0, which Validate rejects), so a healthy
+// write never crosses it. A subscriber that misses the budget is counted as
+// a delivery failure and its last-delivered offset is not advanced, so
+// recovery re-sends: over-delivery (deduped by the stable message ID, gaps
+// surfaced by C6 GapNotice), never message loss. A var so tests can shrink
+// it; see TestHub_BroadcastPublication_SlowWriterHitsBudget.
+var broadcastWriteBudget = 10 * time.Second
 
 // publicationID builds the stable, globally unique message ID for a
 // publication: channel + offset. Realtime delivery and connect-time history
@@ -362,7 +374,12 @@ func (h *Hub) BroadcastPublication(ch string, pub *Publication) error {
 		clients = append(clients, client)
 	}
 
-	ctx := context.Background()
+	// Every frame confirmation waits under one shared budget (C4-B): a
+	// subscriber whose writer does not confirm in time is treated as not
+	// delivered, and one slow write can no longer stall the fan-out past the
+	// budget — the slow-consumer lanes and heartbeat own the cleanup.
+	ctx, cancel := context.WithTimeout(context.Background(), broadcastWriteBudget)
+	defer cancel()
 
 	// Create Payload from publication data, preserving the original
 	// oneof variant (Binary/Text/JSON). The message position carries the

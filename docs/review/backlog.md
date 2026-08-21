@@ -113,3 +113,41 @@ B1-B4、A1-A5 全部由任务书（`docs/review/tasks/`）分派实施完成并�
 6. **cluster 测试关闭顺序**：`Shutdown` 后异步 presence leave 打 `redis: client is closed`（噪音，非功能缺陷）。
 9. **Go SDK `handleSubscribeAck` 锁范围**：仍每频道 `Lock/Unlock`，单 goroutine 无实际竞态。
 10. **B4 热路径压测观察**：不是缺陷。
+
+## 七、2026-08-21 评审遗留补录（v2 合并 main 后录入）
+
+> 来源：`docs/review/2026-08-21-comprehensive-review.md` E10（架构债 9 项，原报告 36 OPEN/11 PARTIAL 中的结构性条目）与规范轴遗留。C4-B（广播 `frame.done` 等待预算）已随 v2 合并当批修复（`internal/session/hub.go` `broadcastWriteBudget` + `TestHub_BroadcastPublication_SlowWriterHitsBudget`），不再列入。
+
+### E10 架构债（按既定 PR 序列推进，动包结构前先补 `recordDeliveredOffsets` 乱序/单调性测试）
+
+1. **God 包**：`internal/runtime/node.go` 约 1556 行，装配/发布/survey/代理/生命周期混杂。
+2. **Runtime 胖缝**：internal/session 侧 Runtime 接口 36 方法，测试还需 `fake_runtime_test.go` + `var newHub` 双壳。
+3. **过渡别名层**：`internal/runtime/aliases_local.go` 294 行约 165 符号（git-mv 过渡产物，消费者已可直接引子包）。
+4. **`isPeerClosedError` 编译期耦合双传输**：session 包同时感知 WS/gRPC 错误形态。
+5. **`syncClusterSessionState` 三套 ctx**：调用链 ctx 语义不统一。
+6. **`Client=Session` 三胞胎**：root/session/runtime 三处类型名并存的历史层。
+7. **sim/admin 反向依赖**：仿真与管理面引用生产包内部符号。
+8. **双重别名层**：runtime 别名 + genproto `sharedv2`/`sharedpb` 双名（35 处 vs 16 处）。
+9. **`NewNode` 冘余构造**：多入口重复装配默认件。
+10. **跨包 helper 复制**：`isWildcard` 4 份、`pingClusterRefreshInterval` 2 份、`positionFrom`（session/runtime 各一份，import-cycle 所迫，可下沉 `internal/protocol`）。
+
+### C4 广播等待：剩余中期/长期项（B+D 已落地）
+
+- **中期**：小扇出（≤8）串行分支可无条件走并行发送（`broadcastParallelLimit` 已有界），消除扇出延迟累加。
+- **长期**：若 profile 显示广播等待仍是投递延迟主因，再评估方案 C（fire-and-forget + 异步簿记），前置条件为先补 `recordDeliveredOffsets` 的乱序/单调性测试。
+
+### 规范轴遗留（2026-08-21 报告规范节 + 本轮 Standards 轴复核）
+
+- **超长函数**（AGENTS.md "under ~100 lines"）：`handleConnect` 约 262 行、`finishConnect` 约 222 行、`BroadcastPublication` 约 204 行、`recoverSubscription` 约 141 行、`handlePublish` 约 127 行、`cluster_command_bus.handleMessage` 约 126 行、`handleRPC` 约 116 行（均 `internal/session` / `internal/runtime` / `pkg/redisbroker`）。
+- **`OutboundMessage_Error` 信封构造**在 client.go 约 25 处重复，helper 未统一。
+- **`finishConnect` 8 参数**，后半 5 个总是结伴，可收拢为 struct。
+- **结构化日志风格混用**：位置式 err 与键值式 `"error", err` 并存（node.go 多处）。
+- **doc comment 缺口约 205 处**、中文注释约 30 处（authorizer.go Principal 一处已翻英文）、无 `.golangci.yml`（import 三组规则无 CI 闸门）。
+- **E11 发布热路径冗余**：redisbroker 每条发布 4 次串行 RTT（first_retained bookkeeping 可并入 Lua）；memory broker `interested()` 仅为 bool 做全量 cstrie Lookup（建议 `MatchExists` 短路）。
+
+### 其他未排期（原修复批次"未处理"清单）
+
+- developer 文档批量翻新（`pkg/websocket`/`pkg/grpcstream`/`pkg/quicstream` 等路径已不存在；02-configuration.md 引用已删除的 config-node1/2.yaml）。
+- AGENTS.md 示例违反自身规则并引用不存在符号。
+- sdks 测试规范；`sdks/go`、`shared` 子模块 `-race` 覆盖。
+- 安全面候选：`Connect.session_id` 字符集/长度校验、`hmac_key_file` 权限检查、节点级总连接数/新建速率限制、Redis PSUBSCRIBE glob 元字符转义、4MiB 上限可配置化。

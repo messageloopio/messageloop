@@ -479,6 +479,72 @@ func TestHub_BroadcastPublication(t *testing.T) {
 	}
 }
 
+// blockingTransport stands in for a subscriber whose writes neither fail nor
+// complete (e.g. a full TCP window): every Write parks until release fires.
+type blockingTransport struct {
+	mockTransport
+	release chan struct{}
+	once    sync.Once
+}
+
+func (b *blockingTransport) Write(data []byte) error {
+	<-b.release
+	return nil
+}
+
+func (b *blockingTransport) unblock() {
+	b.once.Do(func() { close(b.release) })
+}
+
+// TestHub_BroadcastPublication_SlowWriterHitsBudget pins C4-B: the broadcast
+// waits for a subscriber's write confirmation no longer than
+// broadcastWriteBudget, and a subscriber that misses the budget is treated as
+// not delivered — its last-delivered offset stays behind, so recovery re-sends
+// (over-delivery, never loss).
+func TestHub_BroadcastPublication_SlowWriterHitsBudget(t *testing.T) {
+	oldBudget := broadcastWriteBudget
+	broadcastWriteBudget = 100 * time.Millisecond
+	defer func() { broadcastWriteBudget = oldBudget }()
+
+	h := newHub(0, 0)
+
+	slow := &blockingTransport{release: make(chan struct{})}
+	slowClient := newTestClientWithTransport(t, "session-slow", "user-slow", slow)
+	_, _ = h.AddSub("test-channel", Subscriber{Session: slowClient, Ephemeral: false})
+	// Safety net: if the budget is ever removed, unblock the writer so this
+	// test fails on the elapsed assertion instead of deadlocking the run.
+	go func() {
+		time.Sleep(3 * time.Second)
+		slow.unblock()
+	}()
+
+	pub := &Publication{
+		Channel: "test-channel",
+		Offset:  7,
+		Payload: []byte("test payload"),
+		Time:    time.Now().UnixMilli(),
+	}
+
+	start := time.Now()
+	err := h.BroadcastPublication("test-channel", pub)
+	elapsed := time.Since(start)
+	slow.unblock()
+	require.NoError(t, err)
+
+	assert.Less(t, elapsed, time.Second, "broadcast must return within the write budget")
+	assert.GreaterOrEqual(t, elapsed, 90*time.Millisecond, "broadcast must have waited out the budget before giving up")
+
+	// The timed-out send must not advance the slow subscriber's
+	// last-delivered offset: resume/recovery start points come from this
+	// bookkeeping, so the frame must count as undelivered.
+	shard := h.subShards[index("test-channel", numHubShards)]
+	shard.mu.Lock()
+	sub, ok := shard.subs["test-channel"][slowClient.SessionID()]
+	shard.mu.Unlock()
+	require.True(t, ok, "subscription must still exist after the timed-out broadcast")
+	assert.Equal(t, uint64(0), sub.DeliveredOffset, "timed-out frame must not be recorded as delivered")
+}
+
 // countingMarshaler wraps a Marshaler and counts MarshalAppend calls, to
 // pin the "one marshal per encoding per broadcast" contract (C2) — byte
 // equality of frames alone cannot distinguish one shared marshal from N

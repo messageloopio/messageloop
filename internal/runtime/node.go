@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -149,7 +150,13 @@ func NewNode(cfg *config.Server) *Node {
 	authorizer, err := NewAuthorizer(authzCfg)
 	if err != nil {
 		log.WarnContext(context.Background(), "authorizer build failed, falling back to defaults", "error", err)
-		authorizer, _ = NewAuthorizer(config.AuthorizerConfig{})
+		authorizer, err = NewAuthorizer(config.AuthorizerConfig{})
+		if err != nil {
+			// The empty table compiles the built-in defaults and cannot
+			// fail in a consistent build; if it does, fail startup here
+			// instead of nil-panicking on the first Decide call.
+			panic(fmt.Errorf("build default authorizer: %w", err))
+		}
 	}
 	node.authorizer = authorizer
 
@@ -661,8 +668,8 @@ func (n *Node) createProxy(cfg *proxy.ProxyConfig) (proxy.Proxy, error) {
 	if cfg.HTTP != nil {
 		return proxy.NewHTTPProxy(cfg)
 	}
-	if (len(cfg.Endpoint) >= 7 && cfg.Endpoint[:7] == "http://") ||
-		(len(cfg.Endpoint) >= 8 && cfg.Endpoint[:8] == "https://") {
+	if strings.HasPrefix(cfg.Endpoint, "http://") ||
+		strings.HasPrefix(cfg.Endpoint, "https://") {
 		return proxy.NewHTTPProxy(cfg)
 	}
 	return proxy.NewGRPCProxy(cfg)
@@ -776,7 +783,7 @@ func (n *Node) Survey(ctx context.Context, channel string, payload []byte, timeo
 	if timeout > 0 {
 		metadata[clusterCommandMetaSurveyTimeoutMS] = strconv.FormatInt(timeout.Milliseconds(), 10)
 	}
-	metadata["exclude_self"] = "true"
+	metadata[ClusterCommandMetaExcludeSelf] = "true"
 
 	results, err := n.clusterCommandBus().BroadcastCommand(ctx, &ClusterCommand{
 		Type:     ClusterCommandSurvey,
@@ -953,7 +960,7 @@ func (n *Node) countMatchingSubscribers(ctx context.Context, ch string) (int, er
 		Channel: ch,
 		Metadata: map[string]string{
 			clusterCommandMetaSurveyCountOnly: "true",
-			"exclude_self":                    "true",
+			ClusterCommandMetaExcludeSelf:     "true",
 		},
 	})
 	if err != nil {
@@ -1051,12 +1058,18 @@ func surveyTooLargeError(message string) *sharedv2.Error {
 	}
 }
 
+// surveyResultSizeUnencodable is returned by encodedSurveyResultSize when
+// proto.Marshal fails: a size above any conceivable cap (MaxSurveyResultBytes
+// is 256KiB), so the caller rejects the result rather than accepting a
+// payload of unknown size.
+const surveyResultSizeUnencodable = 1 << 30
+
 // encodedSurveyResultSize returns the canonical binary encoding size of the
 // outbound SurveyResult, used for the whole-result cap.
 func encodedSurveyResultSize(result *clientpb.SurveyResult) int {
 	encoded, err := proto.Marshal(result)
 	if err != nil {
-		return 1 << 30
+		return surveyResultSizeUnencodable
 	}
 	return len(encoded)
 }

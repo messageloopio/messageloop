@@ -177,6 +177,12 @@ const (
 	ClusterCommandStatusUnknownFinalState ClusterCommandStatus = "unknown_final_state"
 )
 
+// ClusterCommandMetaExcludeSelf is the Metadata key a command broadcaster
+// sets to "true" to skip its own node lease while fanning the command out:
+// the issuing node has already applied its local share (e.g. its survey
+// results) and must not be counted twice.
+const ClusterCommandMetaExcludeSelf = "exclude_self"
+
 // ClusterCommand is the transport model for cluster-scoped control-plane operations.
 type ClusterCommand struct {
 	CommandID           string

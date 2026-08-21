@@ -620,7 +620,7 @@ func (b *redisClusterCommandBus) BroadcastCommand(ctx context.Context, cmd *clus
 		if err := json.Unmarshal([]byte(payload), lease); err != nil {
 			continue
 		}
-		if cmd.Metadata["exclude_self"] == "true" && lease.NodeID == b.nodeID && lease.IncarnationID == b.incarnationID {
+		if cmd.Metadata[cluster.ClusterCommandMetaExcludeSelf] == "true" && lease.NodeID == b.nodeID && lease.IncarnationID == b.incarnationID {
 			continue
 		}
 		wg.Add(1)

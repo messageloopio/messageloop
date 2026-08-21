@@ -188,12 +188,13 @@ type (
 )
 
 const (
-	ClusterCommandDisconnect  = cluster.ClusterCommandDisconnect
-	ClusterCommandSubscribe   = cluster.ClusterCommandSubscribe
-	ClusterCommandUnsubscribe = cluster.ClusterCommandUnsubscribe
-	ClusterCommandPublish     = cluster.ClusterCommandPublish
-	ClusterCommandTakeover    = cluster.ClusterCommandTakeover
-	ClusterCommandSurvey      = cluster.ClusterCommandSurvey
+	ClusterCommandDisconnect       = cluster.ClusterCommandDisconnect
+	ClusterCommandSubscribe        = cluster.ClusterCommandSubscribe
+	ClusterCommandUnsubscribe      = cluster.ClusterCommandUnsubscribe
+	ClusterCommandPublish          = cluster.ClusterCommandPublish
+	ClusterCommandTakeover         = cluster.ClusterCommandTakeover
+	ClusterCommandSurvey           = cluster.ClusterCommandSurvey
+	ClusterCommandMetaExcludeSelf  = cluster.ClusterCommandMetaExcludeSelf
 )
 
 const (

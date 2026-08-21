@@ -46,9 +46,13 @@ const (
 
 // Principal is the authorization subject of a Decide call.
 type Principal struct {
-	Kind   PrincipalKind
-	UserID string     // User 的用户 ID；Admin 规则匹配仍可用 "admin"
-	Caps   Capability // 仅 Admin 有意义；User 为 0
+	Kind PrincipalKind
+	// UserID is the authenticated user's ID; admin rule matching may also
+	// match the literal "admin".
+	UserID string
+	// Caps carries the admin capability bits; it is only meaningful for
+	// Admin principals and is 0 for User.
+	Caps Capability
 }
 
 // Capability is a closed set of admin privilege bits (KD-K15).

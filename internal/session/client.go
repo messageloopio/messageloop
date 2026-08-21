@@ -95,6 +95,8 @@ type ClientInfo struct {
 }
 
 func jsonLog(msg proto.Message) string {
+	// Best-effort rendering for debug logs: a message protojson cannot
+	// encode is logged as an empty string, never propagated to the send path.
 	data, _ := ProtoJSONMarshaler.Marshal(msg)
 	return string(data)
 }
