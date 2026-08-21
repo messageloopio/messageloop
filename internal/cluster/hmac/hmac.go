@@ -4,9 +4,13 @@
 // receivers reject envelopes that are unsigned, badly signed, or stale.
 //
 // The canonical encoding is a fixed, line-oriented byte layout (never JSON,
-// whose field order is unstable). The audit-only IssuedBy field is NOT part
-// of the canonical bytes: it is forgeable and does not constitute a security
-// boundary — the signature is the boundary.
+// whose field order is unstable). Every field is length-prefixed so a value
+// containing '\n' cannot shift field boundaries: two different field tuples
+// can never encode to the same bytes. The audit-only IssuedBy field is NOT
+// part of the canonical bytes: it is forgeable and does not constitute a
+// security boundary — the signature is the boundary. Channel and Metadata
+// ARE covered: rewriting the subscribe channel or a disconnect code without
+// breaking the MAC must not be possible.
 //
 // The signing key comes from node configuration only (cluster.hmac_key or
 // cluster.hmac_key_file). It must never appear in a Redis key, a PUBLISH
@@ -20,6 +24,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"time"
 
@@ -121,41 +126,67 @@ func VerifyResult(key []byte, res *cluster.ClusterCommandResult, now time.Time) 
 	return nil
 }
 
-// canonicalCommand is the byte-exact signing payload of a command: UTF-8
-// lines joined by '\n', with a trailing '\n' on the last line. IssuedBy,
-// Channel, Metadata, and TargetNodeID are deliberately excluded.
+// canonicalCommand is the byte-exact signing payload of a command: fields
+// joined as length-prefixed lines (see writeField). IssuedBy and TargetNodeID
+// are deliberately excluded (audit-only / routing hint).
 func canonicalCommand(cmd *cluster.ClusterCommand) []byte {
 	// sha256 of a nil slice and of an empty slice is the same digest.
 	payloadHash := sha256.Sum256(cmd.Payload)
 	var b bytes.Buffer
-	b.WriteString("v1\n")
-	writeLine(&b, string(cmd.Type))
-	writeLine(&b, cmd.SessionID)
-	writeLine(&b, cmd.TargetIncarnationID)
-	writeLine(&b, strconv.FormatUint(cmd.LeaseVersion, 10))
-	writeLine(&b, hex.EncodeToString(payloadHash[:]))
-	writeLine(&b, cmd.CommandID)
-	writeLine(&b, strconv.FormatInt(cmd.IssuedAt.UTC().Unix(), 10))
+	b.WriteString("v2\n")
+	writeField(&b, string(cmd.Type))
+	writeField(&b, cmd.SessionID)
+	writeField(&b, cmd.TargetIncarnationID)
+	writeField(&b, strconv.FormatUint(cmd.LeaseVersion, 10))
+	writeField(&b, hex.EncodeToString(payloadHash[:]))
+	writeField(&b, cmd.CommandID)
+	writeField(&b, strconv.FormatInt(cmd.IssuedAt.UTC().Unix(), 10))
+	writeField(&b, cmd.Channel)
+	writeMetadata(&b, cmd.Metadata)
 	return b.Bytes()
 }
 
 // canonicalResult is the byte-exact signing payload of a command result.
 func canonicalResult(res *cluster.ClusterCommandResult) []byte {
 	var b bytes.Buffer
-	b.WriteString("v1-result\n")
-	writeLine(&b, res.CommandID)
-	writeLine(&b, string(res.Status))
-	writeLine(&b, res.ErrorCode)
-	writeLine(&b, res.SessionID)
-	writeLine(&b, res.NodeID)
-	writeLine(&b, res.IncarnationID)
-	writeLine(&b, strconv.FormatInt(res.IssuedAt.UTC().Unix(), 10))
+	b.WriteString("v2-result\n")
+	writeField(&b, res.CommandID)
+	writeField(&b, string(res.Status))
+	writeField(&b, res.ErrorCode)
+	writeField(&b, res.SessionID)
+	writeField(&b, res.NodeID)
+	writeField(&b, res.IncarnationID)
+	writeField(&b, strconv.FormatInt(res.IssuedAt.UTC().Unix(), 10))
+	writeMetadata(&b, res.Metadata)
 	return b.Bytes()
 }
 
-func writeLine(b *bytes.Buffer, line string) {
-	b.WriteString(line)
+// writeField appends one length-prefixed field: the decimal byte length, a
+// ':', the bytes, then '\n'. The length makes the encoding self-delimiting,
+// so a field value containing '\n' or digits cannot be re-split into a
+// different field tuple.
+func writeField(b *bytes.Buffer, field string) {
+	b.WriteString(strconv.Itoa(len(field)))
+	b.WriteByte(':')
+	b.WriteString(field)
 	b.WriteByte('\n')
+}
+
+// writeMetadata appends the entry count followed by each key/value pair in
+// sorted key order, all length-prefixed: map iteration order is unstable, the
+// canonical encoding must not be.
+func writeMetadata(b *bytes.Buffer, metadata map[string]string) {
+	keys := make([]string, 0, len(metadata))
+	for key := range metadata {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	b.WriteString(strconv.Itoa(len(keys)))
+	b.WriteByte('\n')
+	for _, key := range keys {
+		writeField(b, key)
+		writeField(b, metadata[key])
+	}
 }
 
 func checkSkew(issuedAt time.Time, now time.Time) error {

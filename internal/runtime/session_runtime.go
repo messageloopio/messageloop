@@ -123,8 +123,8 @@ func (r nodeRuntime) AdjustClusterChannelSubscriptionsTimeout(channel string, de
 	r.n.adjustClusterChannelSubscriptionsTimeout(channel, delta)
 }
 
-func (r nodeRuntime) ResumeRemoteSession(ctx context.Context, c *session.Session, sessionID string) (*cluster.ClusterSessionSnapshot, bool, error) {
-	return r.n.resumeRemoteSession(ctx, c, sessionID)
+func (r nodeRuntime) ResumeRemoteSession(ctx context.Context, c *session.Session, sessionID, authUser string) (*cluster.ClusterSessionSnapshot, bool, error) {
+	return r.n.resumeRemoteSession(ctx, c, sessionID, authUser)
 }
 
 func (r nodeRuntime) RestoreSessionSubscriptions(ctx context.Context, c *session.Session, subs []cluster.ClusterSubscriptionSnapshot) []session.RestoreFailure {

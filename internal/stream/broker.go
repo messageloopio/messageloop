@@ -177,6 +177,17 @@ func (p *HistoryPage) Pubs() []*Publication {
 // only promises the message was accepted (and written to history when
 // history applies).
 //
+// Delivery ordering contract: the publication handler may be invoked
+// concurrently across distinct channels, but for any single channel it is
+// invoked serially and in offset order — Publish and PublishTransient
+// accepted by the same channel are delivered in acceptance order.
+// Implementations must preserve this (the memory broker assigns offsets and
+// enqueues delivery atomically per channel; the Redis broker binds offsets
+// to stream entries and hashes channels onto serial delivery workers), and
+// the session hub relies on it for per-channel message order on the client
+// wire. A new Broker implementation that delivers one channel concurrently
+// breaks client-visible ordering.
+//
 // Lifecycle: Start must be called once before Publish/Subscribe/History.
 // Start blocks until the provided context is cancelled — call it as a goroutine:
 //

@@ -425,3 +425,27 @@ func TestSession_OutboundFrameClass_GapNotice(t *testing.T) {
 	})
 	require.False(t, outboundFrameClass(pub), "publications stay on the Data lane")
 }
+
+// TestSession_EnqueueBytes_RejectsMarshalerMismatch pins the aaf1743 contract
+// from the pre-marshaled side: enqueueBytes must refuse bytes produced by a
+// marshaler other than the attachment's current one (a mid-broadcast encoding
+// change via resume/reattach), returning errMarshalerChanged instead of
+// delivering frames in the wrong encoding.
+func TestSession_EnqueueBytes_RejectsMarshalerMismatch(t *testing.T) {
+	transport := &mockTransport{}
+	client, _, err := NewClient(context.Background(), newFakeRuntime(), transport, ProtobufMarshaler{})
+	require.NoError(t, err)
+	require.NoError(t, client.Attach(client.attachment))
+
+	frame, err := ProtoJSONMarshaler.Marshal(&clientpb.OutboundMessage{})
+	require.NoError(t, err)
+	err = client.enqueueBytes(context.Background(), frame, false, ProtoJSONMarshaler)
+	require.ErrorIs(t, err, errMarshalerChanged)
+	require.Zero(t, transport.getMessageCount(), "mismatched bytes must never reach the wire")
+
+	// The attachment's own marshaler still goes through.
+	frame, err = ProtobufMarshaler{}.Marshal(&clientpb.OutboundMessage{})
+	require.NoError(t, err)
+	require.NoError(t, client.enqueueBytes(context.Background(), frame, false, ProtobufMarshaler{}))
+	require.Equal(t, 1, transport.getMessageCount())
+}

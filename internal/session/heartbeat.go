@@ -96,17 +96,29 @@ func (hm *HeartbeatManager) heartbeatLoop(ctx context.Context, client *Client) {
 			if closed {
 				return
 			}
-			// Send the outbound ping, then arm the one-shot deadline. A
-			// previous deadline that is still armed (the earlier ping was
-			// never answered) is replaced by this ping's deadline.
+			// Arm the one-shot deadline BEFORE sending the ping: a reply
+			// racing the send (sub-RTT pongs, pipelined clients) must find
+			// the deadline already armed — arming afterwards lets the reply
+			// slip past an unarmed deadline and the stale one then fires a
+			// false 3511. A previous deadline that is still armed (the
+			// earlier ping was never answered) is replaced by this ping's
+			// deadline.
+			client.armPingDeadline(hm.config.PingTimeout)
 			if err := client.Send(ctx, MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
 				out.Envelope = &clientpb.OutboundMessage_Ping{
 					Ping: &clientpb.Ping{},
 				}
 			})); err != nil {
+				// The session is going away; disarm the deadline armed for
+				// this ping so it cannot fire on the way out.
+				client.mu.Lock()
+				if client.pingDeadline != nil {
+					client.pingDeadline.Stop()
+					client.pingDeadline = nil
+				}
+				client.mu.Unlock()
 				continue
 			}
-			client.armPingDeadline(hm.config.PingTimeout)
 
 		case <-idleCh:
 			client.mu.Lock()

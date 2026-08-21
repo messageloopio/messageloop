@@ -853,3 +853,41 @@ func TestMemoryBroker_PublishOccupancy_NeverPublication(t *testing.T) {
 	require.NoError(t, b.PublishOccupancy("chat.1", occupancy.OccupancyEvent{Gen: 1, Event: &clientpb.PresenceEvent{Action: "join"}}))
 	require.Zero(t, mp.count(), "the publication handler must never see occupancy")
 }
+
+// TestMemoryBroker_ConcurrentPublishersDeliverInOffsetOrder pins the Broker
+// ordering contract (broker.go): concurrent publishers on one channel may
+// interleave offset assignment, but the handler must observe offsets in
+// strictly increasing order — offset assignment and dispatch enqueue are
+// atomic per channel.
+func TestMemoryBroker_ConcurrentPublishersDeliverInOffsetOrder(t *testing.T) {
+	b, cp, cancel := newTestBroker(t, MemoryBrokerOptions{})
+	defer cancel()
+	require.NoError(t, b.Subscribe("order-ch"))
+
+	const publishers = 8
+	const perPublisher = 50
+	var wg sync.WaitGroup
+	for p := 0; p < publishers; p++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < perPublisher; i++ {
+				if _, err := b.Publish("order-ch", publishPub([]byte("m"), false)); err != nil {
+					t.Errorf("Publish: %v", err)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	cp.waitCount(t, publishers*perPublisher)
+
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+	require.Len(t, cp.pubs, publishers*perPublisher)
+	for i := 1; i < len(cp.pubs); i++ {
+		require.Greater(t, cp.pubs[i].Offset, cp.pubs[i-1].Offset,
+			"handler must observe offsets in strictly increasing order (delivery position %d): %v then %v",
+			i, cp.pubs[i-1].Offset, cp.pubs[i].Offset)
+	}
+}

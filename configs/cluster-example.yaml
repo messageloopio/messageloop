@@ -12,11 +12,16 @@ transport:
   websocket:
     addr: ":9080"
     path: "/ws"
+  grpc:
+    addr: ":9090"           # Required: client gRPC streaming listener
 
 broker:
   type: redis
   redis:
     addr: "127.0.0.1:6379"
+    # Required with the ml2: Redis broker: stream trimming is approximate-only
+    # (there is no exact trimming), so the config must say so explicitly.
+    stream_approximate: true
 
 cluster:
   enabled: true

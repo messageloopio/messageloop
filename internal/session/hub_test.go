@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 
 	"github.com/messageloopio/messageloop/pkg/topics"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
 // mockTransport is a mock implementation of Transport for testing
@@ -477,10 +479,26 @@ func TestHub_BroadcastPublication(t *testing.T) {
 	}
 }
 
+// countingMarshaler wraps a Marshaler and counts MarshalAppend calls, to
+// pin the "one marshal per encoding per broadcast" contract (C2) — byte
+// equality of frames alone cannot distinguish one shared marshal from N
+// identical marshals.
+type countingMarshaler struct {
+	Marshaler
+	appends atomic.Int32
+}
+
+func (c *countingMarshaler) MarshalAppend(buf []byte, msg any) ([]byte, error) {
+	c.appends.Add(1)
+	return c.Marshaler.MarshalAppend(buf, msg)
+}
+
 // TestHub_BroadcastPublication_MixedEncodings covers the per-encoding
 // serialization of the broadcast path: subscribers sharing a marshaler receive
-// identical frame bytes (one marshal per encoding), and each frame decodes
-// correctly with its own encoding.
+// identical frame bytes, each frame decodes correctly with its own encoding,
+// and each distinct encoding pays exactly one MarshalAppend per broadcast.
+// The JSON subscribers use the production ProtoJSONMarshaler (the WS/QUIC
+// JSON wire), not the test-only JSONMarshaler.
 func TestHub_BroadcastPublication_MixedEncodings(t *testing.T) {
 	h := newHub(0, 0)
 
@@ -499,11 +517,14 @@ func TestHub_BroadcastPublication_MixedEncodings(t *testing.T) {
 		return client, transport
 	}
 
-	jsonClient1, jsonTransport1 := newEncodedClient("json-1", JSONMarshaler{})
-	jsonClient2, jsonTransport2 := newEncodedClient("json-2", JSONMarshaler{})
+	jsonClient1, jsonTransport1 := newEncodedClient("json-1", ProtoJSONMarshaler)
+	jsonClient2, jsonTransport2 := newEncodedClient("json-2", ProtoJSONMarshaler)
+	counting := &countingMarshaler{Marshaler: ProtoJSONMarshaler}
+	countClient1, countTransport1 := newEncodedClient("count-1", counting)
+	countClient2, countTransport2 := newEncodedClient("count-2", counting)
 	protoClient, protoTransport := newEncodedClient("proto-1", ProtobufMarshaler{})
 
-	for _, client := range []*Session{jsonClient1, jsonClient2, protoClient} {
+	for _, client := range []*Session{jsonClient1, jsonClient2, countClient1, countClient2, protoClient} {
 		_, _ = h.AddSub("test-channel", Subscriber{Session: client, Ephemeral: false})
 	}
 
@@ -520,12 +541,26 @@ func TestHub_BroadcastPublication_MixedEncodings(t *testing.T) {
 	require.Equal(t, 1, jsonTransport2.getMessageCount())
 	require.Equal(t, 1, protoTransport.getMessageCount())
 
+	// One MarshalAppend for the counting encoding, though two subscribers
+	// share it; a second broadcast adds exactly one more.
+	assert.EqualValues(t, 1, counting.appends.Load(),
+		"two subscribers of one encoding must share a single marshal")
+	require.NoError(t, h.BroadcastPublication("test-channel", &Publication{
+		Channel: "test-channel",
+		Offset:  2,
+		Payload: []byte("second"),
+		Time:    time.Now().UnixMilli(),
+	}))
+	assert.EqualValues(t, 2, counting.appends.Load())
+	require.Equal(t, 2, countTransport1.getMessageCount())
+	require.Equal(t, 2, countTransport2.getMessageCount())
+
 	// Subscribers with the same encoding share identical frame bytes.
 	assert.Equal(t, jsonTransport1.getMessage(0), jsonTransport2.getMessage(0))
 
 	// Each frame decodes with its own encoding and carries the publication.
 	var jsonOut, protoOut clientpb.OutboundMessage
-	require.NoError(t, JSONMarshaler{}.Unmarshal(jsonTransport1.getMessage(0), &jsonOut))
+	require.NoError(t, ProtoJSONMarshaler.Unmarshal(jsonTransport1.getMessage(0), &jsonOut))
 	require.NoError(t, ProtobufMarshaler{}.Unmarshal(protoTransport.getMessage(0), &protoOut))
 	for _, out := range []*clientpb.OutboundMessage{&jsonOut, &protoOut} {
 		publication := out.GetPublication()
@@ -540,6 +575,8 @@ func TestHub_BroadcastPublication_MixedEncodings(t *testing.T) {
 // the broadcast path: JSON-encoding subscribers receive the stored payload
 // bytes verbatim (skipping the structpb round trip that would mangle big
 // integers and key order), while protobuf subscribers get the structpb form.
+// Both JSON-family marshalers splice: the production ProtoJSONMarshaler (WS/
+// QUIC JSON wire) and the test/SDK JSONMarshaler.
 func TestHub_BroadcastPublication_JSONPassthrough(t *testing.T) {
 	h := newHub(0, 0)
 
@@ -556,9 +593,10 @@ func TestHub_BroadcastPublication_JSONPassthrough(t *testing.T) {
 		return client, transport
 	}
 
+	protoJSONClient, protoJSONTransport := newEncodedClient("pjson-1", ProtoJSONMarshaler)
 	jsonClient, jsonTransport := newEncodedClient("json-1", JSONMarshaler{})
 	protoClient, protoTransport := newEncodedClient("proto-1", ProtobufMarshaler{})
-	for _, client := range []*Session{jsonClient, protoClient} {
+	for _, client := range []*Session{protoJSONClient, jsonClient, protoClient} {
 		_, _ = h.AddSub("json-ch", Subscriber{Session: client, Ephemeral: false})
 	}
 
@@ -574,22 +612,42 @@ func TestHub_BroadcastPublication_JSONPassthrough(t *testing.T) {
 	}
 	require.NoError(t, h.BroadcastPublication("json-ch", pub))
 
+	require.Equal(t, 1, protoJSONTransport.getMessageCount())
 	require.Equal(t, 1, jsonTransport.getMessageCount())
 	require.Equal(t, 1, protoTransport.getMessageCount())
 
-	// The JSON frame embeds the stored payload bytes verbatim.
+	// Both JSON-family frames embed the stored payload bytes verbatim — the
+	// production protojson wire included (regression: the splice once
+	// compared against the JSONMarshaler name only and never fired for it).
+	protoJSONFrame := protoJSONTransport.getMessage(0)
 	jsonFrame := jsonTransport.getMessage(0)
+	assert.True(t, bytes.Contains(protoJSONFrame, raw), "protojson frame must splice the raw payload: %s", protoJSONFrame)
 	assert.True(t, bytes.Contains(jsonFrame, raw), "json frame must splice the raw payload: %s", jsonFrame)
 
-	// Both frames still decode with their own encoding and keep the json oneof.
-	var jsonOut, protoOut clientpb.OutboundMessage
+	// All frames still decode with their own encoding and keep the json oneof.
+	var protoJSONOut, jsonOut, protoOut clientpb.OutboundMessage
+	require.NoError(t, ProtoJSONMarshaler.Unmarshal(protoJSONFrame, &protoJSONOut))
 	require.NoError(t, JSONMarshaler{}.Unmarshal(jsonFrame, &jsonOut))
 	require.NoError(t, ProtobufMarshaler{}.Unmarshal(protoTransport.getMessage(0), &protoOut))
-	jsonPayload := jsonOut.GetPublication().GetMessages()[0].GetPayload()
-	protoPayload := protoOut.GetPublication().GetMessages()[0].GetPayload()
-	require.NotNil(t, jsonPayload.GetJson(), "json frame payload must stay the json oneof")
-	require.NotNil(t, protoPayload.GetJson(), "proto frame payload must stay the json oneof")
-	assert.Equal(t, "v", protoPayload.GetJson().GetFields()["a"].GetStructValue().GetFields()["k"].GetStringValue())
+	for _, payload := range []*sharedv2.Payload{
+		protoJSONOut.GetPublication().GetMessages()[0].GetPayload(),
+		jsonOut.GetPublication().GetMessages()[0].GetPayload(),
+		protoOut.GetPublication().GetMessages()[0].GetPayload(),
+	} {
+		require.NotNil(t, payload.GetJson(), "frame payload must stay the json oneof")
+	}
+	assert.Equal(t, "v", protoOut.GetPublication().GetMessages()[0].GetPayload().GetJson().GetFields()["a"].GetStructValue().GetFields()["k"].GetStringValue())
+}
+
+// TestSpliceRawJSONPayload_MissingPlaceholder pins the defensive contract: a
+// frame without the empty-Struct splice point reports ok=false so the caller
+// re-marshals with the real payload instead of shipping an empty object (and
+// instead of aliasing the caller's pooled buffer).
+func TestSpliceRawJSONPayload_MissingPlaceholder(t *testing.T) {
+	frame := []byte(`{"publication":{"messages":[{"payload":{"text":"x"}}]}}`)
+	out, ok := spliceRawJSONPayload(frame, []byte(`{"a":1}`))
+	assert.False(t, ok, "a frame without the \"json\":{} placeholder must not be spliced")
+	assert.Nil(t, out, "the failure path must not return a frame aliasing the caller's buffer")
 }
 
 // TestHub_BroadcastPublication_JSONNonObjectDegradesToText pins the legacy

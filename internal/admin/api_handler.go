@@ -174,7 +174,27 @@ func (h *apiServiceHandler) Survey(ctx context.Context, req *serverv2.SurveyRequ
 		}
 	}
 
-	timeout := time.Duration(req.TimeoutMs) * time.Millisecond
+	// Clamp the requested timeout exactly like the client survey path
+	// (client.go: policy cap with a 5s default, a 10s hard ceiling, and a
+	// 100ms floor) so an admin request cannot pin survey slots for an
+	// unbounded time.
+	timeout := h.node.ChannelPolicy(req.Channel).MaxSurveyTimeout
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	if timeout > 10*time.Second {
+		timeout = 10 * time.Second
+	}
+	if req.TimeoutMs > 0 {
+		requested := time.Duration(req.TimeoutMs) * time.Millisecond
+		if requested > timeout {
+			requested = timeout
+		}
+		if requested < 100*time.Millisecond {
+			requested = 100 * time.Millisecond
+		}
+		timeout = requested
+	}
 	payload, err := payloadBytes(req.Payload)
 	if err != nil {
 		return nil, err

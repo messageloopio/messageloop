@@ -205,8 +205,9 @@ func (c *Session) HandleMessage(ctx context.Context, in *clientpb.InboundMessage
 		log.DebugContext(ctx, "handling message", "message", jsonLog(in))
 	}
 
+	lifetime := s.contextSnapshot()
 	select {
-	case <-s.ctx.Done():
+	case <-lifetime.Done():
 		return nil
 	default:
 	}
@@ -435,11 +436,20 @@ func (c *Session) handleConnect(ctx context.Context, in *clientpb.InboundMessage
 			resumed = true
 			resumedLocal = true
 
-			// Check the per-user connection limit BEFORE detaching the old
-			// attachment (§6): a cross-user resume must not tear the old
-			// session down when the target user has no slot left. On failure
+			// A session is resumed only by its owner: the session id alone is
+			// not a cross-user capability (it is visible in presence
+			// snapshots), so an authenticated user taking over a session
+			// issued to a different user is refused before any state change —
 			// the old session stays Attached and this connection is closed.
-			if authUser != "" && authUser != existing.UserID() {
+			if owner := existing.UserID(); owner != "" && owner != authUser {
+				log.WarnContext(ctx, "session takeover denied: session belongs to another user",
+					"session", connect.SessionId, "user", authUser, "owner", owner)
+				return c.disconnectOnConnectError(ctx, DisconnectInvalidToken)
+			}
+			if existing.UserID() == "" && authUser != "" {
+				// Adopting an unauthenticated session under a real identity
+				// (defensive: RequireAuth servers never create one) enforces
+				// the target user's connection limit before the takeover.
 				if err := c.rt.Hub().PrepareSessionUser(connect.SessionId, existing, authUser); err != nil {
 					return c.disconnectOnConnectError(ctx, err)
 				}
@@ -499,7 +509,7 @@ func (c *Session) handleConnect(ctx context.Context, in *clientpb.InboundMessage
 			return existing.finishConnect(ctx, in, connect, resumed, resumedLocal, nil, p, authUser)
 		} else {
 			var err error
-			resumeSnapshot, resumed, err = c.rt.ResumeRemoteSession(ctx, c, connect.SessionId)
+			resumeSnapshot, resumed, err = c.rt.ResumeRemoteSession(ctx, c, connect.SessionId, authUser)
 			if err != nil {
 				return c.disconnectOnConnectError(ctx, err)
 			}
@@ -1068,6 +1078,12 @@ func (c *Session) handlePublish(ctx context.Context, in *clientpb.InboundMessage
 	if channel == "" {
 		return c.sendRequestError(ctx, in, "missing channel in publish message")
 	}
+	if isWildcard(channel) {
+		// The publish subject is an exact channel (KD-K21): a literal
+		// wildcard pattern would fan out to wildcard subscribers while never
+		// being an addressable channel itself.
+		return c.sendRequestError(ctx, in, "publish channel must be an exact channel name, not a wildcard pattern")
+	}
 
 	// Static authorization first (PR-KA-A4 §8.1): a proxy that allows must
 	// never override a static deny.
@@ -1373,7 +1389,7 @@ func (c *Session) throttledClusterRefresh() {
 		c.lastClusterSyncNano.CompareAndSwap(last, now) {
 		go c.refreshPresence()
 		go func() {
-			clusterCtx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
+			clusterCtx, cancel := context.WithTimeout(c.contextSnapshot(), 10*time.Second)
 			defer cancel()
 			if err := c.rt.SyncClusterSessionState(clusterCtx, c); err != nil {
 				if errors.Is(err, ErrSessionFenced) {
@@ -1540,7 +1556,7 @@ func (c *Session) sendSurveyTopError(code, errType, message string) {
 	if c.rt.Metrics() != nil {
 		c.rt.Metrics().SurveyClientTotal.WithLabelValues(code).Inc()
 	}
-	_ = c.Send(c.ctx, MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
+	_ = c.Send(c.contextSnapshot(), MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_Error{
 			Error: &sharedv2.Error{Code: code, Type: errType, Message: message},
 		}
@@ -1554,7 +1570,7 @@ func (c *Session) sendSurveyTopError(code, errType, message string) {
 func (c *Session) runSurveyWorker(requestID, channel string, payload []byte, timeout time.Duration) {
 	go func() {
 		defer c.surveyInFlight.Store(false)
-		ctx := c.ctx
+		ctx := c.contextSnapshot()
 
 		total, err := c.rt.CountMatchingSubscribers(ctx, channel)
 		if err != nil {
@@ -1786,6 +1802,6 @@ func (c *Session) refreshPresence() {
 		if !c.rt.ShouldTrackPresence(ch, ephemeral) {
 			continue
 		}
-		_ = c.rt.Presence().Add(c.ctx, ch, info)
+		_ = c.rt.Presence().Add(c.contextSnapshot(), ch, info)
 	}
 }

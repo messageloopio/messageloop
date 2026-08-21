@@ -27,7 +27,7 @@ func (n *Node) adjustClusterChannelSubscriptionsTimeout(channel string, delta in
 	}
 }
 
-func (n *Node) resumeRemoteSession(ctx context.Context, client *Client, sessionID string) (*ClusterSessionSnapshot, bool, error) {
+func (n *Node) resumeRemoteSession(ctx context.Context, client *Client, sessionID, authUser string) (*ClusterSessionSnapshot, bool, error) {
 	if !n.ClusterEnabled() || sessionID == "" {
 		return nil, false, nil
 	}
@@ -39,6 +39,15 @@ func (n *Node) resumeRemoteSession(ctx context.Context, client *Client, sessionI
 	}
 	if lease == nil {
 		return nil, false, nil
+	}
+
+	// A session is resumed only by its owner (same rule as the local
+	// takeover): refuse before claiming the lease, so a cross-user attempt
+	// never CASes, evicts or rolls back anything.
+	if authUser != "" && lease.UserID != "" && authUser != lease.UserID {
+		log.WarnContext(ctx, "remote session takeover denied: session belongs to another user",
+			"session", sessionID, "user", authUser, "owner", lease.UserID)
+		return nil, false, DisconnectInvalidToken
 	}
 
 	snapshot, err := directory.GetSessionSnapshot(ctx, sessionID)

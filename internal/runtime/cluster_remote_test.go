@@ -264,7 +264,7 @@ func TestNode_ResumeRemoteSession_UsesSnapshotAndTakeover(t *testing.T) {
 	client, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
 	require.NoError(t, err)
 
-	snapshot, resumed, err := node.resumeRemoteSession(context.Background(), client, "sess-remote")
+	snapshot, resumed, err := node.resumeRemoteSession(context.Background(), client, "sess-remote", "user-1")
 	require.NoError(t, err)
 	assert.True(t, resumed)
 	require.NotNil(t, snapshot)

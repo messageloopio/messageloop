@@ -48,7 +48,8 @@ func publicationMessageID(channel string, offset uint64) string {
 }
 
 // Hub is the connection registry. Sessions and subscriptions are sharded to
-// reduce lock contention (64 session shards, 16384 subscription shards).
+// reduce lock contention (64 session shards and 64 subscription shards; the
+// node-level subscription saga additionally uses its own per-channel locks).
 type Hub struct {
 	mu              sync.RWMutex
 	sessions        map[string]*Session
@@ -425,7 +426,7 @@ func (h *Hub) BroadcastPublication(ch string, pub *Publication) error {
 		var b []byte
 		var err error
 		spliced := false
-		if jsonRaw != nil && m.Name() == (JSONMarshaler{}).Name() {
+		if jsonRaw != nil && isJSONWireMarshaler(m) {
 			// Swap in the empty-Struct placeholder so protojson emits the
 			// splice point, then graft the raw payload bytes in. The loop is
 			// sequential: the swap is restored before the next encoding
@@ -435,10 +436,20 @@ func (h *Hub) BroadcastPublication(ch string, pub *Publication) error {
 			b, err = m.MarshalAppend((*buf)[:0], out)
 			msg.Payload = payload
 			if err == nil {
-				// spliceRawJSONPayload returns a fresh slice, so the pooled
-				// buffer needs no copy below.
-				b = spliceRawJSONPayload(b, jsonRaw)
-				spliced = true
+				var ok bool
+				b, ok = spliceRawJSONPayload(b, jsonRaw)
+				if ok {
+					// spliceRawJSONPayload returns a fresh slice, so the
+					// pooled buffer needs no copy below.
+					spliced = true
+				} else {
+					// Defensive: the placeholder did not render (a protojson
+					// behavior change would be the only cause). Re-marshal
+					// with the real payload and take the copying path — the
+					// placeholder frame carries an empty object and must not
+					// reach subscribers, and its bytes alias the pooled buffer.
+					b, err = m.MarshalAppend((*buf)[:0], out)
+				}
 			}
 		} else {
 			b, err = m.MarshalAppend((*buf)[:0], out)
@@ -547,19 +558,30 @@ func isJSONObject(data []byte) bool {
 const jsonPayloadSplicePoint = `"json":{}`
 
 // spliceRawJSONPayload replaces the empty-Struct placeholder in frame with
-// the raw payload bytes, returning a fresh slice. If the placeholder is
-// missing (defensive), the frame is returned unchanged.
-func spliceRawJSONPayload(frame, raw []byte) []byte {
+// the raw payload bytes, returning a fresh slice. ok is false when the
+// placeholder is missing (defensive): the caller must then re-marshal with
+// the real payload instead of using the returned frame, whose bytes alias
+// the caller's buffer and carry an empty object at the payload site.
+func spliceRawJSONPayload(frame, raw []byte) ([]byte, bool) {
 	i := bytes.Index(frame, []byte(jsonPayloadSplicePoint))
 	if i < 0 {
-		return frame
+		return nil, false
 	}
 	// `"json":` is kept from the placeholder; only the `{}` is replaced.
 	out := make([]byte, 0, len(frame)+len(raw)-2)
 	out = append(out, frame[:i+len(jsonPayloadSplicePoint)-2]...)
 	out = append(out, raw...)
 	out = append(out, frame[i+len(jsonPayloadSplicePoint):]...)
-	return out
+	return out, true
+}
+
+// isJSONWireMarshaler reports whether m renders proto messages as protojson
+// text — the wire family for which splicing raw JSON payload bytes into the
+// frame is valid. JSONMarshaler delegates proto messages to the shared
+// ProtoJSONMarshaler, so both names produce byte-identical frames.
+func isJSONWireMarshaler(m Marshaler) bool {
+	name := m.Name()
+	return name == (JSONMarshaler{}).Name() || name == ProtoJSONMarshaler.Name()
 }
 
 // recordDeliveredOffsets updates the last successfully delivered offset for

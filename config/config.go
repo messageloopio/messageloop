@@ -198,6 +198,11 @@ type Limits struct {
 
 type HttpServer struct {
 	Addr string `yaml:"addr" json:"addr" mapstructure:"addr"`
+	// AuthToken, when set, requires `Authorization: Bearer <token>` on every
+	// admin HTTP endpoint (/health, /metrics). Without it the server is
+	// unauthenticated — safe only on a loopback or otherwise private
+	// listener; a non-loopback bind without a token logs a startup WARN.
+	AuthToken string `yaml:"auth_token" json:"auth_token" mapstructure:"auth_token"`
 }
 
 type GRPCAdmin struct {
@@ -360,6 +365,23 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	// A zero write timeout removes the only bound on the synchronous
+	// broadcast wait: one stuck peer could hold delivery workers, Close and
+	// DrainAll paths indefinitely (the C4 appendix recommendation). Omit the
+	// field to use the 10s default instead of zeroing it.
+	for _, entry := range []struct {
+		name  string
+		value string
+	}{
+		{"transport.websocket.write_timeout", c.Transport.WebSocket.WriteTimeout},
+		{"transport.grpc.write_timeout", c.Transport.GRPC.WriteTimeout},
+		{"transport.quic.write_timeout", c.Transport.QUIC.WriteTimeout},
+	} {
+		if d, err := time.ParseDuration(entry.value); err == nil && d <= 0 {
+			return fmt.Errorf("%s must be positive (omit the field to use the default; 0 would let one stuck peer stall delivery indefinitely)", entry.name)
+		}
+	}
+
 	// Heartbeat durations must be second-scale when enabled: a non-zero
 	// idle_timeout / ping_interval / ping_timeout below 1s is rejected.
 	// "0s" keeps its existing meaning (disable that probe).
@@ -515,9 +537,15 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	// The admin gRPC listener is always constructed (prepareGRPCServers); an
+	// empty address would only fail late in startup, after the cluster and
+	// broker have already been wired. The check runs last so the more
+	// specific field errors above are reported first.
+	if c.Server.GRPCAdmin.Addr == "" {
+		return fmt.Errorf("server.grpc_admin.addr is required")
+	}
 	return nil
 }
-
 // validateAuthorizerPattern checks that a rule pattern is part of the
 // subscription key language: a valid topic whose wildcard (if any) is a final
 // single "*" or "**" preceded by a non-empty literal prefix. "a.**.b",

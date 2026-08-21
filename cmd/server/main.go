@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -12,6 +14,7 @@ import (
 	"github.com/lynx-go/lynx"
 	"github.com/lynx-go/lynx/contrib/zap"
 	lynxhttp "github.com/lynx-go/lynx/server/http"
+	"github.com/lynx-go/x/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -347,13 +350,53 @@ func newQUICServer(cfg *config.Config, node *runtime.Node) (*quic.Server, error)
 }
 
 // newAdminServer builds the HTTP admin server component (health + metrics).
+// When server.http.auth_token is set, every endpoint requires a matching
+// Bearer token; binding a non-loopback address without a token draws a
+// startup warning, since /metrics and /health would be readable by anyone
+// who can reach the address.
 func newAdminServer(cfg *config.Config, node *runtime.Node, reg *prometheus.Registry) *lynxhttp.Server {
 	adminAddr := cfg.Server.Http.Addr
 	if adminAddr == "" {
 		adminAddr = "127.0.0.1:8080"
 	}
+	var handler http.Handler
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 	mux.HandleFunc("/health", node.HealthHandler())
-	return lynxhttp.NewServer(mux, lynxhttp.WithAddr(adminAddr))
+	handler = mux
+	if token := cfg.Server.Http.AuthToken; token != "" {
+		handler = bearerAuthHandler(token, handler)
+	} else if !isLoopbackAddr(adminAddr) {
+		log.WarnContext(context.Background(), "admin HTTP endpoints (/health, /metrics) are unauthenticated on a non-loopback address; set server.http.auth_token",
+			"addr", adminAddr)
+	}
+	return lynxhttp.NewServer(handler, lynxhttp.WithAddr(adminAddr))
+}
+
+// bearerAuthHandler rejects requests without the exact Bearer token with
+// 401. The comparison is constant-time.
+func bearerAuthHandler(token string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		const prefix = "Bearer "
+		header := r.Header.Get("Authorization")
+		if !strings.HasPrefix(header, prefix) || subtle.ConstantTimeCompare([]byte(header[len(prefix):]), []byte(token)) != 1 {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="messageloop-admin"`)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// isLoopbackAddr reports whether the host part of addr is loopback (or empty).
+func isLoopbackAddr(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	if host == "" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

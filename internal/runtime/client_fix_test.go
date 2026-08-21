@@ -1738,11 +1738,12 @@ func TestClient_Connect_ResumeAtUserLimit_NoZombie(t *testing.T) {
 	assert.False(t, transportB.isClosed())
 }
 
-// TestClient_Connect_ResumeAtUserLimit_KeepsOldSessionAttached exercises
-// PR-KA-B1 §6.5 / §9.3: when a cross-user resume hits the per-user
-// connection limit, the OLD session must stay fully Attached (hub entry,
-// subscriptions, presence, cluster state, transport open) and only the new
-// connection is closed.
+// TestClient_Connect_ResumeAtUserLimit_KeepsOldSessionAttached exercises the
+// cross-user resume denial: a session id is not a cross-user capability, so
+// an authenticated user resuming a session issued to a different user is
+// refused before any state change — the OLD session must stay fully Attached
+// (hub entry, subscriptions, presence, cluster state, transport open) and
+// only the new connection is closed.
 func TestClient_Connect_ResumeAtUserLimit_KeepsOldSessionAttached(t *testing.T) {
 	ctx := context.Background()
 	directory := &recordingSessionDirectory{fakeSessionDirectory: &fakeSessionDirectory{}}
@@ -1797,9 +1798,9 @@ func TestClient_Connect_ResumeAtUserLimit_KeepsOldSessionAttached(t *testing.T) 
 	require.NoError(t, clientB.HandleMessage(ctx, connectB))
 	sessionB := clientB.SessionID()
 
-	// C authenticates as user-b (at its connection limit) and tries to resume
-	// A's session: the per-user limit check runs BEFORE the old attachment is
-	// detached, so the old session survives untouched.
+	// C authenticates as user-b (different from A's owner user-a) and tries
+	// to resume A's session: the takeover is denied before any state change,
+	// so the old session survives untouched.
 	transportC := &capturingTransport{}
 	clientC, _, err := NewClient(ctx, node, transportC, JSONMarshaler{})
 	require.NoError(t, err)
@@ -1811,9 +1812,10 @@ func TestClient_Connect_ResumeAtUserLimit_KeepsOldSessionAttached(t *testing.T) 
 	}
 	require.NoError(t, clientC.HandleMessage(ctx, resumeC))
 
-	// The new connection is closed with the connection-limit code...
+	// The new connection is closed with the invalid-token code (the resume
+	// credentials do not own the session)...
 	require.True(t, transportC.isClosed())
-	assert.Equal(t, DisconnectConnectionLimit.Code, transportC.getCloseReason().Code)
+	assert.Equal(t, DisconnectInvalidToken.Code, transportC.getCloseReason().Code)
 
 	// ...and the old session is still fully Attached: hub entry,
 	// subscription, presence, cluster state and an open transport.

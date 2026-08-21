@@ -310,6 +310,9 @@ func TestHeartbeat_ValidateRejectsSubSecond(t *testing.T) {
 			WebSocket: config.WebSocketTransport{Addr: ":9080", Path: "/ws"},
 			GRPC:      config.GRPCTransport{Addr: ":9090"},
 		},
+		Server: config.Server{
+			GRPCAdmin: config.GRPCAdmin{Addr: "127.0.0.1:9091", AuthToken: "test-admin-token"},
+		},
 	}
 
 	cases := []struct {

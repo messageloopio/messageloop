@@ -56,17 +56,17 @@ func (t *Transport) WriteMany(msgs ...[]byte) error {
 }
 
 func (t *Transport) Close(disconnect protocol.Disconnect) error {
-	// Always close the underlying connection, even when the peer has already
-	// torn the socket down (e.g. RST): WriteControl fails early on such
-	// sockets, and skipping conn.Close() would leak the fd. Closing the conn
-	// also unblocks the read loop, which owns all reads on this connection —
-	// gorilla/websocket requires a single reader, so Close must not drain
-	// frames itself (that raced with the read loop).
+	// gorilla/websocket documents WriteControl (and Close) as safe to call
+	// concurrently with every other method, so Close must NOT take writeMu:
+	// a writerLoop stuck in WriteMessage (a write deadline of zero is
+	// constructible in tests) would otherwise block Close — and the deferred
+	// conn.Close — indefinitely. The 5s WriteControl deadline bounds the
+	// close-frame attempt; closing the conn afterwards unblocks any stuck
+	// writer and the read loop, which owns all reads on this connection
+	// (gorilla/websocket requires a single reader, so Close must not drain
+	// frames itself).
 	defer func() { _ = t.conn.Close() }()
 
-	t.writeMu.Lock()
-	defer t.writeMu.Unlock()
-	// Send a WebSocket close message
 	deadline := time.Now().Add(5 * time.Second)
 	return t.conn.WriteControl(
 		websocket.CloseMessage,

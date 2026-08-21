@@ -151,7 +151,7 @@ func (f *fakeRuntime) DeleteClusterSessionState(_ context.Context, _ string) err
 
 func (f *fakeRuntime) AdjustClusterChannelSubscriptionsTimeout(string, int64) {}
 
-func (f *fakeRuntime) ResumeRemoteSession(context.Context, *Session, string) (*cluster.ClusterSessionSnapshot, bool, error) {
+func (f *fakeRuntime) ResumeRemoteSession(context.Context, *Session, string, string) (*cluster.ClusterSessionSnapshot, bool, error) {
 	return nil, false, nil
 }
 

@@ -889,11 +889,13 @@ func TestAdmin_DisconnectUsersAcrossNodes(t *testing.T) {
 	}, 5*time.Second, 50*time.Millisecond)
 }
 
-// TestClusterRedis_ResumeUserChangeMigratesIndex verifies PR-06 §9.7: after
-// a remote resume where the re-authenticated user differs from the lease
-// owner, the Redis user index migrates the membership (SREM old user, SADD
-// new user) so expansion by the old user no longer hits the session.
-func TestClusterRedis_ResumeUserChangeMigratesIndex(t *testing.T) {
+// TestClusterRedis_CrossUserResumeDeniedKeepsIndex pins the ownership rule
+// on the real Redis directory: a resume whose authenticated user differs from
+// the lease owner is refused (DisconnectInvalidToken) before any lease claim,
+// so the user index keeps the original membership and the old session stays
+// attached. (This replaces the pre-S1 behavior where the resume migrated the
+// index to the new user — the session id is not a cross-user capability.)
+func TestClusterRedis_CrossUserResumeDeniedKeepsIndex(t *testing.T) {
 	redisCfg := requireClusterRedis(t, clusterRedisIntegrationDB)
 	ctx := context.Background()
 
@@ -925,9 +927,9 @@ func TestClusterRedis_ResumeUserChangeMigratesIndex(t *testing.T) {
 		return err == nil && len(ids) == 1
 	}, 5*time.Second, 50*time.Millisecond)
 
-	// Resume on nodeB with a different authenticated user: authUser wins over
-	// the inherited lease user, and the next lease write must migrate the
-	// index membership.
+	// Resume on nodeB with a different authenticated user: the takeover is
+	// denied before the lease claim — the connection is closed with the
+	// invalid-token code and neither the lease nor the index moves.
 	newTransport := &integrationCapturingTransport{}
 	newClient, _, err := runtime.NewClient(ctx, nodeB, newTransport, shared.JSONMarshaler{})
 	require.NoError(t, err)
@@ -938,14 +940,21 @@ func TestClusterRedis_ResumeUserChangeMigratesIndex(t *testing.T) {
 		},
 	}
 	require.NoError(t, newClient.HandleMessage(ctx, resumeMsg))
-	require.Equal(t, "user-new", newClient.UserID())
+	require.True(t, newTransport.isClosed(), "the cross-user resume connection must be closed")
+	require.Equal(t, protocol.DisconnectInvalidToken.Code, newTransport.getCloseReason().Code)
 
-	require.Eventually(t, func() bool {
-		ids, err := directory.ListUserSessions(ctx, "user-old")
-		if err != nil || len(ids) != 0 {
-			return false
-		}
-		ids, err = directory.ListUserSessions(ctx, "user-new")
-		return err == nil && len(ids) == 1
-	}, 5*time.Second, 50*time.Millisecond)
+	// The lease and the user index still belong to user-old, and the old
+	// session keeps serving on nodeA.
+	lease, err := directory.GetSessionLease(ctx, oldSessionID)
+	require.NoError(t, err)
+	require.NotNil(t, lease)
+	require.Equal(t, "user-old", lease.UserID)
+	require.False(t, oldTransport.isClosed(), "the owner's session must stay attached")
+
+	ids, err := directory.ListUserSessions(ctx, "user-old")
+	require.NoError(t, err)
+	require.Len(t, ids, 1)
+	ids, err = directory.ListUserSessions(ctx, "user-new")
+	require.NoError(t, err)
+	require.Empty(t, ids)
 }

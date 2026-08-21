@@ -311,9 +311,19 @@ func (s *Session) Attach(att *Attachment) error {
 	s.stopHeartbeatLocked()
 	s.mu.Unlock()
 
-	s.startHeartbeat(s.ctx)
+	s.startHeartbeat(s.contextSnapshot())
 	go s.writerLoop(att, queue)
 	return nil
+}
+
+// contextSnapshot returns the session's current lifetime context. The ctx
+// field is replaced during a local takeover, so goroutines that outlive one
+// attachment (heartbeat, survey worker, cluster refresh) must snapshot it
+// under the lock — reading the field directly races the takeover write.
+func (s *Session) contextSnapshot() context.Context {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.ctx
 }
 
 // Detach tears off the current attachment: the transport is closed, the
@@ -410,7 +420,7 @@ func (s *Session) Fence(reason Disconnect) error {
 		}
 		s.mu.Unlock()
 		if restoredQueue != nil {
-			s.startHeartbeat(s.ctx)
+			s.startHeartbeat(s.contextSnapshot())
 			go s.writerLoop(att, restoredQueue)
 		}
 		return errors.Join(fenceErrs...)

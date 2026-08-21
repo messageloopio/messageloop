@@ -272,7 +272,7 @@ func TestResumeRemoteSession_UsesCAS(t *testing.T) {
 	client, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
 	require.NoError(t, err)
 
-	snapshot, resumed, err := node.resumeRemoteSession(context.Background(), client, "sess-remote")
+	snapshot, resumed, err := node.resumeRemoteSession(context.Background(), client, "sess-remote", "user-1")
 	require.NoError(t, err)
 	require.True(t, resumed)
 	require.NotNil(t, snapshot)
@@ -316,7 +316,7 @@ func TestResumeRemoteSession_CASConflictAborts(t *testing.T) {
 	client, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
 	require.NoError(t, err)
 
-	_, resumed, err := node.resumeRemoteSession(context.Background(), client, "sess-remote")
+	_, resumed, err := node.resumeRemoteSession(context.Background(), client, "sess-remote", "user-1")
 	require.Error(t, err)
 	var dis Disconnect
 	require.True(t, errors.As(err, &dis), "resume conflict must surface as a disconnect")
@@ -732,7 +732,7 @@ func TestResumeRemoteSession_TakeoverFailureRollsBackCAS(t *testing.T) {
 	client, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
 	require.NoError(t, err)
 
-	_, resumed, err := node.resumeRemoteSession(context.Background(), client, "sess-rollback")
+	_, resumed, err := node.resumeRemoteSession(context.Background(), client, "sess-rollback", "user-1")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "takeover rejected")
 	require.False(t, resumed)
@@ -781,7 +781,7 @@ func TestResumeRemoteSession_TakeoverFailureDeadNodeKeepsClaim(t *testing.T) {
 	client, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
 	require.NoError(t, err)
 
-	snapshot, resumed, err := node.resumeRemoteSession(context.Background(), client, "sess-dead")
+	snapshot, resumed, err := node.resumeRemoteSession(context.Background(), client, "sess-dead", "user-1")
 	require.NoError(t, err)
 	require.True(t, resumed)
 	require.NotNil(t, snapshot)
@@ -826,7 +826,7 @@ func TestResumeRemoteSession_NodeLeaseLookupErrorStillRollsBack(t *testing.T) {
 	client, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
 	require.NoError(t, err)
 
-	_, resumed, err := node.resumeRemoteSession(context.Background(), client, "sess-lookup")
+	_, resumed, err := node.resumeRemoteSession(context.Background(), client, "sess-lookup", "user-1")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "node lease store down")
 	require.False(t, resumed)
@@ -886,7 +886,7 @@ func TestResumeRemoteSession_Metrics_TakeoverClaimFencedCounted(t *testing.T) {
 	client, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
 	require.NoError(t, err)
 
-	_, resumed, err := node.resumeRemoteSession(context.Background(), client, "sess-remote")
+	_, resumed, err := node.resumeRemoteSession(context.Background(), client, "sess-remote", "user-1")
 	require.Error(t, err)
 	require.False(t, resumed)
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.BindFencedTotal))
@@ -918,7 +918,7 @@ func TestResumeRemoteSession_Metrics_TakeoverObserved(t *testing.T) {
 	client, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
 	require.NoError(t, err)
 
-	_, resumed, err := node.resumeRemoteSession(context.Background(), client, "sess-remote")
+	_, resumed, err := node.resumeRemoteSession(context.Background(), client, "sess-remote", "user-1")
 	require.NoError(t, err)
 	require.True(t, resumed)
 	require.Equal(t, float64(0), testutil.ToFloat64(metrics.BindFencedTotal))
@@ -948,7 +948,7 @@ func TestResumeRemoteSession_Metrics_NoRemoteOwnerSkipsTiming(t *testing.T) {
 	client, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
 	require.NoError(t, err)
 
-	_, resumed, err := node.resumeRemoteSession(context.Background(), client, "sess-local")
+	_, resumed, err := node.resumeRemoteSession(context.Background(), client, "sess-local", "user-1")
 	require.NoError(t, err)
 	require.True(t, resumed)
 	require.Equal(t, uint64(0), histogramSampleCount(t, metrics.EvictLag))
@@ -991,7 +991,7 @@ func TestResumeRemoteSession_SameNodeOlderEpochSkipsTakeover(t *testing.T) {
 	client, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
 	require.NoError(t, err)
 
-	snapshot, resumed, err := node.resumeRemoteSession(context.Background(), client, "sess-epoch")
+	snapshot, resumed, err := node.resumeRemoteSession(context.Background(), client, "sess-epoch", "user-1")
 	require.NoError(t, err)
 	require.True(t, resumed)
 	require.NotNil(t, snapshot)
@@ -1036,10 +1036,57 @@ func TestResumeRemoteSession_NonEpochIncarnationDoesNotSkip(t *testing.T) {
 	client, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
 	require.NoError(t, err)
 
-	snapshot, resumed, err := node.resumeRemoteSession(context.Background(), client, "sess-nonepoch")
+	snapshot, resumed, err := node.resumeRemoteSession(context.Background(), client, "sess-nonepoch", "user-1")
 	require.NoError(t, err)
 	require.True(t, resumed)
 	require.NotNil(t, snapshot)
 	require.Len(t, bus.commands, 1, "a non-epoch incarnation never skips the takeover RPC")
 	require.Equal(t, ClusterCommandTakeover, bus.commands[0].Type)
+}
+
+// TestResumeRemoteSession_CrossUserDenied pins the ownership rule: a session
+// is resumed only by the user it was issued to. A cross-user attempt is
+// refused before anything is claimed — no CAS, no takeover command, no
+// rollback — and surfaces as DisconnectInvalidToken.
+func TestResumeRemoteSession_CrossUserDenied(t *testing.T) {
+	directory := &fakeSessionDirectory{
+		lease: &ClusterSessionLease{
+			SessionID:     "sess-remote",
+			NodeID:        "node-b",
+			IncarnationID: "inc-b",
+			UserID:        "user-1",
+			LeaseVersion:  7,
+			ExpiresAt:     time.Now().Add(time.Hour),
+		},
+		snapshot: &ClusterSessionSnapshot{SessionID: "sess-remote", UserID: "user-1"},
+	}
+	bus := &fakeClusterCommandBus{result: &ClusterCommandResult{Status: ClusterCommandStatusSucceeded}}
+	runtime, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-a", IncarnationID: "inc-a", Backend: "memory"}, ClusterDependencies{
+		SessionDirectory: directory,
+		CommandBus:       bus,
+		QueryStore:       fakeQueryStore{},
+	})
+	require.NoError(t, err)
+
+	node := NewNode(nil)
+	node.SetCluster(runtime)
+	client, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
+	require.NoError(t, err)
+
+	// user-2 knows user-1's session id and holds a valid token of its own.
+	snapshot, resumed, err := node.resumeRemoteSession(context.Background(), client, "sess-remote", "user-2")
+	require.Error(t, err)
+	var dis Disconnect
+	require.ErrorAs(t, err, &dis)
+	require.Equal(t, DisconnectInvalidToken.Code, dis.Code)
+	assert.False(t, resumed)
+	assert.Nil(t, snapshot)
+	assert.Zero(t, directory.casCalls, "a cross-user resume must not claim the lease")
+	assert.Empty(t, bus.commands, "a cross-user resume must not issue a takeover command")
+
+	// The owner still resumes cleanly.
+	snapshot, resumed, err = node.resumeRemoteSession(context.Background(), client, "sess-remote", "user-1")
+	require.NoError(t, err)
+	assert.True(t, resumed)
+	assert.NotNil(t, snapshot)
 }

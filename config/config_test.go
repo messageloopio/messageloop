@@ -18,9 +18,15 @@ func validTransport() Transport {
 	}
 }
 
+// validServer supplies the always-required admin gRPC address and token.
+func validServer() Server {
+	return Server{GRPCAdmin: GRPCAdmin{Addr: "127.0.0.1:9091", AuthToken: "test-admin-token"}}
+}
+
 func TestValidate_MinimalValid(t *testing.T) {
 	cfg := &Config{
 		Transport: validTransport(),
+		Server:    validServer(),
 	}
 	assert.NoError(t, cfg.Validate())
 }
@@ -123,6 +129,7 @@ func TestValidate_ClusterRequiresRedis(t *testing.T) {
 func TestValidate_ValidRedisCluster(t *testing.T) {
 	cfg := &Config{
 		Transport: validTransport(),
+		Server:    validServer(),
 		Broker: BrokerConfig{
 			Type:  "redis",
 			Redis: RedisConfig{Addr: "localhost:6379", StreamApproximate: true},
@@ -137,6 +144,7 @@ func TestValidate_ClusterHMACKey(t *testing.T) {
 	validBase := func() *Config {
 		return &Config{
 			Transport: validTransport(),
+			Server:    validServer(),
 			Broker: BrokerConfig{
 				Type:  "redis",
 				Redis: RedisConfig{Addr: "localhost:6379", StreamApproximate: true},
@@ -163,7 +171,7 @@ func TestValidate_ClusterHMACKey(t *testing.T) {
 	assert.NoError(t, cfg.Validate(), "hmac_key_file alone is acceptable (the file is read at startup)")
 
 	// A disabled cluster needs no key.
-	disabled := &Config{Transport: validTransport()}
+	disabled := &Config{Transport: validTransport(), Server: validServer()}
 	assert.NoError(t, disabled.Validate(), "enabled: false must not require a key")
 }
 
@@ -225,7 +233,7 @@ func TestValidate_AdminRequiresAuthToken(t *testing.T) {
 }
 
 func TestValidate_QUICOptionalWhenEmpty(t *testing.T) {
-	cfg := &Config{Transport: validTransport()}
+	cfg := &Config{Transport: validTransport(), Server: validServer()}
 	assert.NoError(t, cfg.Validate())
 }
 
@@ -236,6 +244,7 @@ func TestValidate_QUICRequiresTLSOrInsecure(t *testing.T) {
 			GRPC:      GRPCTransport{Addr: ":9090"},
 			QUIC:      QUICTransport{Addr: ":4433"},
 		},
+		Server: validServer(),
 	}
 	assert.ErrorContains(t, cfg.Validate(), "transport.quic requires tls")
 
@@ -410,7 +419,7 @@ func TestValidate_AuthorizerValid(t *testing.T) {
 					},
 				},
 			},
-			GRPCAdmin: GRPCAdmin{Capabilities: []string{
+			GRPCAdmin: GRPCAdmin{Addr: "127.0.0.1:9091", AuthToken: "test-admin-token", Capabilities: []string{
 				"history.read", "presence.read", "channels.list", "session.act",
 				"user.fanout", "subscribe.any", "presence.large_snapshot",
 				"survey.bypass_gate", "pattern.global",
@@ -434,6 +443,7 @@ func TestValidate_RejectsServerACL(t *testing.T) {
 	cfg2 := &Config{
 		Transport: validTransport(),
 		Server: Server{
+			GRPCAdmin: validServer().GRPCAdmin,
 			Authorizer: AuthorizerConfig{
 				Rules: []AuthorizerRule{
 					{Pattern: "chat.**", AllowSurvey: []string{"*"}, ChannelPolicySpec: ChannelPolicySpec{Survey: boolPtr(true)}},
@@ -486,7 +496,7 @@ func TestValidate_CapabilitiesEmptyAllowed(t *testing.T) {
 	cfg := &Config{
 		Transport: validTransport(),
 		Server: Server{
-			GRPCAdmin: GRPCAdmin{Capabilities: []string{}},
+			GRPCAdmin: GRPCAdmin{Addr: "127.0.0.1:9091", AuthToken: "test-admin-token", Capabilities: []string{}},
 		},
 	}
 	assert.NoError(t, cfg.Validate())
@@ -499,6 +509,7 @@ func TestValidate_CapabilitiesEmptyAllowed(t *testing.T) {
 func TestValidate_PresenceClusterEmitRemoved(t *testing.T) {
 	cfg := &Config{
 		Transport: validTransport(),
+		Server:    validServer(),
 	}
 	require.Nil(t, cfg.Server.Presence.ClusterEmit,
 		"cluster_emit must parse to nil when absent")
@@ -511,7 +522,7 @@ func TestValidate_PresenceClusterEmitRemoved(t *testing.T) {
 	} {
 		cfg = &Config{
 			Transport: validTransport(),
-			Server:    Server{Presence: tc},
+			Server:    Server{GRPCAdmin: validServer().GRPCAdmin, Presence: tc},
 		}
 		err := cfg.Validate()
 		require.Error(t, err)

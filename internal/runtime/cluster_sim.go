@@ -22,8 +22,10 @@ func SimSyncClusterSessionState(n *Node, ctx context.Context, s *Session) error 
 
 // SimResumeRemoteSession exposes the cross-node resume (CAS claim + takeover
 // command), so simulator scenarios can script a Bind on another node.
-func SimResumeRemoteSession(n *Node, ctx context.Context, s *Session, sessionID string) (*ClusterSessionSnapshot, bool, error) {
-	return n.resumeRemoteSession(ctx, s, sessionID)
+// authUser mirrors the production handleConnect argument: the authenticated
+// identity attempting the resume.
+func SimResumeRemoteSession(n *Node, ctx context.Context, s *Session, sessionID, authUser string) (*ClusterSessionSnapshot, bool, error) {
+	return n.resumeRemoteSession(ctx, s, sessionID, authUser)
 }
 
 // SimMembershipOnce runs one membership beat of the cluster repairer, so

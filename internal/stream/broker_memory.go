@@ -258,11 +258,12 @@ func (b *memoryBroker) interested(ch string) bool {
 // node is interested (exact or wildcard match), hands it to the channel's
 // delivery shard for asynchronous handler invocation: a slow subscriber can
 // never stall the publishing caller behind a write (a full shard queue
-// applies bounded backpressure instead). Delivery is serialized per channel,
-// so subscribers observe publications in offset order. The handler's error or
-// panic never negates the publish: the offset is already assigned and the
-// history entry written, so the failure is logged and Publish still returns
-// (offset, nil).
+// applies bounded backpressure instead). Offset assignment and queue
+// insertion happen atomically under the channel's history mutex, so
+// subscribers observe publications in offset order even with concurrent
+// publishers. The handler's error or panic never negates the publish: the
+// offset is already assigned and the history entry written, so the failure
+// is logged and Publish still returns (offset, nil).
 func (b *memoryBroker) Publish(ch string, pub *Publication) (uint64, error) {
 	// Channels with explicit empty segments ("a.", ".a", "a..b") and the
 	// empty channel are rejected up front so malformed channels never produce
@@ -303,6 +304,11 @@ func (b *memoryBroker) Publish(ch string, pub *Publication) (uint64, error) {
 		})
 	}
 
+	// Resolve interest before taking h.mu: interested() acquires b.mu, and the
+	// established lock order is b.mu → h.mu (Unsubscribe takes both in that
+	// order), so acquiring b.mu while holding h.mu could deadlock.
+	wantDelivery := b.handler.Load() != nil && b.interested(ch)
+
 	h.mu.Lock()
 	h.nextOff++
 	offset := h.nextOff
@@ -321,11 +327,16 @@ func (b *memoryBroker) Publish(ch string, pub *Publication) (uint64, error) {
 		h.entries[slot] = &stored
 		h.count++
 	}
-	h.mu.Unlock()
-
-	if b.handler.Load() != nil && b.interested(ch) {
+	if wantDelivery {
+		// Enqueue inside h.mu so offset assignment and queue insertion are
+		// atomic per channel: two concurrent publishers can never reach the
+		// shard queue out of offset order. enqueue may block on a full shard
+		// (backpressure) — holding only this channel's mutex, it delays just
+		// this channel's publishers and history readers.
 		b.enqueue(ch, &stored)
 	}
+	h.mu.Unlock()
+
 	return offset, nil
 }
 
@@ -384,6 +395,20 @@ func (b *memoryBroker) PublishTransient(ch string, pub *Publication) error {
 	stored.Epoch = b.epoch
 	stored.Time = time.Now().UnixMilli()
 	if b.handler.Load() != nil && b.interested(ch) {
+		// When the channel has a history ring, enqueue under its mutex so a
+		// transient event cannot overtake a concurrent logged Publish that
+		// already assigned its offset (Publish enqueues under the same
+		// mutex). Channels without a ring have no logged publications to
+		// order against yet and enqueue directly.
+		b.mu.RLock()
+		h, ok := b.history[ch]
+		b.mu.RUnlock()
+		if ok {
+			h.mu.Lock()
+			b.enqueue(ch, &stored)
+			h.mu.Unlock()
+			return nil
+		}
 		b.enqueue(ch, &stored)
 	}
 	return nil

@@ -138,7 +138,7 @@ type Runtime interface {
 	SyncClusterSessionState(ctx context.Context, c *Session) error
 	DeleteClusterSessionState(ctx context.Context, sessionID string) error
 	AdjustClusterChannelSubscriptionsTimeout(channel string, delta int64)
-	ResumeRemoteSession(ctx context.Context, c *Session, sessionID string) (*cluster.ClusterSessionSnapshot, bool, error)
+	ResumeRemoteSession(ctx context.Context, c *Session, sessionID, authUser string) (*cluster.ClusterSessionSnapshot, bool, error)
 	RestoreSessionSubscriptions(ctx context.Context, c *Session, subs []cluster.ClusterSubscriptionSnapshot) []RestoreFailure
 	RestoreLocalSubscription(ctx context.Context, ch string, sub Subscriber) error
 	RemoveLocalSubscriptionOnly(ch string, s *Session, updateMetrics bool) (bool, error)

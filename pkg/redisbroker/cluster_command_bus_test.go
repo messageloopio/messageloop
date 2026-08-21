@@ -20,9 +20,12 @@ import (
 	"github.com/messageloopio/messageloop/internal/metrics"
 )
 
-// DB 16 keeps these FlushDB calls off the runtime atomic-write tests (DB 14)
+// DB 12 keeps these FlushDB calls off the runtime atomic-write tests (DB 14)
 // and the cluster redis integration suite (DB 15). sdks/go e2e uses DB 13.
-const clusterCommandBusTestDB = 16
+// DB 12 (not 16) because a default-configured Redis — including the CI
+// redis:7 service — exposes only databases 0-15: a DB 16 probe fails SELECT
+// and silently skips the whole suite.
+const clusterCommandBusTestDB = 12
 
 // testClusterCommandBusKey is the 32-byte HMAC key shared by every bus in
 // these tests (spec allows a 32-byte literal in tests).

@@ -68,7 +68,7 @@ func TestSim_StealThenPing(t *testing.T) {
 	// synchronous bus delivers the takeover to A.
 	bClient, err := w.NewResumeClient(w.B)
 	require.NoError(t, err)
-	_, resumed, err := runtime.SimResumeRemoteSession(w.B, ctx, bClient, "sess-1")
+	_, resumed, err := runtime.SimResumeRemoteSession(w.B, ctx, bClient, "sess-1", "user-1")
 	require.NoError(t, err)
 	require.True(t, resumed)
 	requireLease(t, w, "sess-1", "node-b", "inc-b", 2)
@@ -92,7 +92,7 @@ func TestSim_BindThenEvictFences(t *testing.T) {
 
 	bClient, err := w.NewResumeClient(w.B)
 	require.NoError(t, err)
-	_, resumed, err := runtime.SimResumeRemoteSession(w.B, ctx, bClient, "sess-1")
+	_, resumed, err := runtime.SimResumeRemoteSession(w.B, ctx, bClient, "sess-1", "user-1")
 	require.NoError(t, err)
 	require.True(t, resumed)
 
@@ -115,7 +115,7 @@ func TestSim_LostEvictNoDual(t *testing.T) {
 	w.Bus.DropNext() // the takeover Evict to A vanishes
 	bClient, err := w.NewResumeClient(w.B)
 	require.NoError(t, err)
-	_, resumed, err := runtime.SimResumeRemoteSession(w.B, ctx, bClient, "sess-1")
+	_, resumed, err := runtime.SimResumeRemoteSession(w.B, ctx, bClient, "sess-1", "user-1")
 	require.NoError(t, err)
 	require.True(t, resumed, "the CAS claim survives the lost Evict (the old node has no live node lease)")
 

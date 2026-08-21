@@ -198,9 +198,42 @@ func TestCanonicalFormat_StableLines(t *testing.T) {
 	}
 	require.NoError(t, SignCommand(testKey, cmd))
 	require.NoError(t, SignCommand(testKey, cmd))
-	// LeaseVersion 0 renders as "0" with no leading zeros, and every line —
-	// the last included — ends with '\n'.
+	// LeaseVersion 0 renders as "0" with no leading zeros, every field is
+	// length-prefixed ("<len>:<bytes>\n"), and the trailing metadata count
+	// (0 entries here) ends the payload.
 	canonical := string(canonicalCommand(cmd))
-	assert.True(t, strings.HasPrefix(canonical, "v1\npublish\nsess\ninc\n0\n"), canonical)
-	assert.True(t, strings.HasSuffix(canonical, "\nid\n42\n"), canonical)
+	assert.True(t, strings.HasPrefix(canonical, "v2\n7:publish\n4:sess\n3:inc\n1:0\n"), canonical)
+	assert.True(t, strings.HasSuffix(canonical, "\n2:id\n2:42\n0:\n0\n"), canonical)
+}
+
+// TestCanonicalFormat_FieldBoundaryUnambiguous pins the length-prefixing: a
+// field value containing '\n' must not be re-split into a different field
+// tuple. Under the old raw '\n'-joined encoding the two commands below
+// produced byte-identical canonical payloads, so a signature over one
+// verified the other.
+func TestCanonicalFormat_FieldBoundaryUnambiguous(t *testing.T) {
+	crossing := &cluster.ClusterCommand{
+		CommandID:           "cmd-1",
+		Type:                cluster.ClusterCommandTakeover,
+		SessionID:           "sess-A\nB",
+		TargetIncarnationID: "inc",
+		LeaseVersion:        1,
+		IssuedAt:            time.Unix(1_700_000_000, 0),
+	}
+	splitDifferently := &cluster.ClusterCommand{
+		CommandID:           "cmd-1",
+		Type:                cluster.ClusterCommandTakeover,
+		SessionID:           "sess-A",
+		TargetIncarnationID: "B\ninc",
+		LeaseVersion:        1,
+		IssuedAt:            time.Unix(1_700_000_000, 0),
+	}
+	assert.NotEqual(t, canonicalCommand(crossing), canonicalCommand(splitDifferently),
+		"newline-carrying field values must not collapse two different commands into one canonical payload")
+
+	require.NoError(t, SignCommand(testKey, crossing))
+	splitDifferently.Signature = crossing.Signature
+	err := VerifyCommand(testKey, splitDifferently, time.Unix(1_700_000_000, 0))
+	require.Error(t, err, "a signature over one field split must not verify the other")
+	assert.Equal(t, RejectBad, rejectReason(t, err))
 }
