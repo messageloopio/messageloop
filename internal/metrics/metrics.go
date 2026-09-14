@@ -6,15 +6,17 @@ package metrics
 import "github.com/prometheus/client_golang/prometheus"
 
 // MetricsTransportLabel maps a client protocol to the connections metric's
-// transport label value ("ws"/"grpc"/"quic"). The protocol is set by the
-// transport packages at construction; anything unknown (e.g. tests) defaults
-// to "ws".
+// transport label value ("ws"/"grpc"/"quic"/"kcp"). The protocol is set by
+// the transport packages at construction; anything unknown (e.g. tests)
+// defaults to "ws".
 func MetricsTransportLabel(protocol string) string {
 	switch protocol {
 	case "grpc":
 		return "grpc"
 	case "quic":
 		return "quic"
+	case "kcp":
+		return "kcp"
 	default:
 		return "ws"
 	}
@@ -22,7 +24,7 @@ func MetricsTransportLabel(protocol string) string {
 
 // Metrics holds Prometheus metrics for the MessageLoop server.
 type Metrics struct {
-	// ConnectionsTotal is labeled by transport ("ws", "grpc", or "quic").
+	// ConnectionsTotal is labeled by transport ("ws", "grpc", "quic", or "kcp").
 	ConnectionsTotal                *prometheus.GaugeVec
 	SubscriptionsTotal              prometheus.Gauge
 	MessagesPublished               prometheus.Counter

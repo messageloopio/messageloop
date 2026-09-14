@@ -193,7 +193,7 @@ type Limits struct {
 	MaxConnectionsPerUser     int `yaml:"max_connections_per_user" json:"max_connections_per_user" mapstructure:"max_connections_per_user"`             // 0 = unlimited
 	MaxSubscriptionsPerClient int `yaml:"max_subscriptions_per_client" json:"max_subscriptions_per_client" mapstructure:"max_subscriptions_per_client"` // 0 = unlimited
 	MaxPublishesPerSecond     int `yaml:"max_publishes_per_second" json:"max_publishes_per_second" mapstructure:"max_publishes_per_second"`             // 0 = unlimited
-	MaxMessageSize            int `yaml:"max_message_size" json:"max_message_size" mapstructure:"max_message_size"`                                     // bytes, 0 = default (64KB), applies uniformly to WebSocket, gRPC, and QUIC transports
+	MaxMessageSize            int `yaml:"max_message_size" json:"max_message_size" mapstructure:"max_message_size"`                                     // bytes, 0 = default (64KB), applies uniformly to WebSocket, gRPC, QUIC, and KCP transports
 }
 
 type HttpServer struct {
@@ -230,6 +230,7 @@ type Transport struct {
 	WebSocket WebSocketTransport `yaml:"websocket" json:"websocket" mapstructure:"websocket"`
 	GRPC      GRPCTransport      `yaml:"grpc" json:"grpc" mapstructure:"grpc"`
 	QUIC      QUICTransport      `yaml:"quic" json:"quic" mapstructure:"quic"`
+	KCP       KCPTransport       `yaml:"kcp" json:"kcp" mapstructure:"kcp"`
 }
 
 type TLSConfig struct {
@@ -264,6 +265,24 @@ type QUICTransport struct {
 	Addr         string    `yaml:"addr" json:"addr" mapstructure:"addr"`
 	WriteTimeout string    `yaml:"write_timeout" json:"write_timeout" mapstructure:"write_timeout"`
 	ReadTimeout  string    `yaml:"read_timeout" json:"read_timeout" mapstructure:"read_timeout"`
+	Insecure     bool      `yaml:"insecure" json:"insecure" mapstructure:"insecure"`
+	TLS          TLSConfig `yaml:"tls" json:"tls" mapstructure:"tls"`
+}
+
+// KCPTransport configures the optional KCP client listener (UDP with the
+// KCP reliability layer and a TLS overlay; the frame format matches QUIC).
+// An empty Addr disables the listener. KCP provides no encryption of its
+// own, so TLS is mandatory: provide cert/key or set Insecure to generate an
+// ephemeral self-signed certificate (dev only).
+type KCPTransport struct {
+	Addr         string    `yaml:"addr" json:"addr" mapstructure:"addr"`
+	WriteTimeout string    `yaml:"write_timeout" json:"write_timeout" mapstructure:"write_timeout"`
+	ReadTimeout  string    `yaml:"read_timeout" json:"read_timeout" mapstructure:"read_timeout"`
+	// DataShards / ParityShards configure forward error correction (Reed
+	// Solomon). 0/0 (the default) disables FEC. Clients must dial with the
+	// same shard counts.
+	DataShards   int       `yaml:"data_shards" json:"data_shards" mapstructure:"data_shards"`
+	ParityShards int       `yaml:"parity_shards" json:"parity_shards" mapstructure:"parity_shards"`
 	Insecure     bool      `yaml:"insecure" json:"insecure" mapstructure:"insecure"`
 	TLS          TLSConfig `yaml:"tls" json:"tls" mapstructure:"tls"`
 }
@@ -342,6 +361,18 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("transport.quic requires tls cert_file and key_file, or set insecure: true to use a self-signed certificate")
 		}
 	}
+	if c.Transport.KCP.Addr != "" {
+		hasCert := c.Transport.KCP.TLS.CertFile != "" || c.Transport.KCP.TLS.KeyFile != ""
+		if !c.Transport.KCP.Insecure && !hasCert {
+			return fmt.Errorf("transport.kcp requires tls cert_file and key_file, or set insecure: true to use a self-signed certificate")
+		}
+		if c.Transport.KCP.DataShards < 0 || c.Transport.KCP.ParityShards < 0 {
+			return fmt.Errorf("transport.kcp.data_shards and transport.kcp.parity_shards must be >= 0")
+		}
+		if c.Transport.KCP.ParityShards > 0 && c.Transport.KCP.DataShards <= 0 {
+			return fmt.Errorf("transport.kcp.parity_shards requires transport.kcp.data_shards > 0")
+		}
+	}
 
 	// Validate duration fields.
 	for _, entry := range []struct {
@@ -357,6 +388,8 @@ func (c *Config) Validate() error {
 		{"transport.grpc.write_timeout", c.Transport.GRPC.WriteTimeout},
 		{"transport.quic.write_timeout", c.Transport.QUIC.WriteTimeout},
 		{"transport.quic.read_timeout", c.Transport.QUIC.ReadTimeout},
+		{"transport.kcp.write_timeout", c.Transport.KCP.WriteTimeout},
+		{"transport.kcp.read_timeout", c.Transport.KCP.ReadTimeout},
 	} {
 		if entry.value != "" {
 			if _, err := time.ParseDuration(entry.value); err != nil {
@@ -376,6 +409,7 @@ func (c *Config) Validate() error {
 		{"transport.websocket.write_timeout", c.Transport.WebSocket.WriteTimeout},
 		{"transport.grpc.write_timeout", c.Transport.GRPC.WriteTimeout},
 		{"transport.quic.write_timeout", c.Transport.QUIC.WriteTimeout},
+		{"transport.kcp.write_timeout", c.Transport.KCP.WriteTimeout},
 	} {
 		if d, err := time.ParseDuration(entry.value); err == nil && d <= 0 {
 			return fmt.Errorf("%s must be positive (omit the field to use the default; 0 would let one stuck peer stall delivery indefinitely)", entry.name)
@@ -439,6 +473,7 @@ func (c *Config) Validate() error {
 		{"transport.websocket.tls", c.Transport.WebSocket.TLS},
 		{"transport.grpc.tls", c.Transport.GRPC.TLS},
 		{"transport.quic.tls", c.Transport.QUIC.TLS},
+		{"transport.kcp.tls", c.Transport.KCP.TLS},
 	} {
 		if (entry.tls.CertFile == "") != (entry.tls.KeyFile == "") {
 			return fmt.Errorf("%s: cert_file and key_file must both be set or both be empty", entry.name)

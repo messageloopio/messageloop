@@ -26,6 +26,7 @@ import (
 	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/internal/stream"
 	"github.com/messageloopio/messageloop/pkg/redisbroker"
+	"github.com/messageloopio/messageloop/pkg/transport/kcp"
 	"github.com/messageloopio/messageloop/pkg/transport/quic"
 	"github.com/messageloopio/messageloop/pkg/transport/ws"
 	proxyproxy "github.com/messageloopio/messageloop/proxy"
@@ -105,6 +106,10 @@ func main() {
 		if err != nil {
 			return err
 		}
+		kcpServer, err := newKCPServer(cfg, node)
+		if err != nil {
+			return err
+		}
 
 		app.OnStart(node.Run)
 		components := []lynx.Service{wsServer, adminServer}
@@ -112,14 +117,20 @@ func main() {
 		if quicServer != nil {
 			components = append(components, quicServer)
 		}
+		if kcpServer != nil {
+			components = append(components, kcpServer)
+		}
 		app.Register(components...)
 		app.OnStop(func(ctx context.Context) error {
 			// Drain all client connections before shutting down.
 			node.Shutdown()
-			// Release the pre-bound gRPC / QUIC listeners as a defensive measure.
+			// Release the pre-bound gRPC / QUIC / KCP listeners as a defensive measure.
 			grpcServers.Close()
 			if quicServer != nil {
 				_ = quicServer.Close()
+			}
+			if kcpServer != nil {
+				_ = kcpServer.Close()
 			}
 			return nil
 		})
@@ -347,6 +358,33 @@ func newQUICServer(cfg *config.Config, node *runtime.Node) (*quic.Server, error)
 		opts.KeepAlivePeriod = hb.PingInterval
 	}
 	return quic.NewServer(opts, node)
+}
+
+// newKCPServer builds the optional KCP client listener. A nil server is
+// returned (without error) when transport.kcp.addr is empty.
+func newKCPServer(cfg *config.Config, node *runtime.Node) (*kcp.Server, error) {
+	if cfg.Transport.KCP.Addr == "" {
+		return nil, nil
+	}
+	opts := kcp.Options{
+		Addr:         cfg.Transport.KCP.Addr,
+		TLSCertFile:  cfg.Transport.KCP.TLS.CertFile,
+		TLSKeyFile:   cfg.Transport.KCP.TLS.KeyFile,
+		Insecure:     cfg.Transport.KCP.Insecure,
+		DataShards:   cfg.Transport.KCP.DataShards,
+		ParityShards: cfg.Transport.KCP.ParityShards,
+	}
+	if cfg.Transport.KCP.WriteTimeout == "" {
+		opts.WriteTimeout = kcp.DefaultWriteTimeout
+	} else if d, err := time.ParseDuration(cfg.Transport.KCP.WriteTimeout); err == nil {
+		opts.WriteTimeout = d
+	}
+	if cfg.Transport.KCP.ReadTimeout != "" {
+		if d, err := time.ParseDuration(cfg.Transport.KCP.ReadTimeout); err == nil {
+			opts.ReadTimeout = d
+		}
+	}
+	return kcp.NewServer(opts, node)
 }
 
 // newAdminServer builds the HTTP admin server component (health + metrics).

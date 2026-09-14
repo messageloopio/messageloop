@@ -13,13 +13,14 @@ go build -o messageloop ./cmd/server
 
 ## Listener Model
 
-A single MessageLoop process exposes four required network listeners plus an optional QUIC listener:
+A single MessageLoop process exposes four required network listeners plus optional QUIC/KCP listeners:
 
 | Listener | Config Key | Purpose | Default |
 | --- | --- | --- | --- |
 | WebSocket | `transport.websocket.addr` | Client pub/sub traffic | None (required) |
 | gRPC streaming | `transport.grpc.addr` | Client pub/sub traffic | None (required) |
 | QUIC | `transport.quic.addr` | Client pub/sub traffic over UDP | Empty (disabled) |
+| KCP | `transport.kcp.addr` | Client pub/sub traffic over UDP (KCP reliability + TLS overlay) | Empty (disabled) |
 | gRPC admin | `server.grpc_admin.addr` | Server-side admin API | None (required) |
 | HTTP admin | `server.http.addr` | Health checks and Prometheus metrics | `127.0.0.1:8080` |
 
@@ -27,7 +28,7 @@ Bind client-facing listeners to public interfaces and admin listeners to private
 
 ## TLS Configuration
 
-WebSocket, gRPC, and admin listeners support optional TLS. QUIC always requires TLS 1.3 (`tls` cert/key, or `insecure: true` for a self-signed development certificate).
+WebSocket, gRPC, and admin listeners support optional TLS. QUIC always requires TLS 1.3 (`tls` cert/key, or `insecure: true` for a self-signed development certificate). KCP provides no encryption of its own and is always served behind a TLS overlay with the same cert/key / `insecure: true` options; clients must dial with the same `data_shards`/`parity_shards` FEC settings as the server.
 
 ```yaml
 transport:

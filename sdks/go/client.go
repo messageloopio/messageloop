@@ -201,9 +201,13 @@ type client struct {
 	offsetMu       sync.RWMutex
 
 	// Reconnection: stores connection parameters for re-dialing
-	dialURL  string // WebSocket URL (empty for gRPC/QUIC)
-	dialAddr string // gRPC address (empty for WebSocket/QUIC)
-	dialQUIC string // QUIC host:port (empty for WebSocket/gRPC)
+	dialURL  string // WebSocket URL (empty for gRPC/QUIC/KCP)
+	dialAddr string // gRPC address (empty for WebSocket/QUIC/KCP)
+	dialQUIC string // QUIC host:port (empty for WebSocket/gRPC/KCP)
+	dialKCP  string // KCP host:port (empty for WebSocket/gRPC/QUIC)
+	// KCP FEC shard counts for re-dialing (must match the server config).
+	kcpDataShards   int
+	kcpParityShards int
 
 	// newTransport overrides the transport factory used by reconnect (tests).
 	newTransport func() (transport, error)
@@ -273,6 +277,35 @@ func DialQUIC(addr string, opts ...Option) (Client, error) {
 	return c, nil
 }
 
+// DialKCP creates a new KCP client connecting to the specified host:port.
+// KCP carries no encryption of its own, so the session is secured with a TLS
+// overlay; pass WithInsecureSkipVerify when the server is running with
+// transport.kcp.insecure (self-signed). dataShards/parityShards must match
+// the server's transport.kcp FEC configuration (0/0 when FEC is disabled,
+// the default).
+func DialKCP(addr string, dataShards, parityShards int, opts ...Option) (Client, error) {
+	options := defaultOptions()
+	for _, opt := range opts {
+		opt(options)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	trans, err := newKCPTransport(ctx, addr, options.Encoding, options.DialTimeout, quicTLSConfig(options), dataShards, parityShards)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+
+	c := newClient(ctx, cancel, trans, options)
+	c.dialKCP = addr
+	c.kcpDataShards = dataShards
+	c.kcpParityShards = parityShards
+	return c, nil
+}
+
+// quicTLSConfig builds the TLS configuration shared by the QUIC and KCP
+// dials (both carry TLS overlays over UDP-based transports).
 func quicTLSConfig(opts *Options) *tls.Config {
 	var cfg *tls.Config
 	if opts != nil && opts.TLSConfig != nil {
@@ -295,6 +328,9 @@ func (c *client) dialTransport() (transport, error) {
 	}
 	if c.dialQUIC != "" {
 		return newQUICTransport(c.ctx, c.dialQUIC, c.opts.Encoding, c.opts.DialTimeout, quicTLSConfig(c.opts))
+	}
+	if c.dialKCP != "" {
+		return newKCPTransport(c.ctx, c.dialKCP, c.opts.Encoding, c.opts.DialTimeout, quicTLSConfig(c.opts), c.kcpDataShards, c.kcpParityShards)
 	}
 	if c.dialAddr != "" {
 		return newGRPCTransport(c.ctx, c.dialAddr)

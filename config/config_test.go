@@ -277,6 +277,66 @@ func TestValidate_QUICInvalidDuration(t *testing.T) {
 	assert.ErrorContains(t, cfg.Validate(), "transport.quic.write_timeout")
 }
 
+func TestValidate_KCPOptionalWhenEmpty(t *testing.T) {
+	cfg := &Config{Transport: validTransport(), Server: validServer()}
+	assert.NoError(t, cfg.Validate())
+}
+
+func TestValidate_KCPRequiresTLSOrInsecure(t *testing.T) {
+	cfg := &Config{
+		Transport: Transport{
+			WebSocket: WebSocketTransport{Addr: ":9080", Path: "/ws"},
+			GRPC:      GRPCTransport{Addr: ":9090"},
+			KCP:       KCPTransport{Addr: ":29900"},
+		},
+		Server: validServer(),
+	}
+	assert.ErrorContains(t, cfg.Validate(), "transport.kcp requires tls")
+
+	cfg.Transport.KCP.Insecure = true
+	assert.NoError(t, cfg.Validate())
+}
+
+func TestValidate_KCPShards(t *testing.T) {
+	cfg := &Config{
+		Transport: Transport{
+			WebSocket: WebSocketTransport{Addr: ":9080", Path: "/ws"},
+			GRPC:      GRPCTransport{Addr: ":9090"},
+			KCP:       KCPTransport{Addr: ":29900", Insecure: true, ParityShards: 3},
+		},
+		Server: validServer(),
+	}
+	assert.ErrorContains(t, cfg.Validate(), "transport.kcp.parity_shards requires transport.kcp.data_shards > 0")
+
+	cfg.Transport.KCP.DataShards = 10
+	assert.NoError(t, cfg.Validate())
+
+	cfg.Transport.KCP.DataShards = -1
+	assert.ErrorContains(t, cfg.Validate(), "must be >= 0")
+}
+
+func TestValidate_KCPInvalidDuration(t *testing.T) {
+	cfg := &Config{
+		Transport: Transport{
+			WebSocket: WebSocketTransport{Addr: ":9080", Path: "/ws"},
+			GRPC:      GRPCTransport{Addr: ":9090"},
+			KCP:       KCPTransport{Addr: ":29900", Insecure: true, WriteTimeout: "nope"},
+		},
+	}
+	assert.ErrorContains(t, cfg.Validate(), "transport.kcp.write_timeout")
+}
+
+func TestValidate_KCPNonPositiveWriteTimeout(t *testing.T) {
+	cfg := &Config{
+		Transport: Transport{
+			WebSocket: WebSocketTransport{Addr: ":9080", Path: "/ws"},
+			GRPC:      GRPCTransport{Addr: ":9090"},
+			KCP:       KCPTransport{Addr: ":29900", Insecure: true, WriteTimeout: "0s"},
+		},
+	}
+	assert.ErrorContains(t, cfg.Validate(), "transport.kcp.write_timeout must be positive")
+}
+
 func TestProxyConfig_ToProxyConfig_ParsesTimeout(t *testing.T) {
 	pc := &ProxyConfig{Name: "p", Endpoint: "127.0.0.1:1", Timeout: "30s"}
 	got, err := pc.ToProxyConfig()

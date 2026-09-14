@@ -101,6 +101,16 @@ transport:
   #   # tls:
   #   #   cert_file: "./certs/server.crt"
   #   #   key_file: "./certs/server.key"
+  # kcp:                          # Optional UDP/KCP client listener (disabled when addr is empty).
+  #   addr: ":29900"              # KCP carries no encryption, so TLS is always layered on top.
+  #   insecure: true              # Dev only: ephemeral self-signed cert. Production must set tls.
+  #   # write_timeout: "10s"
+  #   # read_timeout: "60s"
+  #   # data_shards: 0            # FEC (Reed-Solomon) shard counts; 0/0 disables FEC (default).
+  #   # parity_shards: 0          # Clients must dial with the same shard counts.
+  #   # tls:
+  #   #   cert_file: "./certs/server.crt"
+  #   #   key_file: "./certs/server.key"
 
 broker:
   type: redis  # Use "memory" for a single-node in-process broker

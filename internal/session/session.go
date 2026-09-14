@@ -40,7 +40,7 @@ const (
 type Attachment struct {
 	Transport Transport
 	Marshaler Marshaler
-	Protocol  string // "ws" | "grpc" | "quic"
+	Protocol  string // "ws" | "grpc" | "quic" | "kcp"
 }
 
 // Send queue depths (§7 of the PR-KA-B1 spec).
@@ -103,7 +103,7 @@ type Session struct {
 	rt      Runtime
 
 	// Connection metadata
-	protocol    string // ws, grpc, or quic
+	protocol    string // ws, grpc, quic, or kcp
 	connectedAt time.Time
 
 	// Heartbeat fields
@@ -813,8 +813,8 @@ func (s *Session) closeFromLoop(dis Disconnect) {
 	_ = s.Close(dis)
 }
 
-// TransportLabel returns the transport label value ("ws", "grpc", or "quic")
-// for the connections metric. Anything unknown defaults to "ws".
+// TransportLabel returns the transport label value ("ws", "grpc", "quic", or
+// "kcp") for the connections metric. Anything unknown defaults to "ws".
 func (s *Session) TransportLabel() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
