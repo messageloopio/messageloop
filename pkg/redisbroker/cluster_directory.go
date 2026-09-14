@@ -273,6 +273,62 @@ func (d *redisSessionDirectory) DeleteSessionLease(ctx context.Context, sessionI
 	return d.syncUserIndex(ctx, lease, nil, 0)
 }
 
+// deleteSessionLeaseIfOwnerScript performs the compare-and-delete of a
+// session lease in one atomic step (review 2026-09-14 #14), closing the
+// GET-then-DEL window of DeleteSessionLease where a close-path reader could
+// delete a lease after another node's resume CAS re-owned it.
+//
+// KEYS[1] = session lease key, ARGV[1] = expected node_id, ARGV[2] =
+// expected incarnation_id.
+//
+// The structure mirrors compareAndSwapSessionStateScript: GET the lease
+// value, cjson-decode it and compare the fields by their exact
+// ClusterSessionLease json tag names (node_id / incarnation_id — the same
+// bracket accessors the CAS script uses for session_id/node_id/...), then act
+// only on a full match. Ownership transfer always changes (node_id,
+// incarnation_id) — that pair is the fence, so lease_version does not
+// participate. Return convention: a match DELs the key and returns the
+// deleted lease JSON (the caller parses it to sync the user index, exactly
+// like DeleteSessionLease does); an absent key or an owner mismatch returns
+// Lua false (go-redis surfaces it as redis.Nil) and writes nothing.
+var deleteSessionLeaseIfOwnerScript = redis.NewScript(`
+local current = redis.call('GET', KEYS[1])
+if not current then return false end
+local cur = cjson.decode(current)
+if cur['node_id'] ~= ARGV[1]
+   or cur['incarnation_id'] ~= ARGV[2] then
+  return false
+end
+redis.call('DEL', KEYS[1])
+return current
+`)
+
+// DeleteSessionLeaseIfOwner atomically deletes the session lease only while
+// it still names (nodeID, incarnationID) (SessionLeaseOwnerDeleter). The
+// compare and the DEL run inside one Lua script, so a lease re-owned between
+// a caller's stale read and this call is never deleted. On success the
+// deleted lease blob drives the same best-effort user index sync the plain
+// DeleteSessionLease performs.
+func (d *redisSessionDirectory) DeleteSessionLeaseIfOwner(ctx context.Context, sessionID, nodeID, incarnationID string) (bool, error) {
+	if sessionID == "" || nodeID == "" || incarnationID == "" {
+		return false, nil
+	}
+	raw, err := deleteSessionLeaseIfOwnerScript.Run(ctx, d.client,
+		[]string{d.sessionLeaseKey(sessionID)}, nodeID, incarnationID).Text()
+	if errors.Is(err, redis.Nil) {
+		// Lua false: the lease is absent or names another owner.
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	var lease cluster.ClusterSessionLease
+	if unmarshalErr := json.Unmarshal([]byte(raw), &lease); unmarshalErr == nil {
+		return true, d.syncUserIndex(ctx, &lease, nil, 0)
+	}
+	return true, nil
+}
+
 func (d *redisSessionDirectory) PutSessionSnapshot(ctx context.Context, snapshot *cluster.ClusterSessionSnapshot, ttl time.Duration) error {
 	if snapshot == nil || snapshot.SessionID == "" {
 		return nil
@@ -466,6 +522,7 @@ func clusterSessionLeaseEqual(left, right *cluster.ClusterSessionLease) bool {
 
 var _ cluster.SessionDirectory = (*redisSessionDirectory)(nil)
 var _ cluster.SessionStateCompareAndSwapper = (*redisSessionDirectory)(nil)
+var _ cluster.SessionLeaseOwnerDeleter = (*redisSessionDirectory)(nil)
 var _ cluster.ClusterSessionLeaseLister = (*redisSessionDirectory)(nil)
 var _ cluster.ClusterNodeLeaseLister = (*redisSessionDirectory)(nil)
 var _ cluster.NodeEpochAllocator = (*redisSessionDirectory)(nil)

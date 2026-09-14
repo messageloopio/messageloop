@@ -175,6 +175,26 @@ func (d *Directory) DeletedSessionLeases() []string {
 	return append([]string(nil), d.deletedSessionLeases...)
 }
 
+// DeleteSessionLeaseIfOwner implements SessionLeaseOwnerDeleter with the same
+// compare-and-delete semantics as the Redis Lua script: the owner compare and
+// the delete commit under the directory lock, so a lease re-owned between a
+// caller's stale read and this call is never deleted, and a mismatching owner
+// leaves the stored lease untouched.
+func (d *Directory) DeleteSessionLeaseIfOwner(_ context.Context, sessionID, nodeID, incarnationID string) (bool, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	lease := d.sessionLeases[sessionID]
+	if lease == nil || lease.NodeID != nodeID || lease.IncarnationID != incarnationID {
+		return false, nil
+	}
+	if lease.UserID != "" {
+		d.removeUserSessionLocked(lease.Namespace, lease.UserID, sessionID)
+	}
+	delete(d.sessionLeases, sessionID)
+	d.deletedSessionLeases = append(d.deletedSessionLeases, sessionID)
+	return true, nil
+}
+
 // ListSessionLeases enumerates every stored session lease
 // (ClusterSessionLeaseLister).
 func (d *Directory) ListSessionLeases(context.Context) ([]*cluster.ClusterSessionLease, error) {
@@ -296,6 +316,7 @@ func userIndexKey(namespace, userID string) string {
 var (
 	_ cluster.SessionDirectory              = (*Directory)(nil)
 	_ cluster.SessionStateCompareAndSwapper = (*Directory)(nil)
+	_ cluster.SessionLeaseOwnerDeleter      = (*Directory)(nil)
 	_ cluster.ClusterSessionLeaseLister     = (*Directory)(nil)
 	_ cluster.ClusterNodeLeaseLister        = (*Directory)(nil)
 )

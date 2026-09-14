@@ -153,6 +153,30 @@ func TestMetrics_HeartbeatIdleDisconnectsRegistered(t *testing.T) {
 		"messageloop_heartbeat_idle_disconnects_total must be registered")
 }
 
+// TestMetrics_ClusterNodeLeaseRenewFailuresRegistered verifies the review
+// 2026-09-14 #8 counter is registered under its full name and counts each
+// failed node-lease renewal.
+func TestMetrics_ClusterNodeLeaseRenewFailuresRegistered(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	metrics := NewMetrics(reg)
+
+	metrics.ClusterNodeLeaseRenewFailures.Inc()
+	metrics.ClusterNodeLeaseRenewFailures.Inc()
+	require.Equal(t, float64(2), testutil.ToFloat64(metrics.ClusterNodeLeaseRenewFailures))
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	found := false
+	for _, family := range families {
+		if family.GetName() == "messageloop_cluster_node_lease_renew_failures_total" {
+			found = true
+			require.Len(t, family.GetMetric(), 1)
+			require.Equal(t, float64(2), family.GetMetric()[0].GetCounter().GetValue())
+		}
+	}
+	require.True(t, found, "messageloop_cluster_node_lease_renew_failures_total must be registered")
+}
+
 // TestMetrics_RecoveryRegistered verifies PR-03: the recovery metrics
 // are registered under their full names and record a truncated recovery.
 func TestMetrics_RecoveryRegistered(t *testing.T) {

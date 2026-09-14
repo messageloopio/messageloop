@@ -39,6 +39,11 @@ type Metrics struct {
 	ClusterCommandHMACRejects       *prometheus.CounterVec
 	ClusterProjectionRepairs        prometheus.Counter
 	ClusterProjectionRepairFailures prometheus.Counter
+	// ClusterNodeLeaseRenewFailures counts failed node-lease renewals. Like
+	// the other Cluster* counters it is unlabeled: in server assembly every
+	// messageloop metric is registered behind a node_id-wrapped registerer,
+	// which is what carries the per-node attribution.
+	ClusterNodeLeaseRenewFailures prometheus.Counter
 	PresencePublishFailures         prometheus.Counter
 	PresenceFailures                *prometheus.CounterVec
 	ChannelPolicyTransientForced    prometheus.Counter
@@ -133,6 +138,11 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Namespace: "messageloop",
 			Name:      "cluster_projection_repair_failures_total",
 			Help:      "Total number of failed cluster projection repair passes.",
+		}),
+		ClusterNodeLeaseRenewFailures: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "messageloop",
+			Name:      "cluster_node_lease_renew_failures_total",
+			Help:      "Total number of failed cluster node lease renewals; a consecutive streak spanning one lease TTL means peers judge this node departed and reap its session fencing.",
 		}),
 		PresencePublishFailures: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: "messageloop",
@@ -248,6 +258,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.ClusterCommandHMACRejects,
 		m.ClusterProjectionRepairs,
 		m.ClusterProjectionRepairFailures,
+		m.ClusterNodeLeaseRenewFailures,
 		m.PresencePublishFailures,
 		m.PresenceFailures,
 		m.ChannelPolicyTransientForced,

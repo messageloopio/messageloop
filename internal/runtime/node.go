@@ -186,6 +186,13 @@ func NewNode(cfg *config.Server) *Node {
 // Waits until the broker's handler is registered before returning.
 func (n *Node) Run(ctx context.Context) error {
 	if n.cluster != nil {
+		// Review 2026-09-14 #8: the node lease renewer is assembled in cmd
+		// wiring without a metrics handle; inject it here by optional
+		// interface (the same SetMetrics pattern the command bus uses), so
+		// renewal failures are counted from the first control-plane beat on.
+		if leaseManager, ok := n.cluster.deps.NodeLeaseManager.(interface{ SetMetrics(*Metrics) }); ok {
+			leaseManager.SetMetrics(n.metrics)
+		}
 		if err := n.cluster.Start(ctx); err != nil {
 			return fmt.Errorf("start cluster: %w", err)
 		}

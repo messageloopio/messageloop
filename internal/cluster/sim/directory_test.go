@@ -159,6 +159,49 @@ func TestDirectory_DeleteSessionLeaseSyncsUserIndex(t *testing.T) {
 	require.Equal(t, []string{"sess-1"}, dir.DeletedSessionLeases())
 }
 
+// TestDirectory_DeleteSessionLeaseIfOwner: the atomic compare-and-delete
+// (SessionLeaseOwnerDeleter) mirrors the Redis Lua script — a matching owner
+// deletes the lease and syncs the user index; a foreign owner or an absent
+// lease deletes nothing.
+func TestDirectory_DeleteSessionLeaseIfOwner(t *testing.T) {
+	dir := NewDirectory()
+	ctx := context.Background()
+
+	lease := testLease("sess-1", "node-a", "inc-a", 2)
+	lease.UserID = "user-1"
+	ok, err := dir.CompareAndSwapSessionLease(ctx, nil, lease, time.Minute)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.NoError(t, dir.AddUserSession(ctx, "", "user-1", "sess-1", time.Minute))
+
+	// A foreign owner (the re-owning resume node) must delete nothing.
+	deleted, err := dir.DeleteSessionLeaseIfOwner(ctx, "sess-1", "node-b", "inc-b")
+	require.NoError(t, err)
+	require.False(t, deleted)
+	stored, err := dir.GetSessionLease(ctx, "sess-1")
+	require.NoError(t, err)
+	require.NotNil(t, stored, "a foreign owner must not delete the lease")
+	require.Equal(t, "node-a", stored.NodeID)
+	require.Empty(t, dir.DeletedSessionLeases())
+
+	// The exact owner deletes the lease and drops the user-index membership.
+	deleted, err = dir.DeleteSessionLeaseIfOwner(ctx, "sess-1", "node-a", "inc-a")
+	require.NoError(t, err)
+	require.True(t, deleted)
+	stored, err = dir.GetSessionLease(ctx, "sess-1")
+	require.NoError(t, err)
+	require.Nil(t, stored)
+	sessions, err := dir.ListUserSessions(ctx, "", "user-1")
+	require.NoError(t, err)
+	require.Empty(t, sessions)
+	require.Equal(t, []string{"sess-1"}, dir.DeletedSessionLeases())
+
+	// An absent lease deletes nothing.
+	deleted, err = dir.DeleteSessionLeaseIfOwner(ctx, "sess-1", "node-a", "inc-a")
+	require.NoError(t, err)
+	require.False(t, deleted)
+}
+
 // TestDirectory_NodeLeases: node leases key on (NodeID, IncarnationID) and
 // the fixture delete removes exactly one record.
 func TestDirectory_NodeLeases(t *testing.T) {

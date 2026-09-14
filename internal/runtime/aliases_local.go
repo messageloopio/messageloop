@@ -183,6 +183,7 @@ type (
 	ClusterChannelInfo            = cluster.ClusterChannelInfo
 	ClusterCommandHandler         = cluster.ClusterCommandHandler
 	SessionStateCompareAndSwapper = cluster.SessionStateCompareAndSwapper
+	SessionLeaseOwnerDeleter      = cluster.SessionLeaseOwnerDeleter
 	NodeEpochAllocator            = cluster.NodeEpochAllocator
 	MemoryNodeEpochAllocator      = cluster.MemoryNodeEpochAllocator
 )

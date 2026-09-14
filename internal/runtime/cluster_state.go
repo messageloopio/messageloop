@@ -53,6 +53,15 @@ func (noopSessionDirectory) DeleteSessionLease(context.Context, string) error {
 	return nil
 }
 
+// DeleteSessionLeaseIfOwner on the noop directory never deletes anything:
+// there is no remote lease behind the call. Implementing the extension (like
+// the SessionStateCompareAndSwapper above) keeps the noop directory drop-in
+// for call sites that prefer the atomic path — the caller's remaining local
+// cleanup (snapshot deletion) is unaffected by deleted=false.
+func (noopSessionDirectory) DeleteSessionLeaseIfOwner(context.Context, string, string, string) (bool, error) {
+	return false, nil
+}
+
 func (noopSessionDirectory) PutSessionSnapshot(context.Context, *ClusterSessionSnapshot, time.Duration) error {
 	return nil
 }
@@ -271,10 +280,10 @@ func (n *Node) deleteClusterSessionState(ctx context.Context, sessionID string) 
 
 	directory := n.clusterSessionDirectory()
 
-	// Ownership check: only delete state that this node incarnation owns, or
-	// whose lease is already gone/expired. A fresh lease identifying another
-	// node incarnation means the session is still being served there, and the
-	// state must be left intact.
+	// Ownership pre-check (fast path): only delete state that this node
+	// incarnation owns, or whose lease is already gone. A fresh lease
+	// identifying another node incarnation means the session is still being
+	// served there, and the state must be left intact.
 	lease, err := directory.GetSessionLease(ctx, sessionID)
 	if err != nil {
 		return err
@@ -285,9 +294,25 @@ func (n *Node) deleteClusterSessionState(ctx context.Context, sessionID string) 
 		return nil
 	}
 
-	if err := directory.DeleteSessionLease(ctx, sessionID); err != nil {
+	// Review 2026-09-14 #14: the GET above and the delete below must not be a
+	// read-then-unconditional-DEL pair — between the two steps a peer's resume
+	// CAS can re-own the lease (lease_version+1, new owner), and the stale
+	// reader's DEL would then delete the NEW owner's fencing, re-opening the
+	// session to yet another takeover (double takeover). When the directory
+	// offers the atomic compare-and-delete, the delete only lands while the
+	// lease still names this node incarnation. An expired lease naming
+	// another incarnation is deliberately left to its key TTL on this path:
+	// a same-fence renewal keeps the lease_version, so an observed expiry is
+	// not proof of abandonment and the owner check is the only safe gate.
+	// Directories without the extension keep the plain delete (fakes, noop).
+	if ownerDeleter, ok := directory.(SessionLeaseOwnerDeleter); ok {
+		if _, err := ownerDeleter.DeleteSessionLeaseIfOwner(ctx, sessionID, n.ClusterNodeID(), n.ClusterIncarnationID()); err != nil {
+			return err
+		}
+	} else if err := directory.DeleteSessionLease(ctx, sessionID); err != nil {
 		return err
 	}
+	// The snapshot carries no fencing of its own and is cleaned up as before.
 	return directory.DeleteSessionSnapshot(ctx, sessionID)
 }
 
@@ -408,12 +433,94 @@ func NewClusterNodeLeaseManager(directory SessionDirectory, cfg ClusterNodeLease
 type clusterNodeLeaseManager struct {
 	directory SessionDirectory
 	config    ClusterNodeLeaseManagerConfig
+	// metrics is optional, injected via SetMetrics (the command bus SetMetrics
+	// precedent); nil disables metric accounting.
+	metrics *Metrics
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 	start  bool
 	stop   bool
+
+	// renewMu guards the consecutive-renewal-failure state shared by the
+	// Start caller (first renewal) and the loop goroutine.
+	renewMu            sync.Mutex
+	renewFailureStreak int
+	renewEscalated     bool
+}
+
+// SetMetrics wires the shared Prometheus registry handle into the manager.
+// It is injected by type assertion where the node attaches its cluster (the
+// same optional-interface pattern cmd/server uses for the command bus),
+// because the manager is assembled in cmd wiring without a metrics handle.
+func (m *clusterNodeLeaseManager) SetMetrics(metrics *Metrics) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.metrics = metrics
+}
+
+// renewEscalationThreshold returns the number of consecutive renewal failures
+// after which the failure escalates from Warn to Error. One failure per
+// RenewInterval means a streak of this length has spanned a full lease TTL —
+// exactly the horizon after which every peer's membership SCAN expires this
+// node's lease and the repairer's OnLeave reaps all of its session fencing
+// (review 2026-09-14 #8; with the defaults, TTL 90s / interval 30s, that is 3
+// consecutive failures).
+func (m *clusterNodeLeaseManager) renewEscalationThreshold() int {
+	ttl := m.config.TTL
+	interval := m.config.RenewInterval
+	if ttl <= 0 {
+		ttl = defaultClusterNodeLeaseTTL
+	}
+	if interval <= 0 {
+		interval = defaultClusterNodeLeaseRenewInterval
+	}
+	if threshold := int(ttl / interval); threshold > 1 {
+		return threshold
+	}
+	return 1
+}
+
+// recordRenewal accounts one renewal outcome. Each failure bumps the
+// consecutive-failure streak and messageloop_cluster_node_lease_renew_failures_total;
+// once the streak spans one lease TTL the log escalates from Warn to Error —
+// the minimum upgrade that lets operations notice a node whose peers are
+// about to (or already do) treat it as departed. The first success after a
+// streak resets the state and logs recovery. Note: this is observability
+// only — auto-disconnecting this node's own sessions on a broken renewal is
+// a behavior change left to a follow-up task (review #8 semantic part).
+func (m *clusterNodeLeaseManager) recordRenewal(ctx context.Context, err error) {
+	m.renewMu.Lock()
+	if err == nil {
+		streak, escalated := m.renewFailureStreak, m.renewEscalated
+		m.renewFailureStreak = 0
+		m.renewEscalated = false
+		m.renewMu.Unlock()
+		if escalated {
+			log.InfoContext(ctx, "cluster node lease renewal recovered",
+				"node_id", m.config.NodeID, "incarnation_id", m.config.IncarnationID,
+				"consecutive_failures", streak)
+		}
+		return
+	}
+	m.renewFailureStreak++
+	streak := m.renewFailureStreak
+	if m.metrics != nil {
+		m.metrics.ClusterNodeLeaseRenewFailures.Inc()
+	}
+	m.renewEscalated = streak >= m.renewEscalationThreshold()
+	escalated := m.renewEscalated
+	m.renewMu.Unlock()
+
+	if escalated {
+		log.ErrorContext(ctx, "cluster node lease renewal failing for at least one lease TTL; peers will treat this node as departed and reap its session fencing",
+			err, "node_id", m.config.NodeID, "incarnation_id", m.config.IncarnationID,
+			"consecutive_failures", streak)
+		return
+	}
+	log.WarnContext(ctx, "cluster node lease renewal failed",
+		"node_id", m.config.NodeID, "incarnation_id", m.config.IncarnationID, "error", err)
 }
 
 func (m *clusterNodeLeaseManager) Start(ctx context.Context) error {
@@ -443,9 +550,7 @@ func (m *clusterNodeLeaseManager) Start(ctx context.Context) error {
 			case <-leaseCtx.Done():
 				return
 			case <-ticker.C:
-				if err := m.renewOnce(leaseCtx); err != nil {
-					log.WarnContext(leaseCtx, "cluster node lease renewal failed", "node_id", m.config.NodeID, "incarnation_id", m.config.IncarnationID, "error", err)
-				}
+				m.recordRenewal(leaseCtx, m.renewOnce(leaseCtx))
 			}
 		}
 	}()

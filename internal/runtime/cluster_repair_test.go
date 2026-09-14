@@ -83,6 +83,28 @@ func (d *membershipFakeDirectory) DeleteSessionLease(ctx context.Context, sessio
 	return nil
 }
 
+// DeleteSessionLeaseIfOwner mirrors the Redis Lua compare-and-delete
+// (SessionLeaseOwnerDeleter): the owner compare and the delete commit
+// atomically under the directory mutex, and a mismatched owner deletes
+// nothing, so the OnLeave tests exercise the same owner-exact semantics as
+// the production directory.
+func (d *membershipFakeDirectory) DeleteSessionLeaseIfOwner(ctx context.Context, sessionID, nodeID, incarnationID string) (bool, error) {
+	d.mu.Lock()
+	lease := d.sessionLeases[sessionID]
+	if lease == nil || lease.NodeID != nodeID || lease.IncarnationID != incarnationID {
+		d.mu.Unlock()
+		return false, nil
+	}
+	delete(d.sessionLeases, sessionID)
+	d.deletedSessions = append(d.deletedSessions, sessionID)
+	userID, namespace := lease.UserID, lease.Namespace
+	d.mu.Unlock()
+	if userID == "" {
+		return true, nil
+	}
+	return true, d.RemoveUserSession(ctx, namespace, userID, sessionID)
+}
+
 // CompareAndSwapSessionLease applies CAS semantics over the session lease map
 // (CAS(nil) is the first-registration claim).
 func (d *membershipFakeDirectory) CompareAndSwapSessionLease(_ context.Context, expected, desired *ClusterSessionLease, _ time.Duration) (bool, error) {
