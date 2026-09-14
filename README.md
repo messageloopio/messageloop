@@ -365,6 +365,7 @@ npm test
 - [docs/developer](docs/developer/README.md): developer documentation suite (Chinese) — architecture, configuration reference, admin API, distributed cluster, observability, development workflow, and SDK guides
 - [config-example.yaml](config-example.yaml): fuller Redis and proxy example
 - [docs/deployment.md](docs/deployment.md): production deployment guide, TLS, Docker, multi-node
+- [docker/dokploy](docker/dokploy/README.md): one-click deployment on Dokploy (Compose template with Redis + Traefik domain routing)
 - [docs/protocol.md](docs/protocol.md): client protocol reference with message formats
 - [CLAUDE.md](CLAUDE.md): architecture and development notes
 - [RPC_TIMEOUT.md](docs/archive/RPC_TIMEOUT.md): RPC timeout behavior and rationale (archived historical record)

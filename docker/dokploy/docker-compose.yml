@@ -1,0 +1,128 @@
+# MessageLoop —— Dokploy 单 Compose 栈
+#
+# 拓扑：redis（broker：streams 历史 + pub/sub，AOF 持久化）
+#       + messageloop（WebSocket :9080 / 客户端 gRPC :9090 /
+#         admin gRPC :9091 / health+metrics :8080）
+#
+# 域名路由以 Traefik label 直接声明在本文件（不用 Dokploy「Domains」UI——
+# 生成名带随机后缀无法变量化，且与 label 并存时 router 二选一不可控）：
+# Traefik 终止 TLS，WebSocket 直达 9080（浏览器 Origin 即前端域，upgrade
+# 由 Traefik 原生透传）；gRPC 以 h2c 转发 9090（gRPC 要求端到端 HTTP/2，
+# scheme=h2c 必须）。QUIC/KCP 是 UDP，Traefik 不路由，需要时放开 ports
+# 的 udp 段宿主直连（见服务内注释）。
+#
+# 双网络缺一不可：default 承载栈内互通（redis 的 DNS 与连接；服务一旦显式
+# 声明 networks 即失去隐式 default，只挂 dokploy-network 会让 lookup redis
+# i/o timeout 崩溃循环）；dokploy-network 供 Traefik 回源（traefik.docker.network
+# 指定回源网段）。
+#
+# 必填环境变量（Dokploy「Environment」）见同目录 README.md。
+# 配置基线：镜像内置 /etc/messageloop/docker.yaml，全部 MESSAGELOOP_*
+# 环境变量可覆盖（键表见 cmd/server/envconfig.go；authorizer 规则与
+# proxy 后端除外——那两项文件专用，需自行挂载 YAML 并覆盖 command）。
+
+name: messageloop
+
+# ---------- 公共锚点 ----------
+
+# messageloop 运行时环境变量（密钥经 Dokploy 变量插值注入）。
+x-app-env: &app-env
+  # —— broker：栈内 redis ——
+  MESSAGELOOP_BROKER_TYPE: redis
+  MESSAGELOOP_BROKER_REDIS_ADDR: redis:6379
+  MESSAGELOOP_BROKER_REDIS_PASSWORD: ${MESSAGELOOP_BROKER_REDIS_PASSWORD:-}
+  MESSAGELOOP_BROKER_REDIS_DB: ${MESSAGELOOP_BROKER_REDIS_DB:-0}
+  # 仅实现近似裁剪，Validate 强制显式 true
+  MESSAGELOOP_BROKER_REDIS_STREAM_APPROXIMATE: "true"
+  MESSAGELOOP_BROKER_REDIS_STREAM_MAX_LENGTH: ${MESSAGELOOP_BROKER_REDIS_STREAM_MAX_LENGTH:-10000}
+  # —— 租户与鉴权 ——
+  # 每个客户端可见频道都活在该命名空间下（"ns:topic"）；多租户隔离在会话边界强制
+  MESSAGELOOP_SERVER_NAMESPACE: ${MESSAGELOOP_SERVER_NAMESPACE:-default}
+  # admin gRPC 强制持 token（无 token 直接拒绝启动）；openssl rand -hex 32
+  MESSAGELOOP_SERVER_GRPC_ADMIN_AUTH_TOKEN: ${MESSAGELOOP_SERVER_GRPC_ADMIN_AUTH_TOKEN:?请在 Dokploy Environment 设置 openssl rand -hex 32}
+  # /health、/metrics 的 Bearer token。默认留空：8080 不发布、不路由，
+  # 仅容器网络内可达；若自行发布 8080 必须设置 token，并同步改下方
+  # healthcheck（wget 需带 Authorization 头，否则一直 401 判死）
+  MESSAGELOOP_SERVER_HTTP_AUTH_TOKEN: ${MESSAGELOOP_SERVER_HTTP_AUTH_TOKEN:-}
+  # —— WebSocket 跨域 ——
+  # 浏览器 Origin 是你的前端域，镜像构建期不可知；默认放开（SDK/前端以
+  # token 鉴权，Origin 不是授权边界）。收紧：设 ALLOWED_ORIGINS 逗号分隔
+  # 列表，并【同时】设 ALLOW_ALL_ORIGINS=false（allow_all 优先级更高）
+  MESSAGELOOP_TRANSPORT_WEBSOCKET_ALLOW_ALL_ORIGINS: ${MESSAGELOOP_TRANSPORT_WEBSOCKET_ALLOW_ALL_ORIGINS:-true}
+  MESSAGELOOP_TRANSPORT_WEBSOCKET_ALLOWED_ORIGINS: ${MESSAGELOOP_TRANSPORT_WEBSOCKET_ALLOWED_ORIGINS:-}
+
+services:
+  redis:
+    image: redis:7-alpine
+    # AOF 必开：streams 历史（客户端 recover 依赖）与 ml2:broker:epoch 都在
+    # Redis；无持久化时容器重启 = 历史清零 + epoch 丢失（epoch 重建后旧客户端
+    # 携带的偏移不被信任，表现为恢复失败而非错消息，但仍应避免）
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  messageloop:
+    # 默认在部署机从源码构建（Dokploy 已克隆整仓，context 指向仓库根）。
+    # 小内存 VPS 上 go build 可能 OOM（部署被杀表现为 cancelled）——预构建
+    # 镜像路径见 README §8：推送镜像后设 MESSAGELOOP_IMAGE 并删除 build 段。
+    image: ${MESSAGELOOP_IMAGE:-messageloop:local}
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    networks:
+      - default
+      - dokploy-network
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=dokploy-network
+      # —— WebSocket：wss://<域名><path>，path 默认 /ws ——
+      - "traefik.http.routers.messageloop-ws.rule=Host(`${MESSAGELOOP_WS_DOMAIN:?请在 Dokploy Environment 设置 WebSocket 域名}`)"
+      - "traefik.http.routers.messageloop-ws.entrypoints=websecure"
+      - "traefik.http.routers.messageloop-ws.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.messageloop-ws.service=messageloop-ws-svc"
+      - "traefik.http.services.messageloop-ws-svc.loadbalancer.server.port=9080"
+      # 80 整站 301 → https（redirect-to-https@file 为 Dokploy 内置中间件）
+      - "traefik.http.routers.messageloop-ws-web.rule=Host(`${MESSAGELOOP_WS_DOMAIN:?请在 Dokploy Environment 设置 WebSocket 域名}`)"
+      - "traefik.http.routers.messageloop-ws-web.entrypoints=web"
+      - "traefik.http.routers.messageloop-ws-web.middlewares=redirect-to-https@file"
+      - "traefik.http.routers.messageloop-ws-web.service=messageloop-ws-svc"
+      # —— 客户端 gRPC：TLS 终结 → h2c ——
+      - "traefik.http.routers.messageloop-grpc.rule=Host(`${MESSAGELOOP_GRPC_DOMAIN:?请在 Dokploy Environment 设置 gRPC 域名}`)"
+      - "traefik.http.routers.messageloop-grpc.entrypoints=websecure"
+      - "traefik.http.routers.messageloop-grpc.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.messageloop-grpc.service=messageloop-grpc-svc"
+      - "traefik.http.services.messageloop-grpc-svc.loadbalancer.server.port=9090"
+      - "traefik.http.services.messageloop-grpc-svc.loadbalancer.server.scheme=h2c"
+    environment: *app-env
+    depends_on:
+      redis:
+        condition: service_healthy
+    # 宿主端口只绑回环：公网 gRPC 走上方域名 TLS（标准 gRPC 客户端），
+    # 回环供 SSH 隧道明文直连兜底——仓库自带 Go SDK 的 DialGRPC 当前为
+    # 明文实现（insecure 硬编码），隧道 + DialGRPC("127.0.0.1:9090") 即
+    # 其接入路径（见 README §4）。admin gRPC(9091) 仅隧道/栈内访问。
+    # QUIC/KCP（UDP，可选）：Traefik 不路由 UDP，启用时在 Environment 设
+    # MESSAGELOOP_TRANSPORT_QUIC_ADDR / MESSAGELOOP_TRANSPORT_KCP_ADDR
+    # （及 TLS 证书路径）后放开对应行；客户端按相同协议直连宿主端口。
+    ports:
+      - "127.0.0.1:${MESSAGELOOP_GRPC_PORT:-9090}:9090"
+      - "127.0.0.1:${MESSAGELOOP_ADMIN_GRPC_PORT:-9091}:9091"
+      # - "${MESSAGELOOP_QUIC_PORT:-4433}:4433/udp"
+      # - "${MESSAGELOOP_KCP_PORT:-29900}:29900/udp"
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+
+networks:
+  # Dokploy 内置网络（其 Traefik 容器所在）：messageloop 加入后 Traefik 经
+  # traefik.docker.network label 从该网络回源容器。external 指向 Dokploy
+  # 托管的同名网络；本地裸跑需先 docker network create dokploy-network。
+  dokploy-network:
+    external: true

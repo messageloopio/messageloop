@@ -369,6 +369,28 @@ func (r *clusterRepairer) onLeave(ctx context.Context, nodeID, incarnationID str
 				if lease.NodeID != nodeID || lease.IncarnationID != incarnationID {
 					continue
 				}
+				// Review 2026-09-14 #14: the SCAN snapshot can be stale by the
+				// time the delete runs — a live node's resume CAS may have
+				// re-owned the lease (lease_version+1, new owner) in the
+				// meantime. The atomic compare-and-delete only lands while the
+				// lease still names the dead incarnation, so a stale snapshot
+				// can no longer delete the NEW owner's fencing; the
+				// "delete every lease of the dead incarnation" semantics are
+				// unchanged, only made owner-exact. Directories without the
+				// extension keep the plain delete.
+				if ownerDeleter, ok := r.directory.(SessionLeaseOwnerDeleter); ok {
+					deleted, err := ownerDeleter.DeleteSessionLeaseIfOwner(ctx, lease.SessionID, lease.NodeID, lease.IncarnationID)
+					if err != nil {
+						log.WarnContext(ctx, "failed to delete dead incarnation's session lease", err,
+							"session_id", lease.SessionID, "node_id", nodeID, "incarnation_id", incarnationID)
+						continue
+					}
+					if !deleted {
+						log.DebugContext(ctx, "dead incarnation's session lease already re-owned, kept",
+							"session_id", lease.SessionID, "node_id", nodeID, "incarnation_id", incarnationID)
+					}
+					continue
+				}
 				if err := r.directory.DeleteSessionLease(ctx, lease.SessionID); err != nil {
 					log.WarnContext(ctx, "failed to delete dead incarnation's session lease", err,
 						"session_id", lease.SessionID, "node_id", nodeID, "incarnation_id", incarnationID)

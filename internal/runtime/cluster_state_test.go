@@ -401,3 +401,113 @@ func TestNoopSessionDirectory_ImplementsAtomicWrite(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 }
+
+// TestNoopSessionDirectory_ImplementsOwnerDelete pins the noop directory's
+// trivial SessionLeaseOwnerDeleter (never deletes anything, there is no
+// remote lease behind the call).
+func TestNoopSessionDirectory_ImplementsOwnerDelete(t *testing.T) {
+	var iface SessionDirectory = &noopSessionDirectory{}
+	directory, ok := iface.(SessionLeaseOwnerDeleter)
+	require.True(t, ok, "noopSessionDirectory must implement SessionLeaseOwnerDeleter")
+
+	deleted, err := directory.DeleteSessionLeaseIfOwner(context.Background(), "sess-noop", "node-a", "inc-a")
+	require.NoError(t, err)
+	require.False(t, deleted)
+}
+
+// --- review 2026-09-14 #8: renewal failure streak, counter, escalation ---
+
+// togglingLeaseDirectory fails PutNodeLease while fail is set, so a test can
+// script a Redis outage window and its recovery.
+type togglingLeaseDirectory struct {
+	fakeSessionDirectory
+	mu   sync.Mutex
+	fail bool
+}
+
+func (d *togglingLeaseDirectory) PutNodeLease(context.Context, *ClusterNodeLease, time.Duration) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.fail {
+		return errors.New("injected lease renewal failure")
+	}
+	return nil
+}
+
+func (d *togglingLeaseDirectory) setFail(fail bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.fail = fail
+}
+
+// TestClusterNodeLeaseManager_RenewEscalationThreshold pins the escalation
+// horizon: the Warn→Error upgrade starts after a consecutive-failure streak
+// spanning one lease TTL (defaults 90s/30s → 3), with a floor of 1.
+func TestClusterNodeLeaseManager_RenewEscalationThreshold(t *testing.T) {
+	defaults := &clusterNodeLeaseManager{config: ClusterNodeLeaseManagerConfig{}}
+	require.Equal(t, 3, defaults.renewEscalationThreshold(),
+		"default TTL 90s / interval 30s must escalate after 3 consecutive failures")
+
+	tight := &clusterNodeLeaseManager{config: ClusterNodeLeaseManagerConfig{
+		TTL: 200 * time.Millisecond, RenewInterval: 50 * time.Millisecond,
+	}}
+	require.Equal(t, 4, tight.renewEscalationThreshold())
+
+	inverted := &clusterNodeLeaseManager{config: ClusterNodeLeaseManagerConfig{
+		TTL: 10 * time.Millisecond, RenewInterval: 100 * time.Millisecond,
+	}}
+	require.Equal(t, 1, inverted.renewEscalationThreshold(),
+		"an interval longer than the TTL must escalate from the first failure")
+}
+
+// TestClusterNodeLeaseManager_RenewalFailureMetricsAndEscalation verifies the
+// #8 accounting loop: every failed renewal bumps
+// cluster_node_lease_renew_failures_total, the streak escalation flips on
+// once the failures span one lease TTL, and the first success resets the
+// streak (recovery) while the counter keeps its lifetime total.
+func TestClusterNodeLeaseManager_RenewalFailureMetricsAndEscalation(t *testing.T) {
+	directory := &togglingLeaseDirectory{}
+	metrics := NewMetrics(prometheus.NewRegistry())
+	// TTL 200ms / interval 50ms → escalation after 4 consecutive failures.
+	manager := NewClusterNodeLeaseManager(directory, ClusterNodeLeaseManagerConfig{
+		NodeID:        "node-a",
+		IncarnationID: "inc-a",
+		TTL:           200 * time.Millisecond,
+		RenewInterval: 50 * time.Millisecond,
+	}).(*clusterNodeLeaseManager)
+	manager.SetMetrics(metrics)
+
+	// Start with a healthy first renewal.
+	require.NoError(t, manager.Start(context.Background()))
+	t.Cleanup(func() { _ = manager.Shutdown(context.Background()) })
+
+	// Inject the outage and wait for enough failed ticks to cross the TTL
+	// horizon.
+	directory.setFail(true)
+	require.Eventually(t, func() bool {
+		return testutil.ToFloat64(metrics.ClusterNodeLeaseRenewFailures) >= 4
+	}, 2*time.Second, 5*time.Millisecond, "failures must keep counting during the outage")
+
+	streak, escalated := manager.renewalFailureState()
+	require.GreaterOrEqual(t, streak, 4)
+	require.True(t, escalated, "a streak spanning one lease TTL must escalate to Error")
+
+	failures := testutil.ToFloat64(metrics.ClusterNodeLeaseRenewFailures)
+
+	// Recovery: the first successful renewal resets the streak and clears the
+	// escalation; the counter is cumulative and never resets.
+	directory.setFail(false)
+	require.Eventually(t, func() bool {
+		streak, escalated := manager.renewalFailureState()
+		return streak == 0 && !escalated
+	}, 2*time.Second, 5*time.Millisecond, "the first success must reset the streak and the escalation")
+	require.Equal(t, failures, testutil.ToFloat64(metrics.ClusterNodeLeaseRenewFailures),
+		"the failure counter is cumulative and must not reset on recovery")
+}
+
+// renewalFailureState exposes the guarded streak state for assertions.
+func (m *clusterNodeLeaseManager) renewalFailureState() (streak int, escalated bool) {
+	m.renewMu.Lock()
+	defer m.renewMu.Unlock()
+	return m.renewFailureStreak, m.renewEscalated
+}

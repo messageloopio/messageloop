@@ -444,6 +444,62 @@ func TestClusterRedis_CompareAndSwapSessionState_Atomic(t *testing.T) {
 	require.Nil(t, missing, "a lost compare on an absent key must not write the snapshot")
 }
 
+// TestClusterRedis_DeleteSessionLeaseIfOwner drives the SessionLeaseOwnerDeleter
+// Lua path directly against real Redis (review 2026-09-14 #14): a matching
+// owner deletes the lease (and syncs the user index), a foreign owner and an
+// absent lease delete nothing.
+func TestClusterRedis_DeleteSessionLeaseIfOwner(t *testing.T) {
+	redisCfg := requireClusterRedis(t, clusterAtomicWriteTestDB)
+	ctx := context.Background()
+
+	directory := redisbroker.NewSessionDirectory(redisCfg)
+	t.Cleanup(func() { _ = directory.Shutdown(ctx) })
+
+	deleter, ok := directory.(clusterpkg.SessionLeaseOwnerDeleter)
+	require.True(t, ok, "the redis session directory must implement SessionLeaseOwnerDeleter")
+
+	// Seed the lease through the production CAS (same JSON blob shape the Lua
+	// script reads) and index a user membership that the delete must sync.
+	lease := &clusterpkg.ClusterSessionLease{
+		SessionID:     "sess-casdel",
+		NodeID:        "node-a",
+		IncarnationID: "1",
+		UserID:        "user-1",
+		LeaseVersion:  2,
+		ExpiresAt:     time.Now().Add(10 * time.Minute),
+	}
+	ok, err := directory.CompareAndSwapSessionLease(ctx, nil, lease, 10*time.Minute)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.NoError(t, directory.AddUserSession(ctx, lease.Namespace, lease.UserID, lease.SessionID, 10*time.Minute))
+
+	// A foreign owner deletes nothing: node-b's resume CAS re-owned the lease
+	// and the stale reader must not remove it.
+	deleted, err := deleter.DeleteSessionLeaseIfOwner(ctx, "sess-casdel", "node-b", "1")
+	require.NoError(t, err)
+	require.False(t, deleted)
+	stored, err := directory.GetSessionLease(ctx, "sess-casdel")
+	require.NoError(t, err)
+	require.NotNil(t, stored, "a foreign owner must not delete the lease")
+	require.Equal(t, uint64(2), stored.LeaseVersion)
+
+	// The exact owner deletes the lease and drops the user index membership.
+	deleted, err = deleter.DeleteSessionLeaseIfOwner(ctx, "sess-casdel", "node-a", "1")
+	require.NoError(t, err)
+	require.True(t, deleted)
+	stored, err = directory.GetSessionLease(ctx, "sess-casdel")
+	require.NoError(t, err)
+	require.Nil(t, stored, "the matching owner must delete the lease")
+	sessions, err := directory.ListUserSessions(ctx, lease.Namespace, lease.UserID)
+	require.NoError(t, err)
+	require.Empty(t, sessions, "deleting the lease must sync the user index")
+
+	// An absent lease deletes nothing.
+	deleted, err = deleter.DeleteSessionLeaseIfOwner(ctx, "sess-casdel", "node-a", "1")
+	require.NoError(t, err)
+	require.False(t, deleted)
+}
+
 func TestClusterRedis_ProjectionRepairRestoresChannels(t *testing.T) {
 	redisCfg := requireClusterRedis(t, clusterRedisIntegrationDB)
 	ctx := context.Background()

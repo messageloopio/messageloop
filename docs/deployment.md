@@ -230,20 +230,32 @@ The server handles `SIGINT` and `SIGTERM` signals:
 
 ## Docker
 
-```dockerfile
-FROM golang:1.25 AS builder
-WORKDIR /app
-COPY go.mod go.sum ./
-RUN go mod download
-COPY . .
-RUN CGO_ENABLED=0 go build -o /messageloop ./cmd/server
+The repository carries a production [`Dockerfile`](../Dockerfile): a multi-stage build (Go builder → Alpine runtime, non-root user) that bakes in [`configs/docker.yaml`](../configs/docker.yaml) as the container default config and health-checks `/health` on port 8080.
 
-FROM gcr.io/distroless/static-debian12
-COPY --from=builder /messageloop /messageloop
-COPY config.yaml /config.yaml
-EXPOSE 9080 9090 9091 8080
-ENTRYPOINT ["/messageloop", "--config", "/config.yaml"]
+```bash
+docker build -t messageloop --build-arg VERSION=$(git rev-parse --short HEAD) .
+docker run --rm -p 9080:9080 -p 8080:8080 messageloop
 ```
+
+Exposed ports: 9080 (WebSocket), 9090 (client gRPC), 9091 (admin gRPC), 8080 (health/metrics).
+
+### Environment Variable Overrides
+
+Every key present in `configs/docker.yaml` can be overridden at runtime with a `MESSAGELOOP_`-prefixed environment variable (dotted path → underscores), so a container can be reconfigured without rebuilding the image:
+
+```bash
+docker run --rm -p 9080:9080 \
+  -e MESSAGELOOP_BROKER_TYPE=redis \
+  -e MESSAGELOOP_BROKER_REDIS_ADDR=redis.internal:6379 \
+  -e MESSAGELOOP_BROKER_REDIS_STREAM_APPROXIMATE=true \
+  -e MESSAGELOOP_SERVER_NAMESPACE=prod \
+  -e MESSAGELOOP_SERVER_GRPC_ADMIN_AUTH_TOKEN=secret \
+  messageloop
+```
+
+Environment values win over the config file. The full overridable key table lives in `cmd/server/envconfig.go`; string slices take comma-separated values (e.g. `MESSAGELOOP_TRANSPORT_WEBSOCKET_ALLOWED_ORIGINS=https://a.example.com,https://b.example.com`). Authorizer rules and proxy backends are config-file-only — mount a custom YAML and start with `command: ["--config", "/path/to/your.yaml"]` (the image entrypoint appends the default config path as CMD, so overriding `command` replaces it).
+
+To deploy on the [Dokploy](https://dokploy.com) platform, see [`docker/dokploy/README.md`](../docker/dokploy/README.md) — a ready-made Docker Compose template (MessageLoop + Redis) with Traefik domain routing declared via labels (WebSocket `wss://…` and gRPC TLS→h2c domains), environment-variable-driven configuration, and a step-by-step Chinese deployment guide.
 
 ## Production Checklist
 

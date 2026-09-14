@@ -1,0 +1,37 @@
+# VCS / CI / editor metadata
+.git
+.github
+.idea
+.vscode
+.claude
+.zcode
+.specify
+
+# Local build artifacts (the repo root carries stale Windows test binaries)
+*.exe
+*.test
+*.out
+coverage.*
+nul
+380
+
+# Developer-local Go workspace files: the image builds in module mode via
+# go.mod + the ./shared replace directive.
+go.work
+go.work.sum
+
+# Local configuration and secrets must never enter an image
+config.yaml
+config-node*.yaml
+.env
+
+# Not needed to build cmd/server
+_examples
+docs
+sdks/ts
+sdks/go
+
+# Deployment assets themselves
+Dockerfile
+.dockerignore
+docker

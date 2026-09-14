@@ -9,8 +9,8 @@ require (
 	github.com/gobwas/glob v0.2.3
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
-	github.com/lynx-go/lynx v1.2.0
-	github.com/lynx-go/lynx/contrib/zap v1.2.0
+	github.com/lynx-go/lynx v1.9.0
+	github.com/lynx-go/lynx/contrib/zap v1.6.0
 	github.com/lynx-go/x v0.1.0
 	github.com/messageloopio/messageloop/shared v0.2.0
 	github.com/prometheus/client_golang v1.23.2
@@ -19,6 +19,7 @@ require (
 	github.com/redis/go-redis/v9 v9.18.0
 	github.com/samber/lo v1.53.0
 	github.com/spf13/pflag v1.0.10
+	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
 	github.com/xtaci/kcp-go/v5 v5.6.72
 	golang.org/x/time v0.15.0
@@ -32,7 +33,7 @@ require (
 	github.com/bits-and-blooms/bitset v1.24.4 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
@@ -51,7 +52,7 @@ require (
 	github.com/oklog/run v1.2.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.4.3 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/common v0.66.1 // indirect
 	github.com/prometheus/procfs v0.17.0 // indirect
 	github.com/sagikazarmark/locafero v0.12.0 // indirect
@@ -59,7 +60,6 @@ require (
 	github.com/samber/slog-zap/v2 v2.7.0 // indirect
 	github.com/spf13/afero v1.15.0 // indirect
 	github.com/spf13/cast v1.10.0 // indirect
-	github.com/spf13/viper v1.21.0 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/tjfoc/gmsm v1.4.1 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect

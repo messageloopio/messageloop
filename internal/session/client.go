@@ -124,7 +124,14 @@ func (c *Session) MarkMetricsCharged() {
 	defer c.mu.Unlock()
 	if c.state == SessionClosed {
 		if c.rt.Metrics() != nil {
-			c.rt.Metrics().ConnectionsTotal.WithLabelValues(c.TransportLabel()).Dec()
+			// TransportLabel() would re-acquire c.mu (RLock) while this
+			// goroutine still holds the write lock. A Go RWMutex is not
+			// reentrant, so that call would block forever and leave the
+			// session (and its read loop) permanently wedged whenever Close
+			// won the race against AddClient. c.protocol is guarded by c.mu,
+			// which this goroutine already holds exclusively, so read the
+			// field directly and map it to the metric label without locking.
+			c.rt.Metrics().ConnectionsTotal.WithLabelValues(MetricsTransportLabel(c.protocol)).Dec()
 		}
 		return
 	}
@@ -241,6 +248,17 @@ func (c *Session) handleMessage(ctx context.Context, in *clientpb.InboundMessage
 	// has no token), so this cannot reject anonymous clients.
 	if _, isConnect := in.Envelope.(*clientpb.InboundMessage_Connect); !isConnect && !c.Authenticated() {
 		return DisconnectInvalidToken
+	}
+
+	// Central namespace precheck (mechanism gap G1, review #4): every
+	// channel-carrying envelope is namespace-scoped here at the single
+	// dispatch entry, next to the auth gate above — namespace isolation no
+	// longer relies on each handler remembering its check. Handlers keep
+	// their own checks as defense in depth; coverage and exemptions are
+	// documented on precheckNamespace.
+	in, err := c.precheckNamespace(ctx, in)
+	if err != nil || in == nil {
+		return err
 	}
 
 	switch msg := in.Envelope.(type) {

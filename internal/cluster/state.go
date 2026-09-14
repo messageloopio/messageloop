@@ -94,3 +94,21 @@ type ClusterCommandHandler func(ctx context.Context, cmd *ClusterCommand) (*Clus
 type SessionStateCompareAndSwapper interface {
 	CompareAndSwapSessionState(ctx context.Context, expected, desired *ClusterSessionLease, snapshot *ClusterSessionSnapshot, leaseTTL, snapshotTTL time.Duration) (bool, error)
 }
+
+// SessionLeaseOwnerDeleter is an optional SessionDirectory extension (review
+// 2026-09-14 #14): the compare-and-delete counterpart of
+// SessionStateCompareAndSwapper. It deletes a session lease only while the
+// stored lease is still owned by (nodeID, incarnationID), closing the
+// GET-then-DEL race of the two-step DeleteSessionLease: a closer that read
+// its own lease could otherwise delete the lease AFTER a peer's resume CAS
+// re-owned it (lease_version+1, new owner) — re-opening the session to
+// another takeover (double takeover).
+//
+// deleted=false means nothing was deleted: either the lease is absent, or it
+// now names a different owner and must be left intact. Wiring is by type
+// assertion (the SessionStateCompareAndSwapper / NodeEpochAllocator
+// precedent): directories without the extension keep the plain
+// DeleteSessionLease at the call sites.
+type SessionLeaseOwnerDeleter interface {
+	DeleteSessionLeaseIfOwner(ctx context.Context, sessionID, nodeID, incarnationID string) (deleted bool, err error)
+}
