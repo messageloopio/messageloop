@@ -26,6 +26,7 @@ func TestRepositoryConfigsValidateAndPrebind(t *testing.T) {
 		"../../config-node1.yaml",
 		"../../config-node2.yaml",
 		"../../configs/test.yaml",
+		"../../configs/docker.yaml",
 	}
 	for _, file := range files {
 		t.Run(file, func(t *testing.T) {

@@ -27,9 +27,8 @@ type HealthStatus struct {
 }
 
 // healthReadyBroker is implemented by brokers that expose a readiness signal
-// (e.g. *memoryBroker). The returned channel is closed once the broker is
-// ready to serve. Brokers without this method (e.g. the Redis broker) are
-// assumed healthy.
+// (both the memory and Redis brokers do). The returned channel is closed once
+// the broker is ready to serve.
 type healthReadyBroker interface {
 	Ready() <-chan struct{}
 }

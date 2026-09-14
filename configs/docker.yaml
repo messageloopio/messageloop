@@ -1,0 +1,100 @@
+# Container default configuration baked into the Docker image (see
+# docker/dokploy/README.md). Every key below can be overridden at runtime with a
+# MESSAGELOOP_-prefixed environment variable; the mapping is the key path
+# with dots replaced by underscores:
+#
+#   server.namespace                  -> MESSAGELOOP_SERVER_NAMESPACE
+#   broker.redis.addr                 -> MESSAGELOOP_BROKER_REDIS_ADDR
+#   transport.websocket.write_timeout -> MESSAGELOOP_TRANSPORT_WEBSOCKET_WRITE_TIMEOUT
+#
+# The full overridable key list lives in cmd/server/envconfig.go; string
+# slices (transport.websocket.allowed_origins) take comma-separated values.
+# Complex nested structures (authorizer rules, proxy backends) are
+# config-file-only: mount a custom YAML and start the container with
+# ["--config", "/path/to/your.yaml"].
+
+server:
+  http:
+    # 0.0.0.0 so the platform health check and Prometheus can reach /health
+    # and /metrics from outside the container. Set an auth token via
+    # MESSAGELOOP_SERVER_HTTP_AUTH_TOKEN in production.
+    addr: "0.0.0.0:8080"
+    auth_token: ""
+  grpc_admin:
+    addr: "0.0.0.0:9091"
+    # Unauthenticated by default so the container starts with zero secrets;
+    # the port is only reachable inside the compose network unless you
+    # publish it. Set MESSAGELOOP_SERVER_GRPC_ADMIN_AUTH_TOKEN for production
+    # (a token takes precedence over allow_insecure).
+    allow_insecure: true
+    auth_token: ""
+  heartbeat:
+    idle_timeout: "300s"
+    ping_interval: "0s"
+    ping_timeout: ""
+  rpc_timeout: "30s"
+  require_auth: false
+  # Static namespace fallback; mandatory while require_auth is off. All
+  # client-visible channels are scoped under it ("ns:topic").
+  namespace: "default"
+  limits:
+    max_connections_per_user: 0
+    max_subscriptions_per_client: 0
+    max_publishes_per_second: 0
+    max_message_size: 0
+
+transport:
+  websocket:
+    addr: "0.0.0.0:9080"
+    path: "/ws"
+    # Behind Dokploy's Traefik the browser Origin is the public domain, which
+    # an image cannot know at build time; allow all by default and restrict
+    # via allowed_origins in a custom config file for hardening.
+    allow_all_origins: true
+    compression: true
+    read_timeout: ""
+    write_timeout: ""
+  grpc:
+    addr: "0.0.0.0:9090"
+    write_timeout: ""
+  quic:
+    # UDP transports: an empty addr disables the listener. Reaching QUIC/KCP
+    # through Dokploy requires a raw ports mapping (protocol: udp) in the
+    # compose file; Traefik only routes HTTP.
+    addr: ""
+    insecure: false
+    read_timeout: ""
+    write_timeout: ""
+  kcp:
+    addr: ""
+    insecure: false
+    data_shards: 0
+    parity_shards: 0
+    read_timeout: ""
+    write_timeout: ""
+
+broker:
+  # The Dokploy compose template flips this to redis via
+  # MESSAGELOOP_BROKER_TYPE=redis.
+  type: memory
+  redis:
+    addr: "redis:6379"
+    password: ""
+    db: 0
+    pool_size: 0
+    min_idle_conns: 0
+    max_retries: 0
+    dial_timeout: ""
+    read_timeout: ""
+    write_timeout: ""
+    stream_max_length: 0
+    # Must be explicitly true once broker.type=redis (only approximate
+    # trimming is implemented).
+    stream_approximate: true
+    history_ttl: ""
+
+cluster:
+  enabled: false
+  node_id: ""
+  backend: "redis"
+  hmac_key: ""

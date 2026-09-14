@@ -18,7 +18,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/spf13/pflag"
 
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/internal/cluster"
@@ -139,11 +138,8 @@ func main() {
 	},
 		lynx.WithName("MessageLoop"),
 		lynx.WithVersion(version),
-		lynx.WithSetFlagsFunc(func(f *pflag.FlagSet) {
-			f.String("config", "./config.yaml", "config file path")
-			f.String("log-level", "info", "log level, default info")
-		}),
-		lynx.WithBindConfigFunc(lynx.DefaultBindConfigFunc),
+		lynx.WithBindFlagsFunc(lynx.DefaultBindFlagsFunc),
+		lynx.WithBindConfigFunc(bindConfigWithEnv),
 		lynx.WithShutdownTimeout(30*time.Second),
 	)
 
