@@ -231,9 +231,9 @@ func compilePattern(pattern string) (compiledRulePattern, error) {
 		return compiledRulePattern{}, fmt.Errorf("%w: invalid pattern %q: %v", ErrInvalidRulePattern, pattern, err)
 	}
 	if !strings.Contains(pattern, "*") {
-		return compiledRulePattern{kind: patternExact, segments: strings.Split(pattern, ".")}, nil
+		return compiledRulePattern{kind: patternExact, segments: topics.SplitSegments(pattern)}, nil
 	}
-	segments := strings.Split(pattern, ".")
+	segments := topics.SplitSegments(pattern)
 	last := segments[len(segments)-1]
 	if last != "*" && last != "**" {
 		return compiledRulePattern{}, fmt.Errorf("%w: %q: wildcard must be the final segment", ErrInvalidRulePattern, pattern)

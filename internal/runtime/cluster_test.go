@@ -57,15 +57,15 @@ func (c *trackingClusterComponent) DeleteSessionSnapshot(context.Context, string
 	return nil
 }
 
-func (c *trackingClusterComponent) AddUserSession(context.Context, string, string, time.Duration) error {
+func (c *trackingClusterComponent) AddUserSession(context.Context, string, string, string, time.Duration) error {
 	return nil
 }
 
-func (c *trackingClusterComponent) RemoveUserSession(context.Context, string, string) error {
+func (c *trackingClusterComponent) RemoveUserSession(context.Context, string, string, string) error {
 	return nil
 }
 
-func (c *trackingClusterComponent) ListUserSessions(context.Context, string) ([]string, error) {
+func (c *trackingClusterComponent) ListUserSessions(context.Context, string, string) ([]string, error) {
 	return nil, nil
 }
 

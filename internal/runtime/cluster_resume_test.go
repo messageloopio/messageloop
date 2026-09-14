@@ -178,14 +178,14 @@ func TestNode_EvictSessionForTakeover_AdjustsSharedProjection(t *testing.T) {
 	require.NoError(t, err)
 	clientA.ForceTestIDs("sess-a", "user-a", "client-a")
 	require.NoError(t, node.AddClient(clientA))
-	require.NoError(t, node.AddSubscription(context.Background(), "news", NewSubscriber(clientA, false)))
+	require.NoError(t, node.AddSubscription(context.Background(), "dev:news", NewSubscriber(clientA, false)))
 	require.NoError(t, node.AddSubscription(context.Background(), "alerts", NewSubscriber(clientA, false)))
 
 	clientB, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
 	require.NoError(t, err)
 	clientB.ForceTestIDs("sess-b", "user-b", "client-b")
 	require.NoError(t, node.AddClient(clientB))
-	require.NoError(t, node.AddSubscription(context.Background(), "news", NewSubscriber(clientB, false)))
+	require.NoError(t, node.AddSubscription(context.Background(), "dev:news", NewSubscriber(clientB, false)))
 
 	require.NoError(t, clientA.Fence(DisconnectStale))
 
@@ -200,7 +200,7 @@ func TestNode_EvictSessionForTakeover_AdjustsSharedProjection(t *testing.T) {
 		}
 		assert.Fail(t, "channel %s missing from projection", name)
 	}
-	assertProjectionCount("news", 1)
+	assertProjectionCount("dev:news", 1)
 	assertProjectionCount("alerts", 0)
 
 	assert.Nil(t, node.hub.LookupSession("sess-a"))
@@ -221,12 +221,12 @@ func TestNode_RestoreSessionSubscriptions_AdjustsSharedProjection(t *testing.T) 
 	require.NoError(t, err)
 	client.ForceTestIDs("sess-restore", "user-restore", "client-restore")
 
-	subscriptions := []ClusterSubscriptionSnapshot{{Channel: "news"}, {Channel: "sports"}}
+	subscriptions := []ClusterSubscriptionSnapshot{{Channel: "dev:news"}, {Channel: "sports"}}
 	require.Empty(t, node.restoreSessionSubscriptions(context.Background(), client, subscriptions))
 
 	channels, err := node.Channels(context.Background())
 	require.NoError(t, err)
-	for _, name := range []string{"news", "sports"} {
+	for _, name := range []string{"dev:news", "sports"} {
 		found := false
 		for _, ch := range channels {
 			if ch.Name == name {
@@ -237,7 +237,7 @@ func TestNode_RestoreSessionSubscriptions_AdjustsSharedProjection(t *testing.T) 
 		}
 		assert.True(t, found, "channel %s missing from projection", name)
 	}
-	assert.True(t, client.HasSubscription("news"))
+	assert.True(t, client.HasSubscription("dev:news"))
 	assert.True(t, client.HasSubscription("sports"))
 }
 
@@ -256,7 +256,7 @@ func TestResumeRemoteSession_UsesCAS(t *testing.T) {
 			SessionID:     "sess-remote",
 			UserID:        "user-1",
 			ClientID:      "client-1",
-			Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "news"}},
+			Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "dev:news"}},
 		},
 	}
 	bus := &fakeClusterCommandBus{result: &ClusterCommandResult{Status: ClusterCommandStatusSucceeded}}
@@ -299,7 +299,7 @@ func TestResumeRemoteSession_CASConflictAborts(t *testing.T) {
 			SessionID:     "sess-remote",
 			UserID:        "user-1",
 			ClientID:      "client-1",
-			Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "news"}},
+			Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "dev:news"}},
 		},
 		forceCasFail: true,
 	}
@@ -323,7 +323,7 @@ func TestResumeRemoteSession_CASConflictAborts(t *testing.T) {
 	require.Equal(t, DisconnectStale.Code, dis.Code)
 	require.False(t, resumed)
 	require.Empty(t, bus.commands, "no takeover command may be issued after a CAS conflict")
-	require.False(t, client.HasSubscription("news"), "no subscriptions may be restored after a CAS conflict")
+	require.False(t, client.HasSubscription("dev:news"), "no subscriptions may be restored after a CAS conflict")
 }
 
 // failSubscribeBroker fails every Subscribe so remote subscription restore
@@ -392,7 +392,7 @@ func resumeSoftFailFixture(t *testing.T, snapshot *ClusterSessionSnapshot, broke
 	})
 	require.NoError(t, err)
 
-	node := NewNode(&config.Server{RequireAuth: true})
+	node := NewNode(&config.Server{RequireAuth: true, Namespace: "dev"})
 	node.SetCluster(runtime)
 	node.SetBroker(broker)
 	authProxy := &connectAuthProxyStub{userID: "user-1"}
@@ -442,17 +442,17 @@ func TestClient_RemoteResume_RestorePartialFailureKeepsSession(t *testing.T) {
 		UserID:    "user-1",
 		ClientID:  "client-1",
 		Subscriptions: []ClusterSubscriptionSnapshot{
-			{Channel: "news"},
-			{Channel: "broken.ch"},
+			{Channel: "dev:news"},
+			{Channel: "dev:broken.ch"},
 		},
 	}
-	node, client, transport, directory := resumeSoftFailFixture(t, snapshot, &failChannelSubscribeBroker{failCh: "broken.ch"})
+	node, client, transport, directory := resumeSoftFailFixture(t, snapshot, &failChannelSubscribeBroker{failCh: "dev:broken.ch"})
 
 	require.False(t, transport.isClosed(), "the connection must survive a partial hydrate failure")
 	require.Same(t, client, node.Hub().LookupSession("sess-remote"), "the session must stay registered")
-	require.True(t, client.HasSubscription("news"), "the healthy channel must stay restored")
-	require.False(t, client.HasSubscription("broken.ch"), "the failed channel must not be restored")
-	_, subscribed := node.hub.LookupSubscriber("broken.ch", client)
+	require.True(t, client.HasSubscription("dev:news"), "the healthy channel must stay restored")
+	require.False(t, client.HasSubscription("dev:broken.ch"), "the failed channel must not be restored")
+	_, subscribed := node.hub.LookupSubscriber("dev:broken.ch", client)
 	require.False(t, subscribed, "the failed channel must not be in the hub")
 	require.False(t, directory.deletedLease, "hydrate soft-fail never deletes the lease")
 	require.False(t, directory.deletedSnapshot, "hydrate soft-fail never deletes the snapshot")
@@ -471,12 +471,12 @@ func TestClient_RemoteResume_RestorePartialFailureKeepsSession(t *testing.T) {
 	require.NotNil(t, connected, "the resume must still send Connected")
 	require.True(t, connected.Resumed)
 	require.Len(t, connected.Subscriptions, 1)
-	require.Equal(t, "news", connected.Subscriptions[0].Channel)
+	require.Equal(t, "dev:news", connected.Subscriptions[0].Channel)
 
 	failures := recoverFailedEnvelopes(t, transport)
 	require.Len(t, failures, 1, "exactly one per-channel RECOVER_FAILED envelope")
 	require.Equal(t, "recover_error", failures[0].GetType())
-	require.Equal(t, "broken.ch", failures[0].GetMetadata().GetFields()["channel"].GetStringValue())
+	require.Equal(t, "dev:broken.ch", failures[0].GetMetadata().GetFields()["channel"].GetStringValue())
 }
 
 // PR-KA-D10 §1.1 boundary: even when every snapshot channel fails to
@@ -487,13 +487,13 @@ func TestClient_RemoteResume_RestoreAllChannelsFailKeepsSession(t *testing.T) {
 		SessionID:     "sess-remote",
 		UserID:        "user-1",
 		ClientID:      "client-1",
-		Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "news"}},
+		Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "dev:news"}},
 	}
 	node, client, transport, directory := resumeSoftFailFixture(t, snapshot, &failSubscribeBroker{})
 
 	require.False(t, transport.isClosed(), "an all-failed hydrate must not disconnect the client")
 	require.Same(t, client, node.Hub().LookupSession("sess-remote"))
-	require.False(t, client.HasSubscription("news"))
+	require.False(t, client.HasSubscription("dev:news"))
 	require.False(t, directory.deletedLease)
 	require.False(t, directory.deletedSnapshot)
 
@@ -512,7 +512,7 @@ func TestClient_RemoteResume_RestoreAllChannelsFailKeepsSession(t *testing.T) {
 
 	failures := recoverFailedEnvelopes(t, transport)
 	require.Len(t, failures, 1)
-	require.Equal(t, "news", failures[0].GetMetadata().GetFields()["channel"].GetStringValue())
+	require.Equal(t, "dev:news", failures[0].GetMetadata().GetFields()["channel"].GetStringValue())
 }
 
 // Task 13e: session snapshots must preserve the per-subscription ephemeral
@@ -660,7 +660,7 @@ func TestNode_Fence_DoesNotDeleteNewSession(t *testing.T) {
 	require.NoError(t, err)
 	clientA.ForceTestIDs("sess-shared", "user-shared", "client-a")
 	require.NoError(t, node.AddClient(clientA))
-	require.NoError(t, node.AddSubscription(context.Background(), "news", NewSubscriber(clientA, false)))
+	require.NoError(t, node.AddSubscription(context.Background(), "dev:news", NewSubscriber(clientA, false)))
 
 	// The old incarnation is closed and removed (e.g. a previous close or
 	// fence), then a NEW session registers the same session ID.
@@ -716,7 +716,7 @@ func TestResumeRemoteSession_TakeoverFailureRollsBackCAS(t *testing.T) {
 			SessionID:     "sess-rollback",
 			UserID:        "user-1",
 			ClientID:      "client-1",
-			Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "news"}},
+			Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "dev:news"}},
 		},
 	}
 	bus := &fakeClusterCommandBus{result: &ClusterCommandResult{Status: ClusterCommandStatusFailed, ErrorMessage: "takeover rejected"}}
@@ -765,7 +765,7 @@ func TestResumeRemoteSession_TakeoverFailureDeadNodeKeepsClaim(t *testing.T) {
 			SessionID:     "sess-dead",
 			UserID:        "user-1",
 			ClientID:      "client-1",
-			Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "news"}},
+			Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "dev:news"}},
 		},
 	}
 	bus := &fakeClusterCommandBus{result: &ClusterCommandResult{Status: ClusterCommandStatusFailed, ErrorMessage: "command timed out"}}
@@ -810,7 +810,7 @@ func TestResumeRemoteSession_NodeLeaseLookupErrorStillRollsBack(t *testing.T) {
 			SessionID:     "sess-lookup",
 			UserID:        "user-1",
 			ClientID:      "client-1",
-			Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "news"}},
+			Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "dev:news"}},
 		},
 	}
 	bus := &fakeClusterCommandBus{result: &ClusterCommandResult{Status: ClusterCommandStatusFailed, ErrorMessage: "takeover rejected"}}
@@ -910,7 +910,7 @@ func TestResumeRemoteSession_Metrics_TakeoverObserved(t *testing.T) {
 			SessionID:     "sess-remote",
 			UserID:        "user-1",
 			ClientID:      "client-1",
-			Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "news"}},
+			Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "dev:news"}},
 		},
 	}
 	bus := &fakeClusterCommandBus{result: &ClusterCommandResult{Status: ClusterCommandStatusSucceeded}}
@@ -975,7 +975,7 @@ func TestResumeRemoteSession_SameNodeOlderEpochSkipsTakeover(t *testing.T) {
 			SessionID:     "sess-epoch",
 			UserID:        "user-1",
 			ClientID:      "client-1",
-			Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "news"}},
+			Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "dev:news"}},
 		},
 	}
 	bus := &fakeClusterCommandBus{result: &ClusterCommandResult{Status: ClusterCommandStatusSucceeded}}
@@ -1020,7 +1020,7 @@ func TestResumeRemoteSession_NonEpochIncarnationDoesNotSkip(t *testing.T) {
 			SessionID:     "sess-nonepoch",
 			UserID:        "user-1",
 			ClientID:      "client-1",
-			Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "news"}},
+			Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "dev:news"}},
 		},
 	}
 	bus := &fakeClusterCommandBus{result: &ClusterCommandResult{Status: ClusterCommandStatusSucceeded}}

@@ -385,11 +385,13 @@ func (x *SurveyResult) GetError() *v2.Error {
 }
 
 type DisconnectRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Sessions      []string               `protobuf:"bytes,1,rep,name=sessions,proto3" json:"sessions,omitempty"`
-	Code          uint32                 `protobuf:"varint,2,opt,name=code,proto3" json:"code,omitempty"`
-	Reason        string                 `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
-	Users         []string               `protobuf:"bytes,4,rep,name=users,proto3" json:"users,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Sessions []string               `protobuf:"bytes,1,rep,name=sessions,proto3" json:"sessions,omitempty"`
+	Code     uint32                 `protobuf:"varint,2,opt,name=code,proto3" json:"code,omitempty"`
+	Reason   string                 `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
+	Users    []string               `protobuf:"bytes,4,rep,name=users,proto3" json:"users,omitempty"`
+	// Namespace scopes the users expansion (required when users is non-empty).
+	Namespace     string `protobuf:"bytes,5,opt,name=namespace,proto3" json:"namespace,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -452,6 +454,13 @@ func (x *DisconnectRequest) GetUsers() []string {
 	return nil
 }
 
+func (x *DisconnectRequest) GetNamespace() string {
+	if x != nil {
+		return x.Namespace
+	}
+	return ""
+}
+
 type DisconnectResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Results       map[string]bool        `protobuf:"bytes,1,rep,name=results,proto3" json:"results,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
@@ -497,10 +506,12 @@ func (x *DisconnectResponse) GetResults() map[string]bool {
 }
 
 type SubscribeRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	Channels      []string               `protobuf:"bytes,2,rep,name=channels,proto3" json:"channels,omitempty"`
-	UserId        string                 `protobuf:"bytes,3,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	SessionId string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	Channels  []string               `protobuf:"bytes,2,rep,name=channels,proto3" json:"channels,omitempty"`
+	UserId    string                 `protobuf:"bytes,3,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	// Namespace scopes the user_id expansion (required when user_id is set).
+	Namespace     string `protobuf:"bytes,4,opt,name=namespace,proto3" json:"namespace,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -556,6 +567,13 @@ func (x *SubscribeRequest) GetUserId() string {
 	return ""
 }
 
+func (x *SubscribeRequest) GetNamespace() string {
+	if x != nil {
+		return x.Namespace
+	}
+	return ""
+}
+
 type SubscribeResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Results       map[string]bool        `protobuf:"bytes,1,rep,name=results,proto3" json:"results,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
@@ -601,10 +619,12 @@ func (x *SubscribeResponse) GetResults() map[string]bool {
 }
 
 type UnsubscribeRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	Channels      []string               `protobuf:"bytes,2,rep,name=channels,proto3" json:"channels,omitempty"`
-	UserId        string                 `protobuf:"bytes,3,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	SessionId string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	Channels  []string               `protobuf:"bytes,2,rep,name=channels,proto3" json:"channels,omitempty"`
+	UserId    string                 `protobuf:"bytes,3,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	// Namespace scopes the user_id expansion (required when user_id is set).
+	Namespace     string `protobuf:"bytes,4,opt,name=namespace,proto3" json:"namespace,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -656,6 +676,13 @@ func (x *UnsubscribeRequest) GetChannels() []string {
 func (x *UnsubscribeRequest) GetUserId() string {
 	if x != nil {
 		return x.UserId
+	}
+	return ""
+}
+
+func (x *UnsubscribeRequest) GetNamespace() string {
+	if x != nil {
+		return x.Namespace
 	}
 	return ""
 }
@@ -1217,10 +1244,13 @@ func (x *Publication_Options) GetAddHistory() bool {
 }
 
 type Publication_Destination struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Sessions      []string               `protobuf:"bytes,1,rep,name=sessions,proto3" json:"sessions,omitempty"`
-	Channels      []string               `protobuf:"bytes,2,rep,name=channels,proto3" json:"channels,omitempty"`
-	Users         []string               `protobuf:"bytes,3,rep,name=users,proto3" json:"users,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Sessions []string               `protobuf:"bytes,1,rep,name=sessions,proto3" json:"sessions,omitempty"`
+	Channels []string               `protobuf:"bytes,2,rep,name=channels,proto3" json:"channels,omitempty"`
+	Users    []string               `protobuf:"bytes,3,rep,name=users,proto3" json:"users,omitempty"`
+	// Namespace scopes the users expansion: user fan-out targets only the
+	// sessions of (namespace, user). Required when users is non-empty.
+	Namespace     string `protobuf:"bytes,4,opt,name=namespace,proto3" json:"namespace,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1276,11 +1306,18 @@ func (x *Publication_Destination) GetUsers() []string {
 	return nil
 }
 
+func (x *Publication_Destination) GetNamespace() string {
+	if x != nil {
+		return x.Namespace
+	}
+	return ""
+}
+
 var File_server_v2_api_proto protoreflect.FileDescriptor
 
 const file_server_v2_api_proto_rawDesc = "" +
 	"\n" +
-	"\x13server/v2/api.proto\x12\x15messageloop.server.v2\x1a\x16shared/v2/errors.proto\x1a\x15shared/v2/types.proto\"\xb5\x03\n" +
+	"\x13server/v2/api.proto\x12\x15messageloop.server.v2\x1a\x16shared/v2/errors.proto\x1a\x15shared/v2/types.proto\"\xd3\x03\n" +
 	"\vPublication\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12P\n" +
 	"\vdestination\x18\x02 \x01(\v2..messageloop.server.v2.Publication.DestinationR\vdestination\x12D\n" +
@@ -1289,11 +1326,12 @@ const file_server_v2_api_proto_rawDesc = "" +
 	"\bmetadata\x18\x05 \x01(\v2\x1f.messageloop.shared.v2.MetadataR\bmetadata\x1a*\n" +
 	"\aOptions\x12\x1f\n" +
 	"\vadd_history\x18\x01 \x01(\bR\n" +
-	"addHistory\x1a[\n" +
+	"addHistory\x1ay\n" +
 	"\vDestination\x12\x1a\n" +
 	"\bsessions\x18\x01 \x03(\tR\bsessions\x12\x1a\n" +
 	"\bchannels\x18\x02 \x03(\tR\bchannels\x12\x14\n" +
-	"\x05users\x18\x03 \x03(\tR\x05users\"w\n" +
+	"\x05users\x18\x03 \x03(\tR\x05users\x12\x1c\n" +
+	"\tnamespace\x18\x04 \x01(\tR\tnamespace\"w\n" +
 	"\x0ePublishRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12F\n" +
@@ -1316,32 +1354,35 @@ const file_server_v2_api_proto_rawDesc = "" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x128\n" +
 	"\apayload\x18\x02 \x01(\v2\x1e.messageloop.shared.v2.PayloadR\apayload\x12;\n" +
 	"\bmetadata\x18\x03 \x01(\v2\x1f.messageloop.shared.v2.MetadataR\bmetadata\x122\n" +
-	"\x05error\x18\x04 \x01(\v2\x1c.messageloop.shared.v2.ErrorR\x05error\"q\n" +
+	"\x05error\x18\x04 \x01(\v2\x1c.messageloop.shared.v2.ErrorR\x05error\"\x8f\x01\n" +
 	"\x11DisconnectRequest\x12\x1a\n" +
 	"\bsessions\x18\x01 \x03(\tR\bsessions\x12\x12\n" +
 	"\x04code\x18\x02 \x01(\rR\x04code\x12\x16\n" +
 	"\x06reason\x18\x03 \x01(\tR\x06reason\x12\x14\n" +
-	"\x05users\x18\x04 \x03(\tR\x05users\"\xa2\x01\n" +
+	"\x05users\x18\x04 \x03(\tR\x05users\x12\x1c\n" +
+	"\tnamespace\x18\x05 \x01(\tR\tnamespace\"\xa2\x01\n" +
 	"\x12DisconnectResponse\x12P\n" +
 	"\aresults\x18\x01 \x03(\v26.messageloop.server.v2.DisconnectResponse.ResultsEntryR\aresults\x1a:\n" +
 	"\fResultsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\bR\x05value:\x028\x01\"f\n" +
+	"\x05value\x18\x02 \x01(\bR\x05value:\x028\x01\"\x84\x01\n" +
 	"\x10SubscribeRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1a\n" +
 	"\bchannels\x18\x02 \x03(\tR\bchannels\x12\x17\n" +
-	"\auser_id\x18\x03 \x01(\tR\x06userId\"\xa0\x01\n" +
+	"\auser_id\x18\x03 \x01(\tR\x06userId\x12\x1c\n" +
+	"\tnamespace\x18\x04 \x01(\tR\tnamespace\"\xa0\x01\n" +
 	"\x11SubscribeResponse\x12O\n" +
 	"\aresults\x18\x01 \x03(\v25.messageloop.server.v2.SubscribeResponse.ResultsEntryR\aresults\x1a:\n" +
 	"\fResultsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\bR\x05value:\x028\x01\"h\n" +
+	"\x05value\x18\x02 \x01(\bR\x05value:\x028\x01\"\x86\x01\n" +
 	"\x12UnsubscribeRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1a\n" +
 	"\bchannels\x18\x02 \x03(\tR\bchannels\x12\x17\n" +
-	"\auser_id\x18\x03 \x01(\tR\x06userId\"\xa4\x01\n" +
+	"\auser_id\x18\x03 \x01(\tR\x06userId\x12\x1c\n" +
+	"\tnamespace\x18\x04 \x01(\tR\tnamespace\"\xa4\x01\n" +
 	"\x13UnsubscribeResponse\x12Q\n" +
 	"\aresults\x18\x01 \x03(\v27.messageloop.server.v2.UnsubscribeResponse.ResultsEntryR\aresults\x1a:\n" +
 	"\fResultsEntry\x12\x10\n" +

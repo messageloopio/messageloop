@@ -62,6 +62,10 @@ message UserInfo {
   string token = 3;
   string client_type = 4;
   string client_id = 5;
+  // Namespace scopes the session to a multi-tenant namespace: every
+  // client-visible channel must live under it ("ns:topic"). Empty means the
+  // server falls back to its static server.namespace.
+  string namespace = 6;
 }
 
 // --- SubscribeAcl ---

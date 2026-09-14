@@ -1,7 +1,6 @@
 package topics
 
 import (
-	"strings"
 	"sync"
 
 	"github.com/RoaringBitmap/roaring"
@@ -83,7 +82,7 @@ func (b *optimizedInvertedBitmapMatcher) Subscribe(topic string, sub Subscriber)
 		// this check.
 		return nil, ErrBadTopic
 	}
-	constituents := strings.Split(topic, delimiter)
+	constituents := SplitSegments(topic)
 	if uint(len(constituents)) > b.maxConstituents {
 		return nil, ErrBadTopic
 	}
@@ -140,9 +139,9 @@ func (b *optimizedInvertedBitmapMatcher) Unsubscribe(sub *Subscription) {
 		return
 	}
 	b.mu.Lock()
-	existing, ok := b.subscribers[sub.ID]
-	if ok && existing == sub.Subscriber {
-		constituents := strings.Split(sub.Topic, delimiter)
+		existing, ok := b.subscribers[sub.ID]
+		if ok && existing == sub.Subscriber {
+			constituents := SplitSegments(sub.Topic)
 		for i, cb := range b.constituentBitmaps {
 			if i < len(constituents) {
 				if bm, ok := cb.bitmaps[constituents[i]]; ok {
@@ -170,7 +169,7 @@ func (b *optimizedInvertedBitmapMatcher) Unsubscribe(sub *Subscription) {
 
 // Lookup returns the Subscribers for the given topic.
 func (b *optimizedInvertedBitmapMatcher) Lookup(topic string) []Subscriber {
-	constituents := strings.Split(topic, delimiter)
+	constituents := SplitSegments(topic)
 	if uint(len(constituents)) > b.maxConstituents {
 		return nil
 	}

@@ -386,10 +386,10 @@ func TestConnect_ResumeMissingOffsetSkipped(t *testing.T) {
 		SessionID:     "sess-off-resume",
 		UserID:        "user-1",
 		ClientID:      "client-1",
-		Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "miss.ch"}},
+		Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "dev:miss.ch"}},
 		BrokerEpoch:   "v2",
 	}
-	node := remoteResumeTestNode(t, snapshot, recoveryPubs("miss.ch", 1, 10), "v2")
+	node := remoteResumeTestNode(t, snapshot, recoveryPubs("dev:miss.ch", 1, 10), "v2")
 
 	msgs := connectOn(t, node, &capturingTransport{}, &clientpb.Connect{
 		Version:   testProtocolVersion,
@@ -397,7 +397,7 @@ func TestConnect_ResumeMissingOffsetSkipped(t *testing.T) {
 		Token:     "t",
 		SessionId: "sess-off-resume",
 		Subscriptions: []*clientpb.Subscription{
-			{Channel: "miss.ch", Recover: true},
+			{Channel: "dev:miss.ch", Recover: true},
 		},
 	})
 
@@ -405,7 +405,7 @@ func TestConnect_ResumeMissingOffsetSkipped(t *testing.T) {
 	completes := recoverCompletes(msgs)
 	require.Len(t, completes, 1)
 	rc := completes[0]
-	assert.Equal(t, "miss.ch", rc.GetChannel())
+	assert.Equal(t, "dev:miss.ch", rc.GetChannel())
 	require.NotNil(t, rc.GetError())
 	assert.Equal(t, "RECOVER_SKIPPED", rc.GetError().GetCode())
 }
@@ -417,13 +417,13 @@ func TestConnect_ResumeSnapshotChannelNotInConnect(t *testing.T) {
 		SessionID:     "sess-off-resume",
 		UserID:        "user-1",
 		ClientID:      "client-1",
-		Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "off.news"}},
+		Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "dev:off.news"}},
 		ChannelOffsets: map[string]uint64{
-			"off.news": 5,
+			"dev:off.news": 5,
 		},
 		BrokerEpoch: "v2",
 	}
-	node := remoteResumeTestNode(t, snapshot, recoveryPubs("off.news", 1, 10), "v2")
+	node := remoteResumeTestNode(t, snapshot, recoveryPubs("dev:off.news", 1, 10), "v2")
 
 	// The Connect request does not list off.news: the snapshot union must
 	// still recover it from offset 6.
@@ -438,7 +438,7 @@ func TestConnect_ResumeSnapshotChannelNotInConnect(t *testing.T) {
 	completes := recoverCompletes(msgs)
 	require.Len(t, completes, 1)
 	rc := completes[0]
-	assert.Equal(t, "off.news", rc.GetChannel())
+	assert.Equal(t, "dev:off.news", rc.GetChannel())
 	assert.False(t, rc.GetTruncated())
 	assert.Equal(t, uint64(10), mustPosOffset(t, rc.GetPosition()))
 }

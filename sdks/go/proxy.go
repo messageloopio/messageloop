@@ -62,6 +62,9 @@ type UserInfo struct {
 	Token      string
 	ClientType string
 	ClientID   string
+	// Namespace scopes the session to a multi-tenant namespace ("" = server
+	// static fallback).
+	Namespace string
 }
 
 // ToProto converts UserInfo to protobuf format.
@@ -75,6 +78,7 @@ func (u *UserInfo) ToProto() *proxypb.UserInfo {
 		Token:      u.Token,
 		ClientType: u.ClientType,
 		ClientId:   u.ClientID,
+		Namespace:  u.Namespace,
 	}
 }
 

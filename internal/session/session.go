@@ -75,6 +75,13 @@ type Session struct {
 	mu   sync.RWMutex
 	ctx  context.Context
 	user string // 用户 ID
+	// namespace is the multi-tenant scope resolved at connect time (auth
+	// proxy UserInfo.namespace, falling back to the static server.namespace).
+	// Every client-visible channel must live under it ("ns:topic"); the
+	// session-boundary guard (checkNamespace) enforces that on every channel
+	// entry point. Empty only for sessions that never completed the namespaced
+	// connect path (test harnesses).
+	namespace string
 	// client is the client-reported device/end ID.
 	client string
 	// session is the server-issued session ID.

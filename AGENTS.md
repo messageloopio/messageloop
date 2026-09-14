@@ -6,6 +6,8 @@ This file provides guidance for agentic coding agents operating in this reposito
 
 MessageLoop is a realtime messaging platform server written in Go. It provides pub/sub messaging over WebSocket and gRPC using protobuf-defined message envelopes and shared payload types.
 
+**Namespaces (multi-tenant, P1)**: every client-visible channel is namespaced — `ns:topic` (e.g. `acme:chat.room1`). `:` participates in topic segment matching alongside `.` (see `pkg/topics`). The namespace is resolved at connect time from the auth proxy response (`UserInfo.namespace`), falling back to the static `server.namespace` (mandatory when `require_auth` is disabled); out-of-namespace channel operations are rejected with `NAMESPACE_MISMATCH`, and cross-namespace resume is refused (3500). Per-user connection limits and the admin/cluster user index are scoped to `(namespace, user)`.
+
 Current listener model:
 
 - WebSocket client traffic on `transport.websocket.addr`.

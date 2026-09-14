@@ -142,9 +142,9 @@ func TestDirectory_DeleteSessionLeaseSyncsUserIndex(t *testing.T) {
 	ok, err := dir.CompareAndSwapSessionLease(ctx, nil, lease, time.Minute)
 	require.NoError(t, err)
 	require.True(t, ok)
-	require.NoError(t, dir.AddUserSession(ctx, "user-1", "sess-1", time.Minute))
+	require.NoError(t, dir.AddUserSession(ctx, "", "user-1", "sess-1", time.Minute))
 
-	sessions, err := dir.ListUserSessions(ctx, "user-1")
+	sessions, err := dir.ListUserSessions(ctx, "", "user-1")
 	require.NoError(t, err)
 	require.Equal(t, []string{"sess-1"}, sessions)
 
@@ -153,7 +153,7 @@ func TestDirectory_DeleteSessionLeaseSyncsUserIndex(t *testing.T) {
 	stored, err := dir.GetSessionLease(ctx, "sess-1")
 	require.NoError(t, err)
 	require.Nil(t, stored)
-	sessions, err = dir.ListUserSessions(ctx, "user-1")
+	sessions, err = dir.ListUserSessions(ctx, "", "user-1")
 	require.NoError(t, err)
 	require.Empty(t, sessions)
 	require.Equal(t, []string{"sess-1"}, dir.DeletedSessionLeases())

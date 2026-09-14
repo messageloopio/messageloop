@@ -44,7 +44,10 @@ type Node struct {
 	// empty list → zero.
 	adminCaps   Capability
 	requireAuth bool
-	healthCheck func(context.Context) error
+	// serverNamespace is the static server.namespace fallback for sessions
+	// whose auth proxy returns none (config.Server.Namespace).
+	serverNamespace string
+	healthCheck     func(context.Context) error
 	// occupancy tracking (B2): lastApplied records the highest applied gen
 	// per (channel, session) so late/replayed occupancy events are dropped;
 	// occGens is the in-process per-channel gen fallback for presence
@@ -87,6 +90,9 @@ func NewNode(cfg *config.Server) *Node {
 		surveys:     make(map[string]*Survey),
 		presence:    NewMemoryPresenceStore(),
 		requireAuth: cfg != nil && cfg.RequireAuth,
+	}
+	if cfg != nil {
+		node.serverNamespace = cfg.Namespace
 	}
 
 	if cfg != nil && cfg.RPCTimeout != "" {

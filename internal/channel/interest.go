@@ -39,14 +39,18 @@ type CompiledInterest struct {
 //  1. topics.ValidateTopic(key) failure → the original ErrBadTopic (not
 //     NotRoutable).
 //  2. No "*" → Exact=key.
-//  3. Split on ".". The final segment must be "*" or "**", and every segment
-//     before it must be literal (no "*"/"**"). Otherwise
-//     ErrPatternNotRoutable.
+//  3. Split on "." and ":" (topics.SplitSegments). The final segment must be
+//     "*" or "**", and every segment before it must be literal (no
+//     "*"/"**"). Otherwise ErrPatternNotRoutable.
 //  4. Empty literal prefix (key is "*" or "**") → ErrPatternNotRoutable (it
 //     would degrade to a cluster-wide PSubscribe, KD-K13).
-//  5. Prefix = the literal segments joined with ".".
-//     - Final "*" → Pattern = prefix+".*" (Redis glob).
-//     - Final "**" → Pattern = prefix+".*", AlsoExact = prefix.
+//  5. Prefix = the literal segments rejoined per the namespace grammar
+//     (joinPrefix); the glob suffix keeps the key's namespace scoping:
+//     - "im.*"       → Pattern "im.*"
+//     - "acme:im.*"  → Pattern "acme:im.*"
+//     - "acme:*"     → Pattern "acme:*"
+//     - Final "**" additionally sets AlsoExact to the prefix ("acme:im.**"
+//       → AlsoExact "acme:im", covering the zero-segment case).
 func CompileInterest(key string) (CompiledInterest, error) {
 	if err := topics.ValidateTopic(key); err != nil {
 		return CompiledInterest{}, err
@@ -55,7 +59,7 @@ func CompileInterest(key string) (CompiledInterest, error) {
 		return CompiledInterest{Exact: key}, nil
 	}
 
-	segments := strings.Split(key, ".")
+	segments := topics.SplitSegments(key)
 	last := segments[len(segments)-1]
 	if last != "*" && last != "**" {
 		return CompiledInterest{}, ErrPatternNotRoutable
@@ -65,16 +69,35 @@ func CompileInterest(key string) (CompiledInterest, error) {
 			return CompiledInterest{}, ErrPatternNotRoutable
 		}
 	}
-	prefix := strings.Join(segments[:len(segments)-1], ".")
+	prefix, sep := joinPrefix(key, segments[:len(segments)-1])
 	if prefix == "" {
 		return CompiledInterest{}, ErrPatternNotRoutable
 	}
 
-	ci := CompiledInterest{Pattern: prefix + ".*"}
+	ci := CompiledInterest{Pattern: prefix + sep + "*"}
 	if last == "**" {
 		ci.AlsoExact = prefix
 	}
 	return ci, nil
+}
+
+// joinPrefix reassembles the literal prefix segments of a subscription key
+// and returns the delimiter that continues the compiled glob after the
+// prefix. Namespaced keys (exactly one ":" per the channel grammar) keep the
+// namespace at the head of the prefix: "acme:im.*" rejoins as "acme:im" and
+// continues with "." ("acme:im.*"), while a bare namespace prefix ("acme:*")
+// rejoins as "acme" and continues with ":" so the glob stays scoped to the
+// namespace ("acme:*"). Un-namespaced keys rejoin with "." as before.
+func joinPrefix(key string, prefixSegs []string) (prefix, sep string) {
+	const dot = "."
+	sep = dot
+	if !strings.Contains(key, topics.NSDelimiter) {
+		return strings.Join(prefixSegs, dot), sep
+	}
+	if len(prefixSegs) == 1 {
+		return prefixSegs[0], topics.NSDelimiter
+	}
+	return prefixSegs[0] + topics.NSDelimiter + strings.Join(prefixSegs[1:], dot), sep
 }
 
 // MatchAfterCompile reports whether a subscription key (exact channel or

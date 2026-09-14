@@ -855,7 +855,7 @@ func TestAdmin_DisconnectUsersAcrossNodes(t *testing.T) {
 	directory := redisbroker.NewSessionDirectory(redisCfg)
 	defer func() { _ = directory.Shutdown(ctx) }()
 	require.Eventually(t, func() bool {
-		ids, err := directory.ListUserSessions(ctx, userID)
+		ids, err := directory.ListUserSessions(ctx, "", userID)
 		if err != nil {
 			return false
 		}
@@ -866,9 +866,10 @@ func TestAdmin_DisconnectUsersAcrossNodes(t *testing.T) {
 	// resolved via the index + lease, then routed through the command bus.
 	handler := admin.NewAPIServiceHandler(nodeA)
 	resp, err := handler.Disconnect(ctx, &serverv2.DisconnectRequest{
-		Users:  []string{userID},
-		Code:   3009,
-		Reason: "cross-node user disconnect",
+		Namespace: "dev",
+		Users:     []string{userID},
+		Code:      3009,
+		Reason:    "cross-node user disconnect",
 	})
 	require.NoError(t, err)
 	require.NotNil(t, resp)
@@ -881,7 +882,7 @@ func TestAdmin_DisconnectUsersAcrossNodes(t *testing.T) {
 
 	// The user index is cleaned up by the lease delete on close.
 	require.Eventually(t, func() bool {
-		ids, err := directory.ListUserSessions(ctx, userID)
+		ids, err := directory.ListUserSessions(ctx, "", userID)
 		if err != nil {
 			return false
 		}
@@ -923,7 +924,7 @@ func TestClusterRedis_CrossUserResumeDeniedKeepsIndex(t *testing.T) {
 	directory := redisbroker.NewSessionDirectory(redisCfg)
 	defer func() { _ = directory.Shutdown(ctx) }()
 	require.Eventually(t, func() bool {
-		ids, err := directory.ListUserSessions(ctx, "user-old")
+		ids, err := directory.ListUserSessions(ctx, "", "user-old")
 		return err == nil && len(ids) == 1
 	}, 5*time.Second, 50*time.Millisecond)
 
@@ -951,10 +952,10 @@ func TestClusterRedis_CrossUserResumeDeniedKeepsIndex(t *testing.T) {
 	require.Equal(t, "user-old", lease.UserID)
 	require.False(t, oldTransport.isClosed(), "the owner's session must stay attached")
 
-	ids, err := directory.ListUserSessions(ctx, "user-old")
+	ids, err := directory.ListUserSessions(ctx, "", "user-old")
 	require.NoError(t, err)
 	require.Len(t, ids, 1)
-	ids, err = directory.ListUserSessions(ctx, "user-new")
+	ids, err = directory.ListUserSessions(ctx, "", "user-new")
 	require.NoError(t, err)
 	require.Empty(t, ids)
 }

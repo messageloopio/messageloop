@@ -99,6 +99,7 @@ server:
     ping_interval: "0s"         # 服务端主动 ping 间隔；0/空 = 不主动 ping（默认）
     ping_timeout: "3s"          # 服务端 ping 未应答判定；仅 ping_interval>0 时生效；空 = ping_interval
   rpc_timeout: "30s"
+  namespace: "dev"          # 静态命名空间；require_auth 关闭时必填
   limits:
     max_connections_per_user: 0
     max_subscriptions_per_client: 0
@@ -150,6 +151,7 @@ server:
 | `server.authorizer.rules[].allow_publish` | string[] | 未设置 | 允许发布的用户 ID 列表；语义同 `allow_subscribe`，判定对象是精确频道 |
 | `server.authorizer.rules[].allow_survey` | string[] | 未设置 | 允许发起客户端 Survey 的用户 ID 列表；**未设置 = 不打开 survey**（Survey 默认拒绝，与 subscribe/publish 的默认放行相反），即使 Effects.survey=true。Admin 无 `survey.bypass_gate` 时同样受此名单约束 |
 | `server.require_auth` | bool | `false` | 拒绝空 token 的连接（`config.go:32` 注释：Reject connections with empty token）。开启后：连接未携带 token 直接拒绝（`AUTH_REQUIRED`，`client.go:405-416`）；携带 token 但**没有**匹配 `$authenticate` 路由的代理时同样拒绝——非空 token 不得绕过认证（`client.go:389-404`）。实际认证总是由代理后端完成，见 [proxy 节](#proxy-节) |
+| `server.namespace` | string | 未设置 | 多租户命名空间（P1）：每个客户端可见 channel 必须位于会话所属命名空间下（`ns:topic`，见[《客户端协议参考》](../protocol.md) Channel Naming）。来源优先级：鉴权代理响应 `UserInfo.namespace` > 该静态值；**两者都为空且 `require_auth` 开启时 Connect 被拒**（`NAMESPACE_REQUIRED` + 3500），**`require_auth` 关闭时本字段必填**（Validate 强制，否则无 namespace 来源、fail-closed）。标识符规则：`[a-z0-9-]`、1-32 字符、以 `[a-z0-9]` 开头结尾。会话建立后所有跨命名空间 channel 操作被 `NAMESPACE_MISMATCH` 拒绝；resume 跨命名空间接管被拒（3500）。hub 连接上限、admin 按 user 寻址、集群 user 索引均以 (namespace, user) 为作用域 |
 | `server.presence.cluster_emit` | — | **已删除** | **PR-KA-B2 移除**：Occupancy 跨节点统一走 LiveBus 精确频道 + `CompileInterest`（见 [presence 跨节点](./04-cluster.md)）。写进 YAML（无论 true/false）都会让 `Validate()` 以 `cluster_emit is removed` 失败；`server.presence` 块现在为空（仅保留以兼容解析） |
 
 ### Authorizer 求值语义（PR-KA-A4 §5）

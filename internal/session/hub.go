@@ -166,8 +166,22 @@ type connShard struct {
 	mu sync.RWMutex
 	// match client ID with actual client connection.
 	clients map[string]*Session
-	// registry to hold active client connections grouped by user.
+	// registry to hold active client connections grouped by (namespace, user)
+	// — see userKey.
 	users map[string]map[string]struct{}
+}
+
+// userKey builds the connShard users-map key for a (namespace, user) pair.
+// Namespacing the key makes every per-user registry namespace-scoped: the
+// same user ID under two namespaces never shares connection slots or admin
+// fan-out targets, and the NUL separator keeps the pair unambiguous.
+func userKey(namespace, userID string) string {
+	return namespace + "\x00" + userID
+}
+
+// sessionUserKey is userKey for a session's current identity.
+func sessionUserKey(c *Session) string {
+	return userKey(c.Namespace(), c.UserID())
 }
 
 func newConnShard() *connShard {
@@ -177,14 +191,15 @@ func newConnShard() *connShard {
 	}
 }
 
-// addWithLimit adds a connection into the registry, enforcing per-user connection limits.
-// Returns DisconnectConnectionLimit if maxPerUser > 0 and the limit is reached.
+// addWithLimit adds a connection into the registry, enforcing per-(namespace,
+// user) connection limits. Returns DisconnectConnectionLimit if maxPerUser > 0
+// and the limit is reached.
 func (h *connShard) addWithLimit(c *Session, maxPerUser int) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	uid := c.SessionID()
-	user := c.UserID()
+	user := sessionUserKey(c)
 
 	if maxPerUser > 0 {
 		if sessions, ok := h.users[user]; ok && len(sessions) >= maxPerUser {
@@ -212,7 +227,7 @@ func (h *connShard) remove(sessionID string) {
 	}
 	delete(h.clients, sessionID)
 
-	user := client.UserID()
+	user := sessionUserKey(client)
 	if users, ok := h.users[user]; ok {
 		delete(users, sessionID)
 		if len(users) == 0 {
@@ -335,7 +350,7 @@ func (h *Hub) Add(c *Session) error {
 	// update is serialized under h.mu.
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	shard := h.connShards[index(c.UserID(), numHubShards)]
+	shard := h.connShards[index(sessionUserKey(c), numHubShards)]
 	if err := shard.addWithLimit(c, h.maxConnsPerUser); err != nil {
 		return err
 	}
@@ -664,8 +679,8 @@ func (h *Hub) RemoveSessionIfMatches(sessionID string, c *Session) bool {
 	delete(h.sessions, sessionID)
 
 	// Also remove from connShards
-	userID := session.UserID()
-	h.connShards[index(userID, numHubShards)].remove(sessionID)
+	userKey := sessionUserKey(session)
+	h.connShards[index(userKey, numHubShards)].remove(sessionID)
 	return true
 }
 
@@ -804,19 +819,20 @@ func (h *Hub) LookupSession(sessionID string) *Session {
 }
 
 // SessionsByUser returns a copy of all local client sessions registered under
-// userID, sorted by session ID. An empty userID always returns an empty slice
-// even when the per-user registry contains anonymous connections under the
-// empty key: anonymous sessions are never addressable by the user-based admin
-// API.
-func (h *Hub) SessionsByUser(userID string) []*Session {
+// (namespace, userID), sorted by session ID. An empty userID always returns an
+// empty slice even when the per-user registry contains anonymous connections
+// under the empty key: anonymous sessions are never addressable by the
+// user-based admin API.
+func (h *Hub) SessionsByUser(namespace, userID string) []*Session {
 	if userID == "" {
 		return nil
 	}
-	shard := h.connShards[index(userID, numHubShards)]
+	key := userKey(namespace, userID)
+	shard := h.connShards[index(key, numHubShards)]
 	shard.mu.RLock()
 	defer shard.mu.RUnlock()
 
-	sessionIDs, ok := shard.users[userID]
+	sessionIDs, ok := shard.users[key]
 	if !ok {
 		return nil
 	}
@@ -890,27 +906,28 @@ func (h *Hub) GetActiveChannels() []ChannelInfo {
 }
 
 // PrepareSessionUser atomically moves a session's connShard registration to a
-// new user, enforcing maxConnsPerUser for the target user. It backs the
-// cross-user local resume: the limit check and the migration run under the
-// shard lock (matching addWithLimit) so a concurrent AddClient cannot claim
-// the last slot in between (TOCTOU fix). The sessions map entry is untouched:
-// the session pointer stays stable. A same-user call is a no-op. On failure
-// nothing is mutated, so the old session stays fully Attached.
-func (h *Hub) PrepareSessionUser(sessionID string, c *Session, newUser string) error {
+// new (namespace, user) identity, enforcing maxConnsPerUser for the target.
+// It backs the cross-user local resume: the limit check and the migration run
+// under the shard lock (matching addWithLimit) so a concurrent AddClient
+// cannot claim the last slot in between (TOCTOU fix). The sessions map entry
+// is untouched: the session pointer stays stable. A same-key call is a no-op.
+// On failure nothing is mutated, so the old session stays fully Attached.
+func (h *Hub) PrepareSessionUser(sessionID string, c *Session, newNamespace, newUser string) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	oldUser := c.UserID()
-	if oldUser == newUser {
+	oldUser := sessionUserKey(c)
+	newUserKey := userKey(newNamespace, newUser)
+	if oldUser == newUserKey {
 		return nil
 	}
 	oldIdx := index(oldUser, numHubShards)
-	newIdx := index(newUser, numHubShards)
+	newIdx := index(newUserKey, numHubShards)
 	if oldIdx == newIdx {
 		shard := h.connShards[oldIdx]
 		shard.mu.Lock()
 		defer shard.mu.Unlock()
-		if h.maxConnsPerUser > 0 && len(shard.users[newUser]) >= h.maxConnsPerUser {
+		if h.maxConnsPerUser > 0 && len(shard.users[newUserKey]) >= h.maxConnsPerUser {
 			return DisconnectConnectionLimit
 		}
 		if users, ok := shard.users[oldUser]; ok {
@@ -920,10 +937,10 @@ func (h *Hub) PrepareSessionUser(sessionID string, c *Session, newUser string) e
 			}
 		}
 		shard.clients[sessionID] = c
-		if _, ok := shard.users[newUser]; !ok {
-			shard.users[newUser] = make(map[string]struct{})
+		if _, ok := shard.users[newUserKey]; !ok {
+			shard.users[newUserKey] = make(map[string]struct{})
 		}
-		shard.users[newUser][sessionID] = struct{}{}
+		shard.users[newUserKey][sessionID] = struct{}{}
 		return nil
 	}
 
@@ -931,7 +948,7 @@ func (h *Hub) PrepareSessionUser(sessionID string, c *Session, newUser string) e
 	newShard := h.connShards[newIdx]
 	newShard.mu.Lock()
 	defer newShard.mu.Unlock()
-	if h.maxConnsPerUser > 0 && len(newShard.users[newUser]) >= h.maxConnsPerUser {
+	if h.maxConnsPerUser > 0 && len(newShard.users[newUserKey]) >= h.maxConnsPerUser {
 		return DisconnectConnectionLimit
 	}
 	oldShard := h.connShards[oldIdx]
@@ -945,9 +962,9 @@ func (h *Hub) PrepareSessionUser(sessionID string, c *Session, newUser string) e
 	}
 	oldShard.mu.Unlock()
 	newShard.clients[sessionID] = c
-	if _, ok := newShard.users[newUser]; !ok {
-		newShard.users[newUser] = make(map[string]struct{})
+	if _, ok := newShard.users[newUserKey]; !ok {
+		newShard.users[newUserKey] = make(map[string]struct{})
 	}
-	newShard.users[newUser][sessionID] = struct{}{}
+	newShard.users[newUserKey][sessionID] = struct{}{}
 	return nil
 }

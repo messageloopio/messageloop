@@ -93,7 +93,14 @@ type Server struct {
 	RPCTimeout  string     `yaml:"rpc_timeout" json:"rpc_timeout" mapstructure:"rpc_timeout"` // default: "30s"
 	Limits      Limits     `yaml:"limits" json:"limits" mapstructure:"limits"`
 	RequireAuth bool       `yaml:"require_auth" json:"require_auth" mapstructure:"require_auth"` // Reject connections with empty token
-	Presence    Presence   `yaml:"presence" json:"presence" mapstructure:"presence"`
+	// Namespace is the static namespace fallback for sessions whose auth
+	// proxy does not return one (proxy.UserInfo.namespace). Multi-tenant
+	// isolation is enforced at the session boundary: every client-visible
+	// channel must live under the session's namespace ("ns:topic"). When
+	// require_auth is disabled there is no auth proxy to supply a namespace,
+	// so a non-empty server.namespace is required.
+	Namespace string   `yaml:"namespace" json:"namespace" mapstructure:"namespace"`
+	Presence  Presence `yaml:"presence" json:"presence" mapstructure:"presence"`
 	// Authorizer is the single authorization table (PR-KA-A4 §6): pattern →
 	// allow lists / deny_all / Effects. It replaces the old server.acl and
 	// server.channels blocks.
@@ -572,6 +579,18 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	// Namespace isolation: the static fallback namespace must be a valid
+	// namespace identifier, and a deployment without require_auth has no auth
+	// proxy to return one per connection — so the static namespace is
+	// mandatory there (fail-closed: no namespace, no channels).
+	if c.Server.Namespace != "" {
+		if err := topics.ValidateNamespace(c.Server.Namespace); err != nil {
+			return fmt.Errorf("server.namespace %q: %w", c.Server.Namespace, err)
+		}
+	} else if !c.Server.RequireAuth {
+		return fmt.Errorf("server.namespace is required when server.require_auth is disabled (no auth proxy to supply a namespace)")
+	}
+
 	// The admin gRPC listener is always constructed (prepareGRPCServers); an
 	// empty address would only fail late in startup, after the cluster and
 	// broker have already been wired. The check runs last so the more
@@ -592,7 +611,7 @@ func validateAuthorizerPattern(pattern string) error {
 	if !strings.Contains(pattern, "*") {
 		return nil
 	}
-	segments := strings.Split(pattern, ".")
+	segments := topics.SplitSegments(pattern)
 	last := segments[len(segments)-1]
 	if last != "*" && last != "**" {
 		return fmt.Errorf("wildcard must be the final segment (last segment must be * or **)")

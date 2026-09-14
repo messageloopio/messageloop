@@ -69,6 +69,35 @@ func TestCompileInterest_AlsoExactAndPattern(t *testing.T) {
 	require.Empty(t, ci.AlsoExact)
 }
 
+// TestCompileInterest_Namespaced pins the namespace grammar: a namespaced
+// key keeps the namespace at the head of the compiled glob, and a
+// bare-namespace wildcard compiles with the namespace delimiter so the
+// pattern stays scoped to the namespace.
+func TestCompileInterest_Namespaced(t *testing.T) {
+	tests := []struct {
+		key  string
+		want CompiledInterest
+	}{
+		{key: "acme:chat.room1", want: CompiledInterest{Exact: "acme:chat.room1"}},
+		{key: "acme:im.room.*", want: CompiledInterest{Pattern: "acme:im.room.*"}},
+		{key: "acme:im.*", want: CompiledInterest{Pattern: "acme:im.*"}},
+		{key: "acme:*", want: CompiledInterest{Pattern: "acme:*"}},
+		{key: "acme:im.**", want: CompiledInterest{Pattern: "acme:im.*", AlsoExact: "acme:im"}},
+		{key: "acme:**", want: CompiledInterest{Pattern: "acme:*", AlsoExact: "acme"}},
+	}
+	for _, tt := range tests {
+		got, err := CompileInterest(tt.key)
+		require.NoErrorf(t, err, "key %q", tt.key)
+		require.Equalf(t, tt.want, got, "key %q", tt.key)
+	}
+
+	// Cross-namespace over-match from the Redis glob is discarded locally.
+	require.True(t, MatchAfterCompile("acme:im.*", "acme:im.room1"))
+	require.False(t, MatchAfterCompile("acme:im.*", "other:im.room1"))
+	require.False(t, MatchAfterCompile("acme:*", "acme:im.room1"), "* matches exactly one segment")
+	require.True(t, MatchAfterCompile("acme:**", "acme"))
+}
+
 // TestMatchAfterCompile verifies segment semantics: exact keys match
 // themselves only, "*" matches exactly one segment, "**" matches zero or
 // more, and the Redis glob over-match ("im.room.*" covering "im.room.a.b")

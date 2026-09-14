@@ -18,9 +18,13 @@ func validTransport() Transport {
 	}
 }
 
-// validServer supplies the always-required admin gRPC address and token.
+// validServer supplies the always-required admin gRPC address and token plus
+// the static namespace (require_auth is off, so server.namespace is mandatory).
 func validServer() Server {
-	return Server{GRPCAdmin: GRPCAdmin{Addr: "127.0.0.1:9091", AuthToken: "test-admin-token"}}
+	return Server{
+		GRPCAdmin: GRPCAdmin{Addr: "127.0.0.1:9091", AuthToken: "test-admin-token"},
+		Namespace: "dev",
+	}
 }
 
 func TestValidate_MinimalValid(t *testing.T) {
@@ -220,6 +224,7 @@ func TestValidate_AdminRequiresAuthToken(t *testing.T) {
 		Transport: validTransport(),
 		Server: Server{
 			GRPCAdmin: GRPCAdmin{Addr: "127.0.0.1:9091"},
+			Namespace: "dev",
 		},
 	}
 	assert.Error(t, cfg.Validate(), "empty admin auth token must fail validation")
@@ -484,6 +489,7 @@ func TestValidate_AuthorizerValid(t *testing.T) {
 				"user.fanout", "subscribe.any", "presence.large_snapshot",
 				"survey.bypass_gate", "pattern.global",
 			}},
+			Namespace: "dev",
 		},
 	}
 	assert.NoError(t, cfg.Validate())
@@ -504,6 +510,7 @@ func TestValidate_RejectsServerACL(t *testing.T) {
 		Transport: validTransport(),
 		Server: Server{
 			GRPCAdmin: validServer().GRPCAdmin,
+			Namespace: "dev",
 			Authorizer: AuthorizerConfig{
 				Rules: []AuthorizerRule{
 					{Pattern: "chat.**", AllowSurvey: []string{"*"}, ChannelPolicySpec: ChannelPolicySpec{Survey: boolPtr(true)}},
@@ -557,6 +564,7 @@ func TestValidate_CapabilitiesEmptyAllowed(t *testing.T) {
 		Transport: validTransport(),
 		Server: Server{
 			GRPCAdmin: GRPCAdmin{Addr: "127.0.0.1:9091", AuthToken: "test-admin-token", Capabilities: []string{}},
+			Namespace: "dev",
 		},
 	}
 	assert.NoError(t, cfg.Validate())

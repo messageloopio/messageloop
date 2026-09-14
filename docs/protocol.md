@@ -505,6 +505,8 @@ Common error codes (this table mirrors the `Error.code` comment in `protocol/sha
 | --- | --- | --- |
 | `AUTH_REQUIRED` | `auth_error` | Authentication required but no token (or no auth proxy) |
 | `AUTH_ERROR` | `auth_error` | Authentication failed (bad token, or auth proxy error) |
+| `NAMESPACE_REQUIRED` | `auth_error` | No namespace resolved at connect: the auth proxy returned none and no static `server.namespace` is configured; followed by disconnect 3500 |
+| `NAMESPACE_MISMATCH` | `acl_error` | Channel is outside the session's namespace (subscribe/publish/RPC/survey/presence) |
 | `VERSION_UNSUPPORTED` | `version_error` | Connect `version` generation is not supported (only generation 2 is accepted); followed by disconnect 3514 |
 | `BAD_REQUEST` | `client_error` / `request_error` | Frame could not be decoded (`client_error`), or the request itself is invalid, e.g. a malformed topic or a presence-query channel (`request_error`) |
 | `PERMISSION_DENIED` | `acl_error` | Operation blocked by ACL rule |
@@ -547,11 +549,14 @@ When the server closes a connection, it sends a disconnect with a numeric code. 
 
 ## Channel Naming
 
-- Channels use `.` as the hierarchy delimiter.
-- Channel names are non-empty dot-separated lists of non-empty segments: `a.` and `..b` are invalid and rejected at subscription and publish time.
-- Wildcard subscriptions use `*` to match a single level (e.g., `chat.*` matches `chat.general` but not `chat.rooms.1`).
-- A trailing `**` matches zero or more levels (MQTT-style suffix wildcard): `chat.**` matches `chat`, `chat.general` and `chat.rooms.1`, and a bare `**` matches every channel. `**` is only valid as the final segment — patterns like `a.**.b` or `a**b` are rejected.
-- Channel names are case-sensitive.
+- Every client-visible channel is **namespaced**: `namespace:topic` (e.g. `acme:chat.room1`). The namespace is resolved server-side at connect time — the auth proxy response (`UserInfo.namespace`) wins, falling back to the static `server.namespace`; the client never declares it. A connect that resolves no namespace is rejected (`NAMESPACE_REQUIRED`, disconnect 3500).
+- Both `:` and `.` separate matching segments: `acme:chat.room1` is the three segments `acme`, `chat`, `room1`. Namespace-scoped wildcards therefore work naturally: `acme:*` matches `acme:chat` (exactly one segment under the namespace), `acme:im.**` matches `acme:im` and `acme:im.a.b`.
+- Exactly one `:` is allowed; the namespace identifier is 1-32 characters from `[a-z0-9-]`, starting and ending with `[a-z0-9]`.
+- Topic segments are non-empty; `a:` and `a:..b` are invalid and rejected at subscription and publish time.
+- Wildcard subscriptions use `*` to match a single level (e.g., `acme:chat.*` matches `acme:chat.general` but not `acme:chat.rooms.1`).
+- A trailing `**` matches zero or more levels (MQTT-style suffix wildcard): `acme:chat.**` matches `acme:chat`, `acme:chat.general` and `acme:chat.rooms.1`. `**` is only valid as the final segment — patterns like `a.**.b` or `a**b` are rejected.
+- Channels are case-sensitive.
+- A session never leaves its namespace: subscribe, publish, RPC, survey and presence-query channels outside the session's namespace are rejected with a `NAMESPACE_MISMATCH` top-level error (`acl_error`) — no disconnect, no subscription revocation.
 
 ## Presence
 

@@ -77,14 +77,17 @@ type SessionDirectory interface {
 	PutSessionSnapshot(ctx context.Context, snapshot *ClusterSessionSnapshot, ttl time.Duration) error
 	GetSessionSnapshot(ctx context.Context, sessionID string) (*ClusterSessionSnapshot, error)
 	DeleteSessionSnapshot(ctx context.Context, sessionID string) error
-	// AddUserSession records that sessionID currently belongs to userID, with
-	// the same TTL as the session lease. Empty user IDs never enter the index.
-	AddUserSession(ctx context.Context, userID, sessionID string, ttl time.Duration) error
-	// RemoveUserSession drops a session's membership from a user's index.
-	RemoveUserSession(ctx context.Context, userID, sessionID string) error
-	// ListUserSessions returns the indexed session IDs of userID. The result
-	// is a hint: callers must verify each session's lease before acting.
-	ListUserSessions(ctx context.Context, userID string) ([]string, error)
+	// AddUserSession records that sessionID currently belongs to (namespace,
+	// userID), with the same TTL as the session lease. Empty user IDs never
+	// enter the index.
+	AddUserSession(ctx context.Context, namespace, userID, sessionID string, ttl time.Duration) error
+	// RemoveUserSession drops a session's membership from a (namespace, user)
+	// index.
+	RemoveUserSession(ctx context.Context, namespace, userID, sessionID string) error
+	// ListUserSessions returns the indexed session IDs of (namespace, userID).
+	// The result is a hint: callers must verify each session's lease before
+	// acting.
+	ListUserSessions(ctx context.Context, namespace, userID string) ([]string, error)
 }
 
 // ClusterCommandBus delivers cluster commands and command results between node incarnations.

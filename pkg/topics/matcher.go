@@ -15,6 +15,23 @@ const (
 	empty         = ""
 )
 
+// SplitSegments splits a topic, pattern or channel into its segments. Both
+// delimiter (".") and NSDelimiter (":") separate segments, so the namespaced
+// channel "acme:chat.room1" is the three segments [acme, chat, room1].
+// Unlike strings.FieldsFunc, consecutive delimiters yield empty segments,
+// preserving the invalid-topic detection in validTopic and matchCriteria.
+func SplitSegments(s string) []string {
+	segs := make([]string, 0, strings.Count(s, delimiter)+strings.Count(s, NSDelimiter)+1)
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == delimiter[0] || s[i] == NSDelimiter[0] {
+			segs = append(segs, s[start:i])
+			start = i + 1
+		}
+	}
+	return append(segs, s[start:])
+}
+
 // ErrBadTopic is returned when a topic is rejected: it is empty, contains
 // explicit empty segments (e.g. "a.", ".a", "a..b"), contains "**" outside of
 // the final segment (e.g. "a.**.b", "a**b"), or does not fit within the
@@ -46,9 +63,9 @@ type Subscription struct {
 
 // Matcher contains topic subscriptions and performs matches on them.
 //
-// Topics are dot-separated lists of non-empty segments (e.g. "forex.eur",
-// "*", "a.b.c"). The single segment "*" is a wildcard matching exactly one
-// segment. The final segment "**" is a multi-segment wildcard matching zero
+// Topics are lists of non-empty segments separated by "." or ":" (e.g.
+// "forex.eur", "acme:chat.room1", "*", "a.b.c"). The single segment "*" is a
+// wildcard matching exactly one segment. The final segment "**" is a multi-segment wildcard matching zero
 // or more segments (MQTT-style suffix wildcard): "a.**" matches "a", "a.b"
 // and "a.b.c", and a bare "**" matches every topic. "**" anywhere else
 // (middle position like "a.**.b" or embedded like "a**b") is rejected. The
@@ -81,10 +98,11 @@ type Matcher interface {
 }
 
 // ValidateTopic reports whether topic is a valid channel or subscription
-// pattern: a non-empty dot-separated list of non-empty segments with "**"
-// allowed only as the final segment. It is the single validation entry point
-// shared by the matchers, the hub's exact-subscription path and the broker
-// publish paths.
+// pattern: a non-empty list of non-empty segments separated by "." or ":"
+// with "**" allowed only as the final segment. It is the single structural
+// validation entry point shared by the matchers, the hub's exact-subscription
+// path and the broker publish paths; the namespace grammar (ValidateChannel)
+// layers on top of it at the session boundary.
 func ValidateTopic(topic string) error {
 	if !validTopic(topic) {
 		return ErrBadTopic
@@ -92,12 +110,12 @@ func ValidateTopic(topic string) error {
 	return nil
 }
 
-// validTopic reports whether topic is a non-empty dot-separated list of
-// non-empty segments with "**" allowed only as the final segment. "**"
+// validTopic reports whether topic is a non-empty list of non-empty segments
+// separated by "." or ":" with "**" allowed only as the final segment. "**"
 // embedded inside a segment ("a**b") is rejected; a single "*" embedded in a
 // segment ("a*b") keeps its literal-match semantics and is allowed.
 func validTopic(topic string) bool {
-	constituents := strings.Split(topic, delimiter)
+	constituents := SplitSegments(topic)
 	last := len(constituents) - 1
 	for i, constituent := range constituents {
 		if constituent == empty {
@@ -135,8 +153,8 @@ func Match(pattern, topic string) bool {
 // first segments and the rest of the topic is absorbed (zero or more
 // segments). A topic with explicit empty segments never matches.
 func matchCriteria(pattern, topic string) bool {
-	patternConstituents := strings.Split(pattern, delimiter)
-	topicConstituents := strings.Split(topic, delimiter)
+	patternConstituents := SplitSegments(pattern)
+	topicConstituents := SplitSegments(topic)
 
 	for _, constituent := range topicConstituents {
 		if constituent == empty {

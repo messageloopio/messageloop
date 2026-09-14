@@ -34,7 +34,9 @@ func (c *capturingTransport) getMessage(i int) []byte {
 // a fixed user ID, or returns the configured error.
 type connectAuthProxyStub struct {
 	userID string
-	err    error
+	// namespace, when non-empty, is returned in the auth response.
+	namespace string
+	err       error
 }
 
 func (m *connectAuthProxyStub) RPC(context.Context, *proxy.RPCProxyRequest) (*proxy.RPCProxyResponse, error) {
@@ -45,7 +47,7 @@ func (m *connectAuthProxyStub) Authenticate(context.Context, *proxy.Authenticate
 	if m.err != nil {
 		return nil, m.err
 	}
-	return &proxy.AuthenticateProxyResponse{UserInfo: &proxy.UserInfo{ID: m.userID}}, nil
+	return &proxy.AuthenticateProxyResponse{UserInfo: &proxy.UserInfo{ID: m.userID, Namespace: m.namespace}}, nil
 }
 
 func (m *connectAuthProxyStub) SubscribeAcl(context.Context, *proxy.SubscribeAclProxyRequest) (*proxy.SubscribeAclProxyResponse, error) {
@@ -426,7 +428,7 @@ func TestClientSession_HandleMessage_Connect_SubscriptionLimit(t *testing.T) {
 
 func TestClientSession_HandleMessage_Connect_SubscriptionLimitWithResume(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode(&config.Server{RequireAuth: true, Limits: config.Limits{MaxSubscriptionsPerClient: 3}})
+	node := NewNode(&config.Server{RequireAuth: true, Namespace: "dev", Limits: config.Limits{MaxSubscriptionsPerClient: 3}})
 	authProxy := &connectAuthProxyStub{userID: "user-1"}
 	require.NoError(t, node.AddProxy(authProxy, "", SystemMethodAuthenticate))
 	transport := &capturingTransport{}
@@ -449,8 +451,8 @@ func TestClientSession_HandleMessage_Connect_SubscriptionLimitWithResume(t *test
 		Envelope: &clientpb.InboundMessage_Subscribe{
 			Subscribe: &clientpb.Subscribe{
 				Subscriptions: []*clientpb.Subscription{
-					{Channel: "ch1"},
-					{Channel: "ch2"},
+					{Channel: "dev:ch1"},
+					{Channel: "dev:ch2"},
 				},
 			},
 		},
@@ -472,8 +474,8 @@ func TestClientSession_HandleMessage_Connect_SubscriptionLimitWithResume(t *test
 				Token:     "t",
 				SessionId: sessionID,
 				Subscriptions: []*clientpb.Subscription{
-					{Channel: "ch3"},
-					{Channel: "ch4"},
+					{Channel: "dev:ch3"},
+					{Channel: "dev:ch4"},
 				},
 			},
 		},
@@ -723,7 +725,7 @@ func TestClientSession_HandleMessage_Connect_ResumeRemoteSendsTakeover(t *testin
 			SessionID:     "sess-remote",
 			UserID:        "user-1",
 			ClientID:      "client-1",
-			Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "news"}},
+			Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "dev:news"}},
 		},
 	}
 	bus := &fakeClusterCommandBus{result: &ClusterCommandResult{Status: ClusterCommandStatusSucceeded}}
@@ -734,7 +736,7 @@ func TestClientSession_HandleMessage_Connect_ResumeRemoteSendsTakeover(t *testin
 	})
 	require.NoError(t, err)
 
-	node := NewNode(&config.Server{RequireAuth: true})
+	node := NewNode(&config.Server{RequireAuth: true, Namespace: "dev"})
 	node.SetCluster(runtime)
 
 	authProxy := &connectAuthProxyStub{userID: "user-1"}
@@ -761,7 +763,7 @@ func TestClientSession_HandleMessage_Connect_ResumeRemoteSendsTakeover(t *testin
 	assert.Equal(t, uint64(7), bus.commands[0].LeaseVersion)
 	assert.Equal(t, "user-1", client.UserID())
 	assert.Equal(t, "client-1", client.ClientID())
-	assert.True(t, client.HasSubscription("news"))
+	assert.True(t, client.HasSubscription("dev:news"))
 }
 
 // --- P1-2: deleteClusterSessionState ownership check ---
@@ -1251,7 +1253,7 @@ func TestClientSession_AnonymousResumeRejected(t *testing.T) {
 // anonymize) that session.
 func TestClientSession_ResumeRejectedWhenAuthReturnsEmptyUser(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode(&config.Server{RequireAuth: true})
+	node := NewNode(&config.Server{RequireAuth: true, Namespace: "dev"})
 	authProxy := &connectAuthProxyStub{userID: "user-1"}
 	require.NoError(t, node.AddProxy(authProxy, "", SystemMethodAuthenticate))
 
@@ -1297,7 +1299,7 @@ func TestClientSession_LocalResume_MetricsBalanced(t *testing.T) {
 	ctx := context.Background()
 	reg := prometheus.NewRegistry()
 	metrics := NewMetrics(reg)
-	node := NewNode(&config.Server{RequireAuth: true})
+	node := NewNode(&config.Server{RequireAuth: true, Namespace: "dev"})
 	node.SetMetrics(metrics)
 	authProxy := &connectAuthProxyStub{userID: "user-1"}
 	require.NoError(t, node.AddProxy(authProxy, "", SystemMethodAuthenticate))
@@ -1573,7 +1575,7 @@ func TestClient_Connect_AddClientClusterSyncFailureDisconnects(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	node := NewNode(&config.Server{RequireAuth: true})
+	node := NewNode(&config.Server{RequireAuth: true, Namespace: "dev"})
 	node.SetCluster(runtime)
 	authProxy := &connectAuthProxyStub{userID: "user-1"}
 	require.NoError(t, node.AddProxy(authProxy, "", SystemMethodAuthenticate))
@@ -1611,7 +1613,7 @@ func TestClient_Connect_RemoteResumeFailureDisconnects(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	node := NewNode(&config.Server{RequireAuth: true})
+	node := NewNode(&config.Server{RequireAuth: true, Namespace: "dev"})
 	node.SetCluster(runtime)
 	authProxy := &connectAuthProxyStub{userID: "user-1"}
 	require.NoError(t, node.AddProxy(authProxy, "", SystemMethodAuthenticate))
@@ -1649,7 +1651,7 @@ func (m *userPerClientAuthProxy) Authenticate(_ context.Context, req *proxy.Auth
 // exist because there is no replaced object.
 func TestClient_Connect_ResumeAtUserLimit_NoZombie(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode(&config.Server{RequireAuth: true, Limits: config.Limits{MaxConnectionsPerUser: 1}})
+	node := NewNode(&config.Server{RequireAuth: true, Namespace: "dev", Limits: config.Limits{MaxConnectionsPerUser: 1}})
 	authProxy := &userPerClientAuthProxy{}
 	require.NoError(t, node.AddProxy(authProxy, "", SystemMethodAuthenticate))
 
@@ -1669,12 +1671,12 @@ func TestClient_Connect_ResumeAtUserLimit_NoZombie(t *testing.T) {
 		Id: "msg-a2",
 		Envelope: &clientpb.InboundMessage_Subscribe{
 			Subscribe: &clientpb.Subscribe{
-				Subscriptions: []*clientpb.Subscription{{Channel: "zombie-ch"}},
+				Subscriptions: []*clientpb.Subscription{{Channel: "dev:zombie-ch"}},
 			},
 		},
 	}
 	require.NoError(t, clientA.HandleMessage(ctx, subA))
-	require.Equal(t, 1, node.Hub().NumSubscribers("zombie-ch"))
+	require.Equal(t, 1, node.Hub().NumSubscribers("dev:zombie-ch"))
 
 	// B (user-b) occupies the only slot of its user.
 	transportB := &capturingTransport{}
@@ -1708,8 +1710,8 @@ func TestClient_Connect_ResumeAtUserLimit_NoZombie(t *testing.T) {
 	assert.Same(t, clientA, node.Hub().LookupSession(sessionA), "the resumed session pointer must be stable")
 	// ...the subscription still points at the same session (no shard scan,
 	// no matcher rebuild)...
-	assert.Equal(t, 1, node.Hub().NumSubscribers("zombie-ch"))
-	sub, ok := node.Hub().LookupSubscriber("zombie-ch", clientA)
+	assert.Equal(t, 1, node.Hub().NumSubscribers("dev:zombie-ch"))
+	sub, ok := node.Hub().LookupSubscriber("dev:zombie-ch", clientA)
 	require.True(t, ok)
 	assert.Same(t, clientA, sub.Session)
 	// ...the new connection's writes go through the session's writer to the
@@ -1754,7 +1756,7 @@ func TestClient_Connect_ResumeAtUserLimit_KeepsOldSessionAttached(t *testing.T) 
 	})
 	require.NoError(t, err)
 
-	node := NewNode(&config.Server{RequireAuth: true, Limits: config.Limits{MaxConnectionsPerUser: 1}})
+	node := NewNode(&config.Server{RequireAuth: true, Namespace: "dev", Limits: config.Limits{MaxConnectionsPerUser: 1}})
 	node.SetCluster(runtime)
 	authProxy := &userPerClientAuthProxy{}
 	require.NoError(t, node.AddProxy(authProxy, "", SystemMethodAuthenticate))
@@ -1775,13 +1777,13 @@ func TestClient_Connect_ResumeAtUserLimit_KeepsOldSessionAttached(t *testing.T) 
 		Id: "msg-a2",
 		Envelope: &clientpb.InboundMessage_Subscribe{
 			Subscribe: &clientpb.Subscribe{
-				Subscriptions: []*clientpb.Subscription{{Channel: "zombie-ch"}},
+				Subscriptions: []*clientpb.Subscription{{Channel: "dev:zombie-ch"}},
 			},
 		},
 	}
 	require.NoError(t, clientA.HandleMessage(ctx, subA))
-	require.Equal(t, 1, node.Hub().NumSubscribers("zombie-ch"))
-	present, err := node.presence.Get(ctx, "zombie-ch")
+	require.Equal(t, 1, node.Hub().NumSubscribers("dev:zombie-ch"))
+	present, err := node.presence.Get(ctx, "dev:zombie-ch")
 	require.NoError(t, err)
 	require.Contains(t, present, sessionA, "the old session must own presence before the failed resume")
 
@@ -1821,8 +1823,8 @@ func TestClient_Connect_ResumeAtUserLimit_KeepsOldSessionAttached(t *testing.T) 
 	// subscription, presence, cluster state and an open transport.
 	assert.Same(t, clientA, node.Hub().LookupSession(sessionA), "the old session must stay in the hub")
 	assert.Equal(t, SessionAttached, clientA.State(), "the old session must stay Attached")
-	assert.Equal(t, 1, node.Hub().NumSubscribers("zombie-ch"), "the old session's subscription must stay")
-	present, err = node.presence.Get(ctx, "zombie-ch")
+	assert.Equal(t, 1, node.Hub().NumSubscribers("dev:zombie-ch"), "the old session's subscription must stay")
+	present, err = node.presence.Get(ctx, "dev:zombie-ch")
 	require.NoError(t, err)
 	assert.Contains(t, present, sessionA, "the old session's presence must stay")
 	assert.False(t, transportA.isClosed(), "the old session's transport must stay open")
@@ -1914,7 +1916,7 @@ func TestClient_Close_ConcurrentSubscribe_NoLeak(t *testing.T) {
 
 func TestClient_ClientInfo_ConcurrentWithConnect(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode(&config.Server{RequireAuth: true})
+	node := NewNode(&config.Server{RequireAuth: true, Namespace: "dev"})
 	authProxy := &connectAuthProxyStub{userID: "user-1"}
 	require.NoError(t, node.AddProxy(authProxy, "", SystemMethodAuthenticate))
 	transport := &capturingTransport{}
@@ -2073,7 +2075,7 @@ func (m *recordingAuthProxy) Authenticate(ctx context.Context, req *proxy.Authen
 
 func TestClient_Connect_AuthProxyReceivesServerSessionID(t *testing.T) {
 	ctx := context.Background()
-	node := NewNode(&config.Server{RequireAuth: true})
+	node := NewNode(&config.Server{RequireAuth: true, Namespace: "dev"})
 	authProxy := &recordingAuthProxy{connectAuthProxyStub: connectAuthProxyStub{userID: "user-1"}}
 	require.NoError(t, node.AddProxy(authProxy, "", SystemMethodAuthenticate))
 

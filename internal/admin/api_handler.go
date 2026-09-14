@@ -53,11 +53,16 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverv2.PublishRe
 
 	// Empty user IDs inside destination.users are a client error: reject the
 	// whole request before any scanning happens (anonymous connections are
-	// never addressable by the user-based API).
+	// never addressable by the user-based API). A user expansion also needs a
+	// namespace: sessions are scoped per namespace.
 	for _, pub := range req.Publications {
-		for _, userID := range pub.GetDestination().GetUsers() {
+		dest := pub.GetDestination()
+		for _, userID := range dest.GetUsers() {
 			if userID == "" {
 				return nil, status.Errorf(codes.InvalidArgument, "destination.users must not contain an empty user_id (publication %q)", pub.GetId())
+			}
+			if dest.GetNamespace() == "" {
+				return nil, status.Errorf(codes.InvalidArgument, "destination.namespace is required when destination.users is set (publication %q)", pub.GetId())
 			}
 		}
 	}
@@ -89,7 +94,7 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverv2.PublishRe
 
 		// Session-based publication: explicit sessions unioned (deduplicated)
 		// with every user's expanded sessions.
-		for _, sessionID := range h.unionSessions(ctx, dest.Sessions, dest.Users, "publish") {
+		for _, sessionID := range h.unionSessions(ctx, dest.Sessions, dest.Users, dest.GetNamespace(), "publish") {
 			attempted++
 			// The admin wire payload is already shared.v2 — the same shape
 			// the client.v2 session consumes, so it passes through directly.
@@ -252,10 +257,13 @@ func (h *apiServiceHandler) Disconnect(ctx context.Context, req *serverv2.Discon
 			return nil, status.Error(codes.InvalidArgument, "users must not contain an empty user_id")
 		}
 	}
+	if len(req.Users) > 0 && req.Namespace == "" {
+		return nil, status.Error(codes.InvalidArgument, "namespace is required when users is set")
+	}
 
 	results := make(map[string]bool)
 
-	for _, sessionID := range h.unionSessions(ctx, req.Sessions, req.Users, "disconnect") {
+	for _, sessionID := range h.unionSessions(ctx, req.Sessions, req.Users, req.Namespace, "disconnect") {
 		// Close the client with disconnect reason
 		disconnect := protocol.Disconnect{
 			Code:   req.Code,
@@ -280,6 +288,9 @@ func (h *apiServiceHandler) Subscribe(ctx context.Context, req *serverv2.Subscri
 	if req.SessionId == "" && req.UserId == "" {
 		return nil, status.Error(codes.InvalidArgument, "session_id and user_id must not both be empty")
 	}
+	if req.UserId != "" && req.Namespace == "" {
+		return nil, status.Error(codes.InvalidArgument, "namespace is required when user_id is set")
+	}
 	// Capability gates (PR-KA-A4 §7): proxied subscription is a session act;
 	// per-user expansion additionally needs user.fanout.
 	if req.SessionId != "" {
@@ -293,7 +304,7 @@ func (h *apiServiceHandler) Subscribe(ctx context.Context, req *serverv2.Subscri
 		}
 	}
 
-	sessions := h.unionSessions(ctx, []string{req.SessionId}, []string{req.UserId}, "subscribe")
+	sessions := h.unionSessions(ctx, []string{req.SessionId}, []string{req.UserId}, req.Namespace, "subscribe")
 	results := make(map[string]bool)
 
 	for _, ch := range req.Channels {
@@ -323,6 +334,9 @@ func (h *apiServiceHandler) Unsubscribe(ctx context.Context, req *serverv2.Unsub
 	if req.SessionId == "" && req.UserId == "" {
 		return nil, status.Error(codes.InvalidArgument, "session_id and user_id must not both be empty")
 	}
+	if req.UserId != "" && req.Namespace == "" {
+		return nil, status.Error(codes.InvalidArgument, "namespace is required when user_id is set")
+	}
 	// Capability gates (PR-KA-A4 §7).
 	if req.SessionId != "" {
 		if err := h.requireAdminCaps(authz.CapSessionAct, "unsubscribe session"); err != nil {
@@ -335,7 +349,7 @@ func (h *apiServiceHandler) Unsubscribe(ctx context.Context, req *serverv2.Unsub
 		}
 	}
 
-	sessions := h.unionSessions(ctx, []string{req.SessionId}, []string{req.UserId}, "unsubscribe")
+	sessions := h.unionSessions(ctx, []string{req.SessionId}, []string{req.UserId}, req.Namespace, "unsubscribe")
 	results := make(map[string]bool)
 
 	for _, ch := range req.Channels {
@@ -359,12 +373,12 @@ func (h *apiServiceHandler) Unsubscribe(ctx context.Context, req *serverv2.Unsub
 	return &serverv2.UnsubscribeResponse{Results: results}, nil
 }
 
-// unionSessions expands the users list into session IDs (via the node's
-// user index plus the local hub) and unions them with the explicit session
-// list, deduplicated and sorted for deterministic execution order. Empty
-// user IDs must have been rejected by the caller. The per-user fan-out
-// metric is observed with the given op label.
-func (h *apiServiceHandler) unionSessions(ctx context.Context, explicit []string, users []string, op string) []string {
+// unionSessions expands the users list into session IDs for the given
+// namespace (via the node's user index plus the local hub) and unions them
+// with the explicit session list, deduplicated and sorted for deterministic
+// execution order. Empty user IDs must have been rejected by the caller. The
+// per-user fan-out metric is observed with the given op label.
+func (h *apiServiceHandler) unionSessions(ctx context.Context, explicit []string, users []string, namespace, op string) []string {
 	seen := make(map[string]struct{}, len(explicit)+len(users))
 	for _, sessionID := range explicit {
 		if sessionID == "" {
@@ -373,7 +387,7 @@ func (h *apiServiceHandler) unionSessions(ctx context.Context, explicit []string
 		seen[sessionID] = struct{}{}
 	}
 	for _, userID := range users {
-		expanded := h.node.ExpandUserSessions(ctx, userID)
+		expanded := h.node.ExpandUserSessions(ctx, namespace, userID)
 		h.node.ObserveAdminUserFanout(op, len(expanded))
 		for _, sessionID := range expanded {
 			seen[sessionID] = struct{}{}

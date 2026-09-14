@@ -39,8 +39,15 @@ type fakeSessionDirectory struct {
 }
 
 type userSessionEntry struct {
+	namespace string
 	userID    string
 	sessionID string
+}
+
+// userIndexKey composes the fake's in-memory user index key; it mirrors the
+// sim directory's key shape.
+func userIndexKey(namespace, userID string) string {
+	return namespace + "\x00" + userID
 }
 
 func (f *fakeSessionDirectory) Start(context.Context) error    { return nil }
@@ -120,42 +127,44 @@ func (f *fakeSessionDirectory) GetSessionSnapshot(context.Context, string) (*Clu
 func (f *fakeSessionDirectory) DeleteSessionSnapshot(context.Context, string) error { return nil }
 
 // AddUserSession records the membership and backs ListUserSessions.
-func (f *fakeSessionDirectory) AddUserSession(_ context.Context, userID, sessionID string, _ time.Duration) error {
-	f.addedUsers = append(f.addedUsers, userSessionEntry{userID: userID, sessionID: sessionID})
+func (f *fakeSessionDirectory) AddUserSession(_ context.Context, namespace, userID, sessionID string, _ time.Duration) error {
+	f.addedUsers = append(f.addedUsers, userSessionEntry{namespace: namespace, userID: userID, sessionID: sessionID})
 	if userID == "" || sessionID == "" {
 		return nil
 	}
+	key := userIndexKey(namespace, userID)
 	if f.userSessions == nil {
 		f.userSessions = make(map[string][]string)
 	}
-	f.userSessions[userID] = append(f.userSessions[userID], sessionID)
+	f.userSessions[key] = append(f.userSessions[key], sessionID)
 	return nil
 }
 
 // RemoveUserSession drops the membership and backs ListUserSessions.
-func (f *fakeSessionDirectory) RemoveUserSession(_ context.Context, userID, sessionID string) error {
-	f.removedUsers = append(f.removedUsers, userSessionEntry{userID: userID, sessionID: sessionID})
+func (f *fakeSessionDirectory) RemoveUserSession(_ context.Context, namespace, userID, sessionID string) error {
+	f.removedUsers = append(f.removedUsers, userSessionEntry{namespace: namespace, userID: userID, sessionID: sessionID})
+	key := userIndexKey(namespace, userID)
 	if f.userSessions == nil {
 		return nil
 	}
-	sessions := f.userSessions[userID]
+	sessions := f.userSessions[key]
 	for i, sid := range sessions {
 		if sid == sessionID {
-			f.userSessions[userID] = append(sessions[:i], sessions[i+1:]...)
+			f.userSessions[key] = append(sessions[:i], sessions[i+1:]...)
 			break
 		}
 	}
-	if len(f.userSessions[userID]) == 0 {
-		delete(f.userSessions, userID)
+	if len(f.userSessions[key]) == 0 {
+		delete(f.userSessions, key)
 	}
 	return nil
 }
 
-func (f *fakeSessionDirectory) ListUserSessions(_ context.Context, userID string) ([]string, error) {
+func (f *fakeSessionDirectory) ListUserSessions(_ context.Context, namespace, userID string) ([]string, error) {
 	if f.userSessions == nil {
 		return nil, nil
 	}
-	return append([]string(nil), f.userSessions[userID]...), nil
+	return append([]string(nil), f.userSessions[userIndexKey(namespace, userID)]...), nil
 }
 
 // TestSyncUserIndex_MigratesOnUserChange verifies the helper's migration
@@ -168,14 +177,14 @@ func TestSyncUserIndex_MigratesOnUserChange(t *testing.T) {
 	old := &ClusterSessionLease{SessionID: "sess-1", UserID: "U1"}
 	new := &ClusterSessionLease{SessionID: "sess-1", UserID: "U2"}
 
-	require.NoError(t, directory.AddUserSession(ctx, "U1", "sess-1", time.Minute))
+	require.NoError(t, directory.AddUserSession(ctx, "", "U1", "sess-1", time.Minute))
 	require.NoError(t, SyncUserIndex(ctx, directory, old, new, time.Minute))
 
-	ids, err := directory.ListUserSessions(ctx, "U1")
+	ids, err := directory.ListUserSessions(ctx, "", "U1")
 	require.NoError(t, err)
 	assert.NotContains(t, ids, "sess-1", "U1 must no longer list sess-1 after the user change")
 
-	ids, err = directory.ListUserSessions(ctx, "U2")
+	ids, err = directory.ListUserSessions(ctx, "", "U2")
 	require.NoError(t, err)
 	assert.Contains(t, ids, "sess-1", "U2 must list sess-1 after the user change")
 
@@ -183,7 +192,7 @@ func TestSyncUserIndex_MigratesOnUserChange(t *testing.T) {
 	removedBefore := len(directory.removedUsers)
 	require.NoError(t, SyncUserIndex(ctx, directory, new, new, time.Minute))
 	assert.Equal(t, removedBefore, len(directory.removedUsers), "same-user Put must not remove the membership")
-	ids, err = directory.ListUserSessions(ctx, "U2")
+	ids, err = directory.ListUserSessions(ctx, "", "U2")
 	require.NoError(t, err)
 	assert.Contains(t, ids, "sess-1")
 }
@@ -195,10 +204,10 @@ func TestSyncUserIndex_DeleteRemovesMembership(t *testing.T) {
 	ctx := context.Background()
 	directory := &fakeSessionDirectory{}
 	lease := &ClusterSessionLease{SessionID: "sess-1", UserID: "U1"}
-	require.NoError(t, directory.AddUserSession(ctx, "U1", "sess-1", time.Minute))
+	require.NoError(t, directory.AddUserSession(ctx, "", "U1", "sess-1", time.Minute))
 
 	require.NoError(t, SyncUserIndex(ctx, directory, lease, nil, 0))
-	ids, err := directory.ListUserSessions(ctx, "U1")
+	ids, err := directory.ListUserSessions(ctx, "", "U1")
 	require.NoError(t, err)
 	assert.NotContains(t, ids, "sess-1", "Delete must remove the membership")
 
@@ -210,7 +219,7 @@ func TestSyncUserIndex_DeleteRemovesMembership(t *testing.T) {
 	for _, entry := range directory.addedUsers {
 		assert.NotEqual(t, "sess-2", entry.sessionID, "anonymous sessions must never enter the index")
 	}
-	ids, err = directory.ListUserSessions(ctx, "U1")
+	ids, err = directory.ListUserSessions(ctx, "", "U1")
 	require.NoError(t, err)
 	assert.NotContains(t, ids, "sess-2", "a lease that became anonymous must leave the index")
 }

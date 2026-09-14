@@ -33,6 +33,12 @@ server:
     #                     # ping. Defaults to ping_interval when left empty.
     #                     # Non-zero values must be >= 1s; "0s" is rejected.
   rpc_timeout: "30s"      # Default timeout for proxied RPC requests
+  # Namespace isolation (multi-tenant P1): every client-visible channel must
+  # live under the session's namespace ("ns:topic"). The namespace comes from
+  # the auth proxy response (UserInfo.namespace); this static value is the
+  # fallback. Mandatory when require_auth is disabled (no proxy to ask).
+  namespace: "dev"
+  # require_auth: false    # Reject connections without a token
   limits:
     max_connections_per_user: 0       # 0 = unlimited
     max_subscriptions_per_client: 0   # 0 = unlimited

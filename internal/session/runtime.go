@@ -116,6 +116,9 @@ type Runtime interface {
 
 	// 身份
 	UserPrincipal(userID string) authz.Principal
+	// ServerNamespace is the static server.namespace fallback used when the
+	// auth proxy response carries no namespace (see config.Server.Namespace).
+	ServerNamespace() string
 
 	// presence 编排
 	ShouldTrackPresence(ch string, ephemeral bool) bool
@@ -161,6 +164,7 @@ type RestoreFailure struct {
 type IdentitySnapshot struct {
 	SessionID     string
 	UserID        string
+	Namespace     string
 	ClientID      string
 	Protocol      string
 	Authenticated bool
@@ -183,6 +187,7 @@ func (s *Session) SnapshotIdentity() IdentitySnapshot {
 	return IdentitySnapshot{
 		SessionID:     s.session,
 		UserID:        s.user,
+		Namespace:     s.namespace,
 		ClientID:      s.client,
 		Protocol:      s.protocol,
 		Authenticated: s.authenticated,
@@ -230,15 +235,18 @@ func (s *Session) UntrackChannel(ch string) {
 	s.mu.Unlock()
 }
 
-// AdoptIdentity replaces the session ID triple, rebuilds subscribedChannels
-// from subscriptions, and writes clusterLeaseVersion. Empty userID/clientID
-// are left unchanged; a zero leaseVersion only fills 1 when the current
-// value is still 0 (resume takeover, cluster_resume.go original).
-func (s *Session) AdoptIdentity(sessionID, userID, clientID string, subscriptions []string, leaseVersion uint64) {
+// AdoptIdentity replaces the session ID quadruple, rebuilds subscribedChannels
+// from subscriptions, and writes clusterLeaseVersion. Empty userID/clientID/
+// namespace are left unchanged; a zero leaseVersion only fills 1 when the
+// current value is still 0 (resume takeover, cluster_resume.go original).
+func (s *Session) AdoptIdentity(sessionID, namespace, userID, clientID string, subscriptions []string, leaseVersion uint64) {
 	s.mu.Lock()
 	s.session = sessionID
 	if userID != "" {
 		s.user = userID
+	}
+	if namespace != "" {
+		s.namespace = namespace
 	}
 	if clientID != "" {
 		s.client = clientID
@@ -286,6 +294,14 @@ func (s *Session) MarkAuthenticated() {
 func (s *Session) SetUserIDForTest(userID string) {
 	s.mu.Lock()
 	s.user = userID
+	s.mu.Unlock()
+}
+
+// SetNamespaceForTest overwrites the namespace (tests build namespaced
+// sessions without driving a full connect).
+func (s *Session) SetNamespaceForTest(namespace string) {
+	s.mu.Lock()
+	s.namespace = namespace
 	s.mu.Unlock()
 }
 

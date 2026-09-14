@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/lynx-go/x/log"
+
+	"github.com/messageloopio/messageloop/pkg/topics"
 )
 
 const (
@@ -49,6 +51,14 @@ func (n *Node) resumeRemoteSession(ctx context.Context, client *Client, sessionI
 			"session", sessionID, "user", authUser, "owner", lease.UserID)
 		return nil, false, DisconnectInvalidToken
 	}
+	// The same owner rule for namespaces: the resuming connection resolved
+	// its namespace at connect time (client.Namespace); a session never
+	// migrates across namespaces.
+	if authNs := client.Namespace(); authNs != "" && lease.Namespace != "" && authNs != lease.Namespace {
+		log.WarnContext(ctx, "remote session takeover denied: session belongs to another namespace",
+			"session", sessionID, "namespace", authNs, "owner_namespace", lease.Namespace)
+		return nil, false, DisconnectInvalidToken
+	}
 
 	snapshot, err := directory.GetSessionSnapshot(ctx, sessionID)
 	if err != nil {
@@ -67,12 +77,18 @@ func (n *Node) resumeRemoteSession(ctx context.Context, client *Client, sessionI
 		NodeID:         n.ClusterNodeID(),
 		IncarnationID:  n.ClusterIncarnationID(),
 		UserID:         lease.UserID,
+		Namespace:      lease.Namespace,
 		ClientID:       lease.ClientID,
 		LeaseVersion:   lease.LeaseVersion + 1,
 		Authenticated:  lease.Authenticated,
 		ConnectedAt:    lease.ConnectedAt,
 		LastActivityAt: time.Now().UnixMilli(),
 		ExpiresAt:      time.Now().Add(n.sessionLeaseTTL()),
+	}
+	if desired.Namespace == "" {
+		// Pre-namespace lease (or empty-proxy session): adopt the resuming
+		// connection's namespace so the record is namespaced from now on.
+		desired.Namespace = client.Namespace()
 	}
 	// The dual-activation window starts at the claim: from the CAS below to
 	// the end of the takeover branch (including the KD-K30 dead-node bypass),
@@ -138,7 +154,11 @@ func (n *Node) resumeRemoteSession(ctx context.Context, client *Client, sessionI
 	if lease.LeaseVersion > 0 {
 		nextLease = lease.LeaseVersion + 1
 	}
-	client.AdoptIdentity(sessionID, snapshot.UserID, snapshot.ClientID, subs, nextLease)
+	ns := snapshot.Namespace
+	if ns == "" {
+		ns = client.Namespace()
+	}
+	client.AdoptIdentity(sessionID, ns, snapshot.UserID, snapshot.ClientID, subs, nextLease)
 
 	return snapshot, true, nil
 }
@@ -194,6 +214,19 @@ type clusterRestoreFailure struct {
 func (n *Node) restoreSessionSubscriptions(ctx context.Context, client *Client, subscriptions []ClusterSubscriptionSnapshot) []clusterRestoreFailure {
 	var failures []clusterRestoreFailure
 	for _, sub := range subscriptions {
+		// Defense in depth: the remote-resume owner check already guarantees
+		// the session's namespace matches, so any out-of-scope snapshot
+		// channel is corrupt/stale state — skip it instead of restoring a
+		// cross-namespace subscription.
+		if ns := client.Namespace(); ns != "" {
+			if chNs, err := topics.NamespaceOf(sub.Channel); err != nil || chNs != ns {
+				log.WarnContext(ctx, "skipping cross-namespace snapshot channel",
+					"channel", sub.Channel, "session", client.SessionID(), "namespace", ns)
+				client.UntrackChannel(sub.Channel)
+				failures = append(failures, clusterRestoreFailure{channel: sub.Channel, err: fmt.Errorf("channel is outside session namespace %q", ns)})
+				continue
+			}
+		}
 		if err := n.restoreLocalSubscription(ctx, sub.Channel, NewSubscriber(client, sub.Ephemeral)); err != nil {
 			log.WarnContext(ctx, "failed to restore subscription for resumed session",
 				"channel", sub.Channel, "session", client.SessionID(), "error", err)

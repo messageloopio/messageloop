@@ -78,7 +78,7 @@ func (d *membershipFakeDirectory) DeleteSessionLease(ctx context.Context, sessio
 	d.deletedSessions = append(d.deletedSessions, sessionID)
 	d.mu.Unlock()
 	if lease != nil && lease.UserID != "" {
-		return d.RemoveUserSession(ctx, lease.UserID, sessionID)
+		return d.RemoveUserSession(ctx, lease.Namespace, lease.UserID, sessionID)
 	}
 	return nil
 }

@@ -177,7 +177,7 @@ func TestSim_DeadNodeOnLeave(t *testing.T) {
 
 	_, err := w.AddClient(w.A, "sess-1", "user-1", "client-1")
 	require.NoError(t, err)
-	require.NoError(t, w.Dir.AddUserSession(ctx, "user-1", "sess-1", time.Hour))
+	require.NoError(t, w.Dir.AddUserSession(ctx, "", "user-1", "sess-1", time.Hour))
 
 	// Both incarnations are alive in the Directory.
 	putNodeLease := func(nodeID, incarnationID string) {
@@ -202,7 +202,7 @@ func TestSim_DeadNodeOnLeave(t *testing.T) {
 	lease, err := w.Dir.GetSessionLease(ctx, "sess-1")
 	require.NoError(t, err)
 	require.Nil(t, lease, "OnLeave invalidates the dead incarnation's fencing")
-	sessions, err := w.Dir.ListUserSessions(ctx, "user-1")
+	sessions, err := w.Dir.ListUserSessions(ctx, "", "user-1")
 	require.NoError(t, err)
 	require.Empty(t, sessions, "DeleteSessionLease syncs the user index")
 

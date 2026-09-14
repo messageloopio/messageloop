@@ -30,6 +30,9 @@ message Publication {
     repeated string sessions = 1;
     repeated string channels = 2;
     repeated string users = 3;
+    // Namespace scopes the users expansion: user fan-out targets only the
+    // sessions of (namespace, user). Required when users is non-empty.
+    string namespace = 4;
   }
 
   string id = 1;
@@ -75,6 +78,8 @@ message DisconnectRequest {
   uint32 code = 2;
   string reason = 3;
   repeated string users = 4;
+  // Namespace scopes the users expansion (required when users is non-empty).
+  string namespace = 5;
 }
 
 message DisconnectResponse {
@@ -87,6 +92,8 @@ message SubscribeRequest {
   string session_id = 1;
   repeated string channels = 2;
   string user_id = 3;
+  // Namespace scopes the user_id expansion (required when user_id is set).
+  string namespace = 4;
 }
 
 message SubscribeResponse {
@@ -97,6 +104,8 @@ message UnsubscribeRequest {
   string session_id = 1;
   repeated string channels = 2;
   string user_id = 3;
+  // Namespace scopes the user_id expansion (required when user_id is set).
+  string namespace = 4;
 }
 
 message UnsubscribeResponse {

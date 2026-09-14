@@ -297,12 +297,16 @@ func (x *AuthenticateResponse) GetUserInfo() *UserInfo {
 }
 
 type UserInfo struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Username      string                 `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
-	Token         string                 `protobuf:"bytes,3,opt,name=token,proto3" json:"token,omitempty"`
-	ClientType    string                 `protobuf:"bytes,4,opt,name=client_type,json=clientType,proto3" json:"client_type,omitempty"`
-	ClientId      string                 `protobuf:"bytes,5,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Id         string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Username   string                 `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
+	Token      string                 `protobuf:"bytes,3,opt,name=token,proto3" json:"token,omitempty"`
+	ClientType string                 `protobuf:"bytes,4,opt,name=client_type,json=clientType,proto3" json:"client_type,omitempty"`
+	ClientId   string                 `protobuf:"bytes,5,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	// Namespace scopes the session to a multi-tenant namespace: every
+	// client-visible channel must live under it ("ns:topic"). Empty means the
+	// server falls back to its static server.namespace.
+	Namespace     string `protobuf:"bytes,6,opt,name=namespace,proto3" json:"namespace,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -368,6 +372,13 @@ func (x *UserInfo) GetClientType() string {
 func (x *UserInfo) GetClientId() string {
 	if x != nil {
 		return x.ClientId
+	}
+	return ""
+}
+
+func (x *UserInfo) GetNamespace() string {
+	if x != nil {
+		return x.Namespace
 	}
 	return ""
 }
@@ -992,14 +1003,15 @@ const file_proxy_v2_proxy_proto_rawDesc = "" +
 	"remoteAddr\"\x87\x01\n" +
 	"\x14AuthenticateResponse\x122\n" +
 	"\x05error\x18\x01 \x01(\v2\x1c.messageloop.shared.v2.ErrorR\x05error\x12;\n" +
-	"\tuser_info\x18\x02 \x01(\v2\x1e.messageloop.proxy.v2.UserInfoR\buserInfo\"\x8a\x01\n" +
+	"\tuser_info\x18\x02 \x01(\v2\x1e.messageloop.proxy.v2.UserInfoR\buserInfo\"\xa8\x01\n" +
 	"\bUserInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n" +
 	"\busername\x18\x02 \x01(\tR\busername\x12\x14\n" +
 	"\x05token\x18\x03 \x01(\tR\x05token\x12\x1f\n" +
 	"\vclient_type\x18\x04 \x01(\tR\n" +
 	"clientType\x12\x1b\n" +
-	"\tclient_id\x18\x05 \x01(\tR\bclientId\"}\n" +
+	"\tclient_id\x18\x05 \x01(\tR\bclientId\x12\x1c\n" +
+	"\tnamespace\x18\x06 \x01(\tR\tnamespace\"}\n" +
 	"\x13SubscribeAclRequest\x12\x18\n" +
 	"\achannel\x18\x01 \x01(\tR\achannel\x12\x14\n" +
 	"\x05token\x18\x02 \x01(\tR\x05token\x12\x17\n" +

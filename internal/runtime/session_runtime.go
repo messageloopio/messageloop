@@ -39,6 +39,8 @@ func (r nodeRuntime) Limits() config.Limits { return r.n.limits }
 
 func (r nodeRuntime) RequireAuth() bool { return r.n.requireAuth }
 
+func (r nodeRuntime) ServerNamespace() string { return r.n.serverNamespace }
+
 func (r nodeRuntime) Heartbeat() *session.HeartbeatManager { return r.n.heartbeatManager }
 
 func (r nodeRuntime) AddClient(c *session.Session) error { return r.n.AddClient(c) }

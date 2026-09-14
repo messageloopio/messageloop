@@ -152,11 +152,16 @@ func policyBoolPtr(v bool) *bool { return &v }
 
 // newUserTestClient registers a client in the node hub under the given user
 // ID (bypassing proxy auth via ForceTestIDs) and returns it.
+// adminTestNamespace is the namespace the test clients live in; requests that
+// expand users must pass it as Namespace.
+const adminTestNamespace = "dev"
+
 func newUserTestClient(t *testing.T, node *runtime.Node, transport session.Transport, sessionID, userID string) *session.Client {
 	t.Helper()
 	client, _, err := runtime.NewClient(context.Background(), node, transport, shared.JSONMarshaler{})
 	require.NoError(t, err)
 	client.ForceTestIDs(sessionID, userID, "client-"+sessionID)
+	client.SetNamespaceForTest(adminTestNamespace)
 	require.NoError(t, node.AddClient(client))
 	return client
 }
@@ -972,7 +977,7 @@ func TestAdmin_PublishDestinationUsers(t *testing.T) {
 		Publications: []*serverv2.Publication{
 			{
 				Id:          "user-fanout-pub",
-				Destination: &serverv2.Publication_Destination{Users: []string{"U"}},
+				Destination: &serverv2.Publication_Destination{Namespace: adminTestNamespace, Users: []string{"U"}},
 				Payload:     &sharedv2.Payload{Data: &sharedv2.Payload_Text{Text: "hello user fanout"}},
 			},
 		},
@@ -1004,7 +1009,7 @@ func TestAdmin_PublishUsersNoCluster(t *testing.T) {
 		Publications: []*serverv2.Publication{
 			{
 				Id:          "nocluster-pub",
-				Destination: &serverv2.Publication_Destination{Users: []string{"U"}},
+				Destination: &serverv2.Publication_Destination{Namespace: adminTestNamespace, Users: []string{"U"}},
 				Payload:     &sharedv2.Payload{Data: &sharedv2.Payload_Text{Text: "local only"}},
 			},
 		},
@@ -1029,9 +1034,10 @@ func TestAdmin_DisconnectUsers(t *testing.T) {
 	newUserTestClient(t, node, &mockTransport{}, "sess-disc-other", "other-user")
 
 	resp, err := handler.Disconnect(ctx, &serverv2.DisconnectRequest{
-		Users:  []string{"U"},
-		Code:   3500,
-		Reason: "admin user disconnect",
+		Namespace: adminTestNamespace,
+		Users:     []string{"U"},
+		Code:      3500,
+		Reason:    "admin user disconnect",
 	})
 	require.NoError(t, err)
 	require.NotNil(t, resp)
@@ -1091,8 +1097,9 @@ func TestAdmin_SubscribeByUser(t *testing.T) {
 	newUserTestClient(t, node, &mockTransport{}, "sess-sub-other", "other-user")
 
 	resp, err := handler.Subscribe(ctx, &serverv2.SubscribeRequest{
-		UserId:   "U",
-		Channels: []string{"user.sub.channel"},
+		Namespace: adminTestNamespace,
+		UserId:    "U",
+		Channels:  []string{"user.sub.channel"},
 	})
 	require.NoError(t, err)
 	require.True(t, resp.Results["user.sub.channel"], "the channel must be subscribed for the user")
@@ -1101,8 +1108,9 @@ func TestAdmin_SubscribeByUser(t *testing.T) {
 
 	// Unsubscribe by user works symmetrically.
 	unsubResp, err := handler.Unsubscribe(ctx, &serverv2.UnsubscribeRequest{
-		UserId:   "U",
-		Channels: []string{"user.sub.channel"},
+		Namespace: adminTestNamespace,
+		UserId:    "U",
+		Channels:  []string{"user.sub.channel"},
 	})
 	require.NoError(t, err)
 	require.True(t, unsubResp.Results["user.sub.channel"])

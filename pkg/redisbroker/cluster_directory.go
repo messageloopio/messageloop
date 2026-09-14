@@ -72,17 +72,18 @@ func (d *redisSessionDirectory) sessionSnapshotKey(sessionID string) string {
 	return d.opts.ClusterSessionSnapshotPrefix + sessionID
 }
 
-// userMemberKey is the per-session member key of the user→sessions index. It
-// carries the same TTL as the session lease so the member expires together
-// with the lease; the set index (userSessionsKey) is trimmed by
-// RemoveUserSession and rebuilt by the periodic repair.
-func (d *redisSessionDirectory) userMemberKey(userID, sessionID string) string {
-	return fmt.Sprintf("%suser:member:%s:%s", d.opts.ClusterPrefix, userID, sessionID)
+// userMemberKey is the per-session member key of the (namespace, user)
+// →sessions index. It carries the same TTL as the session lease so the member
+// expires together with the lease; the set index (userSessionsKey) is trimmed
+// by RemoveUserSession and rebuilt by the periodic repair.
+func (d *redisSessionDirectory) userMemberKey(namespace, userID, sessionID string) string {
+	return fmt.Sprintf("%suser:member:%s:%s:%s", d.opts.ClusterPrefix, namespace, userID, sessionID)
 }
 
-// userSessionsKey is the set of session IDs currently indexed for userID.
-func (d *redisSessionDirectory) userSessionsKey(userID string) string {
-	return fmt.Sprintf("%suser:sessions:%s", d.opts.ClusterPrefix, userID)
+// userSessionsKey is the set of session IDs currently indexed for a
+// (namespace, user) identity.
+func (d *redisSessionDirectory) userSessionsKey(namespace, userID string) string {
+	return fmt.Sprintf("%suser:sessions:%s:%s", d.opts.ClusterPrefix, namespace, userID)
 }
 
 func (d *redisSessionDirectory) PutNodeLease(ctx context.Context, lease *cluster.ClusterNodeLease, ttl time.Duration) error {
@@ -320,11 +321,11 @@ func (d *redisSessionDirectory) getJSON(ctx context.Context, key string, target 
 	return true, nil
 }
 
-// AddUserSession records a session's membership in a user's index: a
-// per-session member key with the session lease TTL plus a set member. The
+// AddUserSession records a session's membership in a (namespace, user) index:
+// a per-session member key with the session lease TTL plus a set member. The
 // set itself has no TTL; stale members expire with their member keys and are
 // filtered at expansion time.
-func (d *redisSessionDirectory) AddUserSession(ctx context.Context, userID, sessionID string, ttl time.Duration) error {
+func (d *redisSessionDirectory) AddUserSession(ctx context.Context, namespace, userID, sessionID string, ttl time.Duration) error {
 	if userID == "" || sessionID == "" {
 		return nil
 	}
@@ -332,28 +333,28 @@ func (d *redisSessionDirectory) AddUserSession(ctx context.Context, userID, sess
 		ttl = time.Second
 	}
 	pipe := d.client.TxPipeline()
-	pipe.Set(ctx, d.userMemberKey(userID, sessionID), "1", ttl)
-	pipe.SAdd(ctx, d.userSessionsKey(userID), sessionID)
+	pipe.Set(ctx, d.userMemberKey(namespace, userID, sessionID), "1", ttl)
+	pipe.SAdd(ctx, d.userSessionsKey(namespace, userID), sessionID)
 	_, err := pipe.Exec(ctx)
 	return err
 }
 
-func (d *redisSessionDirectory) RemoveUserSession(ctx context.Context, userID, sessionID string) error {
+func (d *redisSessionDirectory) RemoveUserSession(ctx context.Context, namespace, userID, sessionID string) error {
 	if userID == "" || sessionID == "" {
 		return nil
 	}
 	pipe := d.client.TxPipeline()
-	pipe.Del(ctx, d.userMemberKey(userID, sessionID))
-	pipe.SRem(ctx, d.userSessionsKey(userID), sessionID)
+	pipe.Del(ctx, d.userMemberKey(namespace, userID, sessionID))
+	pipe.SRem(ctx, d.userSessionsKey(namespace, userID), sessionID)
 	_, err := pipe.Exec(ctx)
 	return err
 }
 
-func (d *redisSessionDirectory) ListUserSessions(ctx context.Context, userID string) ([]string, error) {
+func (d *redisSessionDirectory) ListUserSessions(ctx context.Context, namespace, userID string) ([]string, error) {
 	if userID == "" {
 		return nil, nil
 	}
-	return d.client.SMembers(ctx, d.userSessionsKey(userID)).Result()
+	return d.client.SMembers(ctx, d.userSessionsKey(namespace, userID)).Result()
 }
 
 // ListSessionLeases enumerates every stored session lease (SCAN

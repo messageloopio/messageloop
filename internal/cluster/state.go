@@ -29,6 +29,7 @@ type ClusterSessionLease struct {
 	NodeID         string    `json:"node_id"`
 	IncarnationID  string    `json:"incarnation_id"`
 	UserID         string    `json:"user_id,omitempty"`
+	Namespace      string    `json:"namespace,omitempty"`
 	ClientID       string    `json:"client_id,omitempty"`
 	LeaseVersion   uint64    `json:"lease_version"`
 	Authenticated  bool      `json:"authenticated"`
@@ -47,6 +48,7 @@ type ClusterSubscriptionSnapshot struct {
 type ClusterSessionSnapshot struct {
 	SessionID     string                        `json:"session_id"`
 	UserID        string                        `json:"user_id,omitempty"`
+	Namespace     string                        `json:"namespace,omitempty"`
 	ClientID      string                        `json:"client_id,omitempty"`
 	Authenticated bool                          `json:"authenticated"`
 	Protocol      string                        `json:"protocol,omitempty"`

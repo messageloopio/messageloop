@@ -2,7 +2,6 @@ package topics
 
 import (
 	"runtime"
-	"strings"
 	"sync/atomic"
 	"unsafe"
 )
@@ -174,7 +173,7 @@ func (c *csTrieMatcher) Subscribe(topic string, sub Subscriber) (*Subscription, 
 		return nil, ErrBadTopic
 	}
 	var (
-		words   = strings.Split(topic, delimiter)
+		words   = SplitSegments(topic)
 		rootPtr = (*unsafe.Pointer)(unsafe.Pointer(&c.root))
 	)
 	for attempt := 0; ; attempt++ {
@@ -246,7 +245,7 @@ func (c *csTrieMatcher) Unsubscribe(sub *Subscription) {
 		return
 	}
 	var (
-		words   = strings.Split(sub.Topic, delimiter)
+		words   = SplitSegments(sub.Topic)
 		rootPtr = (*unsafe.Pointer)(unsafe.Pointer(&c.root))
 	)
 	for attempt := 0; ; attempt++ {
@@ -320,7 +319,7 @@ func (c *csTrieMatcher) iremove(i, parent, parentsParent *iNode, words []string,
 
 // Lookup returns the Subscribers for the given topic.
 func (c *csTrieMatcher) Lookup(topic string) []Subscriber {
-	words := strings.Split(topic, delimiter)
+	words := SplitSegments(topic)
 	for _, word := range words {
 		if word == empty {
 			// Topics with explicit empty segments never match, including

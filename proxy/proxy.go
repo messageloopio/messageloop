@@ -196,6 +196,9 @@ type UserInfo struct {
 	Token      string
 	ClientType string
 	ClientID   string
+	// Namespace scopes the session to a multi-tenant namespace ("" = server
+	// static fallback).
+	Namespace string
 }
 
 // FromProtoAuthenticateResponse creates an AuthenticateProxyResponse from the protobuf AuthenticateResponse.
@@ -211,6 +214,7 @@ func FromProtoAuthenticateResponse(resp *proxypb.AuthenticateResponse) *Authenti
 			Token:      resp.UserInfo.Token,
 			ClientType: resp.UserInfo.ClientType,
 			ClientID:   resp.UserInfo.ClientId,
+			Namespace:  resp.UserInfo.Namespace,
 		}
 	}
 	return &AuthenticateProxyResponse{

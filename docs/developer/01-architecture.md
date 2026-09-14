@@ -143,11 +143,14 @@ PR-KA-B1 起内核对象是 `Session`（可恢复逻辑连接，`type Client = S
 1. 若已鉴权再发 Connect，返回 `DisconnectBadRequest`。
 2. 客户端可携带 `SessionId` 请求恢复；会话 ID 在鉴权之前就写入（鉴权代理需要它）。
 3. 鉴权：若带 `Token`，查找方法为 `$authenticate`（`SystemMethodAuthenticate`）的代理并调用 `Authenticate`；`requireAuth` 开启但无代理可验证 token 时拒绝（`DisconnectInvalidToken`）。
-4. 恢复：本地会话存在则**指针不动**——先查 `maxConnsPerUser`（跨用户，`PrepareSessionUser`，失败则旧会话保持 Attached、新连接 `DisconnectConnectionLimit`），再 `Detach` 旧附件、`Attach` 新附件；Attach 失败走真走 `Close(DisconnectInternal)`。新连接上那个临时 Authenticating 会话不进 Hub，变成读循环 shell 委托给被恢复的会话。本地不存在则尝试跨节点恢复（`resumeRemoteSession`）。未鉴权连接不能驱逐仍被服务的会话。
-5. `AddClient` 注册 + `MarkMetricsCharged`，集群模式下同步会话状态（本机 resume 走 same-fence Bind，版本 +1 后仍是自己）。
-6. 通知代理 `OnConnected`。
-7. 处理 Connect 携带的订阅列表：先做订阅数上限检查（超限 `DisconnectChannelLimit`），逐频道 Authorizer/代理检查，`AddSubscription` + presence 登记 + 异步发布 join 事件。
-8. 消息恢复（B3 流式恢复）：先发**裸 `Connected`**（v2 无 publications / recover_results / presence 列表，presence 快照是独立 `Presence` 信封），再对每个 `recover=true` 的精确频道走统一 Replayer（`recover.go`）：只有 `sub.Fresh=true` 或 resume 时快照 epoch ≠ broker epoch（两边都非空）才从 0（开头）恢复；非 resume 且 cursor 带 offset → `since=offset+1`；cursor 未带 → 回退服务端已记录 delivered offset（有则 `since=off+1`），没有则 **Skip**。`broker.History` 以 `MaxRecoveredPublications`（1000，请求级配额、多频道共享）为限，逐条 `Publication(replay=true)` 经 `Session.Send` 落线（每条受 `MaxMessageSize` 约束），最后每频道一条 `RecoverComplete{channel, position, truncated, gap, gap_reason, error?}`（标 Control）。恢复失败**不撤订阅**（KD-9）。
+4. **命名空间解析**（P1 多租户）：鉴权代理响应 `UserInfo.namespace` 优先，回退静态 `server.namespace`；两者皆空且 `requireAuth` 开启时 Connect 被拒（`NAMESPACE_REQUIRED` + 3500）。会话绑定 namespace 后，所有客户端可见 channel 必须位于其下（guard：`checkNamespace`，见下）；resume 时 namespace 不一致与跨用户接管同样按 3500 拒绝（本地 `client.go` owner 检查旁、远端 `cluster_resume.go:47-51` 旁）。
+5. 恢复：本地会话存在则**指针不动**——先查 `maxConnsPerUser`（跨用户，`PrepareSessionUser`，失败则旧会话保持 Attached、新连接 `DisconnectConnectionLimit`），再 `Detach` 旧附件、`Attach` 新附件；Attach 失败走真走 `Close(DisconnectInternal)`。新连接上那个临时 Authenticating 会话不进 Hub，变成读循环 shell 委托给被恢复的会话。本地不存在则尝试跨节点恢复（`resumeRemoteSession`）。未鉴权连接不能驱逐仍被服务的会话。
+6. `AddClient` 注册 + `MarkMetricsCharged`，集群模式下同步会话状态（本机 resume 走 same-fence Bind，版本 +1 后仍是自己）。
+7. 通知代理 `OnConnected`。
+8. 处理 Connect 携带的订阅列表：先做订阅数上限检查（超限 `DisconnectChannelLimit`），逐频道 **namespace guard** / Authorizer/代理检查，`AddSubscription` + presence 登记 + 异步发布 join 事件。
+9. 消息恢复（B3 流式恢复）：先发**裸 `Connected`**（v2 无 publications / recover_results / presence 列表，presence 快照是独立 `Presence` 信封），再对每个 `recover=true` 的精确频道走统一 Replayer（`recover.go`）：只有 `sub.Fresh=true` 或 resume 时快照 epoch ≠ broker epoch（两边都非空）才从 0（开头）恢复；非 resume 且 cursor 带 offset → `since=offset+1`；cursor 未带 → 回退服务端已记录 delivered offset（有则 `since=off+1`），没有则 **Skip**。`broker.History` 以 `MaxRecoveredPublications`（1000，请求级配额、多频道共享）为限，逐条 `Publication(replay=true)` 经 `Session.Send` 落线（每条受 `MaxMessageSize` 约束），最后每频道一条 `RecoverComplete{channel, position, truncated, gap, gap_reason, error?}`（标 Control）。恢复失败**不撤订阅**（KD-9）。
+
+**命名空间 guard（P1）**：会话携带 `namespace` 字段后，`checkNamespace`（internal/session/namespace.go）作为第 0 步挂在所有 channel 入口的校验链最前——订阅（`checkSubscribeACL`，同时覆盖 Connect 携带订阅）、发布、RPC、Survey、Presence 查询；先于 Authorizer 与代理执行，代理放行不能越过。违规回顶层 `NAMESPACE_MISMATCH`/`acl_error` 信封（不断连、该 channel skip）。远端 resume 恢复快照订阅时另有防御性过滤（`restoreSessionSubscriptions`）。
 
 **入站消息路由（`handleMessage`）**：
 
@@ -318,7 +321,7 @@ type Matcher interface {
 }
 ```
 
-主题以 `.` 分隔层级，`*` 匹配**单个层级**（如 `chat.*` 匹配 `chat.general`，不匹配 `chat.rooms.1`）。
+主题以 `.` 与 `:` 分隔层级（`SplitSegments` 是唯一的共享切分实现），因此命名空间 channel `acme:chat.room1` 是三段 `[acme, chat, room1]`，`acme:*` / `acme:im.**` 的通配语义自然成立。`*` 匹配**单个层级**（如 `acme:chat.*` 匹配 `acme:chat.general`，不匹配 `acme:chat.rooms.1`）。命名空间语法（恰好一个 `:`、namespace 标识符规则）由 `ValidateChannel` / `NamespaceOf`（namespace.go）在会话边界执行；`ValidateTopic` 保持纯结构校验。
 
 | 实现 | 文件 | 特点 |
 | --- | --- | --- |

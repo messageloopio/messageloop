@@ -37,6 +37,10 @@
           "items": {
             "type": "string"
           }
+        },
+        "namespace": {
+          "type": "string",
+          "description": "Namespace scopes the users expansion: user fan-out targets only the\nsessions of (namespace, user). Required when users is non-empty."
         }
       }
     },

@@ -323,8 +323,10 @@ func startE2EServer(t *testing.T, binPath, brokerType, redisAddr, redisPassword 
 // required stream_approximate flag.
 func e2eConfigYAML(httpAddr, adminAddr, adminToken, wsAddr, grpcAddr, brokerType, redisAddr, redisPassword string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "server:\n  http:\n    addr: %q\n  grpc_admin:\n    addr: %q\n    auth_token: %q\n",
-		httpAddr, adminAddr, adminToken)
+	fmt.Fprintf(&b, "server:\n  http:\n    addr: %q\n  grpc_admin:\n    addr: %q\n    auth_token: %q\n", httpAddr, adminAddr, adminToken)
+	// require_auth stays off, so the static namespace is mandatory (the
+	// server fails config validation without it).
+	b.WriteString("  namespace: \"dev\"\n")
 	fmt.Fprintf(&b, "transport:\n  websocket:\n    addr: %q\n    path: \"/ws\"\n  grpc:\n    addr: %q\n",
 		wsAddr, grpcAddr)
 	if brokerType == "redis" {
@@ -356,10 +358,12 @@ func e2eAdminToken() string {
 	return "e2e-admin-" + uuid.NewString()
 }
 
-// e2eNamespace returns a run-unique channel prefix so repeated runs (and the
-// Redis variant sharing one Redis) never observe each other's state.
+// e2eNamespace returns a run-unique namespaced channel prefix so repeated
+// runs (and the Redis variant sharing one Redis) never observe each other's
+// state. The prefix lives under the spawned server's static namespace
+// ("dev", see e2eConfigYAML): client channels must be namespaced.
 func e2eNamespace() string {
-	return "e2e." + strings.ReplaceAll(uuid.NewString(), "-", "")[:8]
+	return "dev:e2e." + strings.ReplaceAll(uuid.NewString(), "-", "")[:8]
 }
 
 // dialE2EWS dials the spawned server's WebSocket endpoint with the SDK.

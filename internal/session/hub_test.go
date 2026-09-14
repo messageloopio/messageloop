@@ -164,10 +164,11 @@ func TestConnShard_Add(t *testing.T) {
 	if len(shard.users) != 1 {
 		t.Errorf("len(users) = %d, want 1", len(shard.users))
 	}
-	if _, ok := shard.users["user-1"]; !ok {
+	key := userKey("", "user-1")
+	if _, ok := shard.users[key]; !ok {
 		t.Error("user-1 should be in users map")
 	}
-	if _, ok := shard.users["user-1"]["session-1"]; !ok {
+	if _, ok := shard.users[key]["session-1"]; !ok {
 		t.Error("session-1 should be in user-1's session set")
 	}
 }
@@ -189,8 +190,8 @@ func TestConnShard_Add_MultipleSessionsSameUser(t *testing.T) {
 	if len(shard.users) != 1 {
 		t.Errorf("len(users) = %d, want 1", len(shard.users))
 	}
-	if len(shard.users["user-1"]) != 2 {
-		t.Errorf("user-1 should have 2 sessions, got %d", len(shard.users["user-1"]))
+	if len(shard.users[userKey("", "user-1")]) != 2 {
+		t.Errorf("user-1 should have 2 sessions, got %d", len(shard.users[userKey("", "user-1")]))
 	}
 }
 
@@ -349,12 +350,13 @@ func TestHub_Add(t *testing.T) {
 	h.mu.RUnlock()
 
 	// Check connShard
-	shardIdx := index("user-1", numHubShards)
+	shardIdx := index(userKey("", "user-1"), numHubShards)
 	shard := h.connShards[shardIdx]
 	shard.mu.RLock()
 	if len(shard.clients) != 1 {
 		shard.mu.RUnlock()
 		t.Errorf("len(connShard.clients) = %d, want 1", len(shard.clients))
+		return
 	}
 	shard.mu.RUnlock()
 }
@@ -1244,12 +1246,12 @@ func TestHub_PrepareSessionUser_EnforcesMaxConnsPerUser(t *testing.T) {
 	require.NoError(t, h.Add(clientB))
 
 	// Moving session-1 to user-b must hit the connection limit.
-	err := h.PrepareSessionUser("session-1", clientA, "user-b")
+	err := h.PrepareSessionUser("session-1", clientA, "", "user-b")
 	require.Error(t, err, "PrepareSessionUser must enforce maxConnsPerUser")
 	assert.ErrorIs(t, err, DisconnectConnectionLimit)
 
 	// Same-user stays within the limit and succeeds.
-	require.NoError(t, h.PrepareSessionUser("session-1", clientA, "user-a"))
+	require.NoError(t, h.PrepareSessionUser("session-1", clientA, "", "user-a"))
 }
 
 // TestHub_PrepareSessionUser_FailureKeepsOldSessionIntact guards §9.3: a
@@ -1270,13 +1272,13 @@ func TestHub_PrepareSessionUser_FailureKeepsOldSessionIntact(t *testing.T) {
 
 	// user-b sits at the limit, so this migration must fail before any
 	// mutation.
-	err = h.PrepareSessionUser("session-1", clientA, "user-b")
+	err = h.PrepareSessionUser("session-1", clientA, "", "user-b")
 	require.Error(t, err)
 	assert.ErrorIs(t, err, DisconnectConnectionLimit)
 
 	// The old session is still fully registered and Attached...
 	assert.Same(t, clientA, h.LookupSession("session-1"))
-	shard := h.connShards[index("user-a", numHubShards)]
+	shard := h.connShards[index(userKey("", "user-a"), numHubShards)]
 	shard.mu.RLock()
 	_, inConnShard := shard.clients["session-1"]
 	shard.mu.RUnlock()
@@ -1326,9 +1328,11 @@ func TestHubAddSubRejectsMalformedExactChannel(t *testing.T) {
 	assert.ErrorIs(t, err, topics.ErrBadTopic, "addSub(%q)", "a.**.b")
 }
 
-// TestHub_SessionsByUser verifies the user→sessions lookup: two sessions of
-// the same user are both returned, other users never leak in, and an empty
-// user ID returns empty even when anonymous connections are registered.
+// TestHub_SessionsByUser verifies the (namespace, user)→sessions lookup: two
+// sessions of the same user are both returned, other users never leak in,
+// sessions of the same user ID under a different namespace are separate, and
+// an empty user ID returns empty even when anonymous connections are
+// registered.
 func TestHub_SessionsByUser(t *testing.T) {
 	h := newHub(0, 0)
 	clientA := newTestClient(t, "session-a-1", "user-a")
@@ -1338,22 +1342,30 @@ func TestHub_SessionsByUser(t *testing.T) {
 	for _, c := range []*Client{clientA, clientA2, clientB, anon} {
 		require.NoError(t, h.Add(c))
 	}
+	// The same user ID under a different namespace owns its own slot.
+	clientNS := newTestClient(t, "session-ns", "user-a")
+	clientNS.SetNamespaceForTest("acme")
+	require.NoError(t, h.Add(clientNS))
 
-	sessions := h.SessionsByUser("user-a")
+	sessions := h.SessionsByUser("", "user-a")
 	require.Len(t, sessions, 2)
 	got := []string{sessions[0].SessionID(), sessions[1].SessionID()}
 	assert.Equal(t, []string{"session-a-1", "session-a-2"}, got, "sessions must be sorted and must not mix other users")
 
-	sessionsB := h.SessionsByUser("user-b")
+	sessionsB := h.SessionsByUser("", "user-b")
 	require.Len(t, sessionsB, 1)
 	assert.Equal(t, "session-b", sessionsB[0].SessionID())
 
-	assert.Empty(t, h.SessionsByUser("user-unknown"))
+	nsSessions := h.SessionsByUser("acme", "user-a")
+	require.Len(t, nsSessions, 1, "the same user ID under another namespace must be a separate registry entry")
+	assert.Equal(t, "session-ns", nsSessions[0].SessionID())
+
+	assert.Empty(t, h.SessionsByUser("", "user-unknown"))
 	// Empty user ID must stay empty even though the shard holds anonymous
 	// connections under the empty key.
-	assert.Empty(t, h.SessionsByUser(""))
+	assert.Empty(t, h.SessionsByUser("", ""))
 
 	// Removed sessions disappear from the lookup.
 	require.True(t, h.RemoveSessionIfMatches("session-a-1", clientA))
-	assert.Len(t, h.SessionsByUser("user-a"), 1)
+	assert.Len(t, h.SessionsByUser("", "user-a"), 1)
 }

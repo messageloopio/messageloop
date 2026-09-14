@@ -1,7 +1,6 @@
 package topics
 
 import (
-	"strings"
 	"sync"
 )
 
@@ -47,7 +46,7 @@ func (t *trieMatcher) Subscribe(topic string, sub Subscriber) (*Subscription, er
 	}
 	t.mu.Lock()
 	curr := t.root
-	for _, word := range strings.Split(topic, delimiter) {
+	for _, word := range SplitSegments(topic) {
 		child, ok := curr.children[word]
 		if !ok {
 			child = &node{
@@ -72,7 +71,7 @@ func (t *trieMatcher) Unsubscribe(sub *Subscription) {
 	}
 	t.mu.Lock()
 	curr := t.root
-	for _, word := range strings.Split(sub.Topic, delimiter) {
+	for _, word := range SplitSegments(sub.Topic) {
 		child, ok := curr.children[word]
 		if !ok {
 			// Subscription doesn't exist.
@@ -90,7 +89,7 @@ func (t *trieMatcher) Unsubscribe(sub *Subscription) {
 
 // Lookup returns the Subscribers for the given topic.
 func (t *trieMatcher) Lookup(topic string) []Subscriber {
-	words := strings.Split(topic, delimiter)
+	words := SplitSegments(topic)
 	for _, word := range words {
 		if word == empty {
 			// Topics with explicit empty segments never match, including

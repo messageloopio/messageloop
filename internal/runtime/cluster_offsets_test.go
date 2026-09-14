@@ -250,7 +250,7 @@ func remoteResumeTestNode(t *testing.T, snapshot *ClusterSessionSnapshot, histor
 	})
 	require.NoError(t, err)
 
-	node := NewNode(&config.Server{RequireAuth: true})
+	node := NewNode(&config.Server{RequireAuth: true, Namespace: "dev"})
 	node.SetCluster(runtime)
 	node.SetBroker(&fakeEpochHistoryBroker{epoch: epoch, pubs: history})
 	authProxy := &connectAuthProxyStub{userID: "user-1"}
@@ -275,7 +275,7 @@ func connectOffsets(t *testing.T, node *Node, transport *capturingTransport, cli
 				Token:     "t",
 				SessionId: "sess-off-resume",
 				Subscriptions: []*clientpb.Subscription{
-					{Channel: "off.news", Recover: true, Cursor: cursorOf(clientEpoch, clientOffset)},
+					{Channel: "dev:off.news", Recover: true, Cursor: cursorOf(clientEpoch, clientOffset)},
 				},
 			},
 		},
@@ -292,9 +292,9 @@ func TestClient_RemoteResume_ServerOffsetWinsOverClientOffset(t *testing.T) {
 		SessionID:     "sess-off-resume",
 		UserID:        "user-1",
 		ClientID:      "client-1",
-		Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "off.news"}},
+		Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "dev:off.news"}},
 		ChannelOffsets: map[string]uint64{
-			"off.news": 5,
+			"dev:off.news": 5,
 		},
 		BrokerEpoch: "v2",
 	}
@@ -312,9 +312,9 @@ func TestClient_RemoteResume_SnapshotEpochMismatchForcesFullRecovery(t *testing.
 		SessionID:     "sess-off-resume",
 		UserID:        "user-1",
 		ClientID:      "client-1",
-		Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "off.news"}},
+		Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "dev:off.news"}},
 		ChannelOffsets: map[string]uint64{
-			"off.news": 5,
+			"dev:off.news": 5,
 		},
 		BrokerEpoch: "v1", // broker restarted since the snapshot was taken
 	}
@@ -333,7 +333,7 @@ func TestClient_RemoteResume_MissingOffsetSkipped(t *testing.T) {
 		SessionID:     "sess-off-resume",
 		UserID:        "user-1",
 		ClientID:      "client-1",
-		Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "off.news"}},
+		Subscriptions: []ClusterSubscriptionSnapshot{{Channel: "dev:off.news"}},
 		BrokerEpoch:   "v2",
 	}
 	node := remoteResumeTestNode(t, snapshot, makeOffsetPubs(1, 10), "v2")

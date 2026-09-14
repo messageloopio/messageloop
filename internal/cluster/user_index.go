@@ -11,7 +11,8 @@ import (
 //
 //   - newLease == nil (Delete): remove the old lease's membership.
 //   - Put/CAS success: add (or refresh the TTL of) the new lease's
-//     membership; when the user changed, remove the old membership first.
+//     membership; when the (namespace, user) identity changed, remove the old
+//     membership first.
 //   - Empty UserID: only ever removes — anonymous sessions never enter the
 //     index (an empty user ID is not an addressable key).
 //
@@ -36,12 +37,13 @@ func SyncUserIndex(ctx context.Context, directory SessionDirectory, oldLease, ne
 		if oldLease == nil || oldLease.UserID == "" {
 			return nil
 		}
-		return directory.RemoveUserSession(ctx, oldLease.UserID, sessionID)
+		return directory.RemoveUserSession(ctx, oldLease.Namespace, oldLease.UserID, sessionID)
 	}
 
-	// The lease changed user: move the membership before adding the new one.
-	if oldLease != nil && oldLease.UserID != "" && oldLease.UserID != newLease.UserID {
-		if err := directory.RemoveUserSession(ctx, oldLease.UserID, sessionID); err != nil {
+	// The lease changed identity: move the membership before adding the new one.
+	if oldLease != nil && oldLease.UserID != "" &&
+		(oldLease.UserID != newLease.UserID || oldLease.Namespace != newLease.Namespace) {
+		if err := directory.RemoveUserSession(ctx, oldLease.Namespace, oldLease.UserID, sessionID); err != nil {
 			return err
 		}
 	}
@@ -50,5 +52,5 @@ func SyncUserIndex(ctx context.Context, directory SessionDirectory, oldLease, ne
 	if newLease.UserID == "" {
 		return nil
 	}
-	return directory.AddUserSession(ctx, newLease.UserID, sessionID, ttl)
+	return directory.AddUserSession(ctx, newLease.Namespace, newLease.UserID, sessionID, ttl)
 }

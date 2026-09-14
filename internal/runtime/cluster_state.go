@@ -65,15 +65,15 @@ func (noopSessionDirectory) DeleteSessionSnapshot(context.Context, string) error
 	return nil
 }
 
-func (noopSessionDirectory) AddUserSession(context.Context, string, string, time.Duration) error {
+func (noopSessionDirectory) AddUserSession(context.Context, string, string, string, time.Duration) error {
 	return nil
 }
 
-func (noopSessionDirectory) RemoveUserSession(context.Context, string, string) error {
+func (noopSessionDirectory) RemoveUserSession(context.Context, string, string, string) error {
 	return nil
 }
 
-func (noopSessionDirectory) ListUserSessions(context.Context, string) ([]string, error) {
+func (noopSessionDirectory) ListUserSessions(context.Context, string, string) ([]string, error) {
 	return nil, nil
 }
 
@@ -311,6 +311,7 @@ func (n *Node) clusterSessionLease(client *Client) *ClusterSessionLease {
 		NodeID:         n.ClusterNodeID(),
 		IncarnationID:  n.ClusterIncarnationID(),
 		UserID:         id.UserID,
+		Namespace:      id.Namespace,
 		ClientID:       id.ClientID,
 		LeaseVersion:   leaseVersion,
 		Authenticated:  id.Authenticated,
@@ -352,6 +353,7 @@ func (n *Node) clusterSessionSnapshot(client *Client) *ClusterSessionSnapshot {
 	snapshot := &ClusterSessionSnapshot{
 		SessionID:     sessionID,
 		UserID:        userID,
+		Namespace:     id.Namespace,
 		ClientID:      clientID,
 		Authenticated: authenticated,
 		Protocol:      protocol,
@@ -368,6 +370,9 @@ func (n *Node) clusterSessionSnapshot(client *Client) *ClusterSessionSnapshot {
 			"protocol":  protocol,
 		},
 		UpdatedAt: time.Now(),
+	}
+	if id.Namespace != "" {
+		snapshot.AuthContext["namespace"] = id.Namespace
 	}
 	if epochBroker, ok := n.broker.(interface{ Epoch() string }); ok {
 		snapshot.BrokerEpoch = epochBroker.Epoch()

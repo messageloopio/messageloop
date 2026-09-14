@@ -28,8 +28,12 @@ type fakeRuntime struct {
 	authorizer  *authz.Authorizer
 	limits      config.Limits
 	requireAuth bool
-	heartbeat   *HeartbeatManager
-	maxSize     int
+	// serverNamespace is the static namespace fallback served by
+	// ServerNamespace; empty keeps test sessions namespace-less so existing
+	// fixtures stay valid (the guard skips namespace-less sessions).
+	serverNamespace string
+	heartbeat       *HeartbeatManager
+	maxSize         int
 
 	deletedLease    bool
 	deletedSnapshot bool
@@ -54,6 +58,7 @@ func (f *fakeRuntime) Presence() occupancy.PresenceStore { return f.presence }
 func (f *fakeRuntime) Authorizer() *authz.Authorizer     { return f.authorizer }
 func (f *fakeRuntime) Limits() config.Limits             { return f.limits }
 func (f *fakeRuntime) RequireAuth() bool                 { return f.requireAuth }
+func (f *fakeRuntime) ServerNamespace() string           { return f.serverNamespace }
 func (f *fakeRuntime) Heartbeat() *HeartbeatManager      { return f.heartbeat }
 
 func (f *fakeRuntime) AddClient(c *Session) error { return f.hub.Add(c) }

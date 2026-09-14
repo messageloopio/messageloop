@@ -282,7 +282,7 @@ func (r *clusterRepairer) repairUserIndex(ctx context.Context) error {
 		if ttl <= 0 {
 			continue
 		}
-		if err := r.directory.AddUserSession(ctx, lease.UserID, lease.SessionID, ttl); err != nil {
+		if err := r.directory.AddUserSession(ctx, lease.Namespace, lease.UserID, lease.SessionID, ttl); err != nil {
 			return err
 		}
 	}

@@ -159,7 +159,7 @@ func (d *Directory) DeleteSessionLease(_ context.Context, sessionID string) erro
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if lease := d.sessionLeases[sessionID]; lease != nil && lease.UserID != "" {
-		d.removeUserSessionLocked(lease.UserID, sessionID)
+		d.removeUserSessionLocked(lease.Namespace, lease.UserID, sessionID)
 	}
 	delete(d.sessionLeases, sessionID)
 	d.deletedSessionLeases = append(d.deletedSessionLeases, sessionID)
@@ -235,53 +235,62 @@ func copySnapshot(snapshot *cluster.ClusterSessionSnapshot) *cluster.ClusterSess
 	return &copy
 }
 
-// AddUserSession records that sessionID currently belongs to userID. Empty
-// user IDs never enter the index.
-func (d *Directory) AddUserSession(_ context.Context, userID, sessionID string, _ time.Duration) error {
+// AddUserSession records that sessionID currently belongs to (namespace,
+// userID). Empty user IDs never enter the index.
+func (d *Directory) AddUserSession(_ context.Context, namespace, userID, sessionID string, _ time.Duration) error {
 	if userID == "" || sessionID == "" {
 		return nil
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	sessions := d.users[userID]
+	key := userIndexKey(namespace, userID)
+	sessions := d.users[key]
 	if sessions == nil {
 		sessions = make(map[string]struct{})
-		d.users[userID] = sessions
+		d.users[key] = sessions
 	}
 	sessions[sessionID] = struct{}{}
 	return nil
 }
 
-// RemoveUserSession drops a session's membership from a user's index.
-func (d *Directory) RemoveUserSession(_ context.Context, userID, sessionID string) error {
+// RemoveUserSession drops a session's membership from a (namespace, user)
+// index.
+func (d *Directory) RemoveUserSession(_ context.Context, namespace, userID, sessionID string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.removeUserSessionLocked(userID, sessionID)
+	d.removeUserSessionLocked(namespace, userID, sessionID)
 	return nil
 }
 
-func (d *Directory) removeUserSessionLocked(userID, sessionID string) {
-	sessions := d.users[userID]
+func (d *Directory) removeUserSessionLocked(namespace, userID, sessionID string) {
+	key := userIndexKey(namespace, userID)
+	sessions := d.users[key]
 	if sessions == nil {
 		return
 	}
 	delete(sessions, sessionID)
 	if len(sessions) == 0 {
-		delete(d.users, userID)
+		delete(d.users, key)
 	}
 }
 
-// ListUserSessions returns the indexed session IDs of userID (a hint, never
-// authoritative).
-func (d *Directory) ListUserSessions(_ context.Context, userID string) ([]string, error) {
+// ListUserSessions returns the indexed session IDs of (namespace, userID) (a
+// hint, never authoritative).
+func (d *Directory) ListUserSessions(_ context.Context, namespace, userID string) ([]string, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	sessions := d.users[userID]
+	sessions := d.users[userIndexKey(namespace, userID)]
 	result := make([]string, 0, len(sessions))
 	for sessionID := range sessions {
 		result = append(result, sessionID)
 	}
 	return result, nil
+}
+
+// userIndexKey composes the in-memory user index key for a (namespace, user)
+// pair; the NUL separator keeps the pair unambiguous.
+func userIndexKey(namespace, userID string) string {
+	return namespace + "\x00" + userID
 }
 
 var (

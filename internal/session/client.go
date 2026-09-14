@@ -88,6 +88,7 @@ type ClientInfo struct {
 	ClientID    string `json:"client_id"`
 	SessionID   string `json:"session_id"`
 	UserID      string `json:"user_id"`
+	Namespace   string `json:"namespace,omitempty"`
 	RemoteAddr  string `json:"remote_addr,omitempty"`
 	Protocol    string `json:"protocol,omitempty"`
 	UserAgent   string `json:"user_agent,omitempty"`
@@ -328,6 +329,7 @@ func (c *Session) handleConnect(ctx context.Context, in *clientpb.InboundMessage
 	// Proxy authentication - check if there's a proxy configured for authentication
 	var p proxy.Proxy
 	var authUser string
+	var authNamespace string
 	if connect.Token != "" {
 		p = c.rt.FindProxy("", SystemMethodAuthenticate)
 		if p == nil && c.rt.RequireAuth() {
@@ -406,8 +408,35 @@ func (c *Session) handleConnect(ctx context.Context, in *clientpb.InboundMessage
 		// Store user info from proxy response
 		if authResp.UserInfo != nil {
 			authUser = authResp.UserInfo.ID
+			authNamespace = authResp.UserInfo.Namespace
 		}
 	}
+
+	// Namespace resolution (fail-closed): the auth proxy's namespace wins,
+	// the static server.namespace is the fallback. A require_auth deployment
+	// with neither source rejects the connect — a session without a namespace
+	// has no channel scope, and silently dropping the scope would open
+	// cross-namespace leaks. Anonymous deployments (require_auth=false) are
+	// covered by config validation: server.namespace is mandatory there.
+	if authNamespace == "" {
+		authNamespace = c.rt.ServerNamespace()
+	}
+	if authNamespace == "" && c.rt.RequireAuth() {
+		log.WarnContext(ctx, "connect rejected: no namespace resolved",
+			"session", c.session)
+		_ = c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+			out.Envelope = &clientpb.OutboundMessage_Error{
+				Error: namespaceRequiredError(),
+			}
+		}))
+		return DisconnectInvalidToken
+	}
+	// Bind the resolved namespace before the resume paths: the local takeover
+	// check and the remote resume both compare it against the session being
+	// resumed, and the connection object is discarded on failure anyway.
+	c.mu.Lock()
+	c.namespace = authNamespace
+	c.mu.Unlock()
 
 	// Resumption is only permitted when real authentication happened
 	// (require_auth + a verified token via the auth proxy). In anonymous mode
@@ -448,11 +477,19 @@ func (c *Session) handleConnect(ctx context.Context, in *clientpb.InboundMessage
 					"session", connect.SessionId, "user", authUser, "owner", owner)
 				return c.disconnectOnConnectError(ctx, DisconnectInvalidToken)
 			}
+			// The same owner rule for namespaces: a session never leaves its
+			// namespace, so a resume that resolved a different one is refused
+			// before any state change.
+			if ownerNs := existing.Namespace(); ownerNs != "" && authNamespace != "" && ownerNs != authNamespace {
+				log.WarnContext(ctx, "session takeover denied: session belongs to another namespace",
+					"session", connect.SessionId, "namespace", authNamespace, "owner_namespace", ownerNs)
+				return c.disconnectOnConnectError(ctx, DisconnectInvalidToken)
+			}
 			if existing.UserID() == "" && authUser != "" {
 				// Adopting an unauthenticated session under a real identity
 				// (defensive: RequireAuth servers never create one) enforces
 				// the target user's connection limit before the takeover.
-				if err := c.rt.Hub().PrepareSessionUser(connect.SessionId, existing, authUser); err != nil {
+				if err := c.rt.Hub().PrepareSessionUser(connect.SessionId, existing, authNamespace, authUser); err != nil {
 					return c.disconnectOnConnectError(ctx, err)
 				}
 			}
@@ -462,6 +499,9 @@ func (c *Session) handleConnect(ctx context.Context, in *clientpb.InboundMessage
 			// subscription state already lives on the resumed session).
 			existing.mu.Lock()
 			existing.user = authUser
+			if authNamespace != "" {
+				existing.namespace = authNamespace
+			}
 			existing.ctx = ctx
 			if existing.clusterLeaseVersion == 0 {
 				existing.clusterLeaseVersion = 1
@@ -508,7 +548,7 @@ func (c *Session) handleConnect(ctx context.Context, in *clientpb.InboundMessage
 			}
 			c.mu.Unlock()
 
-			return existing.finishConnect(ctx, in, connect, resumed, resumedLocal, nil, p, authUser)
+			return existing.finishConnect(ctx, in, connect, resumed, resumedLocal, nil, p, authUser, authNamespace)
 		} else {
 			var err error
 			resumeSnapshot, resumed, err = c.rt.ResumeRemoteSession(ctx, c, connect.SessionId, authUser)
@@ -535,7 +575,7 @@ func (c *Session) handleConnect(ctx context.Context, in *clientpb.InboundMessage
 		}
 	}
 
-	return c.finishConnect(ctx, in, connect, resumed, resumedLocal, resumeSnapshot, p, authUser)
+	return c.finishConnect(ctx, in, connect, resumed, resumedLocal, resumeSnapshot, p, authUser, authNamespace)
 }
 
 // finishConnect completes a successful Connect on the canonical session: it
@@ -543,13 +583,18 @@ func (c *Session) handleConnect(ctx context.Context, in *clientpb.InboundMessage
 // recovery and sends the Connected envelope. For a local resume it runs on
 // the resumed session object (the new connection's Authenticating session is
 // only a shell by then).
-func (c *Session) finishConnect(ctx context.Context, in *clientpb.InboundMessage, connect *clientpb.Connect, resumed, resumedLocal bool, resumeSnapshot *ClusterSessionSnapshot, p proxy.Proxy, authUser string) error {
+func (c *Session) finishConnect(ctx context.Context, in *clientpb.InboundMessage, connect *clientpb.Connect, resumed, resumedLocal bool, resumeSnapshot *ClusterSessionSnapshot, p proxy.Proxy, authUser, authNamespace string) error {
 	c.mu.Lock()
 	c.authenticated = true
 	// The authenticated user wins over the inherited one (matches the
 	// pre-resume reordering semantics).
 	if authUser != "" {
 		c.user = authUser
+	}
+	// The resolved namespace likewise wins over an inherited empty one; a
+	// mismatched resume was already refused before this point.
+	if authNamespace != "" {
+		c.namespace = authNamespace
 	}
 	if !resumed {
 		c.client = connect.ClientId
@@ -831,11 +876,18 @@ func (c *Session) sendRequestError(ctx context.Context, in *clientpb.InboundMess
 	}))
 }
 
-// checkSubscribeACL evaluates one subscription through the Authorizer and the
-// proxy (PR-KA-A4 §8.1) and returns the error envelope to send to the client,
-// or nil when the subscription is allowed. Order: routability, static Decide,
-// then the proxy — a proxy approval must never bypass a static deny.
+// checkSubscribeACL evaluates one subscription through the namespace guard,
+// the Authorizer and the proxy (PR-KA-A4 §8.1) and returns the error envelope
+// to send to the client, or nil when the subscription is allowed. Order:
+// namespace scope, routability, static Decide, then the proxy — a proxy
+// approval must never bypass a static deny.
 func (c *Session) checkSubscribeACL(ctx context.Context, in *clientpb.InboundMessage, ch *clientpb.Subscription) *sharedv2.Error {
+	// 0. Namespace scope: the channel must live under the session's namespace
+	// (multi-tenant isolation; see checkNamespace).
+	if nsErr := c.checkNamespace(ch.Channel); nsErr != nil {
+		return nsErr
+	}
+
 	// 1. Routability before authorization: the subscription key must compile
 	// on the live bus (A3). The same code pair as A3: PATTERN_NOT_ROUTABLE /
 	// BAD_REQUEST, and the connection stays up.
@@ -921,6 +973,7 @@ func (c *Session) ClientInfo() *ClientInfo {
 		ClientID:    c.client,
 		SessionID:   c.session,
 		UserID:      c.user,
+		Namespace:   c.namespace,
 		Protocol:    c.protocol,
 		ConnectedAt: c.connectedAt.UnixMilli(),
 	}
@@ -948,6 +1001,17 @@ func (c *Session) handleRPC(ctx context.Context, in *clientpb.InboundMessage, rp
 
 	if channel == "" {
 		return c.sendRequestError(ctx, in, "missing channel in RPC request")
+	}
+
+	// Namespace scope before proxy routing: the channel participates in the
+	// proxy route match, so a cross-namespace channel must never reach a
+	// foreign backend.
+	if nsErr := c.checkNamespace(channel); nsErr != nil {
+		return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+			out.Envelope = &clientpb.OutboundMessage_Error{
+				Error: nsErr,
+			}
+		}))
 	}
 
 	// Apply RPC timeout from configuration or use default
@@ -1085,6 +1149,17 @@ func (c *Session) handlePublish(ctx context.Context, in *clientpb.InboundMessage
 		// wildcard pattern would fan out to wildcard subscribers while never
 		// being an addressable channel itself.
 		return c.sendRequestError(ctx, in, "publish channel must be an exact channel name, not a wildcard pattern")
+	}
+
+	// Namespace scope before authorization: neither an ACL rule nor a proxy
+	// approval may leak a cross-namespace publish.
+	if nsErr := c.checkNamespace(channel); nsErr != nil {
+		log.WarnContext(ctx, "namespace denied publish", "channel", channel, "namespace", c.Namespace())
+		return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+			out.Envelope = &clientpb.OutboundMessage_Error{
+				Error: nsErr,
+			}
+		}))
 	}
 
 	// Static authorization first (PR-KA-A4 §8.1): a proxy that allows must
@@ -1472,6 +1547,9 @@ func (c *Session) handleSurvey(ctx context.Context, in *clientpb.InboundMessage,
 	if ch == "" || isWildcard(ch) {
 		return c.sendSurveyError(ctx, in, "BAD_REQUEST", "request_error", "survey channel must be an exact channel")
 	}
+	if nsErr := c.checkNamespace(ch); nsErr != nil {
+		return c.sendSurveyError(ctx, in, nsErr.Code, nsErr.Type, nsErr.Message)
+	}
 	if !c.sessionCoversChannel(ch) {
 		return c.sendSurveyError(ctx, in, "PERMISSION_DENIED", "acl_error", "survey denied: channel not covered by session")
 	}
@@ -1728,6 +1806,13 @@ func (c *Session) handlePresenceQuery(ctx context.Context, in *clientpb.InboundM
 					Type:    "request_error",
 					Message: "presence query channel must be an exact channel",
 				},
+			}
+		}))
+	}
+	if nsErr := c.checkNamespace(ch); nsErr != nil {
+		return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
+			out.Envelope = &clientpb.OutboundMessage_Error{
+				Error: nsErr,
 			}
 		}))
 	}

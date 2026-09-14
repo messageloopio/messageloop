@@ -180,6 +180,10 @@
         },
         "clientId": {
           "type": "string"
+        },
+        "namespace": {
+          "type": "string",
+          "description": "Namespace scopes the session to a multi-tenant namespace: every\nclient-visible channel must live under it (\"ns:topic\"). Empty means the\nserver falls back to its static server.namespace."
         }
       }
     }
