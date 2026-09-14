@@ -1,6 +1,9 @@
 package ws
 
 import (
+	"context"
+	"errors"
+	"io"
 	"net/http"
 	"time"
 
@@ -71,8 +74,12 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	ctx = log.Context(ctx, log.FromContext(ctx), "client_id", client.SessionID())
 	defer func() { _ = closeFn() }()
 
-	// Set max message size
-	if maxSize := h.node.MaxMessageSize(); maxSize > 0 {
+	// Set max message size. SetReadLimit only caps the compressed bytes on
+	// the wire (gorilla enforces it against the frame payload length before
+	// decompression); the decompressed stream is capped independently in the
+	// read loop below, see readAllBounded.
+	maxSize := h.node.MaxMessageSize()
+	if maxSize > 0 {
 		conn.SetReadLimit(int64(maxSize))
 	}
 
@@ -82,13 +89,22 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	_ = conn.SetReadDeadline(time.Now().Add(readTimeout))
 
 	for {
-		_, data, err := conn.ReadMessage()
+		_, r, err := conn.NextReader()
 		if err != nil {
-			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-				log.InfoContext(ctx, "websocket closed normally")
-			} else {
-				log.ErrorContext(ctx, "websocket read error", err)
-			}
+			// Control frames (ping/pong/close) are consumed inside
+			// NextReader exactly as with ReadMessage, so the close-error
+			// classification below is unchanged.
+			logReadError(ctx, err)
+			break
+		}
+		data, err := readAllBounded(r, int64(maxSize))
+		if err != nil {
+			// An over-limit decompressed message takes the same path as a
+			// transport read error: break and let the deferred session close
+			// shut the connection down, matching the SetReadLimit behavior.
+			// No per-frame error envelope is sent (uniform oversize feedback
+			// across transports is a separate mechanism task).
+			logReadError(ctx, err)
 			break
 		}
 		// Reset read deadline after successful read
@@ -128,6 +144,45 @@ func (h *Handler) marshaler(subProtocol string) shared.Marshaler {
 		return shared.ProtobufMarshaler{}
 	default:
 		return shared.ProtoJSONMarshaler
+	}
+}
+
+// errMessageTooLarge reports that the decompressed message exceeded the
+// configured max message size. It is only logged and never sent to the peer:
+// oversize feedback is handled uniformly across transports elsewhere.
+var errMessageTooLarge = errors.New("websocket message exceeds max message size")
+
+// readAllBounded reads a whole message while capping the decompressed output
+// at maxSize bytes. This closes a decompression-bomb hole: with
+// permessage-deflate negotiated, gorilla's SetReadLimit (and therefore
+// ReadMessage's readLimit check) only bounds the compressed bytes on the
+// wire, while DEFLATE reaches compression ratios of ~1000:1 — a single
+// 64KB frame can expand to ~64MB of buffered output before any decoder
+// rejects it, so a handful of concurrent frames can OOM the process.
+// Reading maxSize+1 bytes distinguishes an exactly-maxSize message from an
+// oversized one. maxSize <= 0 keeps the legacy unlimited behavior.
+func readAllBounded(r io.Reader, maxSize int64) ([]byte, error) {
+	if maxSize <= 0 {
+		return io.ReadAll(r)
+	}
+	data, err := io.ReadAll(io.LimitReader(r, maxSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxSize {
+		return nil, errMessageTooLarge
+	}
+	return data, nil
+}
+
+// logReadError classifies a read-loop failure: a close frame from the peer
+// (1000/1001) is a normal end of session, everything else — including
+// errMessageTooLarge — is logged as an error.
+func logReadError(ctx context.Context, err error) {
+	if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+		log.InfoContext(ctx, "websocket closed normally")
+	} else {
+		log.ErrorContext(ctx, "websocket read error", err)
 	}
 }
 
