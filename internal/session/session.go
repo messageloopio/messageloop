@@ -791,7 +791,12 @@ func (s *Session) closeFromAttachment(att *Attachment) error {
 	current := s.attachment
 	s.mu.RUnlock()
 	if delegate != nil {
-		return delegate.Close(Disconnect{})
+		// This connection handed its transport to the resumed session, so it
+		// may only close that session while the session is still served by
+		// the handed-over transport — a chained resume rebinds the session to
+		// a newer connection, and this superseded shell's death must not kill
+		// it (see closeIfServingHandoff).
+		return delegate.closeIfServingHandoff(att, Disconnect{})
 	}
 	if current != att {
 		return nil
@@ -809,15 +814,41 @@ func (s *Session) closeFromLoop(dis Disconnect) {
 	loopAtt := s.loopAtt
 	s.mu.RUnlock()
 	if delegate != nil {
-		// This connection handed its attachment to the resumed session: the
-		// close is the current attachment's close.
-		_ = delegate.Close(dis)
+		// This connection handed its transport to the resumed session: the
+		// close lands on the resumed session only while it is still served
+		// by the handed-over transport (a chained resume rebinds it to a
+		// newer connection, see closeIfServingHandoff).
+		_ = delegate.closeIfServingHandoff(loopAtt, dis)
 		return
 	}
 	if current != loopAtt {
 		return
 	}
 	_ = s.Close(dis)
+}
+
+// closeIfServingHandoff closes the resumed session only when its current
+// attachment still rides the transport the dying shell handed over during
+// the resume takeover. The session's attachment is a fresh object wrapping
+// that transport, so the comparison must be on the transport, not on the
+// attachment pointer. While it matches, this shell is the session's current
+// connection and its death closes the session normally; a chained resume
+// rebinds the session to the newer connection's transport, so a superseded
+// shell's read-loop exit must leave the session alone. A nil attachment
+// (Detach window of an in-flight chained resume, or an already closed
+// session) is not serving the handoff either: the in-flight resume either
+// completes and owns the session or fails into an explicit Close.
+func (s *Session) closeIfServingHandoff(handoff *Attachment, reason Disconnect) error {
+	if handoff == nil {
+		return nil
+	}
+	s.mu.RLock()
+	current := s.attachment
+	s.mu.RUnlock()
+	if current == nil || current.Transport != handoff.Transport {
+		return nil
+	}
+	return s.Close(reason)
 }
 
 // TransportLabel returns the transport label value ("ws", "grpc", "quic", or

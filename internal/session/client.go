@@ -124,7 +124,14 @@ func (c *Session) MarkMetricsCharged() {
 	defer c.mu.Unlock()
 	if c.state == SessionClosed {
 		if c.rt.Metrics() != nil {
-			c.rt.Metrics().ConnectionsTotal.WithLabelValues(c.TransportLabel()).Dec()
+			// TransportLabel() would re-acquire c.mu (RLock) while this
+			// goroutine still holds the write lock. A Go RWMutex is not
+			// reentrant, so that call would block forever and leave the
+			// session (and its read loop) permanently wedged whenever Close
+			// won the race against AddClient. c.protocol is guarded by c.mu,
+			// which this goroutine already holds exclusively, so read the
+			// field directly and map it to the metric label without locking.
+			c.rt.Metrics().ConnectionsTotal.WithLabelValues(MetricsTransportLabel(c.protocol)).Dec()
 		}
 		return
 	}
