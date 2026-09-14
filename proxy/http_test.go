@@ -398,6 +398,28 @@ func TestHTTPProxy_RPC_NonOKMalformedErrorMemberFallsBack(t *testing.T) {
 	assert.Contains(t, err.Error(), "not an object")
 }
 
+// TestHTTPProxy_RPC_ToleratesUnknownResponseFields is the regression test for
+// review #11: the RPC response was parsed with strict protojson (no
+// DiscardUnknown), so a backend adding any unknown member to a 200 response
+// failed every RPC. The other five parse paths in http.go already used
+// DiscardUnknown; the RPC path must tolerate the same shape.
+func TestHTTPProxy_RPC_ToleratesUnknownResponseFields(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// A valid RPCResponse plus fields the proto does not know: a
+		// trace id at top level and a payload-adjacent envelope member.
+		_, _ = w.Write([]byte(`{"id":"r1","payload":{"text":"hello"},"trace_id":"t-42","deployment":{"region":"cn"}}`))
+	}))
+	defer server.Close()
+
+	p := newTestHTTPProxy(t, server)
+
+	resp, err := p.RPC(context.Background(), &RPCProxyRequest{ID: "r1", Channel: "c", Method: "m"})
+	require.NoError(t, err, "unknown fields in a 200 response must not fail the RPC")
+	require.NotNil(t, resp.Payload, "response payload must survive the tolerant parse")
+	assert.Equal(t, "hello", resp.Payload.GetText())
+}
+
 func mustStruct(t *testing.T, v map[string]any) *structpb.Struct {
 	t.Helper()
 	s, err := structpb.NewStruct(v)

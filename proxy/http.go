@@ -148,7 +148,11 @@ func (p *HTTPProxy) RPC(ctx context.Context, req *RPCProxyRequest) (*RPCProxyRes
 		func(respBody []byte) (any, error) {
 			var protoResp proxypb.RPCResponse
 			// protojson restores the payload oneof that encoding/json drops.
-			if err := protojson.Unmarshal(respBody, &protoResp); err != nil {
+			// DiscardUnknown like every other parse path in this file: a
+			// backend adding an unknown member to a 200 response must not fail
+			// every RPC (review #11).
+			opts := protojson.UnmarshalOptions{DiscardUnknown: true}
+			if err := opts.Unmarshal(respBody, &protoResp); err != nil {
 				return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 			}
 			return FromProtoReply(&protoResp)

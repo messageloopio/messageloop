@@ -250,6 +250,17 @@ func (c *Session) handleMessage(ctx context.Context, in *clientpb.InboundMessage
 		return DisconnectInvalidToken
 	}
 
+	// Central namespace precheck (mechanism gap G1, review #4): every
+	// channel-carrying envelope is namespace-scoped here at the single
+	// dispatch entry, next to the auth gate above — namespace isolation no
+	// longer relies on each handler remembering its check. Handlers keep
+	// their own checks as defense in depth; coverage and exemptions are
+	// documented on precheckNamespace.
+	in, err := c.precheckNamespace(ctx, in)
+	if err != nil || in == nil {
+		return err
+	}
+
 	switch msg := in.Envelope.(type) {
 	case *clientpb.InboundMessage_Connect:
 		return c.handleConnect(ctx, in, msg.Connect)
