@@ -9,7 +9,7 @@ require (
 	github.com/gobwas/glob v0.2.3
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
-	github.com/lynx-go/lynx v1.10.0
+	github.com/lynx-go/lynx v1.11.0
 	github.com/lynx-go/lynx/contrib/zap v1.7.0
 	github.com/lynx-go/x v0.1.0
 	github.com/messageloopio/messageloop/shared v0.2.0
