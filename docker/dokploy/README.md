@@ -36,12 +36,22 @@ Torchwood 的公开 Server API 通信——部署时需提供 Torchwood 网关�
 1. Dokploy 控制台：**Projects → Create Project → Create Service → Docker Compose**；
 2. 来源选你的 Git 仓库与分支；
 3. **Compose Path** 填：`./docker/dokploy/docker-compose.yml`；
-4. 先别急着 Deploy——到 **Environment** 页签按下表添加变量，再回来点 **Deploy**。
+4. 先别急着 Deploy——到 **Environment** 页签粘贴 **`env.dokploy`** 的内容，
+   填齐「必填」段五项（其余保持注释即取默认），再回来点 **Deploy**。
+   `env.dokploy` 是本部署全部环境变量的收口清单（compose 里每个
+   `${VAR}` 引用都能在其中找到）；本地可用
+   `docker compose --env-file env.dokploy -f docker-compose.yml config`
+   校验插值链——不填必填项会得到对应中文报错，渲染通过即插值完整。
 
 首次部署会在服务器上构建镜像（几分钟，取决于带宽与 CPU），之后增量构建走
 BuildKit 缓存。
 
 ## 2. 环境变量（Environment 页签）
+
+> 逐项清单以 **`env.dokploy`** 为准（下表是说明，不是全集）。必填五项：
+> `MESSAGELOOP_SERVER_GRPC_ADMIN_AUTH_TOKEN`、`MESSAGELOOP_WS_DOMAIN`、
+> `MESSAGELOOP_GRPC_DOMAIN`、`MLBRIDGE_TORCHWOOD_BASE_URL`、
+> `MLBRIDGE_TORCHWOOD_PROJECTS`。
 
 | 变量 | 必填 | 说明 |
 |------|------|------|
@@ -185,6 +195,7 @@ curl -I http://<WS域名>/            # 301 → https
 |------|------|
 | `docker-compose.yml` | 全栈编排（redis + messageloop + mlbridge）+ Traefik 域名路由（相对路径均相对本目录） |
 | `mlbridge.yaml` | messageloop 挂载的桥接线配置（proxy 块 + require_auth，config-file-only 键） |
+| `env.dokploy` | Dokploy Environment 变量模板（必填占位 + 可选默认；本地 `--env-file` 校验源） |
 | `README.md` | 本指南 |
 | 仓库根 `Dockerfile` | 镜像构建（内置容器默认配置 `configs/docker.yaml`） |
 | `cmd/server/envconfig.go` | `MESSAGELOOP_*` 环境变量覆盖的完整键表 |
