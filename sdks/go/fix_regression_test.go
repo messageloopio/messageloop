@@ -399,11 +399,12 @@ func TestClientSubscribeWithEphemeral(t *testing.T) {
 
 	c := newClient(ctx, cancel, trans, defaultOptions())
 	c.connected.Store(true)
+	go c.receiveLoop(trans, 0)
 
-	if err := c.SubscribeWith("presence.ch", WithEphemeral(true)); err != nil {
-		t.Fatalf("SubscribeWith failed: %v", err)
-	}
-	sub := trans.lastSent().GetSubscribe()
+	sent := awaitSubscribeAck(t, trans, func() error {
+		return c.SubscribeWith("presence.ch", WithEphemeral(true))
+	})
+	sub := sent.GetSubscribe()
 	if sub == nil {
 		t.Fatal("no Subscribe message sent")
 	}
@@ -412,11 +413,8 @@ func TestClientSubscribeWithEphemeral(t *testing.T) {
 	}
 
 	// Plain Subscribe must keep the default (non-ephemeral).
-	if err := c.Subscribe("persistent.ch"); err != nil {
-		t.Fatalf("Subscribe failed: %v", err)
-	}
-	sub = trans.lastSent().GetSubscribe()
-	if sub.GetSubscriptions()[0].GetEphemeral() {
+	sent = awaitSubscribeAck(t, trans, func() error { return c.Subscribe("persistent.ch") })
+	if sent.GetSubscribe().GetSubscriptions()[0].GetEphemeral() {
 		t.Fatal("Subscribe defaulted to ephemeral")
 	}
 

@@ -152,8 +152,10 @@ static async dial(url: string, options?: ClientOption[]): Promise<MessageLoopCli
 | --- | --- |
 | `connect(): Promise<void>` | 发送 `Connect` 信封进行认证；重连场景下附带 `sessionId`、每频道 `offset` 与 `epoch` 用于会话恢复 |
 | `close(): Promise<void>` | 主动关闭：停止重连与心跳、拒绝所有挂起的 RPC / Presence 查询 / Survey、关闭传输、触发 `onClosed` |
-| `subscribe(...channels): Promise<void>` | 订阅一个或多个频道，并记录进 `subscribedChannels`（重连后自动恢复）；每个参数是频道名或 `{ channel, token?, recover?, offset?, epoch? }`（见下） |
-| `unsubscribe(...channels): Promise<void>` | 取消订阅 |
+| `subscribe(...channels): Promise<void>` | 订阅一个或多个频道并**等待服务端 `SubscribeAck`**：resolve 即服务端已注册订阅（见下文「订阅生效契约」）；每个参数是频道名或 `{ channel, token?, recover?, offset?, epoch? }`（见下）。`subscribedChannels` 的本地记录在 Ack 到达后写入（重连后自动恢复） |
+| `subscribeAsync(...channels): Promise<void>` | 尽力而为订阅：写帧即 resolve，不等待 `SubscribeAck` |
+| `unsubscribe(...channels): Promise<void>` | 取消订阅并**等待服务端 `UnsubscribeAck`**；本地记录与每频道恢复 offset 在 Ack 到达后才清除 |
+| `unsubscribeAsync(...channels): Promise<void>` | 尽力而为退订：写帧即 resolve，不等待 `UnsubscribeAck` |
 | `publish(channel: string, msg: Message): Promise<void>` | 向频道发布一条消息 |
 | `rpc(channel: string, method: string, request: Message, options?: { timeout?: number }): Promise<Message>` | 发起 RPC 请求，返回服务端回复载荷构造的 `Message`；超时（默认 `rpcTimeout`）或服务端返回错误时 reject |
 | `presence(channel: string): Promise<PresenceSnapshot>` | 查询精确频道的当前 Presence 快照；失败时 reject（error 带服务端 `code`）；空/通配频道交给服务端拒绝 |
@@ -163,6 +165,15 @@ static async dial(url: string, options?: ClientOption[]): Promise<MessageLoopCli
 | `disableAutoReconnect()` / `enableAutoReconnect()` | 运行时开关自动重连 |
 
 `SubscriptionSpec` 的恢复字段（与 Go SDK `WithRecover(offset, epoch)` 对应）：
+
+### 订阅生效契约
+
+`subscribe()` / `unsubscribe()` 默认等待服务端 Ack（与 `publishWithAck` 同一等待先例，pending 按请求 Id 关联，服务端在 Ack 信封上回显该 Id）：**promise resolve 即服务端已注册 / 已移除对应订阅**，因此 `await` 之后的发布（哪怕来自另一条连接）不会再与在途订阅竞速导致消息静默丢失。规则与 Go SDK 一致：
+
+- 等待受 `rpcTimeout`（`setRPCTimeout`，默认 30000ms）约束；Ack 不到达时以 `Subscribe ack timeout after ${timeout}ms` / `Unsubscribe ack timeout after ${timeout}ms` reject。
+- 服务端以回显请求 Id 的顶层 Error 信封拒绝时立即 reject（错误携带 `code`）；断连与 `close()` 会以 `Connection closed` reject 所有 in-flight 订阅/退订等待。
+- `subscribeAsync()` / `unsubscribeAsync()` 是显式的尽力而为变体：请求写入传输即 resolve（原有 fire-and-forget 语义），随后立即发布仍可能与订阅注册竞速。
+- 重连后的内部重订阅（`resubscribeAllChannels`）与 `autoSubscribe` 都走 Connect 帧，不经过等待路径，不存在「等待发生在接收循环里」的自锁。
 
 - `recover?: boolean` —— `true` 时服务端通过 `SubscribeAck.publications` 重放 `offset` 之后的离线消息，走与普通消息相同的 `onMessage` / `addMessageHandler` 投递路径。
 - `offset?: bigint` —— 恢复起点（proto `uint64`，用 `bigint` 表示）；`0n` 表示从最新开始（由服务端策略决定）。
@@ -203,7 +214,7 @@ static async dial(url: string, options?: ClientOption[]): Promise<MessageLoopCli
 | `setPingInterval(interval: number)` | `30000` | 心跳间隔（毫秒），`0` 表示禁用 |
 | `setPingTimeout(timeout: number)` | `10000` | Pong 超时（毫秒），超时视为断连 |
 | `setConnectTimeout(timeout: number)` | `30000` | WebSocket 建连与 `Connected` 等待超时（毫秒） |
-| `setRPCTimeout(timeout: number)` | `30000` | RPC 默认超时（毫秒），`rpc()` 可逐次覆盖 |
+| `setRPCTimeout(timeout: number)` | `30000` | RPC 默认超时（毫秒），`rpc()` 可逐次覆盖；同时也是 `subscribe()` / `unsubscribe()` 等待 Ack 的默认超时 |
 | `setEphemeral(ephemeral: boolean)` | `false` | 订阅是否标记为临时（ephemeral） |
 | `setAutoReconnect(enabled: boolean)` | `true` | 是否自动重连 |
 | `setReconnectDelay(initial: number, max: number)` | `1000`, `30000` | 重连退避窗口（毫秒） |
@@ -295,7 +306,7 @@ interface SurveyAnswer { sessionId: string; userId: string; payload?: Message; e
 
 - `SurveyAnswer.userId` 读自答案的 `metadata.entries["user_id"]`（proto 的 `SurveyAnswer` 没有 user_id 字段），缺失为 `""`。
 - 调查结果整体失败时 `survey()` reject，error 携带服务端 `code`；若 `SurveyResult` 自身带 error，答案挂在被 reject 的 error 的 `answers` 属性上。
-- **不要在收包回调里同步 `await`** `rpc()` / `survey()` / `presence()`：这些调用的等待发生在调用方 Promise 上，接收循环负责填充结果，在回调里同步等待会互相卡死。
+- **不要在收包回调里同步 `await`** `rpc()` / `survey()` / `presence()` / `subscribe()` / `unsubscribe()`：这些调用的等待发生在调用方 Promise 上，接收循环负责填充结果，在回调里同步等待会互相卡死。
 
 ## 7. 传输与编码
 
@@ -345,6 +356,7 @@ SDK 层的错误形态均为原生 `Error`，来源与附加信息如下（`src/
 
 - **服务端错误信封**：`Error` 并附加 `code` 与 `type` 属性（取自协议错误字段），经 `onError` 回调分发。
 - **RPC 错误**：服务端 `RpcReply.error` 时 reject，错误对象带 `code`（字符串）；RPC 超时 reject `RPC timeout after ${timeout}ms`。
+- **订阅/退订 Ack 错误**：`subscribe()` / `unsubscribe()` 的 Ack 不到达时按 `rpcTimeout` reject（`Subscribe ack timeout after ${timeout}ms` / `Unsubscribe ack timeout after ${timeout}ms`）；服务端拒绝（匹配请求 Id 的 Error 信封）、断连或 `close()` 时立即 reject。
 - **Presence / Survey 错误**：`presence()` / `survey()` 被服务端拒绝时 reject，错误对象带服务端 `code`；断连或 `close()` 时挂起的查询/调查以 `Connection closed` reject。未连接时调用两者直接 reject `Not connected`。
 - **连接问题**：未连接时调用发送类方法抛 `Not connected`；`dial` 失败直接抛出（超时为 `Connection timeout`，WebSocket 层为 `WebSocket connection failed` 等）。
 - **心跳超时**：`Pong timeout`，随后关闭连接。

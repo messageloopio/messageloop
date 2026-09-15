@@ -93,9 +93,14 @@ await client.close();
 ### Client Methods
 
 - `close()` - Close the connection
-- `subscribe(...channels)` - Subscribe to channels; each argument is a channel
-  name or `{ channel, token?, recover?, cursor?, fresh? }`. With `recover:
-  true` the server streams the channel history as `Publication` envelopes with
+- `subscribe(...channels)` - Subscribe to channels and **wait for the server's
+  SubscribeAck**: the promise resolves only after the server has registered
+  the subscriptions, so a publish issued afterwards (even from another
+  connection) cannot race the subscription. Bounded by `rpcTimeout`; a
+  rejected subscribe (matching error envelope), disconnect, or `close()`
+  rejects immediately. Each argument is a channel name or
+  `{ channel, token?, recover?, cursor?, fresh? }`. With `recover: true` the
+  server streams the channel history as `Publication` envelopes with
   `replay=true` (delivered via the same `onMessage` / `addMessageHandler` path
   as live messages), followed by a `recover_complete` echoing the
   authoritative position. `cursor: { streamEpoch, offset }` is the resume
@@ -103,7 +108,15 @@ await client.close();
   record or skips). There is no "offset 0 means from the start": use
   `fresh: true` for an explicit from-the-start replay (Go SDK `WithRecover` /
   `WithFresh` parity).
-- `unsubscribe(...channels)` - Unsubscribe from channels (same argument form)
+- `subscribeAsync(...channels)` - Subscribe without waiting for the
+  SubscribeAck (best-effort): resolves as soon as the request is written, so
+  a publish issued right after may still race the registration
+- `unsubscribe(...channels)` - Unsubscribe and **wait for the server's
+  UnsubscribeAck** (same wait/timeout semantics as `subscribe`); local
+  bookkeeping and per-channel recovery offsets are dropped only once the
+  server confirmed the removal
+- `unsubscribeAsync(...channels)` - Unsubscribe without waiting for the
+  UnsubscribeAck (best-effort)
 - `publish(channel, message)` - Publish a message to a channel (fire-and-forget)
 - `publishWithAck(channel, message, options?)` - Publish and await the server
   ack; resolves with `{ id, offset }`, rejects on timeout or disconnect
@@ -154,7 +167,22 @@ series on the same event, or handlers may both fire and duplicate delivery.
 Note: do not `await rpc() / survey() / presence()` synchronously inside
 receive-loop callbacks (`onMessage`, `onPresence*`, `onSurvey*`) — those
 calls wait on the caller's promise while the receive loop fills the pending
-result, so a synchronous wait deadlocks.
+result, so a synchronous wait deadlocks. The same applies to
+`subscribe()` / `unsubscribe()`.
+
+### Subscription Effectiveness Contract
+
+`subscribe()` and `unsubscribe()` are acked by default (the same
+wait-for-ack precedent as `publishWithAck`): the promise resolves only after
+the server's SubscribeAck / UnsubscribeAck — which echoes the request id —
+has been processed, so code running after the `await` can rely on the server
+having (un)registered the channels. `subscribeAsync()` and
+`unsubscribeAsync()` are the explicit best-effort variants: they resolve when
+the request has been written to the transport, trading the guarantee for zero
+latency. The wait is bounded by `rpcTimeout` (`setRPCTimeout`); disconnects
+and `close()` reject all in-flight waits. Internal reconnect resubscription
+(`resubscribeAllChannels`) deliberately uses the non-waiting send path to
+avoid waiting on the receive loop.
 
 ### Message Helpers
 

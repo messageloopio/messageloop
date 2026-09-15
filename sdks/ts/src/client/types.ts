@@ -137,8 +137,20 @@ export interface SurveyAnswer {
 export interface IClient {
   connect(): Promise<void>;
   close(): Promise<void>;
+  /**
+   * Subscribe and wait for the server's SubscribeAck: resolves only after
+   * the server has registered the subscriptions (bounded by rpcTimeout).
+   */
   subscribe(...channels: ChannelOrSpec[]): Promise<void>;
+  /** Subscribe without waiting for the server's SubscribeAck (best-effort). */
+  subscribeAsync(...channels: ChannelOrSpec[]): Promise<void>;
+  /**
+   * Unsubscribe and wait for the server's UnsubscribeAck: resolves only
+   * after the server has removed the subscriptions (bounded by rpcTimeout).
+   */
   unsubscribe(...channels: ChannelOrSpec[]): Promise<void>;
+  /** Unsubscribe without waiting for the server's UnsubscribeAck (best-effort). */
+  unsubscribeAsync(...channels: ChannelOrSpec[]): Promise<void>;
   publish(
     channel: string,
     msg: import("../message").Message,

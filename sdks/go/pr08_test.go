@@ -35,11 +35,12 @@ func TestSDK_SubscribeWithRecover(t *testing.T) {
 
 	c := newClient(ctx, cancel, trans, defaultOptions())
 	c.connected.Store(true)
+	go c.receiveLoop(trans, 0)
 
-	if err := c.SubscribeWith("chat.recover", WithRecover(Position("ep", 7))); err != nil {
-		t.Fatalf("SubscribeWith failed: %v", err)
-	}
-	sub := trans.lastSent().GetSubscribe()
+	sent := awaitSubscribeAck(t, trans, func() error {
+		return c.SubscribeWith("chat.recover", WithRecover(Position("ep", 7)))
+	})
+	sub := sent.GetSubscribe()
 	if sub == nil || len(sub.GetSubscriptions()) != 1 {
 		t.Fatal("no Subscribe message with one subscription sent")
 	}
@@ -53,10 +54,10 @@ func TestSDK_SubscribeWithRecover(t *testing.T) {
 
 	// A no-hint recover (nil cursor) still sends recover=true without a
 	// cursor and never claims fresh.
-	if err := c.SubscribeWith("chat.nohint", WithRecover(nil)); err != nil {
-		t.Fatalf("SubscribeWith failed: %v", err)
-	}
-	s = trans.lastSent().GetSubscribe().GetSubscriptions()[0]
+	sent = awaitSubscribeAck(t, trans, func() error {
+		return c.SubscribeWith("chat.nohint", WithRecover(nil))
+	})
+	s = sent.GetSubscribe().GetSubscriptions()[0]
 	if !s.GetRecover() {
 		t.Fatal("recover flag not set for no-hint recover")
 	}
@@ -65,10 +66,10 @@ func TestSDK_SubscribeWithRecover(t *testing.T) {
 	}
 
 	// WithFresh forces an explicit from-the-start replay.
-	if err := c.SubscribeWith("chat.fresh", WithFresh()); err != nil {
-		t.Fatalf("SubscribeWith failed: %v", err)
-	}
-	s = trans.lastSent().GetSubscribe().GetSubscriptions()[0]
+	sent = awaitSubscribeAck(t, trans, func() error {
+		return c.SubscribeWith("chat.fresh", WithFresh())
+	})
+	s = sent.GetSubscribe().GetSubscriptions()[0]
 	if !s.GetRecover() || !s.GetFresh() {
 		t.Fatal("fresh subscription must set recover=true and fresh=true")
 	}

@@ -21,11 +21,12 @@ func TestClientSubscribeWithToken(t *testing.T) {
 
 	c := newClient(ctx, cancel, trans, defaultOptions())
 	c.connected.Store(true)
+	go c.receiveLoop(trans, 0)
 
-	if err := c.SubscribeWith("secure.ch", WithSubscriptionToken("sub-token-1")); err != nil {
-		t.Fatalf("SubscribeWith failed: %v", err)
-	}
-	sub := trans.lastSent().GetSubscribe()
+	sent := awaitSubscribeAck(t, trans, func() error {
+		return c.SubscribeWith("secure.ch", WithSubscriptionToken("sub-token-1"))
+	})
+	sub := sent.GetSubscribe()
 	if sub == nil {
 		t.Fatal("no Subscribe message sent")
 	}
@@ -34,11 +35,8 @@ func TestClientSubscribeWithToken(t *testing.T) {
 	}
 
 	// Plain Subscribe must keep the default (no token).
-	if err := c.Subscribe("plain.ch"); err != nil {
-		t.Fatalf("Subscribe failed: %v", err)
-	}
-	sub = trans.lastSent().GetSubscribe()
-	if sub.GetSubscriptions()[0].GetToken() != "" {
+	sent = awaitSubscribeAck(t, trans, func() error { return c.Subscribe("plain.ch") })
+	if sent.GetSubscribe().GetSubscriptions()[0].GetToken() != "" {
 		t.Fatal("plain Subscribe carried a token")
 	}
 
@@ -50,10 +48,8 @@ func TestClientSubscribeWithToken(t *testing.T) {
 			{Channel: "secure.ch", Token: "sub-token-1", Ephemeral: true},
 		},
 	})
-	if err := c.Unsubscribe("secure.ch"); err != nil {
-		t.Fatalf("Unsubscribe failed: %v", err)
-	}
-	un := trans.lastSent().GetUnsubscribe()
+	sent = awaitUnsubscribeAck(t, trans, func() error { return c.Unsubscribe("secure.ch") })
+	un := sent.GetUnsubscribe()
 	if un == nil {
 		t.Fatal("no Unsubscribe message sent")
 	}

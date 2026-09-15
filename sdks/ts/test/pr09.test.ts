@@ -50,7 +50,7 @@ describe("PR-09: recover", () => {
     const client = connectedClient();
     const sent = (client as any).transport.send;
 
-    await client.subscribe({
+    await client.subscribeAsync({
       channel: "ch1",
       recover: true,
       cursor: { streamEpoch: "ep", offset: 7n },
@@ -69,7 +69,7 @@ describe("PR-09: recover", () => {
     const client = connectedClient();
     const sent = (client as any).transport.send;
 
-    await client.subscribe({ channel: "ch2", recover: true });
+    await client.subscribeAsync({ channel: "ch2", recover: true });
 
     const sub = sent.mock.calls[0][0].envelope.value.subscriptions[0];
     expect(sub).toMatchObject({
@@ -84,7 +84,7 @@ describe("PR-09: recover", () => {
     const client = connectedClient();
     const sent = (client as any).transport.send;
 
-    await client.subscribe({ channel: "ch3", recover: true, fresh: true });
+    await client.subscribeAsync({ channel: "ch3", recover: true, fresh: true });
 
     const sub = sent.mock.calls[0][0].envelope.value.subscriptions[0];
     expect(sub).toMatchObject({
@@ -99,7 +99,7 @@ describe("PR-09: recover", () => {
     const client = connectedClient();
     const sent = (client as any).transport.send;
 
-    await client.subscribe("plain");
+    await client.subscribeAsync("plain");
 
     const sub = sent.mock.calls[0][0].envelope.value.subscriptions[0];
     expect(sub).toMatchObject({ channel: "plain" });

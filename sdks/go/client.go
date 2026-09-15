@@ -28,10 +28,20 @@ type Client interface {
 	Connect(ctx context.Context) error
 	// Close closes the connection
 	Close() error
-	// Subscribe subscribes to channels
+	// Subscribe subscribes to channels and waits for the server's
+	// SubscribeAck: when it returns nil the server has registered the
+	// subscriptions.
 	Subscribe(channels ...string) error
-	// Unsubscribe unsubscribes from channels
+	// SubscribeAsync subscribes to channels without waiting for the server's
+	// SubscribeAck (best-effort).
+	SubscribeAsync(channels ...string) error
+	// Unsubscribe unsubscribes from channels and waits for the server's
+	// UnsubscribeAck: when it returns nil the server has removed the
+	// subscriptions.
 	Unsubscribe(channels ...string) error
+	// UnsubscribeAsync unsubscribes from channels without waiting for the
+	// server's UnsubscribeAck (best-effort).
+	UnsubscribeAsync(channels ...string) error
 	// Publish publishes a message to a channel. Pass transient=true to skip
 	// persistence and only deliver to currently connected subscribers.
 	Publish(channel string, msg *Message, transient ...bool) error
@@ -140,6 +150,20 @@ type surveyPendingResult struct {
 	err    error
 }
 
+// subAckPending tracks a pending Subscribe/Unsubscribe request waiting for
+// its server ack. The once guard makes resolve idempotent so concurrent ack
+// delivery and disconnect or Close cleanup cannot double-send on the
+// channel.
+type subAckPending struct {
+	ch   chan error
+	once sync.Once
+}
+
+// resolve delivers the ack outcome (nil on success), at most once.
+func (s *subAckPending) resolve(err error) {
+	s.once.Do(func() { s.ch <- err })
+}
+
 // resolve delivers the pending survey outcome, at most once.
 func (s *surveyPending) resolve(res surveyPendingResult) {
 	s.once.Do(func() { s.ch <- res })
@@ -188,6 +212,10 @@ type client struct {
 	pendingPresenceMu       sync.RWMutex
 	pendingSurvey           map[string]*surveyPending // Survey inbound id -> pending survey
 	pendingSurveyMu         sync.RWMutex
+	pendingSubAck           map[string]*subAckPending // Subscribe request id -> pending subscribe
+	pendingSubAckMu         sync.RWMutex
+	pendingUnsubAck         map[string]*subAckPending // Unsubscribe request id -> pending unsubscribe
+	pendingUnsubAckMu       sync.RWMutex
 	nextMsgID               atomic.Uint64
 	subscriptions           map[string]*subscriptionState // Channel -> subscription state
 	subMu                   sync.RWMutex
@@ -351,6 +379,8 @@ func newClient(ctx context.Context, cancel context.CancelFunc, trans transport, 
 		pendingAck:      make(map[string]*ackPending),
 		pendingPresence: make(map[string]*rpcPending),
 		pendingSurvey:   make(map[string]*surveyPending),
+		pendingSubAck:   make(map[string]*subAckPending),
+		pendingUnsubAck: make(map[string]*subAckPending),
 		subscriptions:   make(map[string]*subscriptionState),
 		channelOffsets:  make(map[string]uint64),
 		pongCh:          make(chan struct{}, 1),
@@ -530,13 +560,15 @@ func (c *client) receiveLoop(trans transport, gen uint64) {
 				isConnError := !c.connected.Load()
 				c.handleError(fmt.Errorf("receive error: %w", err), isConnError)
 				c.connected.Store(false)
-				// Pending publishes / surveys / presence queries can no
-				// longer complete on the lost connection: fail them so
-				// callers can retry instead of hanging until their context
-				// deadline.
+				// Pending publishes / surveys / presence queries / subscribe
+				// and unsubscribe acks can no longer complete on the lost
+				// connection: fail them so callers can retry instead of
+				// hanging until their timeout.
 				c.rejectPendingAcks(err)
 				c.rejectPendingSurveys(err)
 				c.rejectPendingPresence(err)
+				c.rejectPendingSubAcks(err)
+				c.rejectPendingUnsubAcks(err)
 				// Attempt reconnection if enabled
 				if c.opts.AutoReconnect && !c.closed.Load() {
 					go c.reconnectLoop()
@@ -555,12 +587,13 @@ func (c *client) handleMessage(msg *clientpb.OutboundMessage, gen uint64) {
 	case *clientpb.OutboundMessage_Connected:
 		c.handleConnected(env.Connected, gen)
 
-	case *clientpb.OutboundMessage_Error:
-		// If the error references a pending RPC request, a pending
-		// publish, a pending presence query or a pending survey, deliver it
-		// to the waiting caller so the call fails fast with the server error
-		// instead of hanging until the context deadline.
-		if !c.deliverPending(msg) && !c.rejectPendingAck(msg) && !c.deliverPresence(msg) && !c.deliverSurveyError(msg) {
+		case *clientpb.OutboundMessage_Error:
+			// If the error references a pending RPC request, a pending
+			// publish, a pending subscribe/unsubscribe, a pending presence
+			// query or a pending survey, deliver it to the waiting caller so
+			// the call fails fast with the server error instead of hanging
+			// until the context deadline.
+			if !c.deliverPending(msg) && !c.rejectPendingAck(msg) && !c.rejectPendingSubAck(msg) && !c.rejectPendingUnsubAck(msg) && !c.deliverPresence(msg) && !c.deliverSurveyError(msg) {
 			if dis, ok := disconnectFromError(env.Error); ok {
 				// The gRPC stream has no close frame: the server encodes the
 				// numeric disconnect code in the error envelope metadata, and
@@ -574,9 +607,16 @@ func (c *client) handleMessage(msg *clientpb.OutboundMessage, gen uint64) {
 		}
 
 	case *clientpb.OutboundMessage_SubscribeAck:
+		// Resolve the waiting Subscribe caller first: the ack's envelope id
+		// echoes the request id, so the caller resumes only after the server
+		// has registered the subscriptions. The state write-back in
+		// handleSubscribeAck is then local bookkeeping.
+		c.resolvePendingSubAck(msg.GetId())
 		c.handleSubscribeAck(env.SubscribeAck)
 
 	case *clientpb.OutboundMessage_UnsubscribeAck:
+		// Same contract as the SubscribeAck above, for Unsubscribe.
+		c.resolvePendingUnsubAck(msg.GetId())
 		c.handleUnsubscribeAck(env.UnsubscribeAck)
 
 	case *clientpb.OutboundMessage_Publication:
@@ -723,6 +763,11 @@ func (c *client) handleConnected(connected *clientpb.Connected, gen uint64) {
 // followed by one RecoverComplete per channel (§4.2), never inside the ack.
 func (c *client) handleSubscribeAck(ack *clientpb.SubscribeAck) {
 	for _, sub := range ack.GetSubscriptions() {
+		// The whole read-modify-write of the subscription state runs under
+		// the write lock (same as handleConnected): the ack may be processed
+		// on the receive loop while a caller of the waiting Subscribe path
+		// (or a test seeding state) touches the map concurrently.
+		c.subMu.Lock()
 		state := c.subscriptions[sub.GetChannel()]
 		if state == nil {
 			state = &subscriptionState{}
@@ -733,7 +778,6 @@ func (c *client) handleSubscribeAck(ack *clientpb.SubscribeAck) {
 		if sub.GetToken() != "" {
 			state.token = sub.GetToken()
 		}
-		c.subMu.Lock()
 		c.subscriptions[sub.GetChannel()] = state
 		c.subMu.Unlock()
 	}
@@ -1023,8 +1067,32 @@ func WithFresh() SubscribeOption {
 	}
 }
 
-// Subscribe subscribes to channels.
+// Subscribe subscribes to channels and waits for the server's SubscribeAck:
+// when it returns nil the server has registered the subscriptions, so a
+// publish issued afterwards — even from another connection — can no longer
+// race the subscription registration. The wait is bounded by the configured
+// RPCTimeout (WithRPCTimeout); a rejected subscribe, a lost connection or
+// Close fails the wait immediately. SubscribeAsync is the non-blocking
+// variant.
+//
+// Like the other acked calls (RPC, Presence, Survey) the wait happens on the
+// caller's goroutine: do not invoke Subscribe synchronously from
+// receive-loop callbacks.
 func (c *client) Subscribe(channels ...string) error {
+	subs := make([]*clientpb.Subscription, len(channels))
+	for i, ch := range channels {
+		subs[i] = &clientpb.Subscription{
+			Channel: ch,
+		}
+	}
+	return c.sendSubscribeAndWait(subs)
+}
+
+// SubscribeAsync subscribes to channels without waiting for the server's
+// SubscribeAck (best-effort): the request is written to the transport and
+// the call returns immediately, so a publish issued right after may still
+// race the subscription registration on the server.
+func (c *client) SubscribeAsync(channels ...string) error {
 	subs := make([]*clientpb.Subscription, len(channels))
 	for i, ch := range channels {
 		subs[i] = &clientpb.Subscription{
@@ -1034,7 +1102,8 @@ func (c *client) Subscribe(channels ...string) error {
 	return c.sendSubscribe(subs)
 }
 
-// SubscribeWith subscribes to a single channel with per-subscription options.
+// SubscribeWith subscribes to a single channel with per-subscription options
+// and waits for the server's SubscribeAck (same contract as Subscribe).
 func (c *client) SubscribeWith(channel string, opts ...SubscribeOption) error {
 	sub := &clientpb.Subscription{
 		Channel: channel,
@@ -1042,10 +1111,11 @@ func (c *client) SubscribeWith(channel string, opts ...SubscribeOption) error {
 	for _, opt := range opts {
 		opt(sub)
 	}
-	return c.sendSubscribe([]*clientpb.Subscription{sub})
+	return c.sendSubscribeAndWait([]*clientpb.Subscription{sub})
 }
 
-// sendSubscribe sends a Subscribe message with the given subscriptions.
+// sendSubscribe sends a Subscribe message with the given subscriptions
+// without waiting for the server's ack.
 func (c *client) sendSubscribe(subs []*clientpb.Subscription) error {
 	if !c.connected.Load() {
 		return fmt.Errorf("not connected")
@@ -1070,8 +1140,123 @@ func (c *client) sendSubscribe(subs []*clientpb.Subscription) error {
 	return nil
 }
 
-// Unsubscribe unsubscribes from channels.
+// sendSubscribeAndWait sends a Subscribe request and waits for the server's
+// SubscribeAck, matched by the request id the server echoes back on the ack
+// envelope. The pending is registered before the send so the ack can never
+// be missed between the send and the registration.
+func (c *client) sendSubscribeAndWait(subs []*clientpb.Subscription) error {
+	if !c.connected.Load() {
+		return fmt.Errorf("not connected")
+	}
+
+	id := c.generateID()
+	p := &subAckPending{ch: make(chan error, 1)}
+
+	// Register the pending subscribe before sending so the ack can never be
+	// missed between the send and the registration.
+	c.pendingSubAckMu.Lock()
+	c.pendingSubAck[id] = p
+	c.pendingSubAckMu.Unlock()
+	defer func() {
+		c.pendingSubAckMu.Lock()
+		delete(c.pendingSubAck, id)
+		c.pendingSubAckMu.Unlock()
+	}()
+
+	msg := &clientpb.InboundMessage{
+		Id: id,
+		Envelope: &clientpb.InboundMessage_Subscribe{
+			Subscribe: &clientpb.Subscribe{
+				Subscriptions: subs,
+			},
+		},
+	}
+
+	c.mu.RLock()
+	trans := c.transport
+	c.mu.RUnlock()
+	if err := trans.Send(c.ctx, msg); err != nil {
+		return fmt.Errorf("subscribe failed: %w", err)
+	}
+
+	// The configured RPCTimeout bounds the wait; <=0 disables the default
+	// timeout and the wait resolves on the ack, a disconnect or Close.
+	if timeout := c.opts.RPCTimeout; timeout > 0 {
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+		select {
+		case err := <-p.ch:
+			return err
+		case <-timer.C:
+			return fmt.Errorf("subscribe ack timeout")
+		}
+	}
+	return <-p.ch
+}
+
+// Unsubscribe unsubscribes from channels and waits for the server's
+// UnsubscribeAck: when it returns nil the server has removed the
+// subscriptions. Timeout / disconnect / Close semantics match Subscribe.
 func (c *client) Unsubscribe(channels ...string) error {
+	if !c.connected.Load() {
+		return fmt.Errorf("not connected")
+	}
+
+	subs := make([]*clientpb.Subscription, len(channels))
+	for i, ch := range channels {
+		subs[i] = &clientpb.Subscription{
+			Channel:   ch,
+			Ephemeral: c.isEphemeral(ch),
+			Token:     c.subToken(ch),
+		}
+	}
+
+	id := c.generateID()
+	p := &subAckPending{ch: make(chan error, 1)}
+
+	// Register the pending unsubscribe before sending so the ack can never
+	// be missed between the send and the registration.
+	c.pendingUnsubAckMu.Lock()
+	c.pendingUnsubAck[id] = p
+	c.pendingUnsubAckMu.Unlock()
+	defer func() {
+		c.pendingUnsubAckMu.Lock()
+		delete(c.pendingUnsubAck, id)
+		c.pendingUnsubAckMu.Unlock()
+	}()
+
+	msg := &clientpb.InboundMessage{
+		Id: id,
+		Envelope: &clientpb.InboundMessage_Unsubscribe{
+			Unsubscribe: &clientpb.Unsubscribe{
+				Subscriptions: subs,
+			},
+		},
+	}
+
+	c.mu.RLock()
+	trans := c.transport
+	c.mu.RUnlock()
+	if err := trans.Send(c.ctx, msg); err != nil {
+		return fmt.Errorf("unsubscribe failed: %w", err)
+	}
+
+	if timeout := c.opts.RPCTimeout; timeout > 0 {
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+		select {
+		case err := <-p.ch:
+			return err
+		case <-timer.C:
+			return fmt.Errorf("unsubscribe ack timeout")
+		}
+	}
+	return <-p.ch
+}
+
+// UnsubscribeAsync unsubscribes from channels without waiting for the
+// server's UnsubscribeAck (best-effort).
+func (c *client) UnsubscribeAsync(channels ...string) error {
 	if !c.connected.Load() {
 		return fmt.Errorf("not connected")
 	}
@@ -1102,6 +1287,102 @@ func (c *client) Unsubscribe(channels ...string) error {
 	}
 
 	return nil
+}
+
+// resolvePendingSubAck resolves the pending Subscribe waiting for the ack of
+// the request with the given id (the server echoes the request id on the ack
+// envelope) and removes the entry. Acks that arrive after the caller timed
+// out have no pending left and are dropped.
+func (c *client) resolvePendingSubAck(id string) {
+	if id == "" {
+		return
+	}
+	c.pendingSubAckMu.Lock()
+	p, ok := c.pendingSubAck[id]
+	if ok {
+		delete(c.pendingSubAck, id)
+	}
+	c.pendingSubAckMu.Unlock()
+	if ok {
+		p.resolve(nil)
+	}
+}
+
+// resolvePendingUnsubAck is resolvePendingSubAck for Unsubscribe.
+func (c *client) resolvePendingUnsubAck(id string) {
+	if id == "" {
+		return
+	}
+	c.pendingUnsubAckMu.Lock()
+	p, ok := c.pendingUnsubAck[id]
+	if ok {
+		delete(c.pendingUnsubAck, id)
+	}
+	c.pendingUnsubAckMu.Unlock()
+	if ok {
+		p.resolve(nil)
+	}
+}
+
+// rejectPendingSubAck fails the pending Subscribe with the matching request
+// id when the server rejects it with a top-level error envelope, so the
+// caller fails fast with the server error instead of waiting out the ack
+// timeout. It reports whether the error was routed to a pending subscribe.
+func (c *client) rejectPendingSubAck(msg *clientpb.OutboundMessage) bool {
+	id := msg.GetId()
+	if id == "" {
+		return false
+	}
+	c.pendingSubAckMu.Lock()
+	p, ok := c.pendingSubAck[id]
+	if ok {
+		delete(c.pendingSubAck, id)
+	}
+	c.pendingSubAckMu.Unlock()
+	if ok {
+		p.resolve(fmt.Errorf("subscribe rejected: %s (code: %s)", msg.GetError().GetMessage(), msg.GetError().GetCode()))
+	}
+	return ok
+}
+
+// rejectPendingUnsubAck is rejectPendingSubAck for Unsubscribe.
+func (c *client) rejectPendingUnsubAck(msg *clientpb.OutboundMessage) bool {
+	id := msg.GetId()
+	if id == "" {
+		return false
+	}
+	c.pendingUnsubAckMu.Lock()
+	p, ok := c.pendingUnsubAck[id]
+	if ok {
+		delete(c.pendingUnsubAck, id)
+	}
+	c.pendingUnsubAckMu.Unlock()
+	if ok {
+		p.resolve(fmt.Errorf("unsubscribe rejected: %s (code: %s)", msg.GetError().GetMessage(), msg.GetError().GetCode()))
+	}
+	return ok
+}
+
+// rejectPendingSubAcks fails all pending subscribes when the connection is
+// lost before their acks arrive.
+func (c *client) rejectPendingSubAcks(err error) {
+	c.pendingSubAckMu.Lock()
+	for id, p := range c.pendingSubAck {
+		delete(c.pendingSubAck, id)
+		p.resolve(fmt.Errorf("connection lost before subscribe ack: %w", err))
+	}
+	c.pendingSubAckMu.Unlock()
+}
+
+// rejectPendingUnsubAcks fails all pending unsubscribes when the connection
+// is lost before their acks arrive.
+func (c *client) rejectPendingUnsubAcks(err error) {
+	c.pendingUnsubAckMu.Lock()
+	for id, p := range c.pendingUnsubAck {
+		delete(c.pendingUnsubAck, id)
+		p.resolve(fmt.Errorf("connection lost before unsubscribe ack: %w", err))
+	}
+	c.pendingUnsubAckMu.Unlock()
 }
 
 // isEphemeral reports whether the given channel was last subscribed with the
@@ -2051,6 +2332,21 @@ func (c *client) Close() error {
 		ap.reject(errors.New("client closed before publish ack"))
 	}
 	c.pendingAckMu.Unlock()
+
+	// Clean up pending subscribe / unsubscribe acks
+	c.pendingSubAckMu.Lock()
+	for id, p := range c.pendingSubAck {
+		delete(c.pendingSubAck, id)
+		p.resolve(errors.New("client closed before subscribe ack"))
+	}
+	c.pendingSubAckMu.Unlock()
+
+	c.pendingUnsubAckMu.Lock()
+	for id, p := range c.pendingUnsubAck {
+		delete(c.pendingUnsubAck, id)
+		p.resolve(errors.New("client closed before unsubscribe ack"))
+	}
+	c.pendingUnsubAckMu.Unlock()
 
 	c.mu.RLock()
 	trans := c.transport

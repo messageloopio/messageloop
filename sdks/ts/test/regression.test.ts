@@ -272,7 +272,9 @@ describe("P1-9: unsubscribe clears channelOffsets", () => {
     (client as any).channelOffsets.set("ch1", 100n);
     (client as any).subscribedChannels = new Map([["ch1", ""]]);
 
-    await client.unsubscribe("ch1");
+    // Immediate bookkeeping lives on the async variant; the acked
+    // unsubscribe path is covered in subscribe_ack.test.ts.
+    await client.unsubscribeAsync("ch1");
 
     expect((client as any).channelOffsets.has("ch1")).toBe(false);
     expect(client.getSubscribedChannels()).toEqual([]);

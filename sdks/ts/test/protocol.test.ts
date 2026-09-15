@@ -25,7 +25,9 @@ describe("B3-TS: subscription-level token", () => {
     };
     (client as any).isConnectedFlag = true;
 
-    await client.subscribe("plain", { channel: "tokened", token: "t1" });
+    // Wire-shape assertions use the async variant: subscribe() itself waits
+    // for the SubscribeAck (covered in subscribe_ack.test.ts).
+    await client.subscribeAsync("plain", { channel: "tokened", token: "t1" });
 
     const sub = sent[sent.length - 1];
     expect(sub.envelope.case).toBe("subscribe");
@@ -46,8 +48,8 @@ describe("B3-TS: subscription-level token", () => {
     };
     (client as any).isConnectedFlag = true;
 
-    await client.subscribe({ channel: "ch1", token: "t1" });
-    await client.unsubscribe({ channel: "ch1" });
+    await client.subscribeAsync({ channel: "ch1", token: "t1" });
+    await client.unsubscribeAsync({ channel: "ch1" });
 
     const unsub = sent[sent.length - 1];
     expect(unsub.envelope.case).toBe("unsubscribe");

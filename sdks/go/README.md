@@ -28,7 +28,7 @@ if err := client.Connect(context.Background()); err != nil {
     panic(err)
 }
 
-// 订阅
+// 订阅（等待服务端 SubscribeAck，返回即服务端已注册；见下文「订阅生效契约」）
 if err := client.Subscribe("chat.general"); err != nil {
     panic(err)
 }
@@ -84,6 +84,26 @@ if err != nil {
 }
 fmt.Println("committed at offset", offset)
 ```
+
+## 订阅生效契约
+
+`Subscribe` / `SubscribeWith` / `Unsubscribe` 默认等待服务端 Ack（与 `PublishWithAck` 同一等待先例）：**返回 nil 即服务端已注册 / 已移除订阅**（Ack 回显请求 Id，SDK 按其关联 pending）。「订阅后立即从另一连接发布」因此不再与在途订阅竞速导致消息静默丢失。
+
+- 超时复用 `WithRPCTimeout`（默认 30s，`<=0` 表示不设默认超时，仅由 Ack / 断连 / `Close()` 解除等待）；超时错误形如 `subscribe ack timeout` / `unsubscribe ack timeout`。
+- 服务端以顶层 Error 信封拒绝（回显请求 Id）时立即失败，错误携带服务端 code/message。
+- 连接断开或 `Close()` 时所有 in-flight 订阅/退订以错误（`connection lost before subscribe ack` / `client closed before ...`）立即 resolve，不悬挂、无泄漏。
+- `SubscribeAsync` / `UnsubscribeAsync` 是显式的尽力而为变体：写帧即返回（原 fire-and-forget 语义），随后立即发布仍可能与订阅注册竞速。
+- 自动重连的内部重订阅走 Connect 帧的订阅列表（`resumeSubscriptions`），不经过等待路径，不存在接收循环自锁；`WithAutoSubscribe` 同样随 Connect 建立。
+
+```go
+// 返回后另一连接的 publish 一定不会早于本订阅生效
+if err := client.Subscribe("chat.general"); err != nil { ... }
+
+// 尽力而为：不等待 Ack
+if err := client.SubscribeAsync("chat.general"); err != nil { ... }
+```
+
+与等待版 `RPC` / `Presence` / `Survey` 一样，`Subscribe` / `Unsubscribe` 的等待发生在调用方 goroutine：**不要**在 `OnMessage` 等收包回调里同步调用。
 
 ## 带数值码的断连错误
 

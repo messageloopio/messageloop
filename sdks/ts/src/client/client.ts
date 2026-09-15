@@ -103,6 +103,17 @@ export class MessageLoopClient implements IClient {
     }
   > = new Map();
 
+  // Subscribe/Unsubscribe pending acks (subscribe/unsubscribe), keyed by the
+  // request id the server echoes back on the ack envelope
+  private pendingSubAck: Map<
+    string,
+    {
+      timer: ReturnType<typeof setTimeout> | null;
+      resolve: () => void;
+      reject: (err: Error) => void;
+    }
+  > = new Map();
+
   // Survey request handler; when unset survey requests are echoed back
   private surveyHandler: ((
     requestId: string,
@@ -347,6 +358,17 @@ export class MessageLoopClient implements IClient {
       }
 
       case "subscribeAck": {
+        // Resolve the waiting subscribe() caller first: the ack's envelope
+        // id echoes the request id, so the caller resumes only after the
+        // server has registered the subscriptions. The local write-back
+        // below is then merely bookkeeping.
+        const pendingSub = this.pendingSubAck.get(parsed.id);
+        if (pendingSub) {
+          this.pendingSubAck.delete(parsed.id);
+          if (pendingSub.timer) clearTimeout(pendingSub.timer);
+          pendingSub.resolve();
+        }
+
         // Keep/update the local subscription set. When the server omits the
         // subscription token, fall back to the locally known token (same
         // rule as the Connected handler).
@@ -374,6 +396,30 @@ export class MessageLoopClient implements IClient {
         // after the subscription write-back above.
         for (const snap of parsed.data.presence || []) {
           this.dispatchPresenceSnapshot(presenceSnapshotFromPB(snap));
+        }
+        break;
+      }
+
+      case "unsubscribeAck": {
+        // Same contract as the subscribeAck above, for unsubscribe(): the
+        // ack's envelope id echoes the request id.
+        const pendingUnsub = this.pendingSubAck.get(parsed.id);
+        if (pendingUnsub) {
+          this.pendingSubAck.delete(parsed.id);
+          if (pendingUnsub.timer) clearTimeout(pendingUnsub.timer);
+          pendingUnsub.resolve();
+        }
+
+        // Local bookkeeping mirrors the Go SDK handleUnsubscribeAck: the
+        // channels and their recovery offsets are dropped only once the
+        // server confirmed the removal, so a later resubscribe + reconnect
+        // cannot replay stale history.
+        for (const sub of parsed.data.subscriptions || []) {
+          const channel = sub?.channel;
+          if (typeof channel === "string" && channel.length > 0) {
+            this.subscribedChannels.delete(channel);
+            this.channelOffsets.delete(channel);
+          }
         }
         break;
       }
@@ -514,6 +560,16 @@ export class MessageLoopClient implements IClient {
             pending.reject(error);
             break;
           }
+        }
+
+        // Fail the pending subscribe/unsubscribe with the matching id, if
+        // any (same fail-fast rule).
+        if (parsed.id && this.pendingSubAck.has(parsed.id)) {
+          const pendingSub = this.pendingSubAck.get(parsed.id)!;
+          this.pendingSubAck.delete(parsed.id);
+          if (pendingSub.timer) clearTimeout(pendingSub.timer);
+          pendingSub.reject(error);
+          break;
         }
 
         // Fail the pending presence query with the matching id, if any.
@@ -789,6 +845,14 @@ export class MessageLoopClient implements IClient {
     }
     this.pendingPublish.clear();
 
+    // Reject pending subscribe/unsubscribe acks: the connection is gone, no
+    // ack will arrive.
+    for (const [_, pending] of this.pendingSubAck) {
+      if (pending.timer) clearTimeout(pending.timer);
+      pending.reject(new Error("Connection closed"));
+    }
+    this.pendingSubAck.clear();
+
     // Reject pending presence queries and surveys: the connection is gone,
     // no reply will arrive.
     this.rejectPendingPresenceAndSurveys();
@@ -1048,6 +1112,13 @@ export class MessageLoopClient implements IClient {
     }
     this.pendingPublish.clear();
 
+    // Reject pending subscribe/unsubscribe acks
+    for (const [_, pending] of this.pendingSubAck) {
+      if (pending.timer) clearTimeout(pending.timer);
+      pending.reject(new Error("Connection closed"));
+    }
+    this.pendingSubAck.clear();
+
     // Reject pending presence queries and surveys
     this.rejectPendingPresenceAndSurveys();
 
@@ -1068,12 +1139,71 @@ export class MessageLoopClient implements IClient {
   }
 
   /**
-   * Subscribe to one or more channels.
+   * Subscribe to one or more channels and wait for the server's SubscribeAck:
+   * when the promise resolves the server has registered the subscriptions, so
+   * a publish issued afterwards — even from another connection — can no
+   * longer race the subscription registration. The wait is bounded by the
+   * configured rpcTimeout; a rejected subscribe, a disconnect or close()
+   * rejects the promise immediately. subscribeAsync() is the non-blocking
+   * variant. Like the other acked calls (rpc, survey, presence) the wait
+   * happens on the caller's promise: do not await subscribe() synchronously
+   * from receive-loop callbacks.
+   *
+   * The local subscription bookkeeping (subscribedChannels) is written from
+   * the ack, mirroring the Go SDK.
+   *
    * @param channels - Channel names, or SubscriptionSpec objects carrying an
    * optional per-channel token and recovery fields (e.g.
    * `{ channel: "ch1", token: "t1", recover: true, offset: 7n, epoch: "ep" }`).
    */
   async subscribe(...channels: ChannelOrSpec[]): Promise<void> {
+    const msg = createSubscribeMessage(channels, this.options.ephemeral);
+    const id = msg.id;
+
+    await new Promise<void>((resolve, reject) => {
+      // Timeout follows the publishWithAck precedent: the configured RPC
+      // timeout; <=0 disables it (the wait then resolves on the ack, a
+      // disconnect or close).
+      const timeout = this.options.rpcTimeout;
+      const timer =
+        timeout > 0
+          ? setTimeout(() => {
+              this.pendingSubAck.delete(id);
+              reject(new Error(`Subscribe ack timeout after ${timeout}ms`));
+            }, timeout)
+          : null;
+
+      // Register the pending subscription before sending so the ack can
+      // never be missed between the send and the registration.
+      this.pendingSubAck.set(id, {
+        timer,
+        resolve: () => {
+          if (timer) clearTimeout(timer);
+          resolve();
+        },
+        reject: (err: Error) => {
+          if (timer) clearTimeout(timer);
+          reject(err);
+        },
+      });
+
+      this.send(msg).catch((err) => {
+        this.pendingSubAck.delete(id);
+        if (timer) clearTimeout(timer);
+        reject(err);
+      });
+    });
+  }
+
+  /**
+   * Subscribe to one or more channels without waiting for the server's
+   * SubscribeAck (best-effort): the request is written to the transport and
+   * the promise resolves immediately, so a publish issued right after may
+   * still race the subscription registration on the server.
+   *
+   * @param channels - Channel names, or SubscriptionSpec objects.
+   */
+  async subscribeAsync(...channels: ChannelOrSpec[]): Promise<void> {
     const msg = createSubscribeMessage(channels, this.options.ephemeral);
     await this.send(msg);
 
@@ -1085,10 +1215,57 @@ export class MessageLoopClient implements IClient {
   }
 
   /**
-   * Unsubscribe from one or more channels.
+   * Unsubscribe from one or more channels and wait for the server's
+   * UnsubscribeAck: when the promise resolves the server has removed the
+   * subscriptions. Timeout / disconnect / close semantics match subscribe().
+   * The local bookkeeping (subscribedChannels and the per-channel recovery
+   * offsets) is dropped from the ack, mirroring the Go SDK, so a later
+   * resubscribe + reconnect cannot replay stale history.
+   * unsubscribeAsync() is the non-blocking variant.
+   *
    * @param channels - Channel names, or SubscriptionSpec objects.
    */
   async unsubscribe(...channels: ChannelOrSpec[]): Promise<void> {
+    const msg = createUnsubscribeMessage(channels);
+    const id = msg.id;
+
+    await new Promise<void>((resolve, reject) => {
+      const timeout = this.options.rpcTimeout;
+      const timer =
+        timeout > 0
+          ? setTimeout(() => {
+              this.pendingSubAck.delete(id);
+              reject(new Error(`Unsubscribe ack timeout after ${timeout}ms`));
+            }, timeout)
+          : null;
+
+      this.pendingSubAck.set(id, {
+        timer,
+        resolve: () => {
+          if (timer) clearTimeout(timer);
+          resolve();
+        },
+        reject: (err: Error) => {
+          if (timer) clearTimeout(timer);
+          reject(err);
+        },
+      });
+
+      this.send(msg).catch((err) => {
+        this.pendingSubAck.delete(id);
+        if (timer) clearTimeout(timer);
+        reject(err);
+      });
+    });
+  }
+
+  /**
+   * Unsubscribe from one or more channels without waiting for the server's
+   * UnsubscribeAck (best-effort).
+   *
+   * @param channels - Channel names, or SubscriptionSpec objects.
+   */
+  async unsubscribeAsync(...channels: ChannelOrSpec[]): Promise<void> {
     const msg = createUnsubscribeMessage(channels);
     await this.send(msg);
 
