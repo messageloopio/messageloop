@@ -58,7 +58,7 @@ Torchwood 的公开 Server API 通信——部署时需提供 Torchwood 网关�
 | `MESSAGELOOP_SERVER_GRPC_ADMIN_AUTH_TOKEN` | ✅ | admin gRPC 的 Bearer token，`openssl rand -hex 32`；未设置拒绝启动（compose 内 `:?` 强制） |
 | `MESSAGELOOP_WS_DOMAIN` | ✅ | WebSocket 域名，如 `ws.example.com`（Traefik label 路由，见 §3） |
 | `MESSAGELOOP_GRPC_DOMAIN` | ✅ | 客户端 gRPC 域名，如 `grpc.example.com`（TLS 终结 → h2c） |
-| `MLBRIDGE_TORCHWOOD_BASE_URL` | ✅ | Torchwood 网关地址（如 `https://tw.example.com`），mlbridge 校验凭证/读写策略与档案/上报计量 |
+| `MLBRIDGE_TORCHWOOD_BASE_URL` | ✅ | Torchwood 网关地址。同机 Dokploy 部署走内网直连 `http://torchwood-server:9080`（Torchwood 的 server 容器名；mlbridge 已挂 dokploy-network，别名里没有 `torchwood`）；跨机/独立部署用公网 `https://tw.example.com` |
 | `MLBRIDGE_TORCHWOOD_PROJECTS` | ✅ | JSON 数组 `[{"project_id":"myproj","api_key":"sk-..."}]`；key 需含 `users.read`、`databases.read/write`、`runbooks.read/write`、`analytics.write`（资源供给用 mlbridge 仓库 `runbooks/`） |
 | `MLBRIDGE_IMAGE` | | mlbridge 镜像引用，默认 `ghcr.io/messageloopio/mlbridge:latest`；建议钉版本 tag |
 | `MLBRIDGE_REVALIDATE_INTERVAL` | | 凭证复验环间隔，默认 `5m`（撤销上界 = 复验间隔 + TW 校验缓存 30s） |

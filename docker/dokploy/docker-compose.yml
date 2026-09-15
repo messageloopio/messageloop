@@ -21,7 +21,8 @@
 # 双网络缺一不可：default 承载栈内互通（redis 的 DNS 与连接；服务一旦显式
 # 声明 networks 即失去隐式 default，只挂 dokploy-network 会让 lookup redis
 # i/o timeout 崩溃循环）；dokploy-network 供 Traefik 回源（traefik.docker.network
-# 指定回源网段）。mlbridge 只挂 default——它是内部组件，不经 Traefik 暴露。
+# 指定回源网段）。mlbridge 挂 default（redis/messageloop）+ dokploy-network
+# （内网直连 Torchwood 的 torchwood-server 容器）；无 Traefik label，不对外暴露。
 #
 # 必填环境变量（Dokploy「Environment」）见同目录 README.md。
 # 配置基线：messageloop 挂载同目录 mlbridge.yaml（仅含 config-file-only 的
@@ -78,7 +79,11 @@ x-bridge-env: &bridge-env
   # 键名 project_id / api_key，可配多个项目。key 需含 scopes：
   # users.read / databases.read+write / runbooks.read+write / analytics.write
   # （资源供给见 mlbridge 仓库 runbooks/）。
-  MLBRIDGE_TORCHWOOD_BASE_URL: ${MLBRIDGE_TORCHWOOD_BASE_URL:?请在 Dokploy Environment 设置 Torchwood 网关地址，如 https://tw.example.com}
+  # 与 Torchwood 同机 Dokploy 部署时走 dokploy-network 内网直连：
+  # http://torchwood-server:9080（Torchwood compose 的 server 服务容器名；
+  # 注意别名里没有 "torchwood"——compose project 名不产生 DNS 名）。跨机或
+  # 独立部署则用公网网关地址 https://<tw-domain>。
+  MLBRIDGE_TORCHWOOD_BASE_URL: ${MLBRIDGE_TORCHWOOD_BASE_URL:?请在 Dokploy Environment 设置 Torchwood 网关地址：同机内网 http://torchwood-server:9080，或公网 https://tw.example.com}
   MLBRIDGE_TORCHWOOD_PROJECTS: ${MLBRIDGE_TORCHWOOD_PROJECTS:?请在 Dokploy Environment 设置 JSON 数组，如 [{"project_id":"myproj","api_key":"sk-..."}]}
   # admin 面：栈内 messageloop，token 与其共享同一变量。
   MLBRIDGE_MESSAGELOOP_ADMIN_ADDR: messageloop:9091
@@ -178,6 +183,9 @@ services:
     image: ${MLBRIDGE_IMAGE:-ghcr.io/messageloopio/mlbridge:latest}
     pull_policy: always
     environment: *bridge-env
+    networks:
+      - default
+      - dokploy-network
     depends_on:
       redis:
         condition: service_healthy
