@@ -25,12 +25,16 @@ const (
 )
 
 type RPCRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Channel       string                 `protobuf:"bytes,2,opt,name=channel,proto3" json:"channel,omitempty"`
-	Method        string                 `protobuf:"bytes,3,opt,name=method,proto3" json:"method,omitempty"`
-	Payload       *v2.Payload            `protobuf:"bytes,4,opt,name=payload,proto3" json:"payload,omitempty"`
-	Metadata      *v2.Metadata           `protobuf:"bytes,5,opt,name=metadata,proto3" json:"metadata,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Id       string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Channel  string                 `protobuf:"bytes,2,opt,name=channel,proto3" json:"channel,omitempty"`
+	Method   string                 `protobuf:"bytes,3,opt,name=method,proto3" json:"method,omitempty"`
+	Payload  *v2.Payload            `protobuf:"bytes,4,opt,name=payload,proto3" json:"payload,omitempty"`
+	Metadata *v2.Metadata           `protobuf:"bytes,5,opt,name=metadata,proto3" json:"metadata,omitempty"`
+	// Identity fields for per-user authorization on the proxy backend.
+	UserId        string `protobuf:"bytes,6,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	SessionId     string `protobuf:"bytes,7,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	ClientId      string `protobuf:"bytes,8,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -98,6 +102,27 @@ func (x *RPCRequest) GetMetadata() *v2.Metadata {
 		return x.Metadata
 	}
 	return nil
+}
+
+func (x *RPCRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *RPCRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *RPCRequest) GetClientId() string {
+	if x != nil {
+		return x.ClientId
+	}
+	return ""
 }
 
 type RPCResponse struct {
@@ -979,14 +1004,18 @@ var File_proxy_v2_proxy_proto protoreflect.FileDescriptor
 
 const file_proxy_v2_proxy_proto_rawDesc = "" +
 	"\n" +
-	"\x14proxy/v2/proxy.proto\x12\x14messageloop.proxy.v2\x1a\x16shared/v2/errors.proto\x1a\x15shared/v2/types.proto\"\xc5\x01\n" +
+	"\x14proxy/v2/proxy.proto\x12\x14messageloop.proxy.v2\x1a\x16shared/v2/errors.proto\x1a\x15shared/v2/types.proto\"\x9a\x02\n" +
 	"\n" +
 	"RPCRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
 	"\achannel\x18\x02 \x01(\tR\achannel\x12\x16\n" +
 	"\x06method\x18\x03 \x01(\tR\x06method\x128\n" +
 	"\apayload\x18\x04 \x01(\v2\x1e.messageloop.shared.v2.PayloadR\apayload\x12;\n" +
-	"\bmetadata\x18\x05 \x01(\v2\x1f.messageloop.shared.v2.MetadataR\bmetadata\"\xc8\x01\n" +
+	"\bmetadata\x18\x05 \x01(\v2\x1f.messageloop.shared.v2.MetadataR\bmetadata\x12\x17\n" +
+	"\auser_id\x18\x06 \x01(\tR\x06userId\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\a \x01(\tR\tsessionId\x12\x1b\n" +
+	"\tclient_id\x18\b \x01(\tR\bclientId\"\xc8\x01\n" +
 	"\vRPCResponse\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x128\n" +
 	"\apayload\x18\x02 \x01(\v2\x1e.messageloop.shared.v2.PayloadR\apayload\x12;\n" +

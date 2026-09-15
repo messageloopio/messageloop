@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v2"
@@ -290,7 +291,38 @@ func TestRPCProxyRequest_ToProtoRequest(t *testing.T) {
 	assert.Equal(t, "test-id", protoReq.Id)
 	assert.Equal(t, "test.channel", protoReq.Channel)
 	assert.Equal(t, "testMethod", protoReq.Method)
+	assert.Equal(t, "user-1", protoReq.UserId, "user identity must be serialized for per-user authorization")
+	assert.Equal(t, "session-1", protoReq.SessionId, "session identity must be serialized for per-user authorization")
+	assert.Equal(t, "client-1", protoReq.ClientId, "client identity must be serialized for per-user authorization")
 	assert.NotNil(t, protoReq.Payload)
+}
+
+// TestRPCProxyRequest_ToProtoRequest_IdentityRoundTrip locks the wire contract
+// of the RPCRequest identity fields: after a binary serialization round-trip
+// (what the gRPC transport sends) the user/session/client identity must still
+// be present so proxy backends can authorize RPCs per user.
+func TestRPCProxyRequest_ToProtoRequest_IdentityRoundTrip(t *testing.T) {
+	req := &RPCProxyRequest{
+		ID:        "test-id",
+		UserID:    "u1",
+		SessionID: "s1",
+		ClientID:  "c1",
+		Channel:   "test.channel",
+		Method:    "testMethod",
+	}
+
+	protoReq, err := req.ToProtoRequest()
+	require.NoError(t, err)
+
+	wire, err := proto.Marshal(protoReq)
+	require.NoError(t, err)
+
+	var decoded proxypb.RPCRequest
+	require.NoError(t, proto.Unmarshal(wire, &decoded))
+
+	assert.Equal(t, "u1", decoded.UserId)
+	assert.Equal(t, "s1", decoded.SessionId)
+	assert.Equal(t, "c1", decoded.ClientId)
 }
 
 func TestFromProtoReply(t *testing.T) {

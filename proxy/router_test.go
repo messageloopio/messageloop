@@ -221,6 +221,64 @@ func TestRouter_WildcardPatterns(t *testing.T) {
 	}
 }
 
+// TestRouter_Match_AuthenticateEmptyChannel locks the routing semantics that
+// handleConnect relies on when it looks up the authentication proxy with an
+// empty channel: c.rt.FindProxy("", SystemMethodAuthenticate). Config samples
+// (including _examples/chatroom) declare the auth route as
+// {channel: "*", method: "$authenticate"}, so the bare "*" channel pattern
+// must keep matching the empty string. gobwas/glob compiles "*" without any
+// separator, and its "*" then matches any sequence of characters including
+// the empty one — verified here as regression protection: if a router change
+// (e.g. adding separators like "." or ":") made "*" stop matching "", auth
+// would silently fail closed with require_auth enabled.
+func TestRouter_Match_AuthenticateEmptyChannel(t *testing.T) {
+	r := NewRouter()
+	authProxy := &mockRPCProxy{name: "auth-proxy"}
+	defaultProxy := &mockRPCProxy{name: "default-proxy"}
+
+	require.NoError(t, r.Add(authProxy, "*", "$authenticate"))
+	require.NoError(t, r.Add(defaultProxy, "*", "*"))
+
+	// The exact lookup handleConnect performs: empty channel, system method.
+	p := r.Match("", "$authenticate")
+	require.NotNil(t, p, "channel \"*\" must match the empty channel or authentication routing breaks")
+	assert.Equal(t, "auth-proxy", p.Name())
+
+	// A concrete channel must hit the auth route as well.
+	p = r.Match("chat.room1", "$authenticate")
+	require.NotNil(t, p)
+	assert.Equal(t, "auth-proxy", p.Name())
+
+	// An empty channel with a regular method falls through to the wildcard
+	// route instead of the auth-only route.
+	p = r.Match("", "subscribe")
+	require.NotNil(t, p)
+	assert.Equal(t, "default-proxy", p.Name())
+
+	// Regular routing on a concrete channel is unaffected.
+	p = r.Match("chat.room1", "send")
+	require.NotNil(t, p)
+	assert.Equal(t, "default-proxy", p.Name())
+}
+
+// TestRouter_Match_ScopedPatternNeverMatchesEmptyChannel documents the flip
+// side of the empty-channel semantics: only a bare "*" channel pattern
+// reaches the empty-channel auth lookup. A scoped pattern such as "chat.*"
+// does not match "", so an auth route declared under a concrete channel
+// prefix stays unreachable for authentication (and is therefore not a valid
+// way to configure the auth proxy).
+func TestRouter_Match_ScopedPatternNeverMatchesEmptyChannel(t *testing.T) {
+	r := NewRouter()
+	chatProxy := &mockRPCProxy{name: "chat-proxy"}
+
+	require.NoError(t, r.Add(chatProxy, "chat.*", "$authenticate"))
+
+	assert.Nil(t, r.Match("", "$authenticate"),
+		"chat.* must not match the empty channel")
+	assert.NotNil(t, r.Match("chat.room1", "$authenticate"),
+		"chat.* still matches concrete channels")
+}
+
 func TestRouter_AddFromConfig(t *testing.T) {
 	r := NewRouter()
 	p := &mockRPCProxy{name: "config-proxy"}

@@ -32,6 +32,10 @@ message RPCRequest {
   string method = 3;
   messageloop.shared.v2.Payload payload = 4;
   messageloop.shared.v2.Metadata metadata = 5;
+  // Identity fields for per-user authorization on the proxy backend.
+  string user_id = 6;
+  string session_id = 7;
+  string client_id = 8;
 }
 
 message RPCResponse {

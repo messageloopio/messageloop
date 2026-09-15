@@ -67,11 +67,14 @@ func (r *RPCProxyRequest) ToProtoRequest() (*proxypb.RPCRequest, error) {
 		metadata = &sharedv2.Metadata{Entries: r.Meta}
 	}
 	return &proxypb.RPCRequest{
-		Id:       r.ID,
-		Channel:  r.Channel,
-		Method:   r.Method,
-		Payload:  r.Payload,
-		Metadata: metadata,
+		Id:        r.ID,
+		Channel:   r.Channel,
+		Method:    r.Method,
+		Payload:   r.Payload,
+		Metadata:  metadata,
+		UserId:    r.UserID,
+		SessionId: r.SessionID,
+		ClientId:  r.ClientID,
 	}, nil
 }
 
