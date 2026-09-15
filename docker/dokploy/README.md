@@ -1,8 +1,16 @@
 # MessageLoop × Dokploy 部署指南
 
 本目录提供 Dokploy（自托管 PaaS，Traefik + Docker Compose）一键部署所需的全部文件：
-单 Compose 栈内含 **Redis（broker 持久化）+ messageloop**，域名路由以 Traefik label
-直接声明在 compose 内（不走「Domains」UI）。
+单 Compose 栈内含 **Redis（broker 持久化）+ messageloop + mlbridge**，域名路由以
+Traefik label 直接声明在 compose 内（不走「Domains」UI）。
+
+**mlbridge 集成模型**：messageloop 以 `require_auth: true` 部署，连接认证、按租户
+频道策略、凭证撤销传播、用量计量与 send/history 写穿全部委托给栈内的 mlbridge
+（ProxyService gRPC，`docker/dokploy/mlbridge.yaml` 挂载接线）；mlbridge 只与
+Torchwood 的公开 Server API 通信——部署时需提供 Torchwood 网关地址与项目 API key
+（`MLBRIDGE_TORCHWOOD_*` 环境变量）。客户端凭证即 Torchwood access token，
+会话命名空间 = Torchwood project id。资源供给（集合/索引）用 mlbridge 仓库的
+`runbooks/` 一键应用。
 
 与典型 Web 应用不同的三点，先说清楚：
 
@@ -11,8 +19,10 @@
    HTTP——WebSocket 与 gRPC 各配一条域名（TLS 终结），UDP 不走 Traefik；
 2. **没有迁移作业**：MessageLoop 无数据库 schema，Redis 键在首节点启动时自举，
    不需要 one-shot 作业链；
-3. **默认部署机从源码构建镜像**（仓库暂无预构建发布）：小内存 VPS 见 §8 的 OOM
-   提醒与预构建路径。
+3. **镜像默认来自 GHCR**（`ghcr.io/messageloopio/messageloop` 与
+   `ghcr.io/messageloopio/mlbridge`，GitHub Actions docker-publish workflow
+   随 main/v* 自动发布）：Dokploy 只拉不编。仓库克隆仍在时保留 `build:` 段作
+   源码构建兜底（小内存 VPS 见 §8 的 OOM 提醒）。
 
 ## 0. 前置条件
 
@@ -38,7 +48,12 @@ BuildKit 缓存。
 | `MESSAGELOOP_SERVER_GRPC_ADMIN_AUTH_TOKEN` | ✅ | admin gRPC 的 Bearer token，`openssl rand -hex 32`；未设置拒绝启动（compose 内 `:?` 强制） |
 | `MESSAGELOOP_WS_DOMAIN` | ✅ | WebSocket 域名，如 `ws.example.com`（Traefik label 路由，见 §3） |
 | `MESSAGELOOP_GRPC_DOMAIN` | ✅ | 客户端 gRPC 域名，如 `grpc.example.com`（TLS 终结 → h2c） |
-| `MESSAGELOOP_SERVER_NAMESPACE` | | 租户命名空间，默认 `default`；所有频道都活在其下（`ns:topic`） |
+| `MLBRIDGE_TORCHWOOD_BASE_URL` | ✅ | Torchwood 网关地址（如 `https://tw.example.com`），mlbridge 校验凭证/读写策略与档案/上报计量 |
+| `MLBRIDGE_TORCHWOOD_PROJECTS` | ✅ | JSON 数组 `[{"project_id":"myproj","api_key":"sk-..."}]`；key 需含 `users.read`、`databases.read/write`、`runbooks.read/write`、`analytics.write`（资源供给用 mlbridge 仓库 `runbooks/`） |
+| `MLBRIDGE_IMAGE` | | mlbridge 镜像引用，默认 `ghcr.io/messageloopio/mlbridge:latest`；建议钉版本 tag |
+| `MLBRIDGE_REVALIDATE_INTERVAL` | | 凭证复验环间隔，默认 `5m`（撤销上界 = 复验间隔 + TW 校验缓存 30s） |
+| `MLBRIDGE_WRITE_THROUGH_CHANNELS` | | 写穿频道 JSON 数组，默认 `["**"]`（全频道写穿；瞬态频道不会被 send 路径触及） |
+| `MLBRIDGE_METERING_ENABLED` / `MLBRIDGE_METERING_FLUSH_INTERVAL` | | 用量计量开关与批量间隔，默认开 / `15s` |
 | `MESSAGELOOP_BROKER_REDIS_PASSWORD` | | 栈内 redis 未设密码（仅 `default` 内网可达）；接外部 redis 时改 `MESSAGELOOP_BROKER_REDIS_ADDR` 并配套密码/DB |
 | `MESSAGELOOP_BROKER_REDIS_STREAM_MAX_LENGTH` | | 每频道 streams 裁剪上限，默认 `10000` |
 | `MESSAGELOOP_TRANSPORT_WEBSOCKET_ALLOW_ALL_ORIGINS` | | 默认 `true`（token 鉴权下 Origin 不是授权边界） |
@@ -153,20 +168,23 @@ curl -I http://<WS域名>/            # 301 → https
 
 ## 8. 构建与镜像
 
-- **默认（服务器构建）**：compose 的 `build:` 指向仓库根 `Dockerfile`
+- **默认（GHCR 预构建）**：GitHub Actions `docker-publish` workflow 随 main
+  push 发布 `ghcr.io/messageloopio/messageloop:latest`（+ `main`/sha 标签）、
+  随 `v*` tag 发布 semver 标签；mlbridge 镜像同理。Redeploy 只拉不编；回滚 =
+  Environment 把 `MESSAGELOOP_IMAGE` / `MLBRIDGE_IMAGE` 钉到旧 tag。
+  ⚠ 两个镜像建议成对升级（桥与内核共享 proxy 协议契约，见 mlbridge
+  docs/integration.md §3）。
+- **源码构建兜底**：compose 的 `build:` 指向仓库根 `Dockerfile`
   （多阶段：golang 构建器 → alpine 运行时，非 root）。首次几分钟，之后走
   BuildKit 缓存。⚠ 小内存（≤1GB）VPS 上 `go build` 可能 OOM，部署被杀表现为
-  cancelled——用下面的预构建路径。
-- **预构建路径**：任意一台大内存机器（或 CI）上
-  `docker build -t ghcr.io/<org>/messageloop:v1 ghcr 推送`，然后 Environment 设
-  `MESSAGELOOP_IMAGE=ghcr.io/<org>/messageloop:v1` **并删除 compose 中的
-  `build:` 段**，Redeploy 只拉不编。回滚同理：钉旧 tag。
+  cancelled——预构建路径是默认推荐。
 
 ## 9. 文件清单
 
 | 文件 | 用途 |
 |------|------|
-| `docker-compose.yml` | 全栈编排 + Traefik 域名路由（相对路径均相对本目录） |
+| `docker-compose.yml` | 全栈编排（redis + messageloop + mlbridge）+ Traefik 域名路由（相对路径均相对本目录） |
+| `mlbridge.yaml` | messageloop 挂载的桥接线配置（proxy 块 + require_auth，config-file-only 键） |
 | `README.md` | 本指南 |
 | 仓库根 `Dockerfile` | 镜像构建（内置容器默认配置 `configs/docker.yaml`） |
 | `cmd/server/envconfig.go` | `MESSAGELOOP_*` 环境变量覆盖的完整键表 |

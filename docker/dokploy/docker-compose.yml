@@ -1,8 +1,15 @@
-# MessageLoop —— Dokploy 单 Compose 栈
+# MessageLoop × mlbridge —— Dokploy 单 Compose 栈
 #
-# 拓扑：redis（broker：streams 历史 + pub/sub，AOF 持久化）
+# 拓扑：redis（broker：streams 历史 + pub/sub，AOF 持久化；mlbridge 会话索引共用实例）
 #       + messageloop（WebSocket :9080 / 客户端 gRPC :9090 /
-#         admin gRPC :9091 / health+metrics :8080）
+#         admin gRPC :9091 / health+metrics :8080，require_auth 开启）
+#       + mlbridge（ProxyService gRPC :9070，栈内私有——身份/策略/计量/写穿透到 Torchwood）
+#
+# 集成模型：客户端 Connect 携 Torchwood access token → messageloop 经
+# $authenticate 路由到 mlbridge 校验（POST /v1/server/auth/tokens:verify）→
+# 会话命名空间 = Torchwood project id；订阅/发布策略、凭证撤销传播（复验环）、
+# 用量计量、send/history 写穿均由 mlbridge 承担。Torchwood 本身不在本栈内
+# （独立部署），只需 base_url 与项目 API key 可达。
 #
 # 域名路由以 Traefik label 直接声明在本文件（不用 Dokploy「Domains」UI——
 # 生成名带随机后缀无法变量化，且与 label 并存时 router 二选一不可控）：
@@ -14,19 +21,34 @@
 # 双网络缺一不可：default 承载栈内互通（redis 的 DNS 与连接；服务一旦显式
 # 声明 networks 即失去隐式 default，只挂 dokploy-network 会让 lookup redis
 # i/o timeout 崩溃循环）；dokploy-network 供 Traefik 回源（traefik.docker.network
-# 指定回源网段）。
+# 指定回源网段）。mlbridge 只挂 default——它是内部组件，不经 Traefik 暴露。
 #
 # 必填环境变量（Dokploy「Environment」）见同目录 README.md。
-# 配置基线：镜像内置 /etc/messageloop/docker.yaml，全部 MESSAGELOOP_*
-# 环境变量可覆盖（键表见 cmd/server/envconfig.go；authorizer 规则与
-# proxy 后端除外——那两项文件专用，需自行挂载 YAML 并覆盖 command）。
+# 配置基线：messageloop 挂载同目录 mlbridge.yaml（仅含 config-file-only 的
+# proxy 块），其余全部 MESSAGELOOP_* 环境变量（键表见 cmd/server/envconfig.go）；
+# mlbridge 无需配置文件——全部 MLBRIDGE_* 环境变量，列表型键
+# （torchwood.projects / write_through.channels）用 JSON 值。
 
 name: messageloop
 
 # ---------- 公共锚点 ----------
 
 # messageloop 运行时环境变量（密钥经 Dokploy 变量插值注入）。
+# 挂载的 mlbridge.yaml 只提供 config-file-only 的 proxy 后端块；addr 类键在
+# 镜像默认配置缺席（本文件取代了它的基线地位），必须在这里给全。
 x-app-env: &app-env
+  # —— 鉴权：经 mlbridge 代理认证（Torchwood 凭证），无本地命名空间 ——
+  MESSAGELOOP_SERVER_REQUIRE_AUTH: "true"
+  # —— 监听地址（Validate 必填；镜像默认配置不再生效）——
+  MESSAGELOOP_SERVER_HTTP_ADDR: 0.0.0.0:8080
+  MESSAGELOOP_SERVER_GRPC_ADMIN_ADDR: 0.0.0.0:9091
+  MESSAGELOOP_TRANSPORT_WEBSOCKET_ADDR: 0.0.0.0:9080
+  MESSAGELOOP_TRANSPORT_WEBSOCKET_PATH: /ws
+  MESSAGELOOP_TRANSPORT_GRPC_ADDR: 0.0.0.0:9090
+  # —— 传输行为（沿用镜像默认配置的基线值）——
+  MESSAGELOOP_TRANSPORT_WEBSOCKET_COMPRESSION: "true"
+  MESSAGELOOP_SERVER_HEARTBEAT_IDLE_TIMEOUT: 300s
+  MESSAGELOOP_SERVER_RPC_TIMEOUT: 30s
   # —— broker：栈内 redis ——
   MESSAGELOOP_BROKER_TYPE: redis
   MESSAGELOOP_BROKER_REDIS_ADDR: redis:6379
@@ -35,10 +57,8 @@ x-app-env: &app-env
   # 仅实现近似裁剪，Validate 强制显式 true
   MESSAGELOOP_BROKER_REDIS_STREAM_APPROXIMATE: "true"
   MESSAGELOOP_BROKER_REDIS_STREAM_MAX_LENGTH: ${MESSAGELOOP_BROKER_REDIS_STREAM_MAX_LENGTH:-10000}
-  # —— 租户与鉴权 ——
-  # 每个客户端可见频道都活在该命名空间下（"ns:topic"）；多租户隔离在会话边界强制
-  MESSAGELOOP_SERVER_NAMESPACE: ${MESSAGELOOP_SERVER_NAMESPACE:-default}
-  # admin gRPC 强制持 token（无 token 直接拒绝启动）；openssl rand -hex 32
+  # admin gRPC 强制持 token（无 token 直接拒绝启动）；openssl rand -hex 32。
+  # mlbridge 复用同一 token 调 admin 面（复验断连 + 写穿扇出）。
   MESSAGELOOP_SERVER_GRPC_ADMIN_AUTH_TOKEN: ${MESSAGELOOP_SERVER_GRPC_ADMIN_AUTH_TOKEN:?请在 Dokploy Environment 设置 openssl rand -hex 32}
   # /health、/metrics 的 Bearer token。默认留空：8080 不发布、不路由，
   # 仅容器网络内可达；若自行发布 8080 必须设置 token，并同步改下方
@@ -50,6 +70,33 @@ x-app-env: &app-env
   # 列表，并【同时】设 ALLOW_ALL_ORIGINS=false（allow_all 优先级更高）
   MESSAGELOOP_TRANSPORT_WEBSOCKET_ALLOW_ALL_ORIGINS: ${MESSAGELOOP_TRANSPORT_WEBSOCKET_ALLOW_ALL_ORIGINS:-true}
   MESSAGELOOP_TRANSPORT_WEBSOCKET_ALLOWED_ORIGINS: ${MESSAGELOOP_TRANSPORT_WEBSOCKET_ALLOWED_ORIGINS:-}
+
+# mlbridge 运行时环境变量。
+x-bridge-env: &bridge-env
+  MLBRIDGE_LISTEN: 0.0.0.0:9070
+  # Torchwood 服务端 REST（网关）地址与项目凭证；projects 是 JSON 数组，
+  # 键名 project_id / api_key，可配多个项目。key 需含 scopes：
+  # users.read / databases.read+write / runbooks.read+write / analytics.write
+  # （资源供给见 mlbridge 仓库 runbooks/）。
+  MLBRIDGE_TORCHWOOD_BASE_URL: ${MLBRIDGE_TORCHWOOD_BASE_URL:?请在 Dokploy Environment 设置 Torchwood 网关地址，如 https://tw.example.com}
+  MLBRIDGE_TORCHWOOD_PROJECTS: ${MLBRIDGE_TORCHWOOD_PROJECTS:?请在 Dokploy Environment 设置 JSON 数组，如 [{"project_id":"myproj","api_key":"sk-..."}]}
+  # admin 面：栈内 messageloop，token 与其共享同一变量。
+  MLBRIDGE_MESSAGELOOP_ADMIN_ADDR: messageloop:9091
+  MLBRIDGE_MESSAGELOOP_ADMIN_TOKEN: ${MESSAGELOOP_SERVER_GRPC_ADMIN_AUTH_TOKEN}
+  # 会话索引：与 broker 共用栈内 redis（键前缀 mlb:*，互不冲突）。
+  MLBRIDGE_REDIS_ADDR: redis:6379
+  MLBRIDGE_REDIS_DB: ${MLBRIDGE_REDIS_DB:-0}
+  # 撤销传播与缓存的节奏（撤销上界 = 复验间隔 + TW 校验缓存 30s）。
+  MLBRIDGE_REVALIDATE_INTERVAL: ${MLBRIDGE_REVALIDATE_INTERVAL:-5m}
+  # 计量：批量上报 TW analytics。
+  MLBRIDGE_METERING_ENABLED: ${MLBRIDGE_METERING_ENABLED:-true}
+  MLBRIDGE_METERING_FLUSH_INTERVAL: ${MLBRIDGE_METERING_FLUSH_INTERVAL:-15s}
+  # 写穿：send RPC 先落 TW 文档再经 admin 面扇出；channels 是 JSON 数组，
+  # 通配语言与 ML 频道一致（不带命名空间前缀）。
+  MLBRIDGE_WRITE_THROUGH_ENABLED: ${MLBRIDGE_WRITE_THROUGH_ENABLED:-true}
+  MLBRIDGE_WRITE_THROUGH_DATABASE: ${MLBRIDGE_WRITE_THROUGH_DATABASE:-default}
+  MLBRIDGE_WRITE_THROUGH_COLLECTION: ${MLBRIDGE_WRITE_THROUGH_COLLECTION:-messages}
+  MLBRIDGE_WRITE_THROUGH_CHANNELS: ${MLBRIDGE_WRITE_THROUGH_CHANNELS:-["**"]}
 
 services:
   redis:
@@ -68,13 +115,18 @@ services:
     restart: unless-stopped
 
   messageloop:
-    # 默认在部署机从源码构建（Dokploy 已克隆整仓，context 指向仓库根）。
-    # 小内存 VPS 上 go build 可能 OOM（部署被杀表现为 cancelled）——预构建
-    # 镜像路径见 README §8：推送镜像后设 MESSAGELOOP_IMAGE 并删除 build 段。
-    image: ${MESSAGELOOP_IMAGE:-messageloop:local}
+    # CI 发布的 GHCR 镜像（GitHub Actions docker-publish workflow）；本地
+    # 源码构建兜底见 build 段（小内存 VPS 上 go build 可能 OOM——预构建路径
+    # 是默认推荐）。版本建议钉 tag（如 :v1.1.0）而非 :latest。
+    image: ${MESSAGELOOP_IMAGE:-ghcr.io/messageloopio/messageloop:latest}
     build:
       context: ../..
       dockerfile: Dockerfile
+    # proxy 后端是 config-file-only 配置：挂载同目录 mlbridge.yaml（仅含
+    # proxy 块，指向栈内 mlbridge），其余全部经 MESSAGELOOP_* 环境变量。
+    command: ["--config", "/etc/messageloop/mlbridge.yaml"]
+    volumes:
+      - ./mlbridge.yaml:/etc/messageloop/mlbridge.yaml:ro
     networks:
       - default
       - dokploy-network
@@ -106,7 +158,7 @@ services:
     # 宿主端口只绑回环：公网 gRPC 走上方域名 TLS（标准 gRPC 客户端），
     # 回环供 SSH 隧道明文直连兜底——仓库自带 Go SDK 的 DialGRPC 当前为
     # 明文实现（insecure 硬编码），隧道 + DialGRPC("127.0.0.1:9090") 即
-    # 其接入路径（见 README §4）。admin gRPC(9091) 仅隧道/栈内访问。
+    # 其接入路径。admin gRPC(9091) 仅隧道/栈内访问（mlbridge 经栈内网直连）。
     # QUIC/KCP（UDP，可选）：Traefik 不路由 UDP，启用时在 Environment 设
     # MESSAGELOOP_TRANSPORT_QUIC_ADDR / MESSAGELOOP_TRANSPORT_KCP_ADDR
     # （及 TLS 证书路径）后放开对应行；客户端按相同协议直连宿主端口。
@@ -115,6 +167,20 @@ services:
       - "127.0.0.1:${MESSAGELOOP_ADMIN_GRPC_PORT:-9091}:9091"
       # - "${MESSAGELOOP_QUIC_PORT:-4433}:4433/udp"
       # - "${MESSAGELOOP_KCP_PORT:-29900}:29900/udp"
+    restart: unless-stopped
+
+  mlbridge:
+    # Torchwood ⇄ MessageLoop 桥：身份校验（tokens:verify）、按租户频道策略、
+    # 凭证撤销复验环、analytics 计量、send/history 写穿。镜像由 mlbridge
+    # 仓库的 GitHub Actions docker-publish workflow 发布。仅挂 default 网络：
+    # 内部组件，不经 Traefik 暴露，无宿主端口。
+    image: ${MLBRIDGE_IMAGE:-ghcr.io/messageloopio/mlbridge:latest}
+    environment: *bridge-env
+    depends_on:
+      redis:
+        condition: service_healthy
+      messageloop:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:

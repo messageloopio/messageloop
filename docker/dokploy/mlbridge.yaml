@@ -1,0 +1,23 @@
+# messageloop 的 mlbridge 接线配置——挂载进容器（compose volumes）后以
+# command: ["--config", "/etc/messageloop/mlbridge.yaml"] 生效。
+#
+# proxy 后端是 config-file-only 配置（MESSAGELOOP_* 环境变量表刻意不含它，
+# 见 cmd/server/envconfig.go）；require_auth 与它语义绑定（认证交给桥），
+# 一并在此声明。其余全部配置键由 compose 的 MESSAGELOOP_* 环境变量提供。
+#
+# 单条 "*"/"*" 路由覆盖桥的全部调用点：$authenticate（连接认证）、
+# subscribe/publish ACL 逐请求校验、生命周期钩子（计量与撤销索引），
+# 以及客户端 RPC send/history（写穿）。endpoint 是 compose 服务名；
+# 栈内私网明文即可，跨机部署改 TLS 并收紧来源。
+server:
+  require_auth: true
+
+proxy:
+  - name: mlbridge
+    endpoint: "mlbridge:9070"
+    timeout: 30s
+    grpc:
+      insecure: true
+    routes:
+      - channel: "*"
+        method: "*"
