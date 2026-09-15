@@ -115,13 +115,11 @@ services:
     restart: unless-stopped
 
   messageloop:
-    # CI 发布的 GHCR 镜像（GitHub Actions docker-publish workflow）；本地
-    # 源码构建兜底见 build 段（小内存 VPS 上 go build 可能 OOM——预构建路径
-    # 是默认推荐）。版本建议钉 tag（如 :v1.1.0）而非 :latest。
+    # CI 发布的 GHCR 镜像（GitHub Actions docker-publish workflow）。
+    # 刻意不设 build 段：Dokploy 的 compose 部署恒带 --build，服务一旦有
+    # build 段就会在部署机上源码构建并冒用本镜像名（GHCR 拉取路径被遮蔽，
+    # 小内存 VPS 还可能 OOM）。版本建议钉 tag（如 :v1.1.0）而非 :latest。
     image: ${MESSAGELOOP_IMAGE:-ghcr.io/messageloopio/messageloop:latest}
-    build:
-      context: ../..
-      dockerfile: Dockerfile
     # proxy 后端是 config-file-only 配置：挂载同目录 mlbridge.yaml（仅含
     # proxy 块，指向栈内 mlbridge），其余全部经 MESSAGELOOP_* 环境变量。
     command: ["--config", "/etc/messageloop/mlbridge.yaml"]

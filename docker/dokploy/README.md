@@ -19,10 +19,11 @@ Torchwood 的公开 Server API 通信——部署时需提供 Torchwood 网关�
    HTTP——WebSocket 与 gRPC 各配一条域名（TLS 终结），UDP 不走 Traefik；
 2. **没有迁移作业**：MessageLoop 无数据库 schema，Redis 键在首节点启动时自举，
    不需要 one-shot 作业链；
-3. **镜像默认来自 GHCR**（`ghcr.io/messageloopio/messageloop` 与
-   `ghcr.io/messageloopio/mlbridge`，GitHub Actions docker-publish workflow
-   随 main/v* 自动发布）：Dokploy 只拉不编。仓库克隆仍在时保留 `build:` 段作
-   源码构建兜底（小内存 VPS 见 §8 的 OOM 提醒）。
+3. **镜像只拉不编**：compose 刻意不设 `build:` 段——Dokploy 的 compose
+   部署恒带 `--build`，服务一旦有 build 段就会在部署机上源码构建并冒用镜像名
+   （GHCR 拉取路径被遮蔽，小内存 VPS 还可能 OOM）。镜像来自 GHCR
+   （`ghcr.io/messageloopio/messageloop` 与 `ghcr.io/messageloopio/mlbridge`，
+   GitHub Actions docker-publish workflow 随 main/v* 自动发布）。
 
 ## 0. 前置条件
 
@@ -43,8 +44,7 @@ Torchwood 的公开 Server API 通信——部署时需提供 Torchwood 网关�
    `docker compose --env-file env.dokploy -f docker-compose.yml config`
    校验插值链——不填必填项会得到对应中文报错，渲染通过即插值完整。
 
-首次部署会在服务器上构建镜像（几分钟，取决于带宽与 CPU），之后增量构建走
-BuildKit 缓存。
+首次部署从 GHCR 拉取镜像（两镜像合计约百 MB 量级，取决于带宽）。
 
 ## 2. 环境变量（Environment 页签）
 
@@ -70,7 +70,7 @@ BuildKit 缓存。
 | `MESSAGELOOP_TRANSPORT_WEBSOCKET_ALLOWED_ORIGINS` | | 收紧来源：逗号分隔列表，**且必须同时设** `…ALLOW_ALL_ORIGINS=false`（allow_all 优先级更高） |
 | `MESSAGELOOP_SERVER_HTTP_AUTH_TOKEN` | | /health、/metrics 的 token，默认空（8080 不发布不路由）；若自行发布 8080 必须设置，并同步改 healthcheck |
 | `MESSAGELOOP_GRPC_PORT` / `MESSAGELOOP_ADMIN_GRPC_PORT` | | 宿主回环端口，默认 `9090` / `9091`；冲突时改 |
-| `MESSAGELOOP_IMAGE` | | 预构建镜像引用（§8）；设置后删除 compose 中 `build:` 段 |
+| `MESSAGELOOP_IMAGE` | | 镜像引用，默认 `ghcr.io/messageloopio/messageloop:latest`；建议钉版本 tag |
 | `MESSAGELOOP_TRANSPORT_QUIC_ADDR` / `…KCP_ADDR` | | 启用 UDP 传输（默认空=关闭）；还需放开 ports 的 udp 行并配置 TLS（§4.3） |
 
 ## 3. 域名绑定（compose Traefik label，不用 Domains UI）
@@ -184,10 +184,11 @@ curl -I http://<WS域名>/            # 301 → https
   Environment 把 `MESSAGELOOP_IMAGE` / `MLBRIDGE_IMAGE` 钉到旧 tag。
   ⚠ 两个镜像建议成对升级（桥与内核共享 proxy 协议契约，见 mlbridge
   docs/integration.md §3）。
-- **源码构建兜底**：compose 的 `build:` 指向仓库根 `Dockerfile`
-  （多阶段：golang 构建器 → alpine 运行时，非 root）。首次几分钟，之后走
-  BuildKit 缓存。⚠ 小内存（≤1GB）VPS 上 `go build` 可能 OOM，部署被杀表现为
-  cancelled——预构建路径是默认推荐。
+- **为什么不设 `build:` 段**：Dokploy 对 Compose 部署恒带
+  `up -d --build`，服务带 build 段就会每次部署在服务器上 `go build` 并把产物
+  打成 GHCR 的镜像名（拉取路径被遮蔽；⚠ ≤1GB 内存 VPS 上 OOM 表现为部署
+  cancelled）。要本地出镜像，在开发机 `docker build .` 后推送自己的引用，
+  再用 `MESSAGELOOP_IMAGE` / `MLBRIDGE_IMAGE` 指向它。
 
 ## 9. 文件清单
 
