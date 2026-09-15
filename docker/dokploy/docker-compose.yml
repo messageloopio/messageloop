@@ -120,6 +120,9 @@ services:
     # build 段就会在部署机上源码构建并冒用本镜像名（GHCR 拉取路径被遮蔽，
     # 小内存 VPS 还可能 OOM）。版本建议钉 tag（如 :v1.1.0）而非 :latest。
     image: ${MESSAGELOOP_IMAGE:-ghcr.io/messageloopio/messageloop:latest}
+    # 每次部署强制校验并拉取 registry 侧镜像：compose 对本地已存在的 :latest
+    # 不会自动重新拉取，Redeploy 会一直跑旧镜像（本部署踩过的坑）。
+    pull_policy: always
     # proxy 后端是 config-file-only 配置：挂载同目录 mlbridge.yaml（仅含
     # proxy 块，指向栈内 mlbridge），其余全部经 MESSAGELOOP_* 环境变量。
     command: ["--config", "/etc/messageloop/mlbridge.yaml"]
@@ -173,6 +176,7 @@ services:
     # 仓库的 GitHub Actions docker-publish workflow 发布。仅挂 default 网络：
     # 内部组件，不经 Traefik 暴露，无宿主端口。
     image: ${MLBRIDGE_IMAGE:-ghcr.io/messageloopio/mlbridge:latest}
+    pull_policy: always
     environment: *bridge-env
     depends_on:
       redis:
