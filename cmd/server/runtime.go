@@ -24,7 +24,7 @@ func (s *preparedGRPCServers) Components() []lynx.Service {
 }
 
 // Close releases both pre-bound gRPC listeners. It is invoked from the
-// runner's OnStop hook as a defensive measure so listeners cannot leak even
+// runner's OnPreStop hook as a defensive measure so listeners cannot leak even
 // if a component fails to start after prepareGRPCServers.
 func (s *preparedGRPCServers) Close() {
 	if s == nil {

@@ -110,7 +110,7 @@ func main() {
 			return err
 		}
 
-		app.OnStart(node.Run)
+		app.OnPreStart(node.Run)
 		components := []lynx.Service{wsServer, adminServer}
 		components = append(components, grpcServers.Components()...)
 		if quicServer != nil {
@@ -120,7 +120,7 @@ func main() {
 			components = append(components, kcpServer)
 		}
 		app.Register(components...)
-		app.OnStop(func(ctx context.Context) error {
+		app.OnPreStop(func(ctx context.Context) error {
 			// Drain all client connections before shutting down.
 			node.Shutdown()
 			// Release the pre-bound gRPC / QUIC / KCP listeners as a defensive measure.
