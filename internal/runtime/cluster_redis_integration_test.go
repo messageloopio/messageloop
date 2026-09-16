@@ -77,6 +77,10 @@ func (m *integrationAuthProxy) OnDisconnected(context.Context, *proxy.OnDisconne
 	return &proxy.OnDisconnectedProxyResponse{}, nil
 }
 
+func (m *integrationAuthProxy) AuthenticateAdmin(context.Context, *proxy.AuthenticateAdminProxyRequest) (*proxy.AuthenticateAdminProxyResponse, error) {
+	return &proxy.AuthenticateAdminProxyResponse{}, nil
+}
+
 func (m *integrationAuthProxy) Name() string { return "integration-auth-stub" }
 func (m *integrationAuthProxy) Close() error { return nil }
 

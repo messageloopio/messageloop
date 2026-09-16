@@ -86,7 +86,7 @@ func TestGRPC_AdminPort_DisconnectsSharedClientSession(t *testing.T) {
 
 	clientServer, err := grpc.PrepareClientServer(grpc.Options{Addr: "127.0.0.1:0"}, node)
 	require.NoError(t, err)
-	adminServer, err := admin.PrepareAdminServer(grpc.Options{Addr: "127.0.0.1:0"}, node)
+	adminServer, err := admin.PrepareAdminServer(grpc.Options{Addr: "127.0.0.1:0", AdminAllowInsecure: true}, node, nil)
 	require.NoError(t, err)
 	startPreparedServer(t, clientServer)
 	startPreparedServer(t, adminServer)
@@ -118,7 +118,7 @@ func TestGRPC_AdminPort_DoesNotExposeMessageLoopStream(t *testing.T) {
 	require.NoError(t, node.Run(ctx))
 	t.Cleanup(node.Shutdown)
 
-	adminServer, err := admin.PrepareAdminServer(grpc.Options{Addr: "127.0.0.1:0"}, node)
+	adminServer, err := admin.PrepareAdminServer(grpc.Options{Addr: "127.0.0.1:0", AdminAllowInsecure: true}, node, nil)
 	require.NoError(t, err)
 	startPreparedServer(t, adminServer)
 
@@ -147,7 +147,7 @@ func TestGRPC_AdminPort_ServesUnaryAPI(t *testing.T) {
 	require.NoError(t, node.Run(ctx))
 	t.Cleanup(node.Shutdown)
 
-	adminServer, err := admin.PrepareAdminServer(grpc.Options{Addr: "127.0.0.1:0"}, node)
+	adminServer, err := admin.PrepareAdminServer(grpc.Options{Addr: "127.0.0.1:0", AdminAllowInsecure: true}, node, nil)
 	require.NoError(t, err)
 	startPreparedServer(t, adminServer)
 

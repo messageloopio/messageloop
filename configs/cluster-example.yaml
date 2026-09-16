@@ -6,7 +6,8 @@ server:
     addr: ":8080"
   grpc_admin:
     addr: "127.0.0.1:9091"
-    auth_token: "change-me"   # Required (or set allow_insecure: true for dev only)
+    auth_tokens:              # Required (or set allow_insecure: true for loopback dev only)
+      - "change-me-admin-token-min-20-chars"
 
 transport:
   websocket:

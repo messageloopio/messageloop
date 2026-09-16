@@ -41,7 +41,11 @@ x-app-env: &app-env
   # —— 鉴权：经 mlbridge 代理认证（Torchwood 凭证），无本地命名空间 ——
   MESSAGELOOP_SERVER_REQUIRE_AUTH: "true"
   # —— 监听地址（Validate 必填；镜像默认配置不再生效）——
-  MESSAGELOOP_SERVER_HTTP_ADDR: 0.0.0.0:8080
+  # 8080 绑回环：/health、/metrics 不对外，镜像 HEALTHCHECK 走容器内
+  # 127.0.0.1 不受影响；非回环绑定必须同时配 HTTP token（G5 fail-closed，
+  # 否则 Validate 拒绝启动）。要对外发布 8080：改本值为 0.0.0.0:8080
+  # 【并】设 MESSAGELOOP_SERVER_HTTP_AUTH_TOKEN。
+  MESSAGELOOP_SERVER_HTTP_ADDR: 127.0.0.1:8080
   MESSAGELOOP_SERVER_GRPC_ADMIN_ADDR: 0.0.0.0:9091
   MESSAGELOOP_TRANSPORT_WEBSOCKET_ADDR: 0.0.0.0:9080
   MESSAGELOOP_TRANSPORT_WEBSOCKET_PATH: /ws
@@ -58,9 +62,9 @@ x-app-env: &app-env
   # 仅实现近似裁剪，Validate 强制显式 true
   MESSAGELOOP_BROKER_REDIS_STREAM_APPROXIMATE: "true"
   MESSAGELOOP_BROKER_REDIS_STREAM_MAX_LENGTH: ${MESSAGELOOP_BROKER_REDIS_STREAM_MAX_LENGTH:-10000}
-  # admin gRPC 强制持 token（无 token 直接拒绝启动）；openssl rand -hex 32。
-  # mlbridge 复用同一 token 调 admin 面（复验断连 + 写穿扇出）。
-  MESSAGELOOP_SERVER_GRPC_ADMIN_AUTH_TOKEN: ${MESSAGELOOP_SERVER_GRPC_ADMIN_AUTH_TOKEN:?请在 Dokploy Environment 设置 openssl rand -hex 32}
+  # admin gRPC 强制持静态 token（列表形态，逗号分隔；无 token 直接拒绝启动）；
+  # openssl rand -hex 32。mlbridge 复用同一 token 调 admin 面（复验断连 + 写穿扇出）。
+  MESSAGELOOP_SERVER_GRPC_ADMIN_AUTH_TOKENS: ${MESSAGELOOP_SERVER_GRPC_ADMIN_AUTH_TOKENS:?请在 Dokploy Environment 设置 openssl rand -hex 32}
   # /health、/metrics 的 Bearer token。默认留空：8080 不发布、不路由，
   # 仅容器网络内可达；若自行发布 8080 必须设置 token，并同步改下方
   # healthcheck（wget 需带 Authorization 头，否则一直 401 判死）
@@ -87,7 +91,7 @@ x-bridge-env: &bridge-env
   MLBRIDGE_TORCHWOOD_PROJECTS: ${MLBRIDGE_TORCHWOOD_PROJECTS:?请在 Dokploy Environment 设置 JSON 数组，如 [{"project_id":"myproj","api_key":"sk-..."}]}
   # admin 面：栈内 messageloop，token 与其共享同一变量。
   MLBRIDGE_MESSAGELOOP_ADMIN_ADDR: messageloop:9091
-  MLBRIDGE_MESSAGELOOP_ADMIN_TOKEN: ${MESSAGELOOP_SERVER_GRPC_ADMIN_AUTH_TOKEN}
+  MLBRIDGE_MESSAGELOOP_ADMIN_TOKEN: ${MESSAGELOOP_SERVER_GRPC_ADMIN_AUTH_TOKENS}
   # 会话索引：与 broker 共用栈内 redis（键前缀 mlb:*，互不冲突）。
   MLBRIDGE_REDIS_ADDR: redis:6379
   MLBRIDGE_REDIS_DB: ${MLBRIDGE_REDIS_DB:-0}

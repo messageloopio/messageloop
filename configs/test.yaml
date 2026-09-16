@@ -6,7 +6,8 @@ server:
     addr: "127.0.0.1:8080"
   grpc_admin:
     addr: "127.0.0.1:9091"
-    auth_token: "test-admin-token"
+    auth_tokens:
+      - "test-admin-token-0123456789"
   namespace: "dev"  # static namespace (required when require_auth is off)
   heartbeat:
     idle_timeout: "300s"

@@ -49,13 +49,13 @@ Torchwood 的公开 Server API 通信——部署时需提供 Torchwood 网关�
 ## 2. 环境变量（Environment 页签）
 
 > 逐项清单以 **`env.dokploy`** 为准（下表是说明，不是全集）。必填五项：
-> `MESSAGELOOP_SERVER_GRPC_ADMIN_AUTH_TOKEN`、`MESSAGELOOP_WS_DOMAIN`、
+> `MESSAGELOOP_SERVER_GRPC_ADMIN_AUTH_TOKENS`、`MESSAGELOOP_WS_DOMAIN`、
 > `MESSAGELOOP_GRPC_DOMAIN`、`MLBRIDGE_TORCHWOOD_BASE_URL`、
 > `MLBRIDGE_TORCHWOOD_PROJECTS`。
 
 | 变量 | 必填 | 说明 |
 |------|------|------|
-| `MESSAGELOOP_SERVER_GRPC_ADMIN_AUTH_TOKEN` | ✅ | admin gRPC 的 Bearer token，`openssl rand -hex 32`；未设置拒绝启动（compose 内 `:?` 强制） |
+| `MESSAGELOOP_SERVER_GRPC_ADMIN_AUTH_TOKENS` | ✅ | admin gRPC 的 Bearer token 列表（逗号分隔多把），`openssl rand -hex 32`；未设置拒绝启动（compose 内 `:?` 强制） |
 | `MESSAGELOOP_WS_DOMAIN` | ✅ | WebSocket 域名，如 `ws.example.com`（Traefik label 路由，见 §3） |
 | `MESSAGELOOP_GRPC_DOMAIN` | ✅ | 客户端 gRPC 域名，如 `grpc.example.com`（TLS 终结 → h2c） |
 | `MLBRIDGE_TORCHWOOD_BASE_URL` | ✅ | Torchwood 网关地址。同机 Dokploy 部署走内网直连 `http://torchwood-server:9080`（Torchwood 的 server 容器名；mlbridge 已挂 dokploy-network，别名里没有 `torchwood`）；跨机/独立部署用公网 `https://tw.example.com` |
@@ -68,7 +68,7 @@ Torchwood 的公开 Server API 通信——部署时需提供 Torchwood 网关�
 | `MESSAGELOOP_BROKER_REDIS_STREAM_MAX_LENGTH` | | 每频道 streams 裁剪上限，默认 `10000` |
 | `MESSAGELOOP_TRANSPORT_WEBSOCKET_ALLOW_ALL_ORIGINS` | | 默认 `true`（token 鉴权下 Origin 不是授权边界） |
 | `MESSAGELOOP_TRANSPORT_WEBSOCKET_ALLOWED_ORIGINS` | | 收紧来源：逗号分隔列表，**且必须同时设** `…ALLOW_ALL_ORIGINS=false`（allow_all 优先级更高） |
-| `MESSAGELOOP_SERVER_HTTP_AUTH_TOKEN` | | /health、/metrics 的 token，默认空（8080 不发布不路由）；若自行发布 8080 必须设置，并同步改 healthcheck |
+| `MESSAGELOOP_SERVER_HTTP_AUTH_TOKEN` | | /health、/metrics 的 token。8080 默认绑回环不发布不路由；改非回环绑定（如发布 8080）必须设置（G5 fail-closed，否则 Validate 拒绝启动），并同步改 healthcheck |
 | `MESSAGELOOP_GRPC_PORT` / `MESSAGELOOP_ADMIN_GRPC_PORT` | | 宿主回环端口，默认 `9090` / `9091`；冲突时改 |
 | `MESSAGELOOP_IMAGE` | | 镜像引用，默认 `ghcr.io/messageloopio/messageloop:latest`；建议钉版本 tag |
 | `MESSAGELOOP_TRANSPORT_QUIC_ADDR` / `…KCP_ADDR` | | 启用 UDP 传输（默认空=关闭）；还需放开 ports 的 udp 行并配置 TLS（§4.3） |
