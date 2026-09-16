@@ -17,6 +17,7 @@ import (
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/internal/admin"
 	clusterpkg "github.com/messageloopio/messageloop/internal/cluster"
+	"github.com/messageloopio/messageloop/internal/authz"
 	"github.com/messageloopio/messageloop/internal/protocol"
 	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/internal/session"
@@ -924,7 +925,15 @@ func TestAdmin_DisconnectUsersAcrossNodes(t *testing.T) {
 
 	// Admin Disconnect with users=[U] from nodeA: the remote session is
 	// resolved via the index + lease, then routed through the command bus.
+	// The handler requires a verified identity in the request context (the
+	// admin interceptor normally provides one); this test drives the handler
+	// directly, so it injects the static superadmin identity itself.
 	handler := admin.NewAPIServiceHandler(nodeA)
+	ctx = admin.WithAdminIdentity(ctx, authz.AdminIdentity{
+		KeyID:      "static-token",
+		Namespaces: []string{"*"},
+		Caps:       nodeA.AdminCapabilities(),
+	})
 	resp, err := handler.Disconnect(ctx, &serverv2.DisconnectRequest{
 		Namespace: "dev",
 		Users:     []string{userID},
