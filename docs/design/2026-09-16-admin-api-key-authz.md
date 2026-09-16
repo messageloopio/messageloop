@@ -11,7 +11,7 @@
 | 阶段前提 | dogfooding：重点验证并补全机制缺口，**不考虑向后兼容**（对齐 KD-K31"无兼容期"先例） |
 | 实现还原点 | S1 875c6ad / S2 9531a0f / S3 c6fc04f / S4 8aff6a7 / S5+补遗（分支 feat/admin-api-key-authz） |
 | 修订 | 2026-09-16 rethink 复查：修正 4 项（key_id 唯一性 / scope 抹空短路 / fail-fast / 长度门顺序）、补充 2 项（auth_tokens 列表 / JWT 否决留档），见 D26-D29 |
-| 实现澄清 | ① 矩阵中 Disconnect 不可见 session 的落地形态是 results **无该键**（强于 false，不泄露存在性；Go map 读取语义等价 false）；② G7 两个指标（admin_auth_requests_total + admin_rpc_total{method,key_id,result∈denied/ok/error}）均已实现 |
+| 实现澄清 | ① 矩阵中 Disconnect 不可见 session 的落地形态是 results **无该键**（强于 false，不泄露存在性；Go map 读取语义等价 false）；② G7 两个指标（admin_auth_requests_total + admin_rpc_total{method,key_id,result∈denied/ok/error}）均已实现；③ T4 落地为 whoami 端点（见 T4 行修订）——原"verify + apikeys.verify scope"方案因 TW 已退役 apikeys scope 而否决 |
 
 ---
 
@@ -201,7 +201,7 @@ messageloop 标签清单（= `messageloop.` + 能力位闭集名，一一对应�
 
 **两个刻意不存在的标签**：① 没有 `messageloop.publish`——channel 发布不受能力位门控（Publish 只有 sessions/users 目标才查 caps），其控制单元就是 namespace 范围 + Authorizer 规则；租户"只发消息"的 Key = project 绑定 + 零标签，天然成立；按 Key 细分发布权限用 allow_publish 列表的 `key:<id>` 集成。② 没有 `messageloop.all` 通配——显式勾选，通配毁审计。零 messageloop 标签的 Key 合法：认证通过、全 RPC PermissionDenied（Key 可能同时服务其他系统）。
 
-**Key 复用裁决**：复用 TW 的 Key **体系**（类型、`sk-` 格式、哈希落库、生命周期、verify 端点），通过"一用途一 Key"避免复用 Key **实例**（爆炸半径控制；TW 单项目多 Key 已具备，零机制成本）。mlbridge 自己的供给 Key 只需新增 `apikeys.verify` scope；**mlbridge 自身的 admin 调用永久走静态 token**（D25，依赖环分析见 §3）。
+**Key 复用裁决**：复用 TW 的 Key **体系**（类型、`sk-` 格式、哈希落库、生命周期），通过"一用途一 Key"避免复用 Key **实例**（爆炸半径控制；TW 单项目多 Key 已具备，零机制成本）。**mlbridge 自身的 admin 调用永久走静态 token**（D25，依赖环分析见 §3）。
 
 ### 2.7 配置最终形态
 
@@ -281,9 +281,9 @@ no-compat 简化（dogfooding 专属）：旧拦截器直接删除（不留 Depr
 |---|---|---|
 | T2 | 自定义 scope 机制（§2.6 语法校验、内建保护、UI） | 必需 |
 | T3 | platform 级 Key（无 project 绑定，`["*"]` 唯一来源） | 必需 |
-| T4 | verify 端点：入参 Key 明文 → `{key_id（唯一，非显示名）, project_id\|"platform", scopes[], status, max_age_seconds}`；`apikeys.verify` scope；限流 + 30s 缓存复用 | 必需 |
+| T4 | **whoami 端点**（实现裁决，替代原 verify+scope 方案）：`GET /v1/server/api-keys/whoami`，调用方 X-API-Key 即被查询的 key 本身 → 200 `{keyId, name, projectId（空=平台级）, scopes[], maxAgeSeconds}`；无效/禁用/过期 → 401。零新 scope——TW 的 apikeys scope 已退役（防自铸提权），"知道 key 明文"即查询授权，零信息泄露；复用现有每请求读库校验（撤销立即生效，优于原方案） | 必需 |
 | T5 | project id 创建时 namespace 语法门（`[a-z0-9-]{1,32}` 首尾非 `-`） | 必需（否则签出的 namespace 在 messageloop 清洗为空 → 零范围 Key，源头该源头拦） |
-| T6 | per-Key `max_age_seconds` 策略（0 = mlbridge 默认） | 必需（撤销收紧手段） |
+| T6 | per-Key 撤销收紧：whoami 响应的 `maxAgeSeconds` 由 TW 服务端按 key 既有 `expire_at` 计算（`max(0, expire_at-now)`，规避时钟偏斜——G8）；未设过期 = 0（用 mlbridge/messageloop 默认 TTL）。零 schema 变更 | 必需 |
 | T7/T8 | 审计进 analytics、last_used_at 节流聚合、控制台 Key 管理 UI（CLI 先行） | 运营 |
 
 ### mlbridge
@@ -291,7 +291,7 @@ no-compat 简化（dogfooding 专属）：旧拦截器直接删除（不留 Depr
 | 项 | 内容 |
 |---|---|
 | M1 | 实现 `ProxyService.AuthenticateAdmin`（TW verify + 前缀过滤十行 + max_age 策略） |
-| M2 | 供给 Key 增加 `apikeys.verify` scope（只加这一个） |
+| M2 | ~~供给 Key 增加 `apikeys.verify` scope~~（随 T4 whoami 裁决取消——mlbridge 供给 Key 不参与 admin key 校验） |
 | M3 | mlbridge 自身 admin 调用继续走静态 token（D25，守住依赖环） |
 | M4 | `mlkey-smoke` 子命令：拿一把 Key 跑 dogfooding 打靶清单，输出 Key 完整标签面供审计 |
 
