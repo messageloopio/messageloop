@@ -340,6 +340,7 @@ grpcurl \
 语义：
 
 - 调查只发送给目标频道的订阅者。发送前会记录被调查的会话集合，只有这些会话的应答才会被接受，来自其他会话的应答视为伪造并被丢弃。
+- **载荷按原始字节读写**：发起时 `payload` 的任何变体（text/json/binary）到达客户端都是二进制载荷（客户端 SDK 以 `octet-stream` 呈现）；调用方读取 `SurveyResult.payload` 时应使用 binary 变体（如 Go 的 `GetBinary()`）——读 text/json 变体会得到空值。
 - **门限制**：调用方不持 `survey.bypass_gate` 能力位时，与客户端发起的 Survey 走相同的门——Authorizer `Decide(Survey)` 拒绝（`SURVEY_DISABLED` / `PERMISSION_DENIED`）或订阅者总数超过频道策略 `max_survey_subscribers`（默认 256）时返回 `ResourceExhausted`，零条请求下发。
 - 超时取值：`timeout_ms` 被钳制在 `[100ms, min(频道策略 max_survey_timeout, 10s)]`；`<= 0` 用策略默认（5s）。
 - 每个订阅者的调查请求发送受独立超时约束（10 秒）：发送失败的会话会以一条 `error` 应答记录失败，不会阻塞整个调查。
