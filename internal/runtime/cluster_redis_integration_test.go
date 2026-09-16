@@ -173,7 +173,7 @@ func TestClusterRedis_RemoteSessionAdminAndQueries(t *testing.T) {
 	require.NoError(t, nodeA.AddClient(client))
 
 	channel := "cluster-admin-" + uuid.NewString()
-	ok, err := nodeB.SubscribeSession(ctx, client.SessionID(), channel)
+	ok, err := nodeB.SubscribeSession(ctx, nodeB.AdminPrincipal(), client.SessionID(), channel)
 	require.NoError(t, err)
 	require.True(t, ok)
 
@@ -199,7 +199,7 @@ func TestClusterRedis_RemoteSessionAdminAndQueries(t *testing.T) {
 		return false
 	}, 5*time.Second, 50*time.Millisecond)
 
-	ok, err = nodeB.UnsubscribeSession(ctx, client.SessionID(), channel)
+	ok, err = nodeB.UnsubscribeSession(ctx, nodeB.AdminPrincipal(), client.SessionID(), channel)
 	require.NoError(t, err)
 	require.True(t, ok)
 

@@ -116,7 +116,7 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverv2.PublishRe
 		// Channel-based publication
 		for _, channel := range dest.Channels {
 			attempted++
-			if !h.node.AdminCanPublish(channel) {
+			if !h.node.AdminCanPublish(h.node.AdminPrincipal(), channel) {
 				log.WarnContext(ctx, "admin publish denied by ACL rule", "channel", channel)
 				failed++
 				continue
@@ -167,7 +167,7 @@ func (h *apiServiceHandler) Survey(ctx context.Context, req *serverv2.SurveyRequ
 	// allow_survey / deny_all) and the population cap (PR-KA-A4 §7). With
 	// the bit, today's gate-free behavior is preserved.
 	if h.node.AdminCapabilities()&authz.CapSurveyBypassGate == 0 {
-		if !h.node.AdminDecide(authz.ActionSurvey, req.Channel).Allow {
+		if !h.node.AdminDecide(h.node.AdminPrincipal(), authz.ActionSurvey, req.Channel).Allow {
 			return nil, status.Error(codes.PermissionDenied, "survey denied by ACL rule")
 		}
 		total, err := h.node.CountMatchingSubscribers(ctx, req.Channel)
@@ -312,7 +312,7 @@ func (h *apiServiceHandler) Subscribe(ctx context.Context, req *serverv2.Subscri
 		// the channel's result: false only when every session failed.
 		ok := false
 		for _, sessionID := range sessions {
-			subscribed, err := h.node.SubscribeSession(ctx, sessionID, ch)
+			subscribed, err := h.node.SubscribeSession(ctx, h.node.AdminPrincipal(), sessionID, ch)
 			if err != nil {
 				log.ErrorContext(ctx, "failed to subscribe to channel", err, "channel", ch, "session_id", sessionID)
 				continue
@@ -357,7 +357,7 @@ func (h *apiServiceHandler) Unsubscribe(ctx context.Context, req *serverv2.Unsub
 		// the channel's result: false only when every session failed.
 		ok := false
 		for _, sessionID := range sessions {
-			unsubscribed, err := h.node.UnsubscribeSession(ctx, sessionID, ch)
+			unsubscribed, err := h.node.UnsubscribeSession(ctx, h.node.AdminPrincipal(), sessionID, ch)
 			if err != nil {
 				log.ErrorContext(ctx, "failed to unsubscribe from channel", err, "channel", ch, "session_id", sessionID)
 				continue
@@ -409,7 +409,7 @@ func (h *apiServiceHandler) GetPresence(ctx context.Context, req *serverv2.GetPr
 	if err := h.requireAdminCaps(authz.CapPresenceRead, "GetPresence"); err != nil {
 		return nil, err
 	}
-	if !h.node.AdminDecide(authz.ActionPresence, req.Channel).Allow {
+	if !h.node.AdminDecide(h.node.AdminPrincipal(), authz.ActionPresence, req.Channel).Allow {
 		return nil, status.Error(codes.PermissionDenied, "presence denied by ACL rule")
 	}
 
@@ -474,7 +474,7 @@ func (h *apiServiceHandler) GetHistory(ctx context.Context, req *serverv2.GetHis
 	if err := h.requireAdminCaps(authz.CapHistoryRead, "GetHistory"); err != nil {
 		return nil, err
 	}
-	if !h.node.AdminDecide(authz.ActionRecover, req.Channel).Allow {
+	if !h.node.AdminDecide(h.node.AdminPrincipal(), authz.ActionRecover, req.Channel).Allow {
 		return nil, status.Error(codes.PermissionDenied, "history denied by ACL rule")
 	}
 
