@@ -14,9 +14,9 @@
 # 域名路由以 Traefik label 直接声明在本文件（不用 Dokploy「Domains」UI——
 # 生成名带随机后缀无法变量化，且与 label 并存时 router 二选一不可控）：
 # Traefik 终止 TLS，WebSocket 直达 9080（浏览器 Origin 即前端域，upgrade
-# 由 Traefik 原生透传）；gRPC 以 h2c 转发 9090（gRPC 要求端到端 HTTP/2，
-# scheme=h2c 必须）。QUIC/KCP 是 UDP，Traefik 不路由，需要时放开 ports
-# 的 udp 段宿主直连（见服务内注释）。
+# 由 Traefik 原生透传）；客户端 gRPC 以 h2c 转发 9090、Server API gRPC 以
+# h2c 转发 9091（gRPC 要求端到端 HTTP/2，scheme=h2c 必须）。QUIC/KCP 是
+# UDP，Traefik 不路由，需要时放开 ports 的 udp 段宿主直连（见服务内注释）。
 #
 # 双网络缺一不可：default 承载栈内互通（redis 的 DNS 与连接；服务一旦显式
 # 声明 networks 即失去隐式 default，只挂 dokploy-network 会让 lookup redis
@@ -161,6 +161,14 @@ services:
       - "traefik.http.routers.messageloop-grpc.service=messageloop-grpc-svc"
       - "traefik.http.services.messageloop-grpc-svc.loadbalancer.server.port=9090"
       - "traefik.http.services.messageloop-grpc-svc.loadbalancer.server.scheme=h2c"
+      # —— Server API gRPC：TLS 终结 → h2c（自带鉴权：auth_tokens / API Key，
+      #    面向租户后端服务调用）——
+      - "traefik.http.routers.messageloop-api.rule=Host(`${MESSAGELOOP_API_DOMAIN:?请在 Dokploy Environment 设置 Server API 域名}`)"
+      - "traefik.http.routers.messageloop-api.entrypoints=websecure"
+      - "traefik.http.routers.messageloop-api.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.messageloop-api.service=messageloop-api-svc"
+      - "traefik.http.services.messageloop-api-svc.loadbalancer.server.port=9091"
+      - "traefik.http.services.messageloop-api-svc.loadbalancer.server.scheme=h2c"
     environment: *app-env
     depends_on:
       redis:
@@ -168,7 +176,8 @@ services:
     # 宿主端口只绑回环：公网 gRPC 走上方域名 TLS（标准 gRPC 客户端），
     # 回环供 SSH 隧道明文直连兜底——仓库自带 Go SDK 的 DialGRPC 当前为
     # 明文实现（insecure 硬编码），隧道 + DialGRPC("127.0.0.1:9090") 即
-    # 其接入路径。Server API gRPC(9091) 仅隧道/栈内访问（mlbridge 经栈内网直连）。
+    # 其接入路径。Server API gRPC(9091) 走 MESSAGELOOP_API_DOMAIN 域名
+    # TLS 路由（租户后端直连），回环口仍作隧道兜底；mlbridge 经栈内网直连。
     # QUIC/KCP（UDP，可选）：Traefik 不路由 UDP，启用时在 Environment 设
     # MESSAGELOOP_TRANSPORT_QUIC_ADDR / MESSAGELOOP_TRANSPORT_KCP_ADDR
     # （及 TLS 证书路径）后放开对应行；客户端按相同协议直连宿主端口。
