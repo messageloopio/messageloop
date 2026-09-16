@@ -19,8 +19,8 @@ type Router struct {
 // route represents a single routing rule.
 type route struct {
 	proxy          Proxy
-	channelMatcher glob.Glob
-	methodMatcher  glob.Glob
+	channelMatcher *glob.Pattern
+	methodMatcher  *glob.Pattern
 }
 
 // NewRouter creates a new empty Router.
@@ -75,8 +75,8 @@ func (r *Router) Match(channel, method string) Proxy {
 // instead of half-initialized.
 func (r *Router) AddFromConfig(proxy Proxy, cfg *ProxyConfig) error {
 	type compiledRoute struct {
-		channel glob.Glob
-		method  glob.Glob
+		channel *glob.Pattern
+		method  *glob.Pattern
 	}
 	compiled := make([]compiledRoute, 0, len(cfg.Routes))
 	for _, routeCfg := range cfg.Routes {
