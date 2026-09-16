@@ -45,13 +45,14 @@ func TestNode_AdminCanSubscribeAndPublish(t *testing.T) {
 	})
 	// Without subscribe.any the admin cannot subscribe to an allow-listed
 	// channel it is not on.
-	assert.False(t, node.AdminCanSubscribe("private.room"))
+	admin := node.adminPrincipal()
+	assert.False(t, node.AdminCanSubscribe(admin, "private.room"))
 	// Pattern.compile failures fail admin subscribe too.
-	assert.False(t, node.AdminCanSubscribe("**"))
-	assert.False(t, node.AdminCanSubscribe("*.room"))
+	assert.False(t, node.AdminCanSubscribe(admin, "**"))
+	assert.False(t, node.AdminCanSubscribe(admin, "*.room"))
 	// deny_all blocks admin publish.
-	assert.False(t, node.AdminCanPublish("secret.1"))
-	assert.True(t, node.AdminCanPublish("private.room"))
+	assert.False(t, node.AdminCanPublish(admin, "secret.1"))
+	assert.True(t, node.AdminCanPublish(admin, "private.room"))
 
 	// With subscribe.any the static allow list is skipped.
 	anyNode := NewNode(&config.Server{
@@ -63,11 +64,12 @@ func TestNode_AdminCanSubscribeAndPublish(t *testing.T) {
 			},
 		},
 	})
-	assert.True(t, anyNode.AdminCanSubscribe("private.room"))
-	assert.False(t, anyNode.AdminCanSubscribe("**"), "subscribe.any must not unlock bare ** (A3)")
-	assert.False(t, anyNode.AdminCanSubscribe("secret.1"),
+	anyAdmin := anyNode.adminPrincipal()
+	assert.True(t, anyNode.AdminCanSubscribe(anyAdmin, "private.room"))
+	assert.False(t, anyNode.AdminCanSubscribe(anyAdmin, "**"), "subscribe.any must not unlock bare ** (A3)")
+	assert.False(t, anyNode.AdminCanSubscribe(anyAdmin, "secret.1"),
 		"subscribe.any must not punch a hole in a deny_all rule")
-	assert.False(t, anyNode.AdminCanPublish("secret.1"), "subscribe.any must not bypass publish deny_all")
+	assert.False(t, anyNode.AdminCanPublish(anyAdmin, "secret.1"), "subscribe.any must not bypass publish deny_all")
 }
 
 // TestNode_ReplaceRulesRevokesSubscriptions verifies §9.11: after replacing

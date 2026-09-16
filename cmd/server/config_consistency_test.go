@@ -49,7 +49,7 @@ func TestRepositoryConfigsValidateAndPrebind(t *testing.T) {
 			cfg.Transport.GRPC.Addr = "127.0.0.1:0"
 			cfg.Server.GRPCAdmin.Addr = "127.0.0.1:0"
 
-			servers, err := prepareGRPCServers(cfg, runtime.NewNode(nil))
+			servers, err := prepareGRPCServers(cfg, runtime.NewNode(nil), nil, nil)
 			require.NoError(t, err, "gRPC servers must pre-bind with the config's addresses")
 			servers.Close()
 		})

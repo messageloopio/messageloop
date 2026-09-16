@@ -195,3 +195,69 @@ func TestSession_SnapshotCarriesNamespace(t *testing.T) {
 	assert.Equal(t, "acme", snapshot.AuthContext["namespace"])
 	assert.Equal(t, "acme", node.clusterSessionLease(client).Namespace)
 }
+
+// TestNode_AdminSessionNamespace_Local pins the local-hub path of
+// AdminSessionNamespace (admin API key design §2.4): a session with a
+// resolved namespace reports it, while a namespace-less session and an
+// unknown session ID report not-found — a namespace-less session must stay
+// invisible to scoped identities (fail-closed).
+func TestNode_AdminSessionNamespace_Local(t *testing.T) {
+	node := NewNode(nil)
+	client, _, err := NewClient(context.Background(), node, noopTransport{}, JSONMarshaler{})
+	require.NoError(t, err)
+	client.ForceTestIDs("sess-ns", "user-ns", "client-ns")
+	require.NoError(t, node.AddClient(client))
+
+	// Namespace not yet resolved: invisible ("", false).
+	ns, ok := node.AdminSessionNamespace(context.Background(), "sess-ns")
+	assert.False(t, ok)
+	assert.Empty(t, ns)
+
+	client.SetNamespaceForTest("acme")
+	ns, ok = node.AdminSessionNamespace(context.Background(), "sess-ns")
+	assert.True(t, ok)
+	assert.Equal(t, "acme", ns)
+
+	// Unknown session: not found.
+	ns, ok = node.AdminSessionNamespace(context.Background(), "sess-missing")
+	assert.False(t, ok)
+	assert.Empty(t, ns)
+}
+
+// TestNode_AdminSessionNamespace_Cluster pins the cluster-directory fallback
+// of AdminSessionNamespace (design §2.4): a session unknown locally resolves
+// through its lease namespace; a namespace-less lease and a missing lease
+// report not-found (fail-closed).
+func TestNode_AdminSessionNamespace_Cluster(t *testing.T) {
+	directory := &fakeSessionDirectory{
+		leases: map[string]*ClusterSessionLease{
+			"sess-remote": {SessionID: "sess-remote", NodeID: "node-b", IncarnationID: "inc-b", Namespace: "acme"},
+			"sess-nsless": {SessionID: "sess-nsless", NodeID: "node-b", IncarnationID: "inc-b"},
+		},
+	}
+	bus := &fakeClusterCommandBus{result: &ClusterCommandResult{Status: ClusterCommandStatusSucceeded}}
+	rt, err := NewCluster(ClusterOptions{Enabled: true, NodeID: "node-a", IncarnationID: "inc-a", Backend: "memory"}, ClusterDependencies{
+		SessionDirectory: directory,
+		CommandBus:       bus,
+		QueryStore:       fakeQueryStore{},
+	})
+	require.NoError(t, err)
+
+	node := NewNode(nil)
+	node.SetCluster(rt)
+
+	// Remote session with a namespace: resolved through the directory.
+	ns, ok := node.AdminSessionNamespace(context.Background(), "sess-remote")
+	assert.True(t, ok)
+	assert.Equal(t, "acme", ns)
+
+	// Lease without a namespace: invisible ("", false).
+	ns, ok = node.AdminSessionNamespace(context.Background(), "sess-nsless")
+	assert.False(t, ok)
+	assert.Empty(t, ns)
+
+	// No lease at all: not found.
+	ns, ok = node.AdminSessionNamespace(context.Background(), "sess-missing")
+	assert.False(t, ok)
+	assert.Empty(t, ns)
+}

@@ -6,6 +6,7 @@
 | --- | --- | --- |
 | [独立版本 v2（不向后兼容）](../v2/README.md) | Draft | 内核重设靶心、评审、A0/A1 第三方规格；与本目录 v1.0 规格分列 |
 | [v1.0 功能缺口设计](v1.0-platform-gaps.md) | Approved | Subscribe 恢复、Presence、按 user、心跳、客户端 Survey、通配 presence、频道策略；含 Key Decisions、排期、PR Plan |
+| [Admin API Key 鉴权与按 Namespace 权限控制](2026-09-16-admin-api-key-authz.md) | 已实现（dogfooding） | proxy 托管 Key 校验（mlbridge→Torchwood 复用 TW Key 体系 + `messageloop.*` 服务前缀标签）；scope 层 + census 双测试补机制缺口；三仓协同；dogfooding 免兼容 |
 | [产品 ROADMAP](../../ROADMAP.md) | Approved | v0.2 → v1.0 → v1.x 能力地图与排期摘要 |
 | [PR-01 实现规格](tasks/pr-01-protocol.md) | Accepted | 冻结 v1.0 proto 字段号；[第三方 prompt](tasks/pr-01-prompt.md) |
 | [PR-02 实现规格](tasks/pr-02-channel-policy.md) | Accepted | 频道前缀策略引擎；[第三方 prompt](tasks/pr-02-prompt.md) |

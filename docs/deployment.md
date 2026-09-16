@@ -55,15 +55,16 @@ For WebSocket, TLS turns the listener into a `wss://` endpoint. For gRPC, standa
 
 ## Admin API Authentication
 
-Protect the admin gRPC API with a bearer token in production:
+Protect the admin gRPC API with static superadmin tokens in production:
 
 ```yaml
 server:
   grpc_admin:
-    auth_token: "your-secret-token"
+    auth_tokens:
+      - "your-secret-token-of-at-least-20-chars"
 ```
 
-Clients must include the token as a `authorization: Bearer <token>` gRPC metadata header.
+Each token must be at least 20 characters (config Validate enforces it); the list form makes rotation window-free (add new → rolling restart → drop old). Clients must include the token as a `authorization: Bearer <token>` gRPC metadata header. API keys verified by a backend proxy are also supported via a `proxy[].admin_auth: true` assignment — see the [Admin API reference](developer/03-admin-api.md).
 
 ## Health And Metrics
 
@@ -249,7 +250,7 @@ docker run --rm -p 9080:9080 \
   -e MESSAGELOOP_BROKER_REDIS_ADDR=redis.internal:6379 \
   -e MESSAGELOOP_BROKER_REDIS_STREAM_APPROXIMATE=true \
   -e MESSAGELOOP_SERVER_NAMESPACE=prod \
-  -e MESSAGELOOP_SERVER_GRPC_ADMIN_AUTH_TOKEN=secret \
+  -e MESSAGELOOP_SERVER_GRPC_ADMIN_AUTH_TOKENS=secret-token-of-at-least-20-chars \
   messageloop
 ```
 
@@ -260,7 +261,7 @@ To deploy on the [Dokploy](https://dokploy.com) platform, see [`docker/dokploy/R
 ## Production Checklist
 
 - [ ] Bind admin listeners (`server.http.addr`, `server.grpc_admin.addr`) to loopback or private interfaces.
-- [ ] Set `server.grpc_admin.auth_token` to a strong secret.
+- [ ] Set `server.grpc_admin.auth_tokens` to strong secrets (each ≥ 20 characters).
 - [ ] Disable `allow_all_origins` on the WebSocket transport; use `allowed_origins` instead.
 - [ ] Configure TLS on client-facing listeners or terminate TLS at a load balancer.
 - [ ] Set appropriate resource limits (`max_connections_per_user`, `max_publishes_per_second`).

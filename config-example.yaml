@@ -3,8 +3,12 @@ server:
     addr: "127.0.0.1:8080"   # Admin HTTP server exposing /health and /metrics
   grpc_admin:
     addr: "127.0.0.1:9091"   # Server-side gRPC admin API; keep this on a private interface
-    auth_token: "change-me"  # Required bearer token for admin API (mandatory unless allow_insecure: true)
-    # allow_insecure: true   # Explicitly run the admin API WITHOUT authentication (NOT recommended)
+    auth_tokens:             # Static superadmin bearer token list (any match = superadmin).
+      - "change-me-admin-token-min-20-chars"  # Each token must be >= 20 chars (Validate).
+                             # List form makes rotation window-free: add new -> rolling restart -> drop old.
+    # admin_auth_cache_ttl: "30s"  # Positive cache TTL for admin_auth proxy-verified keys (default 30s).
+    # allow_insecure: true   # Explicitly run the admin API WITHOUT authentication.
+                             # Loopback binds only: non-loopback + allow_insecure fails Validate (G5).
     # tls:
     #   cert_file: "./certs/admin.crt"
     #   key_file: "./certs/admin.key"
@@ -151,6 +155,9 @@ proxy:
   - name: example-grpc
     endpoint: 127.0.0.1:10091
     timeout: 30s
+    # admin_auth: true  # Assign this proxy as the admin API key verifier
+    #                   # (exactly one entry may claim it; independent of routes).
+    #                   # See docs/developer/03-admin-api.md "API Key authentication".
     grpc:
       insecure: true
     routes:

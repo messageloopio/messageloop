@@ -127,6 +127,8 @@ curl -s http://127.0.0.1:8080/metrics | grep '^messageloop_'
 | `messageloop_live_gap_notice_total` | counter | `reason`（`middle`/`replay_truncated`） | catch-up 检出空洞后扇出给本节点订阅者的 gap 通知次数（pkg/redisbroker/pubsub.go） |
 | `messageloop_heartbeat_idle_disconnects_total` | counter | 无 | 心跳以 3511 断开的连接数：idle 超时或服务端 ping 未应答（internal/session/heartbeat.go，一次性 CAS 保证只计一次） |
 | `messageloop_admin_user_fanout` | histogram | `op`（`publish`/`disconnect`/`subscribe`/`unsubscribe`） | 按 user 定向的 Admin 操作一次扇出的 session 数；桶为计数刻度 `[1..1000]`（internal/admin/api_handler.go） |
+| `messageloop_admin_auth_requests_total` | counter | `verifier`（`static`/`insecure`/`proxy`）、`key_id`、`result`（`allow`/`deny`） | Admin API 认证尝试按验证通道与身份归因计数；只携带 key_id（无法归因时 `unknown`），永不含凭证明文（internal/admin/auth.go） |
+| `messageloop_admin_rpc_total` | counter | `method`（gRPC 全方法名）、`key_id`、`result`（`denied`/`ok`/`error`） | Admin API RPC 按调用方身份归因计数：`denied` 为认证层拒绝（未进 handler），`ok`/`error` 为 handler 结果（internal/admin/auth.go） |
 | `messageloop_survey_client_total` | counter | `result`（`ok` 或顶层错误码，如 `SURVEY_DISABLED`/`PERMISSION_DENIED`/`NAMESPACE_MISMATCH`/`SURVEY_TOO_MANY_SUBSCRIBERS`/`RATE_LIMITED`） | 客户端发起的 Survey 按结果计数（internal/session/client.go） |
 | `messageloop_presence_publish_failures_total` | counter | 无 | presence join/leave 伴生频道（`ch/__presence`）发布失败累计 |
 | `messageloop_presence_failures_total` | counter | `op`（`deliver`/`store`/`companion`/`emit`/`gen`） | presence 按操作分类的失败次数：`deliver` 事件投递失败、`store` presence 存储读写失败、`companion` 伴生发布失败、`emit` LiveBus occupancy 事件发布失败、`gen` occupancy generation 签发失败 |
@@ -217,7 +219,7 @@ curl -s http://127.0.0.1:8080/metrics | grep '^messageloop_'
 
 ### 6.2 生产注意事项
 
-- **绑定地址与鉴权**：`server.http.addr` 默认为 `127.0.0.1:8080`，仅暴露 `/health` 与 `/metrics`。该 HTTP 面默认无鉴权——绑定到非回环地址时必须置于私有网络或防火墙之后，或配置 `server.http.auth_token` 启用 Bearer 鉴权（未配置 token 且绑定非回环地址时启动会打 WARN，参见 [../deployment.md](../deployment.md)）；
+- **绑定地址与鉴权**：`server.http.addr` 默认为 `127.0.0.1:8080`，仅暴露 `/health` 与 `/metrics`。该 HTTP 面默认无鉴权——绑定到非回环地址时必须置于私有网络或防火墙之后，或配置 `server.http.auth_token` 启用 Bearer 鉴权（未配置 token 且绑定非回环地址会被 Validate 拒绝启动，G5 fail-closed，参见 [../deployment.md](../deployment.md)）；
 - **抓取间隔**：推荐 10–15 秒，不小于 5 秒。直方图桶为 Prometheus 默认桶，P99 类告警需要足够的历史样本；
 - **registry 已注册 Go runtime / process 采集器**：`/metrics` 自带 `go_*`、`process_*` 系列指标（GC、协程数、内存等），无需外部 exporter；如需 pprof 剖析接口再另行挂载 `net/http/pprof`；
 - **多节点部署**：每节点独立暴露指标；cluster 启用且配置 `node_id` 时，`messageloop_*` 指标自动带 `node_id` 标签（见 §3），可直接按该标签聚合与告警；未启用 cluster 时按实例标签区分。集群相关指标只在集群模式下有意义（见 §3.4）；

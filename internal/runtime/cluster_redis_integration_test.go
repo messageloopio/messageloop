@@ -77,6 +77,10 @@ func (m *integrationAuthProxy) OnDisconnected(context.Context, *proxy.OnDisconne
 	return &proxy.OnDisconnectedProxyResponse{}, nil
 }
 
+func (m *integrationAuthProxy) AuthenticateAdmin(context.Context, *proxy.AuthenticateAdminProxyRequest) (*proxy.AuthenticateAdminProxyResponse, error) {
+	return &proxy.AuthenticateAdminProxyResponse{}, nil
+}
+
 func (m *integrationAuthProxy) Name() string { return "integration-auth-stub" }
 func (m *integrationAuthProxy) Close() error { return nil }
 
@@ -169,7 +173,7 @@ func TestClusterRedis_RemoteSessionAdminAndQueries(t *testing.T) {
 	require.NoError(t, nodeA.AddClient(client))
 
 	channel := "cluster-admin-" + uuid.NewString()
-	ok, err := nodeB.SubscribeSession(ctx, client.SessionID(), channel)
+	ok, err := nodeB.SubscribeSession(ctx, nodeB.AdminPrincipal(), client.SessionID(), channel)
 	require.NoError(t, err)
 	require.True(t, ok)
 
@@ -195,7 +199,7 @@ func TestClusterRedis_RemoteSessionAdminAndQueries(t *testing.T) {
 		return false
 	}, 5*time.Second, 50*time.Millisecond)
 
-	ok, err = nodeB.UnsubscribeSession(ctx, client.SessionID(), channel)
+	ok, err = nodeB.UnsubscribeSession(ctx, nodeB.AdminPrincipal(), client.SessionID(), channel)
 	require.NoError(t, err)
 	require.True(t, ok)
 

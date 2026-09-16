@@ -15,6 +15,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/messageloopio/messageloop/config"
+	"github.com/messageloopio/messageloop/internal/authz"
 	"github.com/messageloopio/messageloop/internal/occupancy"
 	"github.com/messageloopio/messageloop/internal/protocol"
 	"github.com/messageloopio/messageloop/internal/runtime"
@@ -30,6 +31,7 @@ import (
 type captureTransport struct {
 	mu       sync.Mutex
 	messages [][]byte
+	closed   bool
 }
 
 func (t *captureTransport) Write(data []byte) error {
@@ -48,7 +50,12 @@ func (t *captureTransport) WriteMany(data ...[]byte) error {
 	return nil
 }
 
-func (t *captureTransport) Close(protocol.Disconnect) error { return nil }
+func (t *captureTransport) Close(protocol.Disconnect) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.closed = true
+	return nil
+}
 
 func (t *captureTransport) RemoteAddr() string { return "127.0.0.1:12345" }
 
@@ -156,6 +163,19 @@ func policyBoolPtr(v bool) *bool { return &v }
 // expand users must pass it as Namespace.
 const adminTestNamespace = "dev"
 
+// adminTestContext returns a handler context carrying the static superadmin
+// identity, mirroring what the auth interceptor attaches for a static
+// auth_tokens hit (design §2.1: ["*"] namespace scope, caps = node ceiling).
+// The caps follow the node under test so capability-gate tests keep their
+// exact old semantics (the former requireAdminCaps read the node bits).
+func adminTestContext(node *runtime.Node) context.Context {
+	return WithAdminIdentity(context.Background(), authz.AdminIdentity{
+		KeyID:      "static-token",
+		Namespaces: []string{"*"},
+		Caps:       node.AdminCapabilities(),
+	})
+}
+
 func newUserTestClient(t *testing.T, node *runtime.Node, transport session.Transport, sessionID, userID string) *session.Client {
 	t.Helper()
 	client, _, err := runtime.NewClient(context.Background(), node, transport, shared.JSONMarshaler{})
@@ -184,15 +204,15 @@ func transportContainsText(transport *captureTransport, text string) bool {
 // counted as failed and never reaches a history-writing broker, while other
 // channels in the same request still succeed (partial-success semantics).
 func TestAPIServiceHandler_AddHistoryDeniedByPolicy(t *testing.T) {
-	ctx := context.Background()
 	node := runtime.NewNode(&config.Server{
 		Authorizer: config.AuthorizerConfig{
 			Rules: []config.AuthorizerRule{
-				{Pattern: "game.tick.**", ChannelPolicySpec: config.ChannelPolicySpec{TransientOnly: policyBoolPtr(true)}},
-				{Pattern: "no-history.**", ChannelPolicySpec: config.ChannelPolicySpec{History: policyBoolPtr(false)}},
+				{Pattern: "dev:game.tick.**", ChannelPolicySpec: config.ChannelPolicySpec{TransientOnly: policyBoolPtr(true)}},
+				{Pattern: "dev:no-history.**", ChannelPolicySpec: config.ChannelPolicySpec{History: policyBoolPtr(false)}},
 			},
 		},
 	})
+	ctx := adminTestContext(node)
 	probe := &probeBroker{}
 	node.SetBroker(probe)
 	handler := NewAPIServiceHandler(node)
@@ -203,7 +223,7 @@ func TestAPIServiceHandler_AddHistoryDeniedByPolicy(t *testing.T) {
 			{
 				Id: "admin-tick",
 				Destination: &serverv2.Publication_Destination{
-					Channels: []string{"ok-channel", "game.tick.fps", "no-history.ch"},
+					Channels: []string{"dev:ok-channel", "dev:game.tick.fps", "dev:no-history.ch"},
 				},
 				Payload: &sharedv2.Payload{Data: &sharedv2.Payload_Text{Text: "x"}},
 				Options: &serverv2.Publication_Options{AddHistory: true},
@@ -215,7 +235,7 @@ func TestAPIServiceHandler_AddHistoryDeniedByPolicy(t *testing.T) {
 	require.NoError(t, err, "the denied channels must not fail the whole RPC (partial success)")
 	require.NotNil(t, resp)
 	require.Equal(t, 1, probe.publishCalls, "broker.Publish must be called only for the allowed channel")
-	require.Equal(t, "ok-channel", probe.publishChannel)
+	require.Equal(t, "dev:ok-channel", probe.publishChannel)
 
 	// A single add_history publication on a disabled channel: all attempts
 	// fail, so the RPC itself reports an error (existing all-failed
@@ -224,7 +244,7 @@ func TestAPIServiceHandler_AddHistoryDeniedByPolicy(t *testing.T) {
 	node2 := runtime.NewNode(&config.Server{
 		Authorizer: config.AuthorizerConfig{
 			Rules: []config.AuthorizerRule{
-				{Pattern: "game.tick.**", ChannelPolicySpec: config.ChannelPolicySpec{TransientOnly: policyBoolPtr(true)}},
+				{Pattern: "dev:game.tick.**", ChannelPolicySpec: config.ChannelPolicySpec{TransientOnly: policyBoolPtr(true)}},
 			},
 		},
 	})
@@ -236,7 +256,7 @@ func TestAPIServiceHandler_AddHistoryDeniedByPolicy(t *testing.T) {
 			{
 				Id: "admin-tick-only",
 				Destination: &serverv2.Publication_Destination{
-					Channels: []string{"game.tick.fps"},
+					Channels: []string{"dev:game.tick.fps"},
 				},
 				Payload: &sharedv2.Payload{Data: &sharedv2.Payload_Text{Text: "x"}},
 				Options: &serverv2.Publication_Options{AddHistory: true},
@@ -252,14 +272,14 @@ func TestAPIServiceHandler_AddHistoryDeniedByPolicy(t *testing.T) {
 // verifies that a transient admin publish (no add_history) on a
 // policy-disabled-history channel is still delivered.
 func TestAPIServiceHandler_PublishToChannelsWithoutAddHistoryOnDisabledChannel(t *testing.T) {
-	ctx := context.Background()
 	node := runtime.NewNode(&config.Server{
 		Authorizer: config.AuthorizerConfig{
 			Rules: []config.AuthorizerRule{
-				{Pattern: "game.tick.**", ChannelPolicySpec: config.ChannelPolicySpec{TransientOnly: policyBoolPtr(true)}},
+				{Pattern: "dev:game.tick.**", ChannelPolicySpec: config.ChannelPolicySpec{TransientOnly: policyBoolPtr(true)}},
 			},
 		},
 	})
+	ctx := adminTestContext(node)
 	probe := &probeBroker{}
 	node.SetBroker(probe)
 	handler := NewAPIServiceHandler(node)
@@ -270,7 +290,7 @@ func TestAPIServiceHandler_PublishToChannelsWithoutAddHistoryOnDisabledChannel(t
 			{
 				Id: "admin-tick-transient",
 				Destination: &serverv2.Publication_Destination{
-					Channels: []string{"game.tick.fps"},
+					Channels: []string{"dev:game.tick.fps"},
 				},
 				Payload: &sharedv2.Payload{Data: &sharedv2.Payload_Text{Text: "x"}},
 			},
@@ -282,8 +302,8 @@ func TestAPIServiceHandler_PublishToChannelsWithoutAddHistoryOnDisabledChannel(t
 }
 
 func TestAPIServiceHandler_PublishToSessions(t *testing.T) {
-	ctx := context.Background()
 	node := runtime.NewNode(nil)
+	ctx := adminTestContext(node)
 	handler := NewAPIServiceHandler(node)
 
 	// Create a test client
@@ -322,8 +342,8 @@ func TestAPIServiceHandler_PublishToSessions(t *testing.T) {
 }
 
 func TestAPIServiceHandler_PublishToNonExistentSession(t *testing.T) {
-	ctx := context.Background()
 	node := runtime.NewNode(nil)
+	ctx := adminTestContext(node)
 	handler := NewAPIServiceHandler(node)
 
 	// Create payload
@@ -353,8 +373,8 @@ func TestAPIServiceHandler_PublishToNonExistentSession(t *testing.T) {
 }
 
 func TestAPIServiceHandler_PublishToChannels(t *testing.T) {
-	ctx := context.Background()
 	node := runtime.NewNode(nil)
+	ctx := adminTestContext(node)
 	_ = node.Run(ctx) // Start broker
 	handler := NewAPIServiceHandler(node)
 
@@ -366,7 +386,7 @@ func TestAPIServiceHandler_PublishToChannels(t *testing.T) {
 			{
 				Id: uuid.NewString(),
 				Destination: &serverv2.Publication_Destination{
-					Channels: []string{"test-channel-1", "test-channel-2"},
+					Channels: []string{"dev:test-channel-1", "dev:test-channel-2"},
 				},
 				Payload: &sharedv2.Payload{
 					Data: &sharedv2.Payload_Binary{
@@ -383,8 +403,8 @@ func TestAPIServiceHandler_PublishToChannels(t *testing.T) {
 }
 
 func TestAPIServiceHandler_PublishAddHistory(t *testing.T) {
-	ctx := context.Background()
 	node := runtime.NewNode(nil)
+	ctx := adminTestContext(node)
 	_ = node.Run(ctx)
 	handler := NewAPIServiceHandler(node)
 
@@ -394,7 +414,7 @@ func TestAPIServiceHandler_PublishAddHistory(t *testing.T) {
 			{
 				Id: "admin-history-msg",
 				Destination: &serverv2.Publication_Destination{
-					Channels: []string{"history-channel"},
+					Channels: []string{"dev:history-channel"},
 				},
 				Payload: &sharedv2.Payload{Data: &sharedv2.Payload_Text{Text: "hello history"}},
 				Options: &serverv2.Publication_Options{AddHistory: true},
@@ -406,15 +426,15 @@ func TestAPIServiceHandler_PublishAddHistory(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
-	history, err := handler.GetHistory(ctx, &serverv2.GetHistoryRequest{Channel: "history-channel"})
+	history, err := handler.GetHistory(ctx, &serverv2.GetHistoryRequest{Channel: "dev:history-channel"})
 	require.NoError(t, err)
 	require.Len(t, history.Publications, 1)
 	require.Equal(t, "hello history", history.Publications[0].Payload.GetText())
 }
 
 func TestAPIServiceHandler_PublishWithoutAddHistoryNotInHistory(t *testing.T) {
-	ctx := context.Background()
 	node := runtime.NewNode(nil)
+	ctx := adminTestContext(node)
 	_ = node.Run(ctx)
 	handler := NewAPIServiceHandler(node)
 
@@ -424,7 +444,7 @@ func TestAPIServiceHandler_PublishWithoutAddHistoryNotInHistory(t *testing.T) {
 			{
 				Id: "admin-transient-msg",
 				Destination: &serverv2.Publication_Destination{
-					Channels: []string{"no-history-channel"},
+					Channels: []string{"dev:no-history-channel"},
 				},
 				Payload: &sharedv2.Payload{Data: &sharedv2.Payload_Text{Text: "hello transient"}},
 			},
@@ -435,7 +455,7 @@ func TestAPIServiceHandler_PublishWithoutAddHistoryNotInHistory(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
-	history, err := handler.GetHistory(ctx, &serverv2.GetHistoryRequest{Channel: "no-history-channel"})
+	history, err := handler.GetHistory(ctx, &serverv2.GetHistoryRequest{Channel: "dev:no-history-channel"})
 	require.NoError(t, err)
 	require.Len(t, history.Publications, 0)
 }
@@ -443,8 +463,8 @@ func TestAPIServiceHandler_PublishWithoutAddHistoryNotInHistory(t *testing.T) {
 // TestAPIServiceHandler_PublishExplicitFalseAddHistoryNotInHistory：
 // add_history=false 显式值同样不落历史（与缺省 false 语义一致，防止默认值漂移）。
 func TestAPIServiceHandler_PublishExplicitFalseAddHistoryNotInHistory(t *testing.T) {
-	ctx := context.Background()
 	node := runtime.NewNode(nil)
+	ctx := adminTestContext(node)
 	_ = node.Run(ctx)
 	handler := NewAPIServiceHandler(node)
 
@@ -454,7 +474,7 @@ func TestAPIServiceHandler_PublishExplicitFalseAddHistoryNotInHistory(t *testing
 			{
 				Id: "admin-explicit-transient-msg",
 				Destination: &serverv2.Publication_Destination{
-					Channels: []string{"explicit-no-history-channel"},
+					Channels: []string{"dev:explicit-no-history-channel"},
 				},
 				Payload: &sharedv2.Payload{Data: &sharedv2.Payload_Text{Text: "hello explicit transient"}},
 				Options: &serverv2.Publication_Options{AddHistory: false},
@@ -466,7 +486,7 @@ func TestAPIServiceHandler_PublishExplicitFalseAddHistoryNotInHistory(t *testing
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
-	history, err := handler.GetHistory(ctx, &serverv2.GetHistoryRequest{Channel: "explicit-no-history-channel"})
+	history, err := handler.GetHistory(ctx, &serverv2.GetHistoryRequest{Channel: "dev:explicit-no-history-channel"})
 	require.NoError(t, err)
 	require.Len(t, history.Publications, 0)
 }
@@ -475,8 +495,8 @@ func TestAPIServiceHandler_PublishExplicitFalseAddHistoryNotInHistory(t *testing
 // session 目标带 add_history=true 仍走 PublishToSession（不落频道历史），
 // 且在线会话能实际收到消息（组合路径回归）。
 func TestAPIServiceHandler_PublishSessionWithAddHistoryStaysSession(t *testing.T) {
-	ctx := context.Background()
 	node := runtime.NewNode(nil)
+	ctx := adminTestContext(node)
 	_ = node.Run(ctx)
 	handler := NewAPIServiceHandler(node)
 
@@ -523,14 +543,14 @@ func TestAPIServiceHandler_PublishSessionWithAddHistoryStaysSession(t *testing.T
 	}, 2*time.Second, 20*time.Millisecond, "session must receive the publication")
 
 	// add_history 对 session 目标无效：不写频道历史
-	history, err := handler.GetHistory(ctx, &serverv2.GetHistoryRequest{Channel: ""})
+	history, err := handler.GetHistory(ctx, &serverv2.GetHistoryRequest{Channel: "dev:session-history-check"})
 	require.NoError(t, err)
 	require.Len(t, history.Publications, 0)
 }
 
 func TestAPIServiceHandler_PublishBrokerFailureReturnsError(t *testing.T) {
-	ctx := context.Background()
 	node := runtime.NewNode(nil)
+	ctx := adminTestContext(node)
 	node.SetBroker(&failPublishBroker{})
 	handler := NewAPIServiceHandler(node)
 
@@ -540,7 +560,7 @@ func TestAPIServiceHandler_PublishBrokerFailureReturnsError(t *testing.T) {
 			{
 				Id: uuid.NewString(),
 				Destination: &serverv2.Publication_Destination{
-					Channels: []string{"broken-channel"},
+					Channels: []string{"dev:broken-channel"},
 				},
 				Payload: &sharedv2.Payload{
 					Data: &sharedv2.Payload_Text{Text: "hello"},
@@ -557,9 +577,9 @@ func TestAPIServiceHandler_PublishBrokerFailureReturnsError(t *testing.T) {
 }
 
 func TestAPIServiceHandler_PublishPartialFailureSucceeds(t *testing.T) {
-	ctx := context.Background()
 	node := runtime.NewNode(nil)
-	node.SetBroker(&failPublishBroker{failChannel: "broken-channel"})
+	ctx := adminTestContext(node)
+	node.SetBroker(&failPublishBroker{failChannel: "dev:broken-channel"})
 	handler := NewAPIServiceHandler(node)
 
 	req := &serverv2.PublishRequest{
@@ -568,7 +588,7 @@ func TestAPIServiceHandler_PublishPartialFailureSucceeds(t *testing.T) {
 			{
 				Id: uuid.NewString(),
 				Destination: &serverv2.Publication_Destination{
-					Channels: []string{"ok-channel", "broken-channel"},
+					Channels: []string{"dev:ok-channel", "dev:broken-channel"},
 				},
 				Payload: &sharedv2.Payload{
 					Data: &sharedv2.Payload_Text{Text: "hello"},
@@ -584,8 +604,8 @@ func TestAPIServiceHandler_PublishPartialFailureSucceeds(t *testing.T) {
 }
 
 func TestAPIServiceHandler_Disconnect(t *testing.T) {
-	ctx := context.Background()
 	node := runtime.NewNode(nil)
+	ctx := adminTestContext(node)
 	handler := NewAPIServiceHandler(node)
 
 	// Create a test client
@@ -611,8 +631,8 @@ func TestAPIServiceHandler_Disconnect(t *testing.T) {
 }
 
 func TestAPIServiceHandler_DisconnectNonExistentSession(t *testing.T) {
-	ctx := context.Background()
 	node := runtime.NewNode(nil)
+	ctx := adminTestContext(node)
 	handler := NewAPIServiceHandler(node)
 
 	// Test disconnecting a non-existent session
@@ -629,8 +649,8 @@ func TestAPIServiceHandler_DisconnectNonExistentSession(t *testing.T) {
 }
 
 func TestAPIServiceHandler_Subscribe(t *testing.T) {
-	ctx := context.Background()
 	node := runtime.NewNode(nil)
+	ctx := adminTestContext(node)
 	handler := NewAPIServiceHandler(node)
 
 	// Create a test client
@@ -645,36 +665,36 @@ func TestAPIServiceHandler_Subscribe(t *testing.T) {
 	// Test subscribing to channels
 	req := &serverv2.SubscribeRequest{
 		SessionId: client.SessionID(),
-		Channels:  []string{"test-channel-1", "test-channel-2"},
+		Channels:  []string{"dev:test-channel-1", "dev:test-channel-2"},
 	}
 
 	resp, err := handler.Subscribe(ctx, req)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	require.True(t, resp.Results["test-channel-1"])
-	require.True(t, resp.Results["test-channel-2"])
+	require.True(t, resp.Results["dev:test-channel-1"])
+	require.True(t, resp.Results["dev:test-channel-2"])
 }
 
 func TestAPIServiceHandler_SubscribeNonExistentSession(t *testing.T) {
-	ctx := context.Background()
 	node := runtime.NewNode(nil)
+	ctx := adminTestContext(node)
 	handler := NewAPIServiceHandler(node)
 
 	// Test subscribing with a non-existent session
 	req := &serverv2.SubscribeRequest{
 		SessionId: "non-existent-session-id",
-		Channels:  []string{"test-channel-1"},
+		Channels:  []string{"dev:test-channel-1"},
 	}
 
 	resp, err := handler.Subscribe(ctx, req)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	require.False(t, resp.Results["test-channel-1"])
+	require.False(t, resp.Results["dev:test-channel-1"])
 }
 
 func TestAPIServiceHandler_Unsubscribe(t *testing.T) {
-	ctx := context.Background()
 	node := runtime.NewNode(nil)
+	ctx := adminTestContext(node)
 	handler := NewAPIServiceHandler(node)
 
 	// Create a test client
@@ -689,7 +709,7 @@ func TestAPIServiceHandler_Unsubscribe(t *testing.T) {
 	// First subscribe to a channel
 	subReq := &serverv2.SubscribeRequest{
 		SessionId: client.SessionID(),
-		Channels:  []string{"test-channel-1"},
+		Channels:  []string{"dev:test-channel-1"},
 	}
 	_, err = handler.Subscribe(ctx, subReq)
 	require.NoError(t, err)
@@ -697,37 +717,37 @@ func TestAPIServiceHandler_Unsubscribe(t *testing.T) {
 	// Then unsubscribe
 	req := &serverv2.UnsubscribeRequest{
 		SessionId: client.SessionID(),
-		Channels:  []string{"test-channel-1"},
+		Channels:  []string{"dev:test-channel-1"},
 	}
 
 	resp, err := handler.Unsubscribe(ctx, req)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	require.True(t, resp.Results["test-channel-1"])
+	require.True(t, resp.Results["dev:test-channel-1"])
 }
 
 func TestAPIServiceHandler_UnsubscribeNonExistentSession(t *testing.T) {
-	ctx := context.Background()
 	node := runtime.NewNode(nil)
+	ctx := adminTestContext(node)
 	handler := NewAPIServiceHandler(node)
 
 	// Test unsubscribing with a non-existent session
 	req := &serverv2.UnsubscribeRequest{
 		SessionId: "non-existent-session-id",
-		Channels:  []string{"test-channel-1"},
+		Channels:  []string{"dev:test-channel-1"},
 	}
 
 	resp, err := handler.Unsubscribe(ctx, req)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	require.False(t, resp.Results["test-channel-1"])
+	require.False(t, resp.Results["dev:test-channel-1"])
 }
 
 // Task 12: admin Publish propagates id/metadata/content_type and GetHistory
 // returns them intact.
 func TestAPIServiceHandler_GetHistory_ReturnsContentTypeAndId(t *testing.T) {
-	ctx := context.Background()
 	node := runtime.NewNode(nil)
+	ctx := adminTestContext(node)
 	_ = node.Run(ctx) // Start broker
 	handler := NewAPIServiceHandler(node)
 
@@ -737,7 +757,7 @@ func TestAPIServiceHandler_GetHistory_ReturnsContentTypeAndId(t *testing.T) {
 			{
 				Id: "admin-m-1",
 				Destination: &serverv2.Publication_Destination{
-					Channels: []string{"history-meta"},
+					Channels: []string{"dev:history-meta"},
 				},
 				Payload: &sharedv2.Payload{
 					ContentType: "application/json",
@@ -751,7 +771,7 @@ func TestAPIServiceHandler_GetHistory_ReturnsContentTypeAndId(t *testing.T) {
 	_, err := handler.Publish(ctx, req)
 	require.NoError(t, err)
 
-	resp, err := handler.GetHistory(ctx, &serverv2.GetHistoryRequest{Channel: "history-meta"})
+	resp, err := handler.GetHistory(ctx, &serverv2.GetHistoryRequest{Channel: "dev:history-meta"})
 	require.NoError(t, err)
 	require.Len(t, resp.Publications, 1)
 	p := resp.Publications[0]
@@ -771,27 +791,27 @@ func TestAPIServiceHandler_GetHistory_ReturnsContentTypeAndId(t *testing.T) {
 // resumes from that offset, a matching stream_epoch reads, and a stale epoch
 // fails with FailedPrecondition before the broker is read.
 func TestAdmin_GetHistorySincePosition(t *testing.T) {
-	ctx := context.Background()
 	node := runtime.NewNode(nil)
+	ctx := adminTestContext(node)
 	require.NoError(t, node.Run(ctx))
 	handler := NewAPIServiceHandler(node)
 
 	for _, text := range []string{"m1", "m2", "m3"} {
-		_, err := node.Publish("pos.ch", &stream.Publication{Payload: []byte(text), Kind: stream.PayloadKindText})
+		_, err := node.Publish("dev:pos.ch", &stream.Publication{Payload: []byte(text), Kind: stream.PayloadKindText})
 		require.NoError(t, err)
 	}
 	epoch := node.Broker().(interface{ Epoch() string }).Epoch()
 	require.NotEmpty(t, epoch)
 
 	// since == nil: from the head within the limit.
-	resp, err := handler.GetHistory(ctx, &serverv2.GetHistoryRequest{Channel: "pos.ch", Limit: 10})
+	resp, err := handler.GetHistory(ctx, &serverv2.GetHistoryRequest{Channel: "dev:pos.ch", Limit: 10})
 	require.NoError(t, err)
 	require.Len(t, resp.Publications, 3)
 
 	// offset-only position: resumes from that offset.
 	off := uint64(2)
 	resp, err = handler.GetHistory(ctx, &serverv2.GetHistoryRequest{
-		Channel: "pos.ch",
+		Channel: "dev:pos.ch",
 		Since:   &sharedv2.Position{Offset: &off},
 		Limit:   10,
 	})
@@ -802,7 +822,7 @@ func TestAdmin_GetHistorySincePosition(t *testing.T) {
 
 	// matching epoch: reads normally.
 	resp, err = handler.GetHistory(ctx, &serverv2.GetHistoryRequest{
-		Channel: "pos.ch",
+		Channel: "dev:pos.ch",
 		Since:   &sharedv2.Position{StreamEpoch: epoch, Offset: &off},
 		Limit:   10,
 	})
@@ -815,7 +835,7 @@ func TestAdmin_GetHistorySincePosition(t *testing.T) {
 	probeNode.SetBroker(probe)
 	probeHandler := NewAPIServiceHandler(probeNode)
 	_, err = probeHandler.GetHistory(ctx, &serverv2.GetHistoryRequest{
-		Channel: "pos.ch",
+		Channel: "dev:pos.ch",
 		Since:   &sharedv2.Position{StreamEpoch: "stale-epoch"},
 		Limit:   10,
 	})
@@ -824,7 +844,7 @@ func TestAdmin_GetHistorySincePosition(t *testing.T) {
 
 	// the memory broker itself rejects a stale epoch too.
 	_, err = handler.GetHistory(ctx, &serverv2.GetHistoryRequest{
-		Channel: "pos.ch",
+		Channel: "dev:pos.ch",
 		Since:   &sharedv2.Position{StreamEpoch: "stale-epoch"},
 		Limit:   10,
 	})
@@ -833,43 +853,43 @@ func TestAdmin_GetHistorySincePosition(t *testing.T) {
 
 // Task 13a: admin subscribe/publish must respect the authorizer rules.
 func TestAPIServiceHandler_Subscribe_ACLDenied(t *testing.T) {
-	ctx := context.Background()
 	node := runtime.NewNode(&config.Server{
 		Authorizer: config.AuthorizerConfig{
 			Rules: []config.AuthorizerRule{
-				{Pattern: "private.*", AllowSubscribe: []string{"alice"}},
+				{Pattern: "dev:private.*", AllowSubscribe: []string{"alice"}},
 			},
 		},
 	})
+	ctx := adminTestContext(node)
 	handler := NewAPIServiceHandler(node)
 
 	resp, err := handler.Subscribe(ctx, &serverv2.SubscribeRequest{
 		SessionId: "sess-1",
-		Channels:  []string{"private.room"},
+		Channels:  []string{"dev:private.room"},
 	})
 	require.NoError(t, err)
-	require.False(t, resp.Results["private.room"], "admin subscribe to an ACL-denied channel must be rejected")
+	require.False(t, resp.Results["dev:private.room"], "admin subscribe to an ACL-denied channel must be rejected")
 
 	// Without ACL rules the admin operation proceeds (session not found).
 	openNode := runtime.NewNode(nil)
 	openHandler := NewAPIServiceHandler(openNode)
 	openResp, err := openHandler.Subscribe(ctx, &serverv2.SubscribeRequest{
 		SessionId: "sess-1",
-		Channels:  []string{"open.room"},
+		Channels:  []string{"dev:open.room"},
 	})
 	require.NoError(t, err)
 	require.NotNil(t, openResp)
 }
 
 func TestAPIServiceHandler_Publish_ACLDenied(t *testing.T) {
-	ctx := context.Background()
 	node := runtime.NewNode(&config.Server{
 		Authorizer: config.AuthorizerConfig{
 			Rules: []config.AuthorizerRule{
-				{Pattern: "private.*", AllowPublish: []string{"bob"}},
+				{Pattern: "dev:private.*", AllowPublish: []string{"bob"}},
 			},
 		},
 	})
+	ctx := adminTestContext(node)
 	handler := NewAPIServiceHandler(node)
 
 	_, err := handler.Publish(ctx, &serverv2.PublishRequest{
@@ -878,7 +898,7 @@ func TestAPIServiceHandler_Publish_ACLDenied(t *testing.T) {
 			{
 				Id: "admin-pub",
 				Destination: &serverv2.Publication_Destination{
-					Channels: []string{"private.room"},
+					Channels: []string{"dev:private.room"},
 				},
 				Payload: &sharedv2.Payload{Data: &sharedv2.Payload_Text{Text: "x"}},
 			},
@@ -891,8 +911,8 @@ func TestAPIServiceHandler_Publish_ACLDenied(t *testing.T) {
 // semantics (D6): session_id is the formal session ID (falling back to the
 // legacy client_id key) and client_id is the Connect.client_id.
 func TestAdmin_GetPresenceFillsNewFields(t *testing.T) {
-	ctx := context.Background()
 	node := runtime.NewNode(nil)
+	ctx := adminTestContext(node)
 	require.NoError(t, node.Run(ctx))
 
 	transport := &mockTransport{}
@@ -911,14 +931,14 @@ func TestAdmin_GetPresenceFillsNewFields(t *testing.T) {
 		Id: "admin-sub",
 		Envelope: &clientpb.InboundMessage_Subscribe{
 			Subscribe: &clientpb.Subscribe{
-				Subscriptions: []*clientpb.Subscription{{Channel: "admin.presence.ch"}},
+				Subscriptions: []*clientpb.Subscription{{Channel: "dev:admin.presence.ch"}},
 			},
 		},
 	}
 	require.NoError(t, client.HandleMessage(ctx, sub))
 
 	handler := NewAPIServiceHandler(node)
-	resp, err := handler.GetPresence(ctx, &serverv2.GetPresenceRequest{Channel: "admin.presence.ch"})
+	resp, err := handler.GetPresence(ctx, &serverv2.GetPresenceRequest{Channel: "dev:admin.presence.ch"})
 	require.NoError(t, err)
 
 	info, ok := resp.GetClients()[client.SessionID()]
@@ -933,21 +953,21 @@ func TestAdmin_GetPresenceFillsNewFields(t *testing.T) {
 // session_id derived from client_id and an empty client_id (no
 // Connect.client_id was recorded).
 func TestAdmin_GetPresence_LegacyKeyFallsBackToClientID(t *testing.T) {
-	ctx := context.Background()
 	node := runtime.NewNode(nil)
+	ctx := adminTestContext(node)
 	require.NoError(t, node.Run(ctx))
 
 	store := occupancy.NewMemoryPresenceStore()
 	node.SetPresenceStore(store)
 	// Simulate a legacy record: only client_id/user_id/connected_at set.
-	require.NoError(t, store.Add(ctx, "legacy.ch", &occupancy.PresenceInfo{
+	require.NoError(t, store.Add(ctx, "dev:legacy.ch", &occupancy.PresenceInfo{
 		ClientID:    "legacy-session",
 		UserID:      "legacy-user",
 		ConnectedAt: 1,
 	}))
 
 	handler := NewAPIServiceHandler(node)
-	resp, err := handler.GetPresence(ctx, &serverv2.GetPresenceRequest{Channel: "legacy.ch"})
+	resp, err := handler.GetPresence(ctx, &serverv2.GetPresenceRequest{Channel: "dev:legacy.ch"})
 	require.NoError(t, err)
 	info, ok := resp.GetClients()["legacy-session"]
 	require.True(t, ok)
@@ -961,8 +981,8 @@ func TestAdmin_GetPresence_LegacyKeyFallsBackToClientID(t *testing.T) {
 // (no sessions, no channels) fans the publication out to every local session
 // of the user and to no one else.
 func TestAdmin_PublishDestinationUsers(t *testing.T) {
-	ctx := context.Background()
 	node := runtime.NewNode(nil)
+	ctx := adminTestContext(node)
 	handler := NewAPIServiceHandler(node)
 
 	transportA := &captureTransport{}
@@ -997,8 +1017,8 @@ func TestAdmin_PublishDestinationUsers(t *testing.T) {
 // with cluster disabled the expansion uses only the local Hub.SessionsByUser,
 // no session directory or Redis is involved.
 func TestAdmin_PublishUsersNoCluster(t *testing.T) {
-	ctx := context.Background()
 	node := runtime.NewNode(nil) // cluster.enabled=false
+	ctx := adminTestContext(node)
 	handler := NewAPIServiceHandler(node)
 
 	transport := &captureTransport{}
@@ -1023,8 +1043,8 @@ func TestAdmin_PublishUsersNoCluster(t *testing.T) {
 // TestAdmin_DisconnectUsers verifies that Disconnect by user fans out to
 // every session of the user and reports per-session results.
 func TestAdmin_DisconnectUsers(t *testing.T) {
-	ctx := context.Background()
 	node := runtime.NewNode(nil)
+	ctx := adminTestContext(node)
 	handler := NewAPIServiceHandler(node)
 
 	transportA := &mockTransport{}
@@ -1052,8 +1072,8 @@ func TestAdmin_DisconnectUsers(t *testing.T) {
 // user-targeted field are rejected with InvalidArgument before any scanning,
 // and that a registered session survives the rejected requests untouched.
 func TestAdmin_EmptyUserInvalidArgument(t *testing.T) {
-	ctx := context.Background()
 	node := runtime.NewNode(nil)
+	ctx := adminTestContext(node)
 	handler := NewAPIServiceHandler(node)
 
 	transport := &mockTransport{}
@@ -1089,8 +1109,8 @@ func TestAdmin_EmptyUserInvalidArgument(t *testing.T) {
 // user's local sessions enter the hub subscription, other users are
 // untouched, and the results are keyed by channel.
 func TestAdmin_SubscribeByUser(t *testing.T) {
-	ctx := context.Background()
 	node := runtime.NewNode(nil)
+	ctx := adminTestContext(node)
 	handler := NewAPIServiceHandler(node)
 
 	newUserTestClient(t, node, &mockTransport{}, "sess-sub-user", "U")
@@ -1099,22 +1119,22 @@ func TestAdmin_SubscribeByUser(t *testing.T) {
 	resp, err := handler.Subscribe(ctx, &serverv2.SubscribeRequest{
 		Namespace: adminTestNamespace,
 		UserId:    "U",
-		Channels:  []string{"user.sub.channel"},
+		Channels:  []string{"dev:user.sub.channel"},
 	})
 	require.NoError(t, err)
-	require.True(t, resp.Results["user.sub.channel"], "the channel must be subscribed for the user")
-	require.Equal(t, 1, node.Hub().NumSubscribers("user.sub.channel"),
+	require.True(t, resp.Results["dev:user.sub.channel"], "the channel must be subscribed for the user")
+	require.Equal(t, 1, node.Hub().NumSubscribers("dev:user.sub.channel"),
 		"only the user's session may be subscribed, not other users")
 
 	// Unsubscribe by user works symmetrically.
 	unsubResp, err := handler.Unsubscribe(ctx, &serverv2.UnsubscribeRequest{
 		Namespace: adminTestNamespace,
 		UserId:    "U",
-		Channels:  []string{"user.sub.channel"},
+		Channels:  []string{"dev:user.sub.channel"},
 	})
 	require.NoError(t, err)
-	require.True(t, unsubResp.Results["user.sub.channel"])
-	require.Zero(t, node.Hub().NumSubscribers("user.sub.channel"))
+	require.True(t, unsubResp.Results["dev:user.sub.channel"])
+	require.Zero(t, node.Hub().NumSubscribers("dev:user.sub.channel"))
 }
 
 // --- PR-KA-A4 §9.9: capability gates ---
@@ -1123,15 +1143,15 @@ func TestAdmin_SubscribeByUser(t *testing.T) {
 // GetHistory fails with PERMISSION_DENIED and the broker History is never
 // called (spy broker).
 func TestAdmin_GetHistoryRequiresCapability(t *testing.T) {
-	ctx := context.Background()
 	node := runtime.NewNode(&config.Server{
 		GRPCAdmin: config.GRPCAdmin{Capabilities: []string{"channels.list"}},
 	})
+	ctx := adminTestContext(node)
 	probe := &probeBroker{}
 	node.SetBroker(probe)
 	handler := NewAPIServiceHandler(node)
 
-	_, err := handler.GetHistory(ctx, &serverv2.GetHistoryRequest{Channel: "cap.history.ch"})
+	_, err := handler.GetHistory(ctx, &serverv2.GetHistoryRequest{Channel: "dev:cap.history.ch"})
 	require.Equal(t, codes.PermissionDenied, status.Code(err), "missing history.read must fail softly")
 	require.Zero(t, probe.historyCalls, "the broker must never be touched without history.read")
 }
@@ -1139,13 +1159,13 @@ func TestAdmin_GetHistoryRequiresCapability(t *testing.T) {
 // TestAdmin_GetHistoryDefaultCapabilities verifies that omitted capabilities
 // keep GetHistory usable (the default bits include history.read).
 func TestAdmin_GetHistoryDefaultCapabilities(t *testing.T) {
-	ctx := context.Background()
 	node := runtime.NewNode(nil)
+	ctx := adminTestContext(node)
 	probe := &probeBroker{}
 	node.SetBroker(probe)
 	handler := NewAPIServiceHandler(node)
 
-	resp, err := handler.GetHistory(ctx, &serverv2.GetHistoryRequest{Channel: "cap.history.ch"})
+	resp, err := handler.GetHistory(ctx, &serverv2.GetHistoryRequest{Channel: "dev:cap.history.ch"})
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	require.Equal(t, 1, probe.historyCalls, "the default bits must include history.read")
@@ -1155,20 +1175,20 @@ func TestAdmin_GetHistoryDefaultCapabilities(t *testing.T) {
 // empty capability list locks the admin data plane: GetHistory is denied and
 // the broker is never touched.
 func TestAdmin_GetHistoryExplicitEmptyCapabilities(t *testing.T) {
-	ctx := context.Background()
 	node := runtime.NewNode(&config.Server{
 		GRPCAdmin: config.GRPCAdmin{Capabilities: []string{}},
 	})
+	ctx := adminTestContext(node)
 	probe := &probeBroker{}
 	node.SetBroker(probe)
 	handler := NewAPIServiceHandler(node)
 
-	_, err := handler.GetHistory(ctx, &serverv2.GetHistoryRequest{Channel: "cap.history.ch"})
+	_, err := handler.GetHistory(ctx, &serverv2.GetHistoryRequest{Channel: "dev:cap.history.ch"})
 	require.Equal(t, codes.PermissionDenied, status.Code(err))
 	require.Zero(t, probe.historyCalls)
 
 	// GetPresence / GetChannels are locked too.
-	_, err = handler.GetPresence(ctx, &serverv2.GetPresenceRequest{Channel: "cap.presence.ch"})
+	_, err = handler.GetPresence(ctx, &serverv2.GetPresenceRequest{Channel: "dev:cap.presence.ch"})
 	require.Equal(t, codes.PermissionDenied, status.Code(err), "presence.read missing")
 	_, err = handler.GetChannels(ctx, &serverv2.GetChannelsRequest{})
 	require.Equal(t, codes.PermissionDenied, status.Code(err), "channels.list missing")
@@ -1178,22 +1198,22 @@ func TestAdmin_GetHistoryExplicitEmptyCapabilities(t *testing.T) {
 // Decide(admin, ActionRecover, ch): a deny_all rule on the channel fails the
 // read before the broker is touched, even with history.read held.
 func TestAdmin_GetHistoryDecideDenied(t *testing.T) {
-	ctx := context.Background()
 	node := runtime.NewNode(&config.Server{
 		Authorizer: config.AuthorizerConfig{
-			Rules: []config.AuthorizerRule{{Pattern: "secret.**", DenyAll: true}},
+			Rules: []config.AuthorizerRule{{Pattern: "dev:secret.**", DenyAll: true}},
 		},
 	})
+	ctx := adminTestContext(node)
 	probe := &probeBroker{}
 	node.SetBroker(probe)
 	handler := NewAPIServiceHandler(node)
 
-	_, err := handler.GetHistory(ctx, &serverv2.GetHistoryRequest{Channel: "secret.room"})
+	_, err := handler.GetHistory(ctx, &serverv2.GetHistoryRequest{Channel: "dev:secret.room"})
 	require.Equal(t, codes.PermissionDenied, status.Code(err))
 	require.Zero(t, probe.historyCalls, "deny_all must fail GetHistory before the broker is read")
 
 	// A non-denied channel is served.
-	resp, err := handler.GetHistory(ctx, &serverv2.GetHistoryRequest{Channel: "open.room"})
+	resp, err := handler.GetHistory(ctx, &serverv2.GetHistoryRequest{Channel: "dev:open.room"})
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	require.Equal(t, 1, probe.historyCalls)
@@ -1203,30 +1223,30 @@ func TestAdmin_GetHistoryDecideDenied(t *testing.T) {
 // Decide(admin, ActionPresence, ch): presence=false channels and deny_all
 // channels fail softly.
 func TestAdmin_GetPresenceDecideDenied(t *testing.T) {
-	ctx := context.Background()
 	node := runtime.NewNode(&config.Server{
 		Authorizer: config.AuthorizerConfig{
 			Rules: []config.AuthorizerRule{
-				{Pattern: "secret.**", DenyAll: true},
-				{Pattern: "nopres.**", ChannelPolicySpec: config.ChannelPolicySpec{Presence: policyBoolPtr(false)}},
+				{Pattern: "dev:secret.**", DenyAll: true},
+				{Pattern: "dev:nopres.**", ChannelPolicySpec: config.ChannelPolicySpec{Presence: policyBoolPtr(false)}},
 			},
 		},
 	})
+	ctx := adminTestContext(node)
 	handler := NewAPIServiceHandler(node)
 
-	_, err := handler.GetPresence(ctx, &serverv2.GetPresenceRequest{Channel: "secret.room"})
+	_, err := handler.GetPresence(ctx, &serverv2.GetPresenceRequest{Channel: "dev:secret.room"})
 	require.Equal(t, codes.PermissionDenied, status.Code(err), "deny_all must fail GetPresence")
-	_, err = handler.GetPresence(ctx, &serverv2.GetPresenceRequest{Channel: "nopres.room"})
+	_, err = handler.GetPresence(ctx, &serverv2.GetPresenceRequest{Channel: "dev:nopres.room"})
 	require.Equal(t, codes.PermissionDenied, status.Code(err), "presence=false must fail GetPresence")
 }
 
 // TestAdmin_PublishSessionRequiresCapability verifies session/user
 // destinations are capability-gated (session.act / user.fanout).
 func TestAdmin_PublishSessionRequiresCapability(t *testing.T) {
-	ctx := context.Background()
 	node := runtime.NewNode(&config.Server{
 		GRPCAdmin: config.GRPCAdmin{Capabilities: []string{"user.fanout"}},
 	})
+	ctx := adminTestContext(node)
 	handler := NewAPIServiceHandler(node)
 
 	_, err := handler.Publish(ctx, &serverv2.PublishRequest{

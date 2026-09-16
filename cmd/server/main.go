@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -14,7 +13,6 @@ import (
 	"github.com/lynx-go/lynx"
 	"github.com/lynx-go/lynx/contrib/zap"
 	lynxhttp "github.com/lynx-go/lynx/server/http"
-	"github.com/lynx-go/x/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -94,7 +92,7 @@ func main() {
 			return err
 		}
 
-		grpcServers, err := prepareGRPCServers(cfg, node)
+		grpcServers, err := prepareGRPCServers(cfg, node, metrics.AdminAuthRequests, metrics.AdminRPCs)
 		if err != nil {
 			return err
 		}
@@ -385,9 +383,9 @@ func newKCPServer(cfg *config.Config, node *runtime.Node) (*kcp.Server, error) {
 
 // newAdminServer builds the HTTP admin server component (health + metrics).
 // When server.http.auth_token is set, every endpoint requires a matching
-// Bearer token; binding a non-loopback address without a token draws a
-// startup warning, since /metrics and /health would be readable by anyone
-// who can reach the address.
+// Bearer token. A non-loopback bind without a token is a config.Validate
+// error (G5 fail-closed startup gate), so no unauthenticated non-loopback
+// bind can reach runtime.
 func newAdminServer(cfg *config.Config, node *runtime.Node, reg *prometheus.Registry) *lynxhttp.Server {
 	adminAddr := cfg.Server.Http.Addr
 	if adminAddr == "" {
@@ -400,9 +398,6 @@ func newAdminServer(cfg *config.Config, node *runtime.Node, reg *prometheus.Regi
 	handler = mux
 	if token := cfg.Server.Http.AuthToken; token != "" {
 		handler = bearerAuthHandler(token, handler)
-	} else if !isLoopbackAddr(adminAddr) {
-		log.WarnContext(context.Background(), "admin HTTP endpoints (/health, /metrics) are unauthenticated on a non-loopback address; set server.http.auth_token",
-			"addr", adminAddr)
 	}
 	return lynxhttp.NewServer(handler, lynxhttp.WithAddr(adminAddr))
 }
@@ -420,17 +415,4 @@ func bearerAuthHandler(token string, next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
-}
-
-// isLoopbackAddr reports whether the host part of addr is loopback (or empty).
-func isLoopbackAddr(addr string) bool {
-	host, _, err := net.SplitHostPort(addr)
-	if err != nil {
-		host = addr
-	}
-	if host == "" {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
 }

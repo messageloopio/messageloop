@@ -1000,6 +1000,183 @@ func (*OnDisconnectedResponse) Descriptor() ([]byte, []int) {
 	return file_proxy_v2_proxy_proto_rawDescGZIP(), []int{16}
 }
 
+type AuthenticateAdminRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ApiKey        string                 `protobuf:"bytes,1,opt,name=api_key,json=apiKey,proto3" json:"api_key,omitempty"`             // 调用方出示的完整 Key 明文（由 proxy 后端校验）
+	RemoteAddr    string                 `protobuf:"bytes,2,opt,name=remote_addr,json=remoteAddr,proto3" json:"remote_addr,omitempty"` // 审计用
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AuthenticateAdminRequest) Reset() {
+	*x = AuthenticateAdminRequest{}
+	mi := &file_proxy_v2_proxy_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AuthenticateAdminRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AuthenticateAdminRequest) ProtoMessage() {}
+
+func (x *AuthenticateAdminRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proxy_v2_proxy_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AuthenticateAdminRequest.ProtoReflect.Descriptor instead.
+func (*AuthenticateAdminRequest) Descriptor() ([]byte, []int) {
+	return file_proxy_v2_proxy_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *AuthenticateAdminRequest) GetApiKey() string {
+	if x != nil {
+		return x.ApiKey
+	}
+	return ""
+}
+
+func (x *AuthenticateAdminRequest) GetRemoteAddr() string {
+	if x != nil {
+		return x.RemoteAddr
+	}
+	return ""
+}
+
+// AdminIdentityInfo 是 proxy 后端裁定的 admin 身份。key_id 必须是后端 Key 的
+// 唯一 ID（非显示名：调用方 allow 列表按 "key:<id>" 匹配 principal，显示名
+// 不唯一会串权限——设计 D26）。namespaces 空列表 = 拒绝一切（fail-closed）；
+// capabilities 是能力位名称闭集，空 = 零能力；max_age_seconds 是相对时长
+// （本验证结果至多再用多久，规避两系统时钟偏斜——D14/G8），0 = 用调用方配置 TTL。
+type AdminIdentityInfo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	KeyId         string                 `protobuf:"bytes,1,opt,name=key_id,json=keyId,proto3" json:"key_id,omitempty"`
+	Namespaces    []string               `protobuf:"bytes,2,rep,name=namespaces,proto3" json:"namespaces,omitempty"`
+	Capabilities  []string               `protobuf:"bytes,3,rep,name=capabilities,proto3" json:"capabilities,omitempty"`
+	MaxAgeSeconds int64                  `protobuf:"varint,4,opt,name=max_age_seconds,json=maxAgeSeconds,proto3" json:"max_age_seconds,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdminIdentityInfo) Reset() {
+	*x = AdminIdentityInfo{}
+	mi := &file_proxy_v2_proxy_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdminIdentityInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdminIdentityInfo) ProtoMessage() {}
+
+func (x *AdminIdentityInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_proxy_v2_proxy_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdminIdentityInfo.ProtoReflect.Descriptor instead.
+func (*AdminIdentityInfo) Descriptor() ([]byte, []int) {
+	return file_proxy_v2_proxy_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *AdminIdentityInfo) GetKeyId() string {
+	if x != nil {
+		return x.KeyId
+	}
+	return ""
+}
+
+func (x *AdminIdentityInfo) GetNamespaces() []string {
+	if x != nil {
+		return x.Namespaces
+	}
+	return nil
+}
+
+func (x *AdminIdentityInfo) GetCapabilities() []string {
+	if x != nil {
+		return x.Capabilities
+	}
+	return nil
+}
+
+func (x *AdminIdentityInfo) GetMaxAgeSeconds() int64 {
+	if x != nil {
+		return x.MaxAgeSeconds
+	}
+	return 0
+}
+
+type AuthenticateAdminResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Error         *v2.Error              `protobuf:"bytes,1,opt,name=error,proto3" json:"error,omitempty"`
+	Identity      *AdminIdentityInfo     `protobuf:"bytes,2,opt,name=identity,proto3" json:"identity,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AuthenticateAdminResponse) Reset() {
+	*x = AuthenticateAdminResponse{}
+	mi := &file_proxy_v2_proxy_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AuthenticateAdminResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AuthenticateAdminResponse) ProtoMessage() {}
+
+func (x *AuthenticateAdminResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proxy_v2_proxy_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AuthenticateAdminResponse.ProtoReflect.Descriptor instead.
+func (*AuthenticateAdminResponse) Descriptor() ([]byte, []int) {
+	return file_proxy_v2_proxy_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *AuthenticateAdminResponse) GetError() *v2.Error {
+	if x != nil {
+		return x.Error
+	}
+	return nil
+}
+
+func (x *AuthenticateAdminResponse) GetIdentity() *AdminIdentityInfo {
+	if x != nil {
+		return x.Identity
+	}
+	return nil
+}
+
 var File_proxy_v2_proxy_proto protoreflect.FileDescriptor
 
 const file_proxy_v2_proxy_proto_rawDesc = "" +
@@ -1078,7 +1255,21 @@ const file_proxy_v2_proxy_proto_rawDesc = "" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1a\n" +
 	"\busername\x18\x02 \x01(\tR\busername\"\x18\n" +
-	"\x16OnDisconnectedResponse2\xae\x06\n" +
+	"\x16OnDisconnectedResponse\"T\n" +
+	"\x18AuthenticateAdminRequest\x12\x17\n" +
+	"\aapi_key\x18\x01 \x01(\tR\x06apiKey\x12\x1f\n" +
+	"\vremote_addr\x18\x02 \x01(\tR\n" +
+	"remoteAddr\"\x96\x01\n" +
+	"\x11AdminIdentityInfo\x12\x15\n" +
+	"\x06key_id\x18\x01 \x01(\tR\x05keyId\x12\x1e\n" +
+	"\n" +
+	"namespaces\x18\x02 \x03(\tR\n" +
+	"namespaces\x12\"\n" +
+	"\fcapabilities\x18\x03 \x03(\tR\fcapabilities\x12&\n" +
+	"\x0fmax_age_seconds\x18\x04 \x01(\x03R\rmaxAgeSeconds\"\x94\x01\n" +
+	"\x19AuthenticateAdminResponse\x122\n" +
+	"\x05error\x18\x01 \x01(\v2\x1c.messageloop.shared.v2.ErrorR\x05error\x12C\n" +
+	"\bidentity\x18\x02 \x01(\v2'.messageloop.proxy.v2.AdminIdentityInfoR\bidentity2\xa4\a\n" +
 	"\fProxyService\x12J\n" +
 	"\x03RPC\x12 .messageloop.proxy.v2.RPCRequest\x1a!.messageloop.proxy.v2.RPCResponse\x12e\n" +
 	"\fAuthenticate\x12).messageloop.proxy.v2.AuthenticateRequest\x1a*.messageloop.proxy.v2.AuthenticateResponse\x12e\n" +
@@ -1088,7 +1279,8 @@ const file_proxy_v2_proxy_proto_rawDesc = "" +
 	"\vOnConnected\x12(.messageloop.proxy.v2.OnConnectedRequest\x1a).messageloop.proxy.v2.OnConnectedResponse\x12e\n" +
 	"\fOnSubscribed\x12).messageloop.proxy.v2.OnSubscribedRequest\x1a*.messageloop.proxy.v2.OnSubscribedResponse\x12k\n" +
 	"\x0eOnUnsubscribed\x12+.messageloop.proxy.v2.OnUnsubscribedRequest\x1a,.messageloop.proxy.v2.OnUnsubscribedResponse\x12k\n" +
-	"\x0eOnDisconnected\x12+.messageloop.proxy.v2.OnDisconnectedRequest\x1a,.messageloop.proxy.v2.OnDisconnectedResponseBIZGgithub.com/messageloopio/messageloop/shared/genproto/proxy/v2;proxyv2pbb\x06proto3"
+	"\x0eOnDisconnected\x12+.messageloop.proxy.v2.OnDisconnectedRequest\x1a,.messageloop.proxy.v2.OnDisconnectedResponse\x12t\n" +
+	"\x11AuthenticateAdmin\x12..messageloop.proxy.v2.AuthenticateAdminRequest\x1a/.messageloop.proxy.v2.AuthenticateAdminResponseBIZGgithub.com/messageloopio/messageloop/shared/genproto/proxy/v2;proxyv2pbb\x06proto3"
 
 var (
 	file_proxy_v2_proxy_proto_rawDescOnce sync.Once
@@ -1102,60 +1294,67 @@ func file_proxy_v2_proxy_proto_rawDescGZIP() []byte {
 	return file_proxy_v2_proxy_proto_rawDescData
 }
 
-var file_proxy_v2_proxy_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
+var file_proxy_v2_proxy_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_proxy_v2_proxy_proto_goTypes = []any{
-	(*RPCRequest)(nil),             // 0: messageloop.proxy.v2.RPCRequest
-	(*RPCResponse)(nil),            // 1: messageloop.proxy.v2.RPCResponse
-	(*AuthenticateRequest)(nil),    // 2: messageloop.proxy.v2.AuthenticateRequest
-	(*AuthenticateResponse)(nil),   // 3: messageloop.proxy.v2.AuthenticateResponse
-	(*UserInfo)(nil),               // 4: messageloop.proxy.v2.UserInfo
-	(*SubscribeAclRequest)(nil),    // 5: messageloop.proxy.v2.SubscribeAclRequest
-	(*SubscribeAclResponse)(nil),   // 6: messageloop.proxy.v2.SubscribeAclResponse
-	(*PublishAclRequest)(nil),      // 7: messageloop.proxy.v2.PublishAclRequest
-	(*PublishAclResponse)(nil),     // 8: messageloop.proxy.v2.PublishAclResponse
-	(*OnConnectedRequest)(nil),     // 9: messageloop.proxy.v2.OnConnectedRequest
-	(*OnConnectedResponse)(nil),    // 10: messageloop.proxy.v2.OnConnectedResponse
-	(*OnSubscribedRequest)(nil),    // 11: messageloop.proxy.v2.OnSubscribedRequest
-	(*OnSubscribedResponse)(nil),   // 12: messageloop.proxy.v2.OnSubscribedResponse
-	(*OnUnsubscribedRequest)(nil),  // 13: messageloop.proxy.v2.OnUnsubscribedRequest
-	(*OnUnsubscribedResponse)(nil), // 14: messageloop.proxy.v2.OnUnsubscribedResponse
-	(*OnDisconnectedRequest)(nil),  // 15: messageloop.proxy.v2.OnDisconnectedRequest
-	(*OnDisconnectedResponse)(nil), // 16: messageloop.proxy.v2.OnDisconnectedResponse
-	(*v2.Payload)(nil),             // 17: messageloop.shared.v2.Payload
-	(*v2.Metadata)(nil),            // 18: messageloop.shared.v2.Metadata
-	(*v2.Error)(nil),               // 19: messageloop.shared.v2.Error
+	(*RPCRequest)(nil),                // 0: messageloop.proxy.v2.RPCRequest
+	(*RPCResponse)(nil),               // 1: messageloop.proxy.v2.RPCResponse
+	(*AuthenticateRequest)(nil),       // 2: messageloop.proxy.v2.AuthenticateRequest
+	(*AuthenticateResponse)(nil),      // 3: messageloop.proxy.v2.AuthenticateResponse
+	(*UserInfo)(nil),                  // 4: messageloop.proxy.v2.UserInfo
+	(*SubscribeAclRequest)(nil),       // 5: messageloop.proxy.v2.SubscribeAclRequest
+	(*SubscribeAclResponse)(nil),      // 6: messageloop.proxy.v2.SubscribeAclResponse
+	(*PublishAclRequest)(nil),         // 7: messageloop.proxy.v2.PublishAclRequest
+	(*PublishAclResponse)(nil),        // 8: messageloop.proxy.v2.PublishAclResponse
+	(*OnConnectedRequest)(nil),        // 9: messageloop.proxy.v2.OnConnectedRequest
+	(*OnConnectedResponse)(nil),       // 10: messageloop.proxy.v2.OnConnectedResponse
+	(*OnSubscribedRequest)(nil),       // 11: messageloop.proxy.v2.OnSubscribedRequest
+	(*OnSubscribedResponse)(nil),      // 12: messageloop.proxy.v2.OnSubscribedResponse
+	(*OnUnsubscribedRequest)(nil),     // 13: messageloop.proxy.v2.OnUnsubscribedRequest
+	(*OnUnsubscribedResponse)(nil),    // 14: messageloop.proxy.v2.OnUnsubscribedResponse
+	(*OnDisconnectedRequest)(nil),     // 15: messageloop.proxy.v2.OnDisconnectedRequest
+	(*OnDisconnectedResponse)(nil),    // 16: messageloop.proxy.v2.OnDisconnectedResponse
+	(*AuthenticateAdminRequest)(nil),  // 17: messageloop.proxy.v2.AuthenticateAdminRequest
+	(*AdminIdentityInfo)(nil),         // 18: messageloop.proxy.v2.AdminIdentityInfo
+	(*AuthenticateAdminResponse)(nil), // 19: messageloop.proxy.v2.AuthenticateAdminResponse
+	(*v2.Payload)(nil),                // 20: messageloop.shared.v2.Payload
+	(*v2.Metadata)(nil),               // 21: messageloop.shared.v2.Metadata
+	(*v2.Error)(nil),                  // 22: messageloop.shared.v2.Error
 }
 var file_proxy_v2_proxy_proto_depIdxs = []int32{
-	17, // 0: messageloop.proxy.v2.RPCRequest.payload:type_name -> messageloop.shared.v2.Payload
-	18, // 1: messageloop.proxy.v2.RPCRequest.metadata:type_name -> messageloop.shared.v2.Metadata
-	17, // 2: messageloop.proxy.v2.RPCResponse.payload:type_name -> messageloop.shared.v2.Payload
-	18, // 3: messageloop.proxy.v2.RPCResponse.metadata:type_name -> messageloop.shared.v2.Metadata
-	19, // 4: messageloop.proxy.v2.RPCResponse.error:type_name -> messageloop.shared.v2.Error
-	19, // 5: messageloop.proxy.v2.AuthenticateResponse.error:type_name -> messageloop.shared.v2.Error
+	20, // 0: messageloop.proxy.v2.RPCRequest.payload:type_name -> messageloop.shared.v2.Payload
+	21, // 1: messageloop.proxy.v2.RPCRequest.metadata:type_name -> messageloop.shared.v2.Metadata
+	20, // 2: messageloop.proxy.v2.RPCResponse.payload:type_name -> messageloop.shared.v2.Payload
+	21, // 3: messageloop.proxy.v2.RPCResponse.metadata:type_name -> messageloop.shared.v2.Metadata
+	22, // 4: messageloop.proxy.v2.RPCResponse.error:type_name -> messageloop.shared.v2.Error
+	22, // 5: messageloop.proxy.v2.AuthenticateResponse.error:type_name -> messageloop.shared.v2.Error
 	4,  // 6: messageloop.proxy.v2.AuthenticateResponse.user_info:type_name -> messageloop.proxy.v2.UserInfo
-	19, // 7: messageloop.proxy.v2.SubscribeAclResponse.error:type_name -> messageloop.shared.v2.Error
-	19, // 8: messageloop.proxy.v2.PublishAclResponse.error:type_name -> messageloop.shared.v2.Error
-	0,  // 9: messageloop.proxy.v2.ProxyService.RPC:input_type -> messageloop.proxy.v2.RPCRequest
-	2,  // 10: messageloop.proxy.v2.ProxyService.Authenticate:input_type -> messageloop.proxy.v2.AuthenticateRequest
-	5,  // 11: messageloop.proxy.v2.ProxyService.SubscribeAcl:input_type -> messageloop.proxy.v2.SubscribeAclRequest
-	7,  // 12: messageloop.proxy.v2.ProxyService.PublishAcl:input_type -> messageloop.proxy.v2.PublishAclRequest
-	9,  // 13: messageloop.proxy.v2.ProxyService.OnConnected:input_type -> messageloop.proxy.v2.OnConnectedRequest
-	11, // 14: messageloop.proxy.v2.ProxyService.OnSubscribed:input_type -> messageloop.proxy.v2.OnSubscribedRequest
-	13, // 15: messageloop.proxy.v2.ProxyService.OnUnsubscribed:input_type -> messageloop.proxy.v2.OnUnsubscribedRequest
-	15, // 16: messageloop.proxy.v2.ProxyService.OnDisconnected:input_type -> messageloop.proxy.v2.OnDisconnectedRequest
-	1,  // 17: messageloop.proxy.v2.ProxyService.RPC:output_type -> messageloop.proxy.v2.RPCResponse
-	3,  // 18: messageloop.proxy.v2.ProxyService.Authenticate:output_type -> messageloop.proxy.v2.AuthenticateResponse
-	6,  // 19: messageloop.proxy.v2.ProxyService.SubscribeAcl:output_type -> messageloop.proxy.v2.SubscribeAclResponse
-	8,  // 20: messageloop.proxy.v2.ProxyService.PublishAcl:output_type -> messageloop.proxy.v2.PublishAclResponse
-	10, // 21: messageloop.proxy.v2.ProxyService.OnConnected:output_type -> messageloop.proxy.v2.OnConnectedResponse
-	12, // 22: messageloop.proxy.v2.ProxyService.OnSubscribed:output_type -> messageloop.proxy.v2.OnSubscribedResponse
-	14, // 23: messageloop.proxy.v2.ProxyService.OnUnsubscribed:output_type -> messageloop.proxy.v2.OnUnsubscribedResponse
-	16, // 24: messageloop.proxy.v2.ProxyService.OnDisconnected:output_type -> messageloop.proxy.v2.OnDisconnectedResponse
-	17, // [17:25] is the sub-list for method output_type
-	9,  // [9:17] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	22, // 7: messageloop.proxy.v2.SubscribeAclResponse.error:type_name -> messageloop.shared.v2.Error
+	22, // 8: messageloop.proxy.v2.PublishAclResponse.error:type_name -> messageloop.shared.v2.Error
+	22, // 9: messageloop.proxy.v2.AuthenticateAdminResponse.error:type_name -> messageloop.shared.v2.Error
+	18, // 10: messageloop.proxy.v2.AuthenticateAdminResponse.identity:type_name -> messageloop.proxy.v2.AdminIdentityInfo
+	0,  // 11: messageloop.proxy.v2.ProxyService.RPC:input_type -> messageloop.proxy.v2.RPCRequest
+	2,  // 12: messageloop.proxy.v2.ProxyService.Authenticate:input_type -> messageloop.proxy.v2.AuthenticateRequest
+	5,  // 13: messageloop.proxy.v2.ProxyService.SubscribeAcl:input_type -> messageloop.proxy.v2.SubscribeAclRequest
+	7,  // 14: messageloop.proxy.v2.ProxyService.PublishAcl:input_type -> messageloop.proxy.v2.PublishAclRequest
+	9,  // 15: messageloop.proxy.v2.ProxyService.OnConnected:input_type -> messageloop.proxy.v2.OnConnectedRequest
+	11, // 16: messageloop.proxy.v2.ProxyService.OnSubscribed:input_type -> messageloop.proxy.v2.OnSubscribedRequest
+	13, // 17: messageloop.proxy.v2.ProxyService.OnUnsubscribed:input_type -> messageloop.proxy.v2.OnUnsubscribedRequest
+	15, // 18: messageloop.proxy.v2.ProxyService.OnDisconnected:input_type -> messageloop.proxy.v2.OnDisconnectedRequest
+	17, // 19: messageloop.proxy.v2.ProxyService.AuthenticateAdmin:input_type -> messageloop.proxy.v2.AuthenticateAdminRequest
+	1,  // 20: messageloop.proxy.v2.ProxyService.RPC:output_type -> messageloop.proxy.v2.RPCResponse
+	3,  // 21: messageloop.proxy.v2.ProxyService.Authenticate:output_type -> messageloop.proxy.v2.AuthenticateResponse
+	6,  // 22: messageloop.proxy.v2.ProxyService.SubscribeAcl:output_type -> messageloop.proxy.v2.SubscribeAclResponse
+	8,  // 23: messageloop.proxy.v2.ProxyService.PublishAcl:output_type -> messageloop.proxy.v2.PublishAclResponse
+	10, // 24: messageloop.proxy.v2.ProxyService.OnConnected:output_type -> messageloop.proxy.v2.OnConnectedResponse
+	12, // 25: messageloop.proxy.v2.ProxyService.OnSubscribed:output_type -> messageloop.proxy.v2.OnSubscribedResponse
+	14, // 26: messageloop.proxy.v2.ProxyService.OnUnsubscribed:output_type -> messageloop.proxy.v2.OnUnsubscribedResponse
+	16, // 27: messageloop.proxy.v2.ProxyService.OnDisconnected:output_type -> messageloop.proxy.v2.OnDisconnectedResponse
+	19, // 28: messageloop.proxy.v2.ProxyService.AuthenticateAdmin:output_type -> messageloop.proxy.v2.AuthenticateAdminResponse
+	20, // [20:29] is the sub-list for method output_type
+	11, // [11:20] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_proxy_v2_proxy_proto_init() }
@@ -1169,7 +1368,7 @@ func file_proxy_v2_proxy_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proxy_v2_proxy_proto_rawDesc), len(file_proxy_v2_proxy_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   17,
+			NumMessages:   20,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

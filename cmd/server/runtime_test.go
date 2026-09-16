@@ -25,7 +25,7 @@ func TestPrepareGRPCServers_CleansUpClientListenerOnAdminFailure(t *testing.T) {
 		},
 	}
 
-	_, err = prepareGRPCServers(cfg, runtime.NewNode(nil))
+	_, err = prepareGRPCServers(cfg, runtime.NewNode(nil), nil, nil)
 	require.Error(t, err)
 
 	rebound, err := net.Listen("tcp", addr)
@@ -40,6 +40,6 @@ func TestPrepareGRPCServers_RequiresAdminAddr(t *testing.T) {
 		},
 	}
 
-	_, err := prepareGRPCServers(cfg, runtime.NewNode(nil))
+	_, err := prepareGRPCServers(cfg, runtime.NewNode(nil), nil, nil)
 	require.EqualError(t, err, "grpc-admin-server addr is required")
 }

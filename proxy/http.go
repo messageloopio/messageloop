@@ -388,6 +388,42 @@ func (p *HTTPProxy) OnDisconnected(ctx context.Context, req *OnDisconnectedProxy
 	return result.(*OnDisconnectedProxyResponse), nil
 }
 
+// AuthenticateAdmin implements Proxy.AuthenticateAdmin.
+func (p *HTTPProxy) AuthenticateAdmin(ctx context.Context, req *AuthenticateAdminProxyRequest) (*AuthenticateAdminProxyResponse, error) {
+	ctx, cancel := p.withTimeout(ctx)
+	defer cancel()
+
+	protoReq := req.ToProtoRequest()
+	body, err := marshalProxyJSON(protoReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	result, err := p.doRequest(ctx, httpReq, "AuthenticateAdmin", req.RemoteAddr, "",
+		func(respBody []byte) (any, error) {
+			var protoResp proxypb.AuthenticateAdminResponse
+			// Parse with protojson like the Authenticate path: protojson accepts
+			// both the JSON name (camelCase such as identity) and the original
+			// proto field name, and DiscardUnknown keeps a backend adding an
+			// unknown member from failing the call.
+			opts := protojson.UnmarshalOptions{DiscardUnknown: true}
+			if err := opts.Unmarshal(respBody, &protoResp); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+			}
+			return FromProtoAuthenticateAdminResponse(&protoResp), nil
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	return result.(*AuthenticateAdminProxyResponse), nil
+}
+
 // doRequest is a helper function for making HTTP requests.
 func (p *HTTPProxy) doRequest(ctx context.Context, httpReq *http.Request, method, channel, extra string, parseFunc func([]byte) (any, error)) (any, error) {
 	// Set headers

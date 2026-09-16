@@ -323,7 +323,7 @@ func startE2EServer(t *testing.T, binPath, brokerType, redisAddr, redisPassword 
 // required stream_approximate flag.
 func e2eConfigYAML(httpAddr, adminAddr, adminToken, wsAddr, grpcAddr, brokerType, redisAddr, redisPassword string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "server:\n  http:\n    addr: %q\n  grpc_admin:\n    addr: %q\n    auth_token: %q\n", httpAddr, adminAddr, adminToken)
+	fmt.Fprintf(&b, "server:\n  http:\n    addr: %q\n  grpc_admin:\n    addr: %q\n    auth_tokens:\n      - %q\n", httpAddr, adminAddr, adminToken)
 	// require_auth stays off, so the static namespace is mandatory (the
 	// server fails config validation without it).
 	b.WriteString("  namespace: \"dev\"\n")

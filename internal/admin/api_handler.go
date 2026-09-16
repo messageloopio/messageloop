@@ -14,6 +14,7 @@ import (
 	"github.com/messageloopio/messageloop/internal/protocol"
 	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/internal/stream"
+	"github.com/messageloopio/messageloop/pkg/topics"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
 	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
@@ -28,28 +29,18 @@ func NewAPIServiceHandler(node *runtime.Node) serverv2.APIServiceServer {
 	return &apiServiceHandler{node: node}
 }
 
-func (h *apiServiceHandler) Publish(ctx context.Context, req *serverv2.PublishRequest) (*serverv2.PublishResponse, error) {
-	log.InfoContext(ctx, "server side API Publish", "request_id", req.RequestId)
+// Every RPC method body starts with its scope wrapper (internal/admin/scope.go,
+// design §2.4): capability table + channel grammar gate + namespace matrix
+// rewrite. After the wrapper returns nil error the request context carries a
+// verified identity and the request holds only in-scope targets — the
+// handlers below are scope-free.
 
-	// Capability gates (PR-KA-A4 §7): per-session delivery needs session.act;
-	// per-user expansion needs user.fanout on top. A missing bit fails the
-	// whole RPC with PERMISSION_DENIED before any delivery.
-	for _, pub := range req.Publications {
-		dest := pub.GetDestination()
-		if dest == nil {
-			continue
-		}
-		if len(dest.Sessions) > 0 {
-			if err := h.requireAdminCaps(authz.CapSessionAct, "publish to sessions"); err != nil {
-				return nil, err
-			}
-		}
-		if len(dest.Users) > 0 {
-			if err := h.requireAdminCaps(authz.CapUserFanout|authz.CapSessionAct, "publish to users"); err != nil {
-				return nil, err
-			}
-		}
+func (h *apiServiceHandler) Publish(ctx context.Context, req *serverv2.PublishRequest) (*serverv2.PublishResponse, error) {
+	scope, err := h.scopePublish(ctx, req)
+	if err != nil {
+		return nil, err
 	}
+	log.InfoContext(ctx, "server side API Publish", "request_id", req.RequestId)
 
 	// Empty user IDs inside destination.users are a client error: reject the
 	// whole request before any scanning happens (anonymous connections are
@@ -69,9 +60,13 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverv2.PublishRe
 
 	// PublishResponse has no per-publication result fields, so failures are
 	// reported with partial-success semantics: every failure is logged, and
-	// when all publications fail the RPC returns an error.
-	attempted := 0
-	failed := 0
+	// when all publications fail the RPC returns an error. The scope layer's
+	// erasures join the counters up front: erased sessions behave exactly
+	// like not-found sessions (attempted, skipped), removed channels like
+	// failed deliveries.
+	principal := identityFromScope(ctx).Principal()
+	attempted := scope.erasedSessions + scope.removedChannels
+	failed := scope.removedChannels
 	for _, pub := range req.Publications {
 		// Extract data from Payload, preserving the original oneof variant.
 		brokerPub, err := stream.PublicationFromPayloadV2(pub.Id, pub.GetMetadata().GetEntries(), pub.GetPayload())
@@ -116,7 +111,7 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverv2.PublishRe
 		// Channel-based publication
 		for _, channel := range dest.Channels {
 			attempted++
-			if !h.node.AdminCanPublish(channel) {
+			if !h.node.AdminCanPublish(principal, channel) {
 				log.WarnContext(ctx, "admin publish denied by ACL rule", "channel", channel)
 				failed++
 				continue
@@ -160,14 +155,20 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverv2.PublishRe
 }
 
 func (h *apiServiceHandler) Survey(ctx context.Context, req *serverv2.SurveyRequest) (*serverv2.SurveyResponse, error) {
+	if err := h.scopeSurvey(ctx, req); err != nil {
+		return nil, err
+	}
+	id := identityFromScope(ctx)
 	log.InfoContext(ctx, "server side API Survey", "channel", req.Channel, "request_id", req.RequestId)
 
 	// Without survey.bypass_gate the Admin survey runs through the same
 	// gates as a client survey: the Survey decision (Effects.Survey +
 	// allow_survey / deny_all) and the population cap (PR-KA-A4 §7). With
-	// the bit, today's gate-free behavior is preserved.
-	if h.node.AdminCapabilities()&authz.CapSurveyBypassGate == 0 {
-		if !h.node.AdminDecide(authz.ActionSurvey, req.Channel).Allow {
+	// the bit, today's gate-free behavior is preserved. The bit follows the
+	// caller's identity (static tokens/insecure hold the node ceiling; keys
+	// carry their own clamped bits).
+	if id.Caps&authz.CapSurveyBypassGate == 0 {
+		if !h.node.AdminDecide(id.Principal(), authz.ActionSurvey, req.Channel).Allow {
 			return nil, status.Error(codes.PermissionDenied, "survey denied by ACL rule")
 		}
 		total, err := h.node.CountMatchingSubscribers(ctx, req.Channel)
@@ -238,19 +239,10 @@ func (h *apiServiceHandler) Survey(ctx context.Context, req *serverv2.SurveyRequ
 }
 
 func (h *apiServiceHandler) Disconnect(ctx context.Context, req *serverv2.DisconnectRequest) (*serverv2.DisconnectResponse, error) {
+	if err := h.scopeDisconnect(ctx, req); err != nil {
+		return nil, err
+	}
 	log.InfoContext(ctx, "server side API Disconnect", "sessions", req.Sessions, "users", req.Users, "code", req.Code, "reason", req.Reason)
-
-	// Capability gates (PR-KA-A4 §7).
-	if len(req.Sessions) > 0 {
-		if err := h.requireAdminCaps(authz.CapSessionAct, "disconnect sessions"); err != nil {
-			return nil, err
-		}
-	}
-	if len(req.Users) > 0 {
-		if err := h.requireAdminCaps(authz.CapUserFanout|authz.CapSessionAct, "disconnect users"); err != nil {
-			return nil, err
-		}
-	}
 
 	for _, userID := range req.Users {
 		if userID == "" {
@@ -283,6 +275,25 @@ func (h *apiServiceHandler) Disconnect(ctx context.Context, req *serverv2.Discon
 }
 
 func (h *apiServiceHandler) Subscribe(ctx context.Context, req *serverv2.SubscribeRequest) (*serverv2.SubscribeResponse, error) {
+	scope, err := h.scopeSubscribe(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	// Scope short-circuit: the only addressing target was erased (invisible
+	// session and no user left). Synthesize the not-found response here —
+	// falling through would hit the "session_id and user_id must not both
+	// be empty" InvalidArgument below, breaking the not-found semantics and
+	// leaking that the request was special-cased (design §2.4 matrix).
+	if scope.shortCircuit {
+		results := make(map[string]bool, len(req.GetChannels())+len(scope.erasedChannels))
+		for channel := range scope.erasedChannels {
+			results[channel] = false
+		}
+		for _, channel := range req.GetChannels() {
+			results[channel] = false
+		}
+		return &serverv2.SubscribeResponse{Results: results}, nil
+	}
 	log.InfoContext(ctx, "server side API Subscribe", "session_id", req.SessionId, "user_id", req.UserId, "channels", req.Channels)
 
 	if req.SessionId == "" && req.UserId == "" {
@@ -291,28 +302,22 @@ func (h *apiServiceHandler) Subscribe(ctx context.Context, req *serverv2.Subscri
 	if req.UserId != "" && req.Namespace == "" {
 		return nil, status.Error(codes.InvalidArgument, "namespace is required when user_id is set")
 	}
-	// Capability gates (PR-KA-A4 §7): proxied subscription is a session act;
-	// per-user expansion additionally needs user.fanout.
-	if req.SessionId != "" {
-		if err := h.requireAdminCaps(authz.CapSessionAct, "subscribe session"); err != nil {
-			return nil, err
-		}
-	}
-	if req.UserId != "" {
-		if err := h.requireAdminCaps(authz.CapUserFanout|authz.CapSessionAct, "subscribe user"); err != nil {
-			return nil, err
-		}
-	}
 
 	sessions := h.unionSessions(ctx, []string{req.SessionId}, []string{req.UserId}, req.Namespace, "subscribe")
-	results := make(map[string]bool)
+	principal := identityFromScope(ctx).Principal()
+	results := make(map[string]bool, len(req.Channels)+len(scope.erasedChannels))
 
+	// Out-of-namespace channels were removed by the scope layer: they report
+	// false like any other failed subscribe (design §2.4 matrix).
+	for channel := range scope.erasedChannels {
+		results[channel] = false
+	}
 	for _, ch := range req.Channels {
 		// With multiple sessions (user fan-out), any successful session wins
 		// the channel's result: false only when every session failed.
 		ok := false
 		for _, sessionID := range sessions {
-			subscribed, err := h.node.SubscribeSession(ctx, sessionID, ch)
+			subscribed, err := h.node.SubscribeSession(ctx, principal, sessionID, ch)
 			if err != nil {
 				log.ErrorContext(ctx, "failed to subscribe to channel", err, "channel", ch, "session_id", sessionID)
 				continue
@@ -329,6 +334,21 @@ func (h *apiServiceHandler) Subscribe(ctx context.Context, req *serverv2.Subscri
 }
 
 func (h *apiServiceHandler) Unsubscribe(ctx context.Context, req *serverv2.UnsubscribeRequest) (*serverv2.UnsubscribeResponse, error) {
+	scope, err := h.scopeUnsubscribe(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	// Scope short-circuit, mirroring Subscribe (see there).
+	if scope.shortCircuit {
+		results := make(map[string]bool, len(req.GetChannels())+len(scope.erasedChannels))
+		for channel := range scope.erasedChannels {
+			results[channel] = false
+		}
+		for _, channel := range req.GetChannels() {
+			results[channel] = false
+		}
+		return &serverv2.UnsubscribeResponse{Results: results}, nil
+	}
 	log.InfoContext(ctx, "server side API Unsubscribe", "session_id", req.SessionId, "user_id", req.UserId, "channels", req.Channels)
 
 	if req.SessionId == "" && req.UserId == "" {
@@ -337,27 +357,20 @@ func (h *apiServiceHandler) Unsubscribe(ctx context.Context, req *serverv2.Unsub
 	if req.UserId != "" && req.Namespace == "" {
 		return nil, status.Error(codes.InvalidArgument, "namespace is required when user_id is set")
 	}
-	// Capability gates (PR-KA-A4 §7).
-	if req.SessionId != "" {
-		if err := h.requireAdminCaps(authz.CapSessionAct, "unsubscribe session"); err != nil {
-			return nil, err
-		}
-	}
-	if req.UserId != "" {
-		if err := h.requireAdminCaps(authz.CapUserFanout|authz.CapSessionAct, "unsubscribe user"); err != nil {
-			return nil, err
-		}
-	}
 
 	sessions := h.unionSessions(ctx, []string{req.SessionId}, []string{req.UserId}, req.Namespace, "unsubscribe")
-	results := make(map[string]bool)
+	principal := identityFromScope(ctx).Principal()
+	results := make(map[string]bool, len(req.Channels)+len(scope.erasedChannels))
 
+	for channel := range scope.erasedChannels {
+		results[channel] = false
+	}
 	for _, ch := range req.Channels {
 		// With multiple sessions (user fan-out), any successful session wins
 		// the channel's result: false only when every session failed.
 		ok := false
 		for _, sessionID := range sessions {
-			unsubscribed, err := h.node.UnsubscribeSession(ctx, sessionID, ch)
+			unsubscribed, err := h.node.UnsubscribeSession(ctx, principal, sessionID, ch)
 			if err != nil {
 				log.ErrorContext(ctx, "failed to unsubscribe from channel", err, "channel", ch, "session_id", sessionID)
 				continue
@@ -402,14 +415,15 @@ func (h *apiServiceHandler) unionSessions(ctx context.Context, explicit []string
 }
 
 func (h *apiServiceHandler) GetPresence(ctx context.Context, req *serverv2.GetPresenceRequest) (*serverv2.GetPresenceResponse, error) {
-	log.InfoContext(ctx, "server side API GetPresence", "channel", req.Channel)
-
-	// Capability + Decide gates (PR-KA-A4 §7): presence.read is required and
-	// the channel must be allowed for the admin principal.
-	if err := h.requireAdminCaps(authz.CapPresenceRead, "GetPresence"); err != nil {
+	if err := h.scopeGetPresence(ctx, req); err != nil {
 		return nil, err
 	}
-	if !h.node.AdminDecide(authz.ActionPresence, req.Channel).Allow {
+	id := identityFromScope(ctx)
+	log.InfoContext(ctx, "server side API GetPresence", "channel", req.Channel)
+
+	// The channel must be allowed for the caller's principal (presence.read
+	// is already enforced by the scope layer's capability table).
+	if !h.node.AdminDecide(id.Principal(), authz.ActionPresence, req.Channel).Allow {
 		return nil, status.Error(codes.PermissionDenied, "presence denied by ACL rule")
 	}
 
@@ -434,8 +448,8 @@ func (h *apiServiceHandler) GetPresence(ctx context.Context, req *serverv2.GetPr
 
 	// Without presence.large_snapshot the admin snapshot is truncated to the
 	// channel policy cap like the client path; with the bit it stays full
-	// (PR-KA-A4 §7).
-	if h.node.AdminCapabilities()&authz.CapPresenceLargeSnapshot == 0 {
+	// (PR-KA-A4 §7). The bit follows the caller's identity.
+	if id.Caps&authz.CapPresenceLargeSnapshot == 0 {
 		limit := occupancy.MaxPresenceSnapshotClients
 		if pol := h.node.ChannelPolicy(req.Channel); pol.PresenceSnapshotLimit > 0 {
 			limit = pol.PresenceSnapshotLimit
@@ -465,16 +479,16 @@ func firstNonEmpty(values ...string) string {
 }
 
 func (h *apiServiceHandler) GetHistory(ctx context.Context, req *serverv2.GetHistoryRequest) (*serverv2.GetHistoryResponse, error) {
-	log.InfoContext(ctx, "server side API GetHistory", "channel", req.Channel, "since", req.Since, "limit", req.Limit)
-
-	// Capability + Decide gates (PR-KA-A4 §7): history.read is required and
-	// the channel must allow Recover for the admin principal (Effects.Recover
-	// plus deny_all; transient channels are rejected). A missing bit must not
-	// touch the broker at all.
-	if err := h.requireAdminCaps(authz.CapHistoryRead, "GetHistory"); err != nil {
+	if err := h.scopeGetHistory(ctx, req); err != nil {
 		return nil, err
 	}
-	if !h.node.AdminDecide(authz.ActionRecover, req.Channel).Allow {
+	id := identityFromScope(ctx)
+	log.InfoContext(ctx, "server side API GetHistory", "channel", req.Channel, "since", req.Since, "limit", req.Limit)
+
+	// The channel must allow Recover for the caller's principal (history.read
+	// is already enforced by the scope layer's capability table): deny_all
+	// and transient channels are rejected before the broker is touched.
+	if !h.node.AdminDecide(id.Principal(), authz.ActionRecover, req.Channel).Allow {
 		return nil, status.Error(codes.PermissionDenied, "history denied by ACL rule")
 	}
 
@@ -521,19 +535,28 @@ func (h *apiServiceHandler) GetHistory(ctx context.Context, req *serverv2.GetHis
 }
 
 func (h *apiServiceHandler) GetChannels(ctx context.Context, req *serverv2.GetChannelsRequest) (*serverv2.GetChannelsResponse, error) {
-	log.InfoContext(ctx, "server side API GetChannels")
-
-	// Capability gate (PR-KA-A4 §7): channels.list is required.
-	if err := h.requireAdminCaps(authz.CapChannelsList, "GetChannels"); err != nil {
+	if err := h.scopeGetChannels(ctx, req); err != nil {
 		return nil, err
 	}
+	id := identityFromScope(ctx)
+	log.InfoContext(ctx, "server side API GetChannels")
 
 	activeChannels, err := h.node.Channels(ctx)
 	if err != nil {
 		return nil, err
 	}
+	// Scoped identities only see channels inside their namespace scope;
+	// channels that do not parse under the ns:topic grammar are hidden from
+	// them too (fail-closed). Global identities see everything.
+	filtered := identityIsGlobal(id)
 	channels := make([]*serverv2.ChannelInfo, 0, len(activeChannels))
 	for _, ch := range activeChannels {
+		if !filtered {
+			ns, err := topics.NamespaceOf(ch.Name)
+			if err != nil || !id.AllowsNamespace(ns) {
+				continue
+			}
+		}
 		channels = append(channels, &serverv2.ChannelInfo{
 			Name:        ch.Name,
 			Subscribers: int32(ch.Subscribers),
@@ -549,14 +572,4 @@ func payloadBytes(payload *sharedv2.Payload) ([]byte, error) {
 		return nil, err
 	}
 	return pub.Payload, nil
-}
-
-// requireAdminCaps fails the RPC with PERMISSION_DENIED when the configured
-// admin capabilities miss any of the required bits (PR-KA-A4 §7). Missing
-// bits fail softly; nothing is read or written.
-func (h *apiServiceHandler) requireAdminCaps(bits authz.Capability, what string) error {
-	if h.node.AdminCapabilities()&bits != bits {
-		return status.Errorf(codes.PermissionDenied, "%s requires admin capability", what)
-	}
-	return nil
 }

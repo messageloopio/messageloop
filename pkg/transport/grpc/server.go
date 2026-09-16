@@ -2,7 +2,6 @@ package grpc
 
 import (
 	"context"
-	"crypto/subtle"
 	"errors"
 	"fmt"
 	"net"
@@ -12,23 +11,34 @@ import (
 	"github.com/lynx-go/lynx"
 	"github.com/lynx-go/x/log"
 	googlegrpc "google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	_ "google.golang.org/grpc/encoding/gzip"
-	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
+
+	"github.com/messageloopio/messageloop/proxy"
 )
 
 type Options struct {
-	Addr           string        `yaml:"addr" json:"addr"`
-	WriteTimeout   time.Duration `yaml:"write_timeout" json:"write_timeout"`
-	TLSCertFile    string
-	TLSKeyFile     string
-	AdminAuthToken string // Bearer token for admin API authentication
+	Addr         string        `yaml:"addr" json:"addr"`
+	WriteTimeout time.Duration `yaml:"write_timeout" json:"write_timeout"`
+	TLSCertFile  string
+	TLSKeyFile   string
+	// AuthTokens is the static admin bearer token list: any constant-time
+	// match grants the superadmin identity (design D28). Admin listener only.
+	AuthTokens []string
 	// AdminAllowInsecure serves the admin API without authentication
 	// (requires config server.grpc_admin.allow_insecure: true).
 	AdminAllowInsecure bool
-	MaxRecvMsgSize     int // Max inbound message size in bytes (0 = gRPC default)
+	// AdminAuthCacheTTL is the positive cache TTL for admin API keys verified
+	// through the admin_auth-assigned proxy (0 = the 30s resolver default).
+	AdminAuthCacheTTL time.Duration
+	// AdminFindProxy returns the admin_auth-assigned proxy (nil = no
+	// assignment; key verification then does not exist).
+	AdminFindProxy func() proxy.Proxy
+	// AdminCapabilityCeiling is the node capability upper bound as closed-set
+	// capability names (nil → the default admin capability set at the admin
+	// layer). Admin listener only.
+	AdminCapabilityCeiling []string
+	MaxRecvMsgSize         int // Max inbound message size in bytes (0 = gRPC default)
 }
 
 func validateOptions(name string, opts Options) error {
@@ -82,30 +92,11 @@ func PrepareServer(name string, opts Options, register func(*googlegrpc.Server),
 	}, nil
 }
 
-// AdminAuthInterceptor returns a gRPC unary interceptor that validates bearer tokens.
-func AdminAuthInterceptor(token string) googlegrpc.UnaryServerInterceptor {
-	return func(ctx context.Context, req any, info *googlegrpc.UnaryServerInfo, handler googlegrpc.UnaryHandler) (any, error) {
-		md, ok := metadata.FromIncomingContext(ctx)
-		if !ok {
-			return nil, status.Error(codes.Unauthenticated, "missing metadata")
-		}
-		values := md.Get("authorization")
-		if len(values) == 0 {
-			return nil, status.Error(codes.Unauthenticated, "missing authorization token")
-		}
-		authHeader := values[0]
-		const bearerPrefix = "Bearer "
-		if len(authHeader) <= len(bearerPrefix) || authHeader[:len(bearerPrefix)] != bearerPrefix {
-			return nil, status.Error(codes.Unauthenticated, "invalid authorization format")
-		}
-		// Constant-time comparison so token timing cannot leak the expected value.
-		// ConstantTimeCompare is length-safe: mismatched lengths return 0.
-		if subtle.ConstantTimeCompare([]byte(authHeader[len(bearerPrefix):]), []byte(token)) != 1 {
-			return nil, status.Error(codes.Unauthenticated, "invalid authorization token")
-		}
-		return handler(ctx, req)
-	}
-}
+// The former single-token admin interceptor was removed (design D18′/KD-K31
+// no-compat): admin authentication now lives in internal/admin/auth.go — a
+// resolver-backed interceptor supporting the auth_tokens list,
+// allow_insecure, and admin_auth proxy assignment, wired by
+// admin.PrepareAdminServer.
 
 type Server struct {
 	name string

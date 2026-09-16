@@ -16,18 +16,22 @@
 server:
   http:
     # 0.0.0.0 so the platform health check and Prometheus can reach /health
-    # and /metrics from outside the container. Set an auth token via
-    # MESSAGELOOP_SERVER_HTTP_AUTH_TOKEN in production.
+    # and /metrics from outside the container. A non-loopback bind REQUIRES a
+    # token (Validate rejects an unauthenticated non-loopback admin HTTP
+    # listener); the placeholder below must be overridden in production via
+    # MESSAGELOOP_SERVER_HTTP_AUTH_TOKEN.
     addr: "0.0.0.0:8080"
-    auth_token: ""
+    auth_token: "change-me-http-admin-token-min-20-chars"
   grpc_admin:
     addr: "0.0.0.0:9091"
-    # Unauthenticated by default so the container starts with zero secrets;
-    # the port is only reachable inside the compose network unless you
-    # publish it. Set MESSAGELOOP_SERVER_GRPC_ADMIN_AUTH_TOKEN for production
-    # (a token takes precedence over allow_insecure).
-    allow_insecure: true
-    auth_token: ""
+    # Static superadmin token list (>= 20 chars each). A non-loopback bind
+    # with allow_insecure is rejected by Validate (G5 fail-closed), so the
+    # image default ships a placeholder token list instead — override it in
+    # production via MESSAGELOOP_SERVER_GRPC_ADMIN_AUTH_TOKENS (comma-
+    # separated). The port is only reachable inside the compose network
+    # unless you publish it.
+    auth_tokens:
+      - "change-me-admin-token-min-20-chars"
   heartbeat:
     idle_timeout: "300s"
     ping_interval: "0s"

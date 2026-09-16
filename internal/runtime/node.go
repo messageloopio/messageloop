@@ -353,10 +353,53 @@ func (n *Node) adminPrincipal() Principal {
 	return Principal{Kind: PrincipalAdmin, UserID: adminPrincipal, Caps: n.adminCaps}
 }
 
-// AdminDecide evaluates one action for the admin principal (used by the
-// gRPC admin API: Recover / Presence / Survey gates).
-func (n *Node) AdminDecide(action Action, channel string) Decision {
-	return n.authorizer.Decide(n.adminPrincipal(), action, channel)
+// AdminPrincipal returns the node's built-in admin principal (UserID
+// "admin", capability bits from server.grpc_admin.capabilities). It is the
+// exact principal the admin API authorized with before per-call identities
+// existed; admin API callers pass it today, and S4 of the admin API key
+// design (§2.4) replaces those call sites with the per-request identity from
+// the auth context.
+func (n *Node) AdminPrincipal() Principal {
+	return n.adminPrincipal()
+}
+
+// AdminDecide evaluates one action for the caller-supplied principal p (used
+// by the gRPC admin API: Recover / Presence / Survey gates). Design §2.4:
+// the principal travels with the call instead of being built here, so the
+// decision follows whatever identity the caller carries.
+func (n *Node) AdminDecide(p Principal, action Action, channel string) Decision {
+	return n.authorizer.Decide(p, action, channel)
+}
+
+// AdminSessionNamespace resolves the namespace of the session identified by
+// sessionID for the admin API (design §2.4). The local hub is consulted
+// first; on a miss with the cluster enabled, the cluster session directory
+// is queried. The boolean reports whether the session was found *with a
+// resolved namespace*: a session whose namespace is still empty (never
+// resolved) reports ("", false), so scoped identities cannot observe it
+// (fail-closed). Callers holding the ["*"] identity may treat the boolean as
+// pure existence. Directory lookup errors are surfaced as not-found: the
+// result only feeds visibility decisions, never writes.
+func (n *Node) AdminSessionNamespace(ctx context.Context, sessionID string) (string, bool) {
+	if sessionID == "" {
+		return "", false
+	}
+	if client := n.hub.LookupSession(sessionID); client != nil {
+		ns := client.Namespace()
+		return ns, ns != ""
+	}
+	if !n.ClusterEnabled() {
+		return "", false
+	}
+	lease, err := n.clusterSessionDirectory().GetSessionLease(ctx, sessionID)
+	if err != nil {
+		log.WarnContext(ctx, "admin session namespace lookup failed", "session", sessionID, "error", err)
+		return "", false
+	}
+	if lease == nil || lease.Namespace == "" {
+		return "", false
+	}
+	return lease.Namespace, true
 }
 
 // AdminCapabilities returns the configured admin capability bits.

@@ -131,6 +131,31 @@ broker:
 		cfg.Transport.WebSocket.AllowedOrigins)
 }
 
+func TestBindConfigWithEnvAdminAuthTokens(t *testing.T) {
+	// The admin token list overrides via the plural env key (design D28):
+	// comma-separated values decode into server.grpc_admin.auth_tokens, and
+	// the cache TTL binding parses as a plain string.
+	t.Setenv("MESSAGELOOP_SERVER_GRPC_ADMIN_AUTH_TOKENS", "token-one-0123456789abcdef,token-two-0123456789abcdef")
+	t.Setenv("MESSAGELOOP_SERVER_GRPC_ADMIN_ADMIN_AUTH_CACHE_TTL", "45s")
+
+	source := newTestConfigSource(t, `
+server:
+  namespace: from-file
+transport:
+  websocket:
+    addr: ":9080"
+    path: "/ws"
+broker:
+  type: memory
+`)
+	var cfg config.Config
+	require.NoError(t, source.Unmarshal(&cfg))
+	assert.Equal(t,
+		[]string{"token-one-0123456789abcdef", "token-two-0123456789abcdef"},
+		cfg.Server.GRPCAdmin.AuthTokens)
+	assert.Equal(t, "45s", cfg.Server.GRPCAdmin.AdminAuthCacheTTL)
+}
+
 func TestBindConfigWithEnvIgnoresUnregisteredKey(t *testing.T) {
 	// server.authorizer is not in the BindEnv table; an env var cannot
 	// conjure an authorization rule that the config file does not define.
