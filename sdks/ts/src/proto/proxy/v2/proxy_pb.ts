@@ -16,7 +16,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file proxy/v2/proxy.proto.
  */
 export const file_proxy_v2_proxy: GenFile = /*@__PURE__*/
-  fileDesc("ChRwcm94eS92Mi9wcm94eS5wcm90bxIUbWVzc2FnZWxvb3AucHJveHkudjIi1QEKClJQQ1JlcXVlc3QSCgoCaWQYASABKAkSDwoHY2hhbm5lbBgCIAEoCRIOCgZtZXRob2QYAyABKAkSLwoHcGF5bG9hZBgEIAEoCzIeLm1lc3NhZ2Vsb29wLnNoYXJlZC52Mi5QYXlsb2FkEjEKCG1ldGFkYXRhGAUgASgLMh8ubWVzc2FnZWxvb3Auc2hhcmVkLnYyLk1ldGFkYXRhEg8KB3VzZXJfaWQYBiABKAkSEgoKc2Vzc2lvbl9pZBgHIAEoCRIRCgljbGllbnRfaWQYCCABKAkiqgEKC1JQQ1Jlc3BvbnNlEgoKAmlkGAEgASgJEi8KB3BheWxvYWQYAiABKAsyHi5tZXNzYWdlbG9vcC5zaGFyZWQudjIuUGF5bG9hZBIxCghtZXRhZGF0YRgDIAEoCzIfLm1lc3NhZ2Vsb29wLnNoYXJlZC52Mi5NZXRhZGF0YRIrCgVlcnJvchgEIAEoCzIcLm1lc3NhZ2Vsb29wLnNoYXJlZC52Mi5FcnJvciJ1ChNBdXRoZW50aWNhdGVSZXF1ZXN0EhEKCWNsaWVudF9pZBgBIAEoCRINCgV0b2tlbhgCIAEoCRITCgtjbGllbnRfdHlwZRgDIAEoCRISCgpzZXNzaW9uX2lkGAQgASgJEhMKC3JlbW90ZV9hZGRyGAUgASgJInYKFEF1dGhlbnRpY2F0ZVJlc3BvbnNlEisKBWVycm9yGAEgASgLMhwubWVzc2FnZWxvb3Auc2hhcmVkLnYyLkVycm9yEjEKCXVzZXJfaW5mbxgCIAEoCzIeLm1lc3NhZ2Vsb29wLnByb3h5LnYyLlVzZXJJbmZvInIKCFVzZXJJbmZvEgoKAmlkGAEgASgJEhAKCHVzZXJuYW1lGAIgASgJEg0KBXRva2VuGAMgASgJEhMKC2NsaWVudF90eXBlGAQgASgJEhEKCWNsaWVudF9pZBgFIAEoCRIRCgluYW1lc3BhY2UYBiABKAkiWgoTU3Vic2NyaWJlQWNsUmVxdWVzdBIPCgdjaGFubmVsGAEgASgJEg0KBXRva2VuGAIgASgJEg8KB3VzZXJfaWQYAyABKAkSEgoKc2Vzc2lvbl9pZBgEIAEoCSJDChRTdWJzY3JpYmVBY2xSZXNwb25zZRIrCgVlcnJvchgBIAEoCzIcLm1lc3NhZ2Vsb29wLnNoYXJlZC52Mi5FcnJvciJYChFQdWJsaXNoQWNsUmVxdWVzdBIPCgdjaGFubmVsGAEgASgJEg0KBXRva2VuGAIgASgJEg8KB3VzZXJfaWQYAyABKAkSEgoKc2Vzc2lvbl9pZBgEIAEoCSJBChJQdWJsaXNoQWNsUmVzcG9uc2USKwoFZXJyb3IYASABKAsyHC5tZXNzYWdlbG9vcC5zaGFyZWQudjIuRXJyb3IiOgoST25Db25uZWN0ZWRSZXF1ZXN0EhIKCnNlc3Npb25faWQYASABKAkSEAoIdXNlcm5hbWUYAiABKAkiFQoTT25Db25uZWN0ZWRSZXNwb25zZSJMChNPblN1YnNjcmliZWRSZXF1ZXN0EhIKCnNlc3Npb25faWQYASABKAkSDwoHY2hhbm5lbBgCIAEoCRIQCgh1c2VybmFtZRgDIAEoCSIWChRPblN1YnNjcmliZWRSZXNwb25zZSJOChVPblVuc3Vic2NyaWJlZFJlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRIPCgdjaGFubmVsGAIgASgJEhAKCHVzZXJuYW1lGAMgASgJIhgKFk9uVW5zdWJzY3JpYmVkUmVzcG9uc2UiPQoVT25EaXNjb25uZWN0ZWRSZXF1ZXN0EhIKCnNlc3Npb25faWQYASABKAkSEAoIdXNlcm5hbWUYAiABKAkiGAoWT25EaXNjb25uZWN0ZWRSZXNwb25zZTKuBgoMUHJveHlTZXJ2aWNlEkoKA1JQQxIgLm1lc3NhZ2Vsb29wLnByb3h5LnYyLlJQQ1JlcXVlc3QaIS5tZXNzYWdlbG9vcC5wcm94eS52Mi5SUENSZXNwb25zZRJlCgxBdXRoZW50aWNhdGUSKS5tZXNzYWdlbG9vcC5wcm94eS52Mi5BdXRoZW50aWNhdGVSZXF1ZXN0GioubWVzc2FnZWxvb3AucHJveHkudjIuQXV0aGVudGljYXRlUmVzcG9uc2USZQoMU3Vic2NyaWJlQWNsEikubWVzc2FnZWxvb3AucHJveHkudjIuU3Vic2NyaWJlQWNsUmVxdWVzdBoqLm1lc3NhZ2Vsb29wLnByb3h5LnYyLlN1YnNjcmliZUFjbFJlc3BvbnNlEl8KClB1Ymxpc2hBY2wSJy5tZXNzYWdlbG9vcC5wcm94eS52Mi5QdWJsaXNoQWNsUmVxdWVzdBooLm1lc3NhZ2Vsb29wLnByb3h5LnYyLlB1Ymxpc2hBY2xSZXNwb25zZRJiCgtPbkNvbm5lY3RlZBIoLm1lc3NhZ2Vsb29wLnByb3h5LnYyLk9uQ29ubmVjdGVkUmVxdWVzdBopLm1lc3NhZ2Vsb29wLnByb3h5LnYyLk9uQ29ubmVjdGVkUmVzcG9uc2USZQoMT25TdWJzY3JpYmVkEikubWVzc2FnZWxvb3AucHJveHkudjIuT25TdWJzY3JpYmVkUmVxdWVzdBoqLm1lc3NhZ2Vsb29wLnByb3h5LnYyLk9uU3Vic2NyaWJlZFJlc3BvbnNlEmsKDk9uVW5zdWJzY3JpYmVkEisubWVzc2FnZWxvb3AucHJveHkudjIuT25VbnN1YnNjcmliZWRSZXF1ZXN0GiwubWVzc2FnZWxvb3AucHJveHkudjIuT25VbnN1YnNjcmliZWRSZXNwb25zZRJrCg5PbkRpc2Nvbm5lY3RlZBIrLm1lc3NhZ2Vsb29wLnByb3h5LnYyLk9uRGlzY29ubmVjdGVkUmVxdWVzdBosLm1lc3NhZ2Vsb29wLnByb3h5LnYyLk9uRGlzY29ubmVjdGVkUmVzcG9uc2VCSVpHZ2l0aHViLmNvbS9tZXNzYWdlbG9vcGlvL21lc3NhZ2Vsb29wL3NoYXJlZC9nZW5wcm90by9wcm94eS92Mjtwcm94eXYycGJiBnByb3RvMw", [file_shared_v2_errors, file_shared_v2_types]);
+  fileDesc("ChRwcm94eS92Mi9wcm94eS5wcm90bxIUbWVzc2FnZWxvb3AucHJveHkudjIi1QEKClJQQ1JlcXVlc3QSCgoCaWQYASABKAkSDwoHY2hhbm5lbBgCIAEoCRIOCgZtZXRob2QYAyABKAkSLwoHcGF5bG9hZBgEIAEoCzIeLm1lc3NhZ2Vsb29wLnNoYXJlZC52Mi5QYXlsb2FkEjEKCG1ldGFkYXRhGAUgASgLMh8ubWVzc2FnZWxvb3Auc2hhcmVkLnYyLk1ldGFkYXRhEg8KB3VzZXJfaWQYBiABKAkSEgoKc2Vzc2lvbl9pZBgHIAEoCRIRCgljbGllbnRfaWQYCCABKAkiqgEKC1JQQ1Jlc3BvbnNlEgoKAmlkGAEgASgJEi8KB3BheWxvYWQYAiABKAsyHi5tZXNzYWdlbG9vcC5zaGFyZWQudjIuUGF5bG9hZBIxCghtZXRhZGF0YRgDIAEoCzIfLm1lc3NhZ2Vsb29wLnNoYXJlZC52Mi5NZXRhZGF0YRIrCgVlcnJvchgEIAEoCzIcLm1lc3NhZ2Vsb29wLnNoYXJlZC52Mi5FcnJvciJ1ChNBdXRoZW50aWNhdGVSZXF1ZXN0EhEKCWNsaWVudF9pZBgBIAEoCRINCgV0b2tlbhgCIAEoCRITCgtjbGllbnRfdHlwZRgDIAEoCRISCgpzZXNzaW9uX2lkGAQgASgJEhMKC3JlbW90ZV9hZGRyGAUgASgJInYKFEF1dGhlbnRpY2F0ZVJlc3BvbnNlEisKBWVycm9yGAEgASgLMhwubWVzc2FnZWxvb3Auc2hhcmVkLnYyLkVycm9yEjEKCXVzZXJfaW5mbxgCIAEoCzIeLm1lc3NhZ2Vsb29wLnByb3h5LnYyLlVzZXJJbmZvInIKCFVzZXJJbmZvEgoKAmlkGAEgASgJEhAKCHVzZXJuYW1lGAIgASgJEg0KBXRva2VuGAMgASgJEhMKC2NsaWVudF90eXBlGAQgASgJEhEKCWNsaWVudF9pZBgFIAEoCRIRCgluYW1lc3BhY2UYBiABKAkiWgoTU3Vic2NyaWJlQWNsUmVxdWVzdBIPCgdjaGFubmVsGAEgASgJEg0KBXRva2VuGAIgASgJEg8KB3VzZXJfaWQYAyABKAkSEgoKc2Vzc2lvbl9pZBgEIAEoCSJDChRTdWJzY3JpYmVBY2xSZXNwb25zZRIrCgVlcnJvchgBIAEoCzIcLm1lc3NhZ2Vsb29wLnNoYXJlZC52Mi5FcnJvciJYChFQdWJsaXNoQWNsUmVxdWVzdBIPCgdjaGFubmVsGAEgASgJEg0KBXRva2VuGAIgASgJEg8KB3VzZXJfaWQYAyABKAkSEgoKc2Vzc2lvbl9pZBgEIAEoCSJBChJQdWJsaXNoQWNsUmVzcG9uc2USKwoFZXJyb3IYASABKAsyHC5tZXNzYWdlbG9vcC5zaGFyZWQudjIuRXJyb3IiOgoST25Db25uZWN0ZWRSZXF1ZXN0EhIKCnNlc3Npb25faWQYASABKAkSEAoIdXNlcm5hbWUYAiABKAkiFQoTT25Db25uZWN0ZWRSZXNwb25zZSJMChNPblN1YnNjcmliZWRSZXF1ZXN0EhIKCnNlc3Npb25faWQYASABKAkSDwoHY2hhbm5lbBgCIAEoCRIQCgh1c2VybmFtZRgDIAEoCSIWChRPblN1YnNjcmliZWRSZXNwb25zZSJOChVPblVuc3Vic2NyaWJlZFJlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRIPCgdjaGFubmVsGAIgASgJEhAKCHVzZXJuYW1lGAMgASgJIhgKFk9uVW5zdWJzY3JpYmVkUmVzcG9uc2UiPQoVT25EaXNjb25uZWN0ZWRSZXF1ZXN0EhIKCnNlc3Npb25faWQYASABKAkSEAoIdXNlcm5hbWUYAiABKAkiGAoWT25EaXNjb25uZWN0ZWRSZXNwb25zZSJAChhBdXRoZW50aWNhdGVBZG1pblJlcXVlc3QSDwoHYXBpX2tleRgBIAEoCRITCgtyZW1vdGVfYWRkchgCIAEoCSJmChFBZG1pbklkZW50aXR5SW5mbxIOCgZrZXlfaWQYASABKAkSEgoKbmFtZXNwYWNlcxgCIAMoCRIUCgxjYXBhYmlsaXRpZXMYAyADKAkSFwoPbWF4X2FnZV9zZWNvbmRzGAQgASgDIoMBChlBdXRoZW50aWNhdGVBZG1pblJlc3BvbnNlEisKBWVycm9yGAEgASgLMhwubWVzc2FnZWxvb3Auc2hhcmVkLnYyLkVycm9yEjkKCGlkZW50aXR5GAIgASgLMicubWVzc2FnZWxvb3AucHJveHkudjIuQWRtaW5JZGVudGl0eUluZm8ypAcKDFByb3h5U2VydmljZRJKCgNSUEMSIC5tZXNzYWdlbG9vcC5wcm94eS52Mi5SUENSZXF1ZXN0GiEubWVzc2FnZWxvb3AucHJveHkudjIuUlBDUmVzcG9uc2USZQoMQXV0aGVudGljYXRlEikubWVzc2FnZWxvb3AucHJveHkudjIuQXV0aGVudGljYXRlUmVxdWVzdBoqLm1lc3NhZ2Vsb29wLnByb3h5LnYyLkF1dGhlbnRpY2F0ZVJlc3BvbnNlEmUKDFN1YnNjcmliZUFjbBIpLm1lc3NhZ2Vsb29wLnByb3h5LnYyLlN1YnNjcmliZUFjbFJlcXVlc3QaKi5tZXNzYWdlbG9vcC5wcm94eS52Mi5TdWJzY3JpYmVBY2xSZXNwb25zZRJfCgpQdWJsaXNoQWNsEicubWVzc2FnZWxvb3AucHJveHkudjIuUHVibGlzaEFjbFJlcXVlc3QaKC5tZXNzYWdlbG9vcC5wcm94eS52Mi5QdWJsaXNoQWNsUmVzcG9uc2USYgoLT25Db25uZWN0ZWQSKC5tZXNzYWdlbG9vcC5wcm94eS52Mi5PbkNvbm5lY3RlZFJlcXVlc3QaKS5tZXNzYWdlbG9vcC5wcm94eS52Mi5PbkNvbm5lY3RlZFJlc3BvbnNlEmUKDE9uU3Vic2NyaWJlZBIpLm1lc3NhZ2Vsb29wLnByb3h5LnYyLk9uU3Vic2NyaWJlZFJlcXVlc3QaKi5tZXNzYWdlbG9vcC5wcm94eS52Mi5PblN1YnNjcmliZWRSZXNwb25zZRJrCg5PblVuc3Vic2NyaWJlZBIrLm1lc3NhZ2Vsb29wLnByb3h5LnYyLk9uVW5zdWJzY3JpYmVkUmVxdWVzdBosLm1lc3NhZ2Vsb29wLnByb3h5LnYyLk9uVW5zdWJzY3JpYmVkUmVzcG9uc2USawoOT25EaXNjb25uZWN0ZWQSKy5tZXNzYWdlbG9vcC5wcm94eS52Mi5PbkRpc2Nvbm5lY3RlZFJlcXVlc3QaLC5tZXNzYWdlbG9vcC5wcm94eS52Mi5PbkRpc2Nvbm5lY3RlZFJlc3BvbnNlEnQKEUF1dGhlbnRpY2F0ZUFkbWluEi4ubWVzc2FnZWxvb3AucHJveHkudjIuQXV0aGVudGljYXRlQWRtaW5SZXF1ZXN0Gi8ubWVzc2FnZWxvb3AucHJveHkudjIuQXV0aGVudGljYXRlQWRtaW5SZXNwb25zZUJJWkdnaXRodWIuY29tL21lc3NhZ2Vsb29waW8vbWVzc2FnZWxvb3Avc2hhcmVkL2dlbnByb3RvL3Byb3h5L3YyO3Byb3h5djJwYmIGcHJvdG8z", [file_shared_v2_errors, file_shared_v2_types]);
 
 /**
  * @generated from message messageloop.proxy.v2.RPCRequest
@@ -458,6 +458,92 @@ export const OnDisconnectedResponseSchema: GenMessage<OnDisconnectedResponse> = 
   messageDesc(file_proxy_v2_proxy, 16);
 
 /**
+ * @generated from message messageloop.proxy.v2.AuthenticateAdminRequest
+ */
+export type AuthenticateAdminRequest = Message<"messageloop.proxy.v2.AuthenticateAdminRequest"> & {
+  /**
+   * 调用方出示的完整 Key 明文（由 proxy 后端校验）
+   *
+   * @generated from field: string api_key = 1;
+   */
+  apiKey: string;
+
+  /**
+   * 审计用
+   *
+   * @generated from field: string remote_addr = 2;
+   */
+  remoteAddr: string;
+};
+
+/**
+ * Describes the message messageloop.proxy.v2.AuthenticateAdminRequest.
+ * Use `create(AuthenticateAdminRequestSchema)` to create a new message.
+ */
+export const AuthenticateAdminRequestSchema: GenMessage<AuthenticateAdminRequest> = /*@__PURE__*/
+  messageDesc(file_proxy_v2_proxy, 17);
+
+/**
+ * AdminIdentityInfo 是 proxy 后端裁定的 admin 身份。key_id 必须是后端 Key 的
+ * 唯一 ID（非显示名：调用方 allow 列表按 "key:<id>" 匹配 principal，显示名
+ * 不唯一会串权限——设计 D26）。namespaces 空列表 = 拒绝一切（fail-closed）；
+ * capabilities 是能力位名称闭集，空 = 零能力；max_age_seconds 是相对时长
+ * （本验证结果至多再用多久，规避两系统时钟偏斜——D14/G8），0 = 用调用方配置 TTL。
+ *
+ * @generated from message messageloop.proxy.v2.AdminIdentityInfo
+ */
+export type AdminIdentityInfo = Message<"messageloop.proxy.v2.AdminIdentityInfo"> & {
+  /**
+   * @generated from field: string key_id = 1;
+   */
+  keyId: string;
+
+  /**
+   * @generated from field: repeated string namespaces = 2;
+   */
+  namespaces: string[];
+
+  /**
+   * @generated from field: repeated string capabilities = 3;
+   */
+  capabilities: string[];
+
+  /**
+   * @generated from field: int64 max_age_seconds = 4;
+   */
+  maxAgeSeconds: bigint;
+};
+
+/**
+ * Describes the message messageloop.proxy.v2.AdminIdentityInfo.
+ * Use `create(AdminIdentityInfoSchema)` to create a new message.
+ */
+export const AdminIdentityInfoSchema: GenMessage<AdminIdentityInfo> = /*@__PURE__*/
+  messageDesc(file_proxy_v2_proxy, 18);
+
+/**
+ * @generated from message messageloop.proxy.v2.AuthenticateAdminResponse
+ */
+export type AuthenticateAdminResponse = Message<"messageloop.proxy.v2.AuthenticateAdminResponse"> & {
+  /**
+   * @generated from field: messageloop.shared.v2.Error error = 1;
+   */
+  error?: Error;
+
+  /**
+   * @generated from field: messageloop.proxy.v2.AdminIdentityInfo identity = 2;
+   */
+  identity?: AdminIdentityInfo;
+};
+
+/**
+ * Describes the message messageloop.proxy.v2.AuthenticateAdminResponse.
+ * Use `create(AuthenticateAdminResponseSchema)` to create a new message.
+ */
+export const AuthenticateAdminResponseSchema: GenMessage<AuthenticateAdminResponse> = /*@__PURE__*/
+  messageDesc(file_proxy_v2_proxy, 19);
+
+/**
  * @generated from service messageloop.proxy.v2.ProxyService
  */
 export const ProxyService: GenService<{
@@ -534,6 +620,16 @@ export const ProxyService: GenService<{
     methodKind: "unary";
     input: typeof OnDisconnectedRequestSchema;
     output: typeof OnDisconnectedResponseSchema;
+  },
+  /**
+   * Admin API Key 校验（admin_auth 指派的 proxy 后端实现）
+   *
+   * @generated from rpc messageloop.proxy.v2.ProxyService.AuthenticateAdmin
+   */
+  authenticateAdmin: {
+    methodKind: "unary";
+    input: typeof AuthenticateAdminRequestSchema;
+    output: typeof AuthenticateAdminResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_proxy_v2_proxy, 0);

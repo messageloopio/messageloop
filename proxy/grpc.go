@@ -242,6 +242,27 @@ func (p *GRPCProxy) OnDisconnected(ctx context.Context, req *OnDisconnectedProxy
 	return FromProtoOnDisconnectedResponse(resp), nil
 }
 
+// AuthenticateAdmin implements Proxy.AuthenticateAdmin.
+func (p *GRPCProxy) AuthenticateAdmin(ctx context.Context, req *AuthenticateAdminProxyRequest) (*AuthenticateAdminProxyResponse, error) {
+	ctx, cancel := p.withTimeout(ctx)
+	defer cancel()
+
+	protoReq := req.ToProtoRequest()
+
+	log.DebugContext(ctx, "proxying gRPC AuthenticateAdmin request",
+		"proxy", p.name,
+		"endpoint", p.endpoint,
+		"remote_addr", req.RemoteAddr,
+	)
+
+	resp, err := p.client.AuthenticateAdmin(ctx, protoReq)
+	if err != nil {
+		return nil, fmt.Errorf("gRPC authenticate admin failed: %w", err)
+	}
+
+	return FromProtoAuthenticateAdminResponse(resp), nil
+}
+
 // withTimeout applies the proxy timeout if not already set in context.
 // The caller must defer the returned CancelFunc.
 func (p *GRPCProxy) withTimeout(ctx context.Context) (context.Context, context.CancelFunc) {

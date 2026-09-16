@@ -21,14 +21,15 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ProxyService_RPC_FullMethodName            = "/messageloop.proxy.v2.ProxyService/RPC"
-	ProxyService_Authenticate_FullMethodName   = "/messageloop.proxy.v2.ProxyService/Authenticate"
-	ProxyService_SubscribeAcl_FullMethodName   = "/messageloop.proxy.v2.ProxyService/SubscribeAcl"
-	ProxyService_PublishAcl_FullMethodName     = "/messageloop.proxy.v2.ProxyService/PublishAcl"
-	ProxyService_OnConnected_FullMethodName    = "/messageloop.proxy.v2.ProxyService/OnConnected"
-	ProxyService_OnSubscribed_FullMethodName   = "/messageloop.proxy.v2.ProxyService/OnSubscribed"
-	ProxyService_OnUnsubscribed_FullMethodName = "/messageloop.proxy.v2.ProxyService/OnUnsubscribed"
-	ProxyService_OnDisconnected_FullMethodName = "/messageloop.proxy.v2.ProxyService/OnDisconnected"
+	ProxyService_RPC_FullMethodName               = "/messageloop.proxy.v2.ProxyService/RPC"
+	ProxyService_Authenticate_FullMethodName      = "/messageloop.proxy.v2.ProxyService/Authenticate"
+	ProxyService_SubscribeAcl_FullMethodName      = "/messageloop.proxy.v2.ProxyService/SubscribeAcl"
+	ProxyService_PublishAcl_FullMethodName        = "/messageloop.proxy.v2.ProxyService/PublishAcl"
+	ProxyService_OnConnected_FullMethodName       = "/messageloop.proxy.v2.ProxyService/OnConnected"
+	ProxyService_OnSubscribed_FullMethodName      = "/messageloop.proxy.v2.ProxyService/OnSubscribed"
+	ProxyService_OnUnsubscribed_FullMethodName    = "/messageloop.proxy.v2.ProxyService/OnUnsubscribed"
+	ProxyService_OnDisconnected_FullMethodName    = "/messageloop.proxy.v2.ProxyService/OnDisconnected"
+	ProxyService_AuthenticateAdmin_FullMethodName = "/messageloop.proxy.v2.ProxyService/AuthenticateAdmin"
 )
 
 // ProxyServiceClient is the client API for ProxyService service.
@@ -48,6 +49,8 @@ type ProxyServiceClient interface {
 	OnSubscribed(ctx context.Context, in *OnSubscribedRequest, opts ...grpc.CallOption) (*OnSubscribedResponse, error)
 	OnUnsubscribed(ctx context.Context, in *OnUnsubscribedRequest, opts ...grpc.CallOption) (*OnUnsubscribedResponse, error)
 	OnDisconnected(ctx context.Context, in *OnDisconnectedRequest, opts ...grpc.CallOption) (*OnDisconnectedResponse, error)
+	// Admin API Key 校验（admin_auth 指派的 proxy 后端实现）
+	AuthenticateAdmin(ctx context.Context, in *AuthenticateAdminRequest, opts ...grpc.CallOption) (*AuthenticateAdminResponse, error)
 }
 
 type proxyServiceClient struct {
@@ -138,6 +141,16 @@ func (c *proxyServiceClient) OnDisconnected(ctx context.Context, in *OnDisconnec
 	return out, nil
 }
 
+func (c *proxyServiceClient) AuthenticateAdmin(ctx context.Context, in *AuthenticateAdminRequest, opts ...grpc.CallOption) (*AuthenticateAdminResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AuthenticateAdminResponse)
+	err := c.cc.Invoke(ctx, ProxyService_AuthenticateAdmin_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ProxyServiceServer is the server API for ProxyService service.
 // All implementations must embed UnimplementedProxyServiceServer
 // for forward compatibility.
@@ -155,6 +168,8 @@ type ProxyServiceServer interface {
 	OnSubscribed(context.Context, *OnSubscribedRequest) (*OnSubscribedResponse, error)
 	OnUnsubscribed(context.Context, *OnUnsubscribedRequest) (*OnUnsubscribedResponse, error)
 	OnDisconnected(context.Context, *OnDisconnectedRequest) (*OnDisconnectedResponse, error)
+	// Admin API Key 校验（admin_auth 指派的 proxy 后端实现）
+	AuthenticateAdmin(context.Context, *AuthenticateAdminRequest) (*AuthenticateAdminResponse, error)
 	mustEmbedUnimplementedProxyServiceServer()
 }
 
@@ -188,6 +203,9 @@ func (UnimplementedProxyServiceServer) OnUnsubscribed(context.Context, *OnUnsubs
 }
 func (UnimplementedProxyServiceServer) OnDisconnected(context.Context, *OnDisconnectedRequest) (*OnDisconnectedResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method OnDisconnected not implemented")
+}
+func (UnimplementedProxyServiceServer) AuthenticateAdmin(context.Context, *AuthenticateAdminRequest) (*AuthenticateAdminResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AuthenticateAdmin not implemented")
 }
 func (UnimplementedProxyServiceServer) mustEmbedUnimplementedProxyServiceServer() {}
 func (UnimplementedProxyServiceServer) testEmbeddedByValue()                      {}
@@ -354,6 +372,24 @@ func _ProxyService_OnDisconnected_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ProxyService_AuthenticateAdmin_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AuthenticateAdminRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProxyServiceServer).AuthenticateAdmin(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ProxyService_AuthenticateAdmin_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProxyServiceServer).AuthenticateAdmin(ctx, req.(*AuthenticateAdminRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ProxyService_ServiceDesc is the grpc.ServiceDesc for ProxyService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -392,6 +428,10 @@ var ProxyService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "OnDisconnected",
 			Handler:    _ProxyService_OnDisconnected_Handler,
+		},
+		{
+			MethodName: "AuthenticateAdmin",
+			Handler:    _ProxyService_AuthenticateAdmin_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

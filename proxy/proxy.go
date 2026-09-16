@@ -34,6 +34,9 @@ type Proxy interface {
 	// OnDisconnected notifies the backend when a client disconnects.
 	OnDisconnected(ctx context.Context, req *OnDisconnectedProxyRequest) (*OnDisconnectedProxyResponse, error)
 
+	// AuthenticateAdmin forwards an admin API key verification request to the backend service.
+	AuthenticateAdmin(ctx context.Context, req *AuthenticateAdminProxyRequest) (*AuthenticateAdminProxyResponse, error)
+
 	// Name returns the name of this proxy instance.
 	Name() string
 
@@ -398,4 +401,60 @@ func FromProtoOnDisconnectedResponse(resp *proxypb.OnDisconnectedResponse) *OnDi
 		return &OnDisconnectedProxyResponse{}
 	}
 	return &OnDisconnectedProxyResponse{}
+}
+
+// AuthenticateAdminProxyRequest represents an admin API key verification request to be proxied.
+type AuthenticateAdminProxyRequest struct {
+	APIKey     string
+	RemoteAddr string
+}
+
+// ToProtoRequest converts an AuthenticateAdminProxyRequest to the protobuf AuthenticateAdminRequest.
+func (r *AuthenticateAdminProxyRequest) ToProtoRequest() *proxypb.AuthenticateAdminRequest {
+	return &proxypb.AuthenticateAdminRequest{
+		ApiKey:     r.APIKey,
+		RemoteAddr: r.RemoteAddr,
+	}
+}
+
+// AuthenticateAdminProxyResponse represents an admin authentication response from the proxy backend.
+type AuthenticateAdminProxyResponse struct {
+	Error    *sharedv2.Error
+	Identity *AdminIdentityInfo
+}
+
+// AdminIdentityInfo represents the admin identity decided by the proxy backend.
+// KeyID is the backend's unique key ID (not the display name: allow lists match
+// principals as "key:<id>" and display names are not unique — design D26).
+// Empty Namespaces means deny everything (fail-closed); Capabilities is a
+// closed set of capability names where empty means no capabilities.
+// MaxAgeSeconds is a relative duration (how much longer this verification
+// result may be reused, avoiding clock skew between the two systems); 0 means
+// the caller's configured TTL.
+type AdminIdentityInfo struct {
+	KeyID         string
+	Namespaces    []string
+	Capabilities  []string
+	MaxAgeSeconds int64
+}
+
+// FromProtoAuthenticateAdminResponse creates an AuthenticateAdminProxyResponse from the protobuf AuthenticateAdminResponse.
+// Identity stays nil when the backend decided no identity (e.g. it answered with an error only).
+func FromProtoAuthenticateAdminResponse(resp *proxypb.AuthenticateAdminResponse) *AuthenticateAdminProxyResponse {
+	if resp == nil {
+		return &AuthenticateAdminProxyResponse{}
+	}
+	var identity *AdminIdentityInfo
+	if resp.Identity != nil {
+		identity = &AdminIdentityInfo{
+			KeyID:         resp.Identity.KeyId,
+			Namespaces:    resp.Identity.Namespaces,
+			Capabilities:  resp.Identity.Capabilities,
+			MaxAgeSeconds: resp.Identity.MaxAgeSeconds,
+		}
+	}
+	return &AuthenticateAdminProxyResponse{
+		Error:    resp.Error,
+		Identity: identity,
+	}
 }
