@@ -16,6 +16,7 @@ proxy:
   - name: mlbridge
     endpoint: "mlbridge:9070"
     timeout: 30s
+    api_auth: true
     grpc:
       insecure: true
     routes:
