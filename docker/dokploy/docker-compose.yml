@@ -90,8 +90,8 @@ x-bridge-env: &bridge-env
   MLBRIDGE_TORCHWOOD_BASE_URL: ${MLBRIDGE_TORCHWOOD_BASE_URL:?请在 Dokploy Environment 设置 Torchwood 网关地址：同机内网 http://torchwood-server:9080，或公网 https://tw.example.com}
   MLBRIDGE_TORCHWOOD_PROJECTS: ${MLBRIDGE_TORCHWOOD_PROJECTS:?请在 Dokploy Environment 设置 JSON 数组，如 [{"project_id":"myproj","api_key":"sk-..."}]}
   # admin 面：栈内 messageloop，token 与其共享同一变量。
-  MLBRIDGE_MESSAGELOOP_ADMIN_ADDR: messageloop:9091
-  MLBRIDGE_MESSAGELOOP_ADMIN_TOKEN: ${MESSAGELOOP_SERVER_API_AUTH_TOKENS}
+  MLBRIDGE_MESSAGELOOP_API_ADDR: messageloop:9091
+  MLBRIDGE_MESSAGELOOP_API_TOKEN: ${MESSAGELOOP_SERVER_API_AUTH_TOKENS}
   # 会话索引：与 broker 共用栈内 redis（键前缀 mlb:*，互不冲突）。
   MLBRIDGE_REDIS_ADDR: redis:6379
   MLBRIDGE_REDIS_DB: ${MLBRIDGE_REDIS_DB:-0}
