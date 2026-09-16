@@ -13,30 +13,31 @@
 
 ## 仓库布局
 
-仓库由三个独立的 Go 模块构成，生成代码与共享类型集中在 `shared/` 子模块中：
+仓库由三个独立的 Go 模块构成（外加 `_examples/` 下的独立演示模块），生成代码与共享类型集中在 `shared/` 子模块中：
 
 | 条目 | 职责 |
 | --- | --- |
-| 仓库根 `doc.go` | 模块根空壳（PR-KA-D15）：无导出符号 |
+| 仓库根 `doc.go` | 模块根空壳：无导出符号 |
 | `internal/runtime/` | 编排层：`Node` 协调器、Cluster 门面、recover、health、subscription saga、Sim 钩子、`session_runtime.go` |
-| `internal/session/` | Session Plane：`Session`/`Hub`/`Transport`/`Heartbeat` 与 `Runtime` 缝 |
+| `internal/session/` | Session Plane：`Session`/`Hub`/`Transport`/`Heartbeat`、命名空间守卫 `namespace.go` 与 `Runtime` 缝 |
 | `internal/stream/` | Broker 契约与内存实现 |
-| `internal/occupancy/`、`internal/survey/`、`internal/protocol/`、`internal/authz/`、`internal/channel/`、`internal/metrics/` | 叶子契约 |
+| `internal/channel/`、`internal/occupancy/`、`internal/survey/`、`internal/protocol/`、`internal/authz/`、`internal/metrics/` | 叶子契约：频道策略与 Interest 编译、在线状态、Survey、断连码/版本门、授权器、指标 |
 | `internal/cluster/` | 集群控制面契约（`contracts.go`、`epoch.go`、`user_index.go`）与 `hmac/`、`sim/` |
-| `internal/admin/` | 管理 gRPC API |
-| `cmd/server/` | 服务端入口 `main.go` 与 gRPC 启动预检 `runtime.go`，基于 `lynx` 框架 |
-| `config/` | 配置结构体定义与校验（`config.go`、`config_test.go`） |
-| `protocol/` | Protobuf 源文件（单一 buf module），下分 `shared/v2/`、`client/v2/`、`server/v2/`、`proxy/v2/`（v1 已于 D6 删尽） |
-| `shared/` | 独立 Go 模块 `github.com/messageloopio/messageloop/shared`；`genproto/` 为生成代码，`marshaler.go` 为 JSON/Protobuf 序列化器 |
+| `internal/admin/` | 管理 gRPC API（`admin_server.go`、`api_handler.go`） |
+| `cmd/server/` | 服务端入口 `main.go`、gRPC 启动预检 `runtime.go`、环境变量覆盖 `envconfig.go`，基于 `lynx` 框架 |
+| `config/` | 配置结构体定义与校验（`config.go`） |
+| `protocol/` | Protobuf 源文件（单一 buf module），下分 `shared/v2/`、`client/v2/`、`server/v2/`、`proxy/v2/` |
+| `shared/` | 独立 Go 模块 `github.com/messageloopio/messageloop/shared`；`genproto/` 为生成代码，`marshaler.go` 为 JSON/Protobuf 序列化器，`streamframe.go` 为 QUIC/KCP 的流帧与 ALPN 常量 |
 | `pkg/transport/ws/` | WebSocket 传输实现（含集成测试） |
 | `pkg/transport/grpc/` | gRPC 流式传输（客户端流 `client_server.go`、公共准备逻辑 `server.go`） |
 | `pkg/transport/quic/` | 可选 QUIC 客户端传输（一条双向流 + 长度前缀帧，TLS 1.3 / ALPN 协商编码） |
 | `pkg/transport/kcp/` | 可选 KCP 客户端传输（TLS 加密的 KCP 会话 + 长度前缀帧，ALPN 协商编码） |
-| `pkg/topics/` | 主题匹配器：`cstrie`（默认并发实现）、`trie`、`naive`、`inverted_bitmap` 等 |
-| `pkg/redisbroker/` | Redis broker 实现：Streams 历史、Pub/Sub 实时分发、Redis 支撑的 presence 与集群命令总线 |
+| `pkg/topics/` | 主题匹配器：`cstrie`（默认并发实现）、`trie`、`naive`、`inverted_bitmap` 等，及命名空间校验 `namespace.go` |
+| `pkg/redisbroker/` | Redis broker 实现：Streams 历史、Pub/Sub 实时分发、Redis 支撑的 presence 与集群控制面（目录/命令总线/查询存储） |
 | `proxy/` | RPC 代理后端集成（HTTP/gRPC 后端、路由、超时） |
-| `sdks/go/` | 独立 Go 模块 `github.com/messageloopio/messageloop/sdks/go`：客户端 SDK（`client.go`、`websocket.go`、`grpc.go`、`quic.go`、`kcp.go`、`proxy.go`、`mux.go`、`options.go`）与 `example/` 示例 |
+| `sdks/go/` | 独立 Go 模块 `github.com/messageloopio/messageloop/sdks/go`：客户端 SDK（`client.go`、`websocket.go`、`grpc.go`、`quic.go`、`kcp.go`、`message.go`、`presence.go`、`survey.go`、`gap.go`、`disconnect.go`、`proxy.go`、`mux.go`、`options.go`）与 `example/` 示例 |
 | `sdks/ts/` | TypeScript SDK（`@messageloop/sdk`），含 `src/`、`test/` 与生成的 `src/proto/` |
+| `_examples/chatroom/` | 独立 Go 模块的端到端演示应用（`cmd/backend`、`e2e`、`goclient`、`web`）；CI 会构建它 |
 | `docs/` | 文档：根目录为英文版协议与部署文档，`developer/` 为本开发者文档套件 |
 | `Taskfile.yml`、`buf.yaml`、`buf.gen.yaml`、`buf.lock` | 任务定义与 buf 配置 |
 | `config-example.yaml` | 完整配置参考示例 |
@@ -48,7 +49,7 @@
 - **shared 模块** `github.com/messageloopio/messageloop/shared`，`go 1.25.5`，仅依赖 `grpc` 与 `protobuf`。
 - **sdks/go 模块** `github.com/messageloopio/messageloop/sdks/go`，`go 1.25.5`，通过 `replace github.com/messageloopio/messageloop/shared => ./../../shared` 引用 shared 模块。
 
-因此根目录执行 `go build ./...` 只会覆盖根模块；shared 与 sdks/go 需要在各自目录内单独构建与测试。根模块的 `require` 中同时保留了 shared 的远程版本（`v0.1.0`），本地开发依赖 `replace` 覆盖。
+因此根目录执行 `go build ./...` 只会覆盖根模块；shared 与 sdks/go 需要在各自目录内单独构建与测试。根模块的 `require` 中同时保留了 shared 的远程版本（`v0.2.0`），本地开发依赖 `replace` 覆盖。
 
 ## 构建与测试
 
@@ -69,16 +70,16 @@ go test ./pkg/topics/...
 go test -v ./pkg/topics/... -run TestCSTrieMatcher
 ```
 
-`task test` 定义为 `go test -race ./...`，是 CI 之外最接近的门禁。shared 与 sdks/go 是独立模块，需在其目录内执行 `go test ./...`（shared 模块当前无测试；sdks/go 含 `client_test.go`、`message_test.go`、`proxy_test.go` 等）。
+`task test` 定义为 `go test -race ./...`，是 CI 之外最接近的门禁。shared 与 sdks/go 是独立模块，需在其目录内执行 `go test ./...`（shared 含 `marshaler_test.go`、`streamframe_test.go`；sdks/go 含 `client_test.go`、`message_test.go`、`proxy_test.go`、`subscribe_ack_test.go` 等）。
 
 ### 需要 Redis 的集成测试
 
-以下测试在启动时通过 Redis `Ping` 探测可用性，失败则调用 `t.Skipf` 自动跳过，无需 build tag 或环境变量开关：
+以下测试在启动时通过 Redis `Ping` 探测可用性，失败则调用 `t.Skipf` 自动跳过，无需 build tag 或环境变量开关。各测试族使用不同的 DB，避免 `go test ./...` 包间并发互清库：
 
 - `sdks/go/e2e_process_test.go`：Go SDK 黑盒 e2e，使用 **DB 13**。
-- `internal/runtime/cluster_redis_integration_test.go` 原子写测（`clusterAtomicWriteTestDB`）：使用 **DB 14**。
+- `internal/runtime/cluster_redis_integration_test.go` 原子写测：使用 **DB 14**。
 - `internal/runtime/cluster_redis_integration_test.go` 多节点会话/查询/在线状态：使用 **DB 15**，测试前后执行 `FlushDB`。
-- `pkg/redisbroker/` 集成测试（命令总线、history、presence、pubsub 等，经 `requireCommandBusRedis`）：使用 **DB 16**。测试前后 `FlushDB`。与 DB 14/15 隔离，避免 `go test ./...` 包间并发互清库。
+- `pkg/redisbroker/` 集成测试（命令总线、history、presence、pubsub 等）：使用 **DB 12**（Redis 默认只有 DB 0–15，更高编号会探测失败导致整套用例静默跳过），测试前后 `FlushDB`。
 
 连接参数通过环境变量配置：
 
@@ -94,20 +95,24 @@ go test -race -v ./pkg/redisbroker/...
 
 没有 Redis 时这些测试直接跳过，其余测试不受影响。此外，`pkg/transport/ws/integration_test.go` 与 `pkg/transport/grpc/port_integration_test.go` 属于端到端用例：它们在测试内直接构造 `runtime.NewNode(...)` 与进程内组件（不依赖外部运行中的服务器），随 `go test ./...` 一起执行。
 
-## 静态检查
+## 静态检查与 CI
 
 ```bash
 task vet   # go vet ./...
 task lint  # golangci-lint run
 ```
 
-CI（`.github/workflows/ci.yml`）在 push/PR 到 `main` 与 `v2` 时运行三个 job：
+`.github/workflows/` 下有两个 workflow：
+
+**ci.yml**（push/PR 到 `main` 与 `v2` 触发）运行三个 job：
 
 - `build-and-test`：挂 `redis:7` service（`127.0.0.1:6379`，无密码，供 Redis 集成测试真实运行），随后 `go build ./...`、`go vet ./...`、以钉版 buf（`v1.65.0`）执行 `buf generate` 并用 `git diff --exit-code` 校验生成物为最新、`go test -race -coverprofile=coverage.out -covermode=atomic ./...`，再依次跑子模块 `shared`/`sdks/go` 的 `go test ./...` 与 `_examples/chatroom` 的 `go build ./...`；PR 场景上传覆盖率产物。
 - `ts-sdk`：`actions/setup-node@v4`（Node 24.11.1）后在 `sdks/ts` 执行 `npm ci`、`npm run build`、`npx jest`。
 - `lint`：`golangci/golangci-lint-action@v7`（version 固定为 `v2.12.2`）。
 
 CI 会以钉版 buf 执行 `buf generate` 并校验零 diff；协议代码变更必须本地用同一版本（`task init` 安装）重新生成后随提交进入仓库。
+
+**docker-publish.yml**（镜像发布）：构建服务端镜像并发布到 `ghcr.io/messageloopio/messageloop`——push 到 `main` 产出 `latest`，`v*` 标签产出 semver 标签，每次运行附带 commit SHA 标签；PR 仅做构建门禁不推送。
 
 ## Protobuf 工作流
 
@@ -171,7 +176,7 @@ breaking:
 
 ### 错误处理
 
-- 主动断连使用类型化 `Disconnect` 错误（`disconnect.go`），带编号代码：`3000` 正常关闭，`3500–3509` 各类终端错误（`DisconnectBadRequest`、`DisconnectStale` 等），`3511` 空闲超时，`3512` 慢消费者，`3513` 内部错误（connect 路径失败时强制断连）。
+- 主动断连使用类型化 `Disconnect` 错误（internal/protocol/disconnect.go），带编号代码：`3000` 正常关闭，`3500–3509` 各类终端错误（`DisconnectBadRequest`、`DisconnectStale` 等），`3511` 空闲超时，`3512` 慢消费者，`3513` 内部错误，`3514` 协议版本过旧。
 - 用 `fmt.Errorf("context: %w", err)` 包装错误保留链，用 `errors.As` / `errors.Is` 判断类型或哨兵值。
 - 返回前在适当级别记录日志，不要无理由吞掉错误。
 
@@ -183,15 +188,15 @@ breaking:
 
 ## 测试约定
 
-- 单元测试与被测源码同目录、同包，命名 `*_test.go`，函数为 `TestXxx(t *testing.T)` 或 `BenchmarkXxx(b *testing.B)`。
+- 单元测试与被测源码同目录、同包（或 `<pkg>_test` 外部测试包），命名 `*_test.go`，函数为 `TestXxx(t *testing.T)` 或 `BenchmarkXxx(b *testing.B)`。
 - 断言使用 `testify/assert`（轻量断言）与 `testify/require`（失败即中止，集成测试中常用）。
 - 偏好表驱动测试（table-driven tests）。
 - 集成测试位置：
-  - `pkg/websocket/integration_test.go`：WebSocket 连接与发布。
-  - `pkg/grpcstream/integration_test.go`、`pkg/grpcstream/port_integration_test.go`：gRPC 流端到端。
-  - 根目录 `cluster_redis_integration_test.go`：需要 Redis 的多节点集群行为。
-- 双进程黑盒 e2e 位于 `sdks/go/e2e_process_test.go`（`TestE2EProcess`）：测试 `go build` 出真实 `cmd/server` 子进程，用 Go SDK 过真实 socket 跑 WS 全流程、历史回放、gRPC 传输与 admin gRPC 冒烟；运行方式为 `cd sdks/go && go test -count=1 -run TestE2EProcess .`。
-  Redis 变体按 `MESSAGELOOP_TEST_REDIS_ADDR`（默认 `127.0.0.1:6379`）探测，连不上自动 skip（使用 DB 13）。
+  - `pkg/transport/ws/integration_test.go`：WebSocket 连接与发布。
+  - `pkg/transport/grpc/integration_test.go`、`pkg/transport/grpc/port_integration_test.go`：gRPC 流端到端与端口分离。
+  - `internal/runtime/cluster_redis_integration_test.go`：需要 Redis 的多节点集群行为。
+  - `internal/runtime/cluster_sim_test.go` 与 `internal/cluster/sim/`：不依赖 Redis 的确定性 fencing 模拟（见[《分布式集群指南》](04-cluster.md) 第 12 节）。
+- 双进程黑盒 e2e 位于 `sdks/go/e2e_process_test.go`（`TestE2EProcess`）：测试 `go build` 出真实 `cmd/server` 子进程，用 Go SDK 过真实 socket 跑 WS 全流程、历史回放、gRPC 传输与 admin gRPC 冒烟；运行方式为 `cd sdks/go && go test -count=1 -run TestE2EProcess .`。Redis 变体按 `MESSAGELOOP_TEST_REDIS_ADDR`（默认 `127.0.0.1:6379`）探测，连不上自动 skip（使用 DB 13）。
 - 默认以 `task test`（`go test -race ./...`）作为完整门禁，与 CI 一致。
 
 ## 本地运行开发服务器
@@ -200,12 +205,12 @@ breaking:
 go run ./cmd/server --config ./config.yaml
 ```
 
-命令行参数（`cmd/server/main.go` 中通过 pflag 定义）：
+命令行参数（cmd/server/main.go 中通过 pflag 定义）：
 
 - `--config <path>`：配置文件路径，默认 `./config.yaml`。
 - `--log-level <level>`：日志级别，默认 `info`。
 
-默认监听端口（可通过配置覆盖，详见[《配置参考》](02-configuration.md)）：
+默认监听端口（可通过配置或 `MESSAGELOOP_*` 环境变量覆盖，详见[《配置参考》](02-configuration.md)）：
 
 | 监听器 | 配置键 | 默认值 |
 | --- | --- | --- |
@@ -219,25 +224,24 @@ go run ./cmd/server --config ./config.yaml
 仓库内的配置示例用途：
 
 - `config.yaml`：默认开发配置；broker 类型为 `redis`，连接 `127.0.0.1:6379`（密码 `123456`，DB 10），并注册一个指向 `127.0.0.1:8090` 的示例代理。
-- `config-node1.yaml` / `config-node2.yaml`：双节点集群演示，端口分别使用 `18/19/29` 前缀（如 WebSocket `:19080` / `:29080`），两个节点共享同一个 Redis 实例，用于本地验证集群功能。
+- `config-node1.yaml` / `config-node2.yaml`：双节点集群演示，端口分别使用 `18/19` 与 `28/29` 前缀（如 WebSocket `:19080` / `:29080`），两个节点共享同一个 Redis 实例，用于本地验证集群功能（需自行补 `cluster` 段与 HMAC 密钥）。
 - `configs/test.yaml`：端到端测试配置，明确 `grpc_admin` 为 `127.0.0.1:9091`，broker 为 Redis。
 - `config-example.yaml`：完整字段参考，所有配置项的权威示例。
 
 ## TypeScript SDK 开发
 
-SDK 位于 `sdks/ts/`，包名 `@messageloop/sdk`，要求 Node.js >= 18，运行依赖 `@bufbuild/protobuf`（`^2.0.0`），`@grpc/grpc-js` 为 peer 依赖：
+SDK 位于 `sdks/ts/`，包名 `@messageloop/sdk`（当前版本 `1.2.0`），要求 Node.js >= 18，运行依赖 `@bufbuild/protobuf`（`^2.0.0`）与 `ws`（Node 18–20 无全局 `WebSocket` 时使用）：
 
 ```bash
 npm install        # 安装依赖
 npm run build      # 依次构建 ESM、CJS 与类型声明（dist/esm、dist/cjs、dist/types）
 npm test           # Jest 测试（ts-jest，测试位于 test/）
-npm run lint       # ESLint 检查 src/
 ```
 
 构建与测试细节：
 
 - `tsconfig.json`：ES2020 目标、`strict` 开启，输出 `dist/esm`；`tsconfig.node.json` 负责 CJS 输出。
-- 测试由 `jest.config.js` 配置，preset 为 `ts-jest`，环境 `node`，roots 为 `test/`。
+- 测试由 `jest.config.js` 配置，preset 为 `ts-jest`，环境 `node`，roots 为 `test/`。测试文件覆盖客户端选项构造（`client.test.ts`）、编解码（`codec.test.ts`）、协议行为（`protocol.test.ts`、`regression.test.ts`）、订阅生效契约（`subscribe_ack.test.ts`）、GapNotice（`gapnotice.test.ts`）与 Presence/Survey 能力（`pr09.test.ts`）。
 - `src/proto/` 下为 buf 生成的代码，不要手工编辑（见[Protobuf 工作流](#protobuf-工作流)）；手写封装位于 `src/client/`、`src/message/`、`src/transport/`。
 - 详细用法见[《TypeScript SDK 指南》](08-sdk-ts.md)。
 
@@ -247,10 +251,10 @@ npm run lint       # ESLint 检查 src/
 
 - `task release-all`：依次为三个模块打 annotated tag 并推送：`v0.2.0`（根）、`shared/v0.2.0`（shared 模块）、`sdks/go/v0.2.0`（Go SDK）。标签格式为 `git tag -a <tag> -m <comment>` 后 `git push origin <tag>`，三组标签共享同一版本号，用目录前缀区分模块。
 - `task release-tag`：单独打一个标签并推送（`task release-tag Version=v0.2.0` 形式覆盖变量）。
-- `task release-sdk-ts`：在 `sdks/ts/` 下执行 `npm exec rimraf -- dist` 清理、`npm run build` 构建、`npm publish --access public --registry https://registry.npmjs.org/` 发布。注意 npm 包版本（`package.json` 的 `version`，当前 `1.1.0`）独立于 Go 侧标签，需要单独递增。
+- `task release-sdk-ts`：在 `sdks/ts/` 下执行 `npm exec rimraf -- dist` 清理、`npm run build` 构建、`npm publish --access public --registry https://registry.npmjs.org/` 发布。注意 npm 包版本（`package.json` 的 `version`，当前 `1.2.0`）独立于 Go 侧标签，需要单独递增。
 - `task upgrade-lynx`：批量升级 `lynx` 框架及 contrib 依赖（`go get -u github.com/lynx-go/x` 等）后 `go mod tidy`。
 
-CI 在 push/PR 合并前自动执行构建、vet、带竞态与覆盖率的测试以及 golangci-lint，发布动作均为手动触发。
+自动化发布有两条路：Go 侧标签由 `task release-*` 手动打；容器镜像由 `docker-publish.yml` 在 push `main`（`latest`）与 `v*` 标签（semver）时自动发布到 GHCR。CI 在 push/PR 合并前自动执行构建、vet、带竞态与覆盖率的测试以及 golangci-lint。
 
 ## 交叉链接
 

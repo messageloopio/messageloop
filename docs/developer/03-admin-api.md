@@ -10,13 +10,13 @@
 messageloop.server.v2.APIService
 ```
 
-所有 RPC 均为普通一元调用（unary call），不涉及流式传输。管理 API 监听在独立的端口上，地址由配置项 `server.grpc_admin.addr` 指定（见[《配置参考》](02-configuration.md)）。在进程内部，管理 API 的处理器与客户端流共享同一个 `Node` 实例，因此管理操作直接作用于在线客户端会话。
+所有 RPC 均为普通一元调用（unary call），不涉及流式传输。管理 API 监听在独立的端口上，地址由配置项 `server.grpc_admin.addr` 指定（必填，见[《配置参考》](02-configuration.md)）。在进程内部，管理 API 的处理器（internal/admin/api_handler.go）与客户端流共享同一个 `Node` 实例，因此管理操作直接作用于在线客户端会话。
 
 服务共声明 8 个 RPC：
 
 | RPC | 说明 |
 | --- | --- |
-| `Publish` | 服务端向频道或指定会话发布消息 |
+| `Publish` | 服务端向频道、指定会话或指定用户发布消息 |
 | `Disconnect` | 强制断开客户端会话 |
 | `Subscribe` | 让某个会话订阅频道 |
 | `Unsubscribe` | 让某个会话取消订阅频道 |
@@ -31,14 +31,15 @@ messageloop.server.v2.APIService
 
 | 配置键 | 说明 |
 | --- | --- |
-| `server.grpc_admin.addr` | 管理 API 监听地址（监听器在启动预检阶段即绑定） |
+| `server.grpc_admin.addr` | 管理 API 监听地址（必填，监听器在启动预检阶段即绑定） |
 | `server.grpc_admin.auth_token` | 管理 API 访问令牌；`addr` 非空时该字段与 `allow_insecure` 必须至少设置一个（否则配置校验失败） |
 | `server.grpc_admin.allow_insecure` | 显式放弃强制鉴权（仅限开发/受控环境）；置为 true 时 `auth_token` 可留空 |
 | `server.grpc_admin.tls.cert_file` / `server.grpc_admin.tls.key_file` | TLS 证书与私钥，必须同时设置或同时留空 |
+| `server.grpc_admin.capabilities` | Admin 能力位闭集，见下文[能力位](#能力位capabilities) |
 
-### 鉴权
+### 鉴权（Bearer Token）
 
-当 `server.grpc_admin.auth_token` 配置了非空值时，管理服务器会为所有一元 RPC 安装一个 unary interceptor（见 `pkg/grpcstream/server.go` 中的 `adminAuthInterceptor`）。该拦截器要求每个请求的 gRPC 元数据（metadata）中带有 `authorization` 头，格式为：
+当 `server.grpc_admin.auth_token` 配置了非空值时，管理服务器会为所有一元 RPC 安装一个 unary 拦截器（`AdminAuthInterceptor`，pkg/transport/grpc/server.go）。该拦截器要求每个请求的 gRPC 元数据（metadata）中带有 `authorization` 头，格式为：
 
 ```
 authorization: Bearer <token>
@@ -54,6 +55,27 @@ authorization: Bearer <token>
 
 生产环境必须配置 `server.grpc_admin.auth_token`，并将管理端口绑定到回环或私有网络接口（见 [../deployment.md](../deployment.md)）。鉴权未启用时，任何能访问该端口的主机都可以执行全部管理操作。
 
+### 能力位（capabilities）
+
+Bearer Token 之外，每个 RPC 还受 `server.grpc_admin.capabilities` 能力位门控（处理器内的 `requireAdminCaps` 检查，缺位返回 `PermissionDenied`）：
+
+| 能力位 | 控制的操作 |
+| --- | --- |
+| `session.act` | `Disconnect`（会话定向操作） |
+| `user.fanout` | 按 user 展开（`Publish.users` / `Disconnect.users` / `Subscribe.user_id` / `Unsubscribe.user_id`） |
+| `history.read` | `GetHistory` |
+| `presence.read` | `GetPresence` |
+| `channels.list` | `GetChannels` |
+| `subscribe.any` | `Subscribe` / `Unsubscribe`（代订阅操作） |
+| `survey.bypass_gate` | `Survey` 绕过客户端 Survey 的门限制（无此位时受 Authorizer 与 `max_survey_subscribers` 约束，见 [Survey](#survey)） |
+| `presence.large_snapshot` | `GetPresence` 返回完整快照（无此位时按上限截断） |
+
+`capabilities` 省略时默认为除 `pattern.global`（预留位）外的全部能力；显式 `[]` 表示零能力，锁死 Admin 数据面。完整语义见[《配置参考》](02-configuration.md) server 节。
+
+### 命名空间
+
+按 user 寻址必须携带命名空间：`Publication.Destination.namespace`（users 非空时必填）、`DisconnectRequest.namespace`（`users` 非空时必填）、`SubscribeRequest.namespace` / `UnsubscribeRequest.namespace`（`user_id` 非空时必填），缺失返回 `InvalidArgument`。会话按命名空间作用域隔离，user→sessions 展开只在该命名空间的索引内进行。
+
 ### TLS
 
 当 `server.grpc_admin.tls.cert_file` 与 `server.grpc_admin.tls.key_file` 成对设置时，管理服务器以 TLS 方式服务；二者必须同时设置或同时留空（配置校验见《配置参考》[02-configuration.md](02-configuration.md)）。
@@ -68,7 +90,7 @@ grpcurl \
   -proto server/v2/api.proto \
   -H "authorization: Bearer <token>" \
   -plaintext \
-  -d '{"channel": "chat.general"}' \
+  -d '{"channel": "dev:chat.general"}' \
   127.0.0.1:9091 \
   messageloop.server.v2.APIService/GetPresence
 ```
@@ -83,7 +105,7 @@ grpcurl \
 
 ### Publish
 
-服务端向频道（channel）或指定会话（session）发布消息。
+服务端向频道（channel）、指定会话（session）或指定用户（user）发布消息。
 
 请求消息 `PublishRequest`：
 
@@ -97,29 +119,29 @@ grpcurl \
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `id` | `string` | 出版物标识；会话投递时作为消息的 `id` 透传给客户端 |
-| `destination` | `Destination` | 投递目标：`sessions`（会话 ID 列表）、`channels`（频道列表）或 `users`（用户 ID 列表），可以同时指定 |
+| `destination` | `Destination` | 投递目标：`sessions`（会话 ID 列表）、`channels`（频道列表）、`users`（用户 ID 列表）与 `namespace`（user 展开的作用域），可以同时指定前三者 |
 | `options` | `Options` | 投递选项，目前仅声明 `add_history` |
 | `payload` | `shared.v2.Payload` | 消息载荷，支持 `text`、`binary`、`json` 三种形式 |
-| `metadata` | `shared.v2.Metadata` | 已声明但当前处理器未使用，会被忽略 |
+| `metadata` | `shared.v2.Metadata` | 元数据键值对，随消息透传给客户端 |
 
 `Publication.Options.add_history`：控制频道发布是否写入历史。
 - `true`：写入 broker 历史，后续可通过 `GetHistory` 补拉。
 - `false` 或未设置：以 transient 方式发布，不写历史。
-- 会话目标（`destination.sessions`）与用户目标（`destination.users`）不受该选项影响，始终直接投递到会话。
+- 会话目标与用户目标不受该选项影响，始终直接投递到会话。
+- 频道的授权策略（`Authorizer` Effects）可以否决该选项：策略禁历史（`transient_only` 或 `history=false`）时 `add_history=true` 被拒绝——该条投递计为失败、不发布（避免误以为写入了历史）；`AdminCanPublish` 授权拒绝同样计为失败。
 
 响应消息 `PublishResponse`：空消息，不返回任何字段。单条出版物的投递结果（例如 broker 分配的 offset）不会暴露给调用方。
 
 语义：
 
-- 载荷转换：`binary` 直接使用原始字节；`text` 按 UTF-8 字节发送；`json` 会被序列化为 JSON 字节后按文本发送。载荷为 nil 时发送空载荷。
-- 频道投递：默认以 transient 方式发布，不写历史；仅当 `options.add_history` 为 `true` 时通过 broker 的 `Publish` 路径发布并写入历史，与客户端发布走同一管道（见[《架构指南》](01-architecture.md)）。
-- 会话投递：向目标会话直接发送一条 `publication` 信封，消息的 `channel` 字段为空字符串（会话定向消息没有频道），`id` 为 `Publication.id`。目标会话不存在时**跳过**该投递，不报错、不计入失败（仅记录 debug 日志）。
-- 用户投递：`destination.users` 里的每个用户先展开为该用户的**全部 session**（单节点来自本地 hub 的 user 索引；集群下并上 Redis user 索引），展开结果与 `destination.sessions` **取并集（去重）**后走会话投递；`channels` 可同时指定或留空。**只有 users 的 destination 是合法的**，与 sessions 一样按会话逐个 best-effort 投递。展开时**始终校验** session lease 的 `UserID`（本地客户端则校验 `Client.UserID()`）：索引里的陈旧/投毒条目会被跳过；索引 miss 不做全集群 SCAN，靠周期 repair 收敛。
-- 部分失败语义：由于 `PublishResponse` 没有按条目返回的字段，失败只能通过整体结果表达。每条失败投递（目标会话发送失败、目标频道发布失败、载荷序列化失败、缺少 destination）都会记录错误日志；仅当**所有**投递尝试全部失败时，RPC 返回状态码 `Internal`（错误信息形如 `all N delivery attempt(s) failed`）；只要有一条成功，RPC 就返回空响应。
+- 载荷转换：`binary` 直接使用原始字节；`text` 按 UTF-8 字节发送；`json` 会被序列化为 JSON 字节后按文本发送。载荷为 nil 时发送空载荷。`metadata.entries` 随消息透传。
+- 频道投递：默认以 transient 方式发布，不写历史；仅当 `options.add_history` 为 `true` 且频道策略允许时通过 broker 的 `Publish` 路径发布并写入历史，与客户端发布走同一管道（见[《架构指南》](01-architecture.md)）。
+- 会话投递：向目标会话直接发送一条 `publication` 信封，消息的 `channel` 字段为空字符串（会话定向消息没有频道），`id` 为 `Publication.id`。目标会话不存在时跳过该投递，不报错、不计入失败（仅记录 debug 日志）。
+- 用户投递：`destination.users` 里的每个用户先展开为该用户在 `destination.namespace` 下的全部 session（单节点来自本地 hub 的 user 索引；集群下并上 Redis user 索引），展开结果与 `destination.sessions` 取并集（去重）后走会话投递。`users` 非空时 `namespace` 必填，否则 `InvalidArgument`；`users` 含空字符串也是 `InvalidArgument`，且不做任何扫描（匿名连接不可按 user 寻址）。展开时始终校验 session lease 的 `UserID`：索引里的陈旧/投毒条目会被跳过；索引 miss 不做全集群扫描，靠周期 repair 收敛。
+- 部分失败语义：由于 `PublishResponse` 没有按条目返回的字段，失败只能通过整体结果表达。每条失败投递（目标会话发送失败、目标频道发布失败或被策略/授权拒绝、载荷序列化失败、缺少 destination）都会记录错误日志；仅当所有投递尝试全部失败时，RPC 返回状态码 `Internal`（错误信息形如 `all N delivery attempt(s) failed`）；只要有一条成功，RPC 就返回空响应。
 - destination 为 nil 或 `sessions`、`channels`、`users` 均为空时，该条出版物视为失败。
-- `destination.users`（以及其它按 user 字段）中的**空字符串**是客户端错误：RPC 返回 `InvalidArgument`，且**不做任何扫描**（匿名连接不可按 user 寻址）。
 
-返回的错误码：`Internal`、`InvalidArgument`。
+返回的错误码：`Internal`、`InvalidArgument`、`PermissionDenied`（能力位缺失）。
 
 集群感知：见 [集群感知行为](#集群感知行为)。
 
@@ -134,7 +156,8 @@ grpcurl \
 | `sessions` | `repeated string` | 要断开的会话 ID 列表 |
 | `code` | `uint32` | 断开码（disconnect code），原样传给客户端 |
 | `reason` | `string` | 人类可读的断开原因，原样传给客户端 |
-| `users` | `repeated string` | 要断开的用户 ID 列表；每个用户展开为其全部 session，与 `sessions` 取并集（去重）后逐个断开 |
+| `users` | `repeated string` | 要断开的用户 ID 列表；每个用户展开为其命名空间下的全部 session，与 `sessions` 取并集（去重）后逐个断开 |
+| `namespace` | `string` | user 展开的作用域；`users` 非空时必填 |
 
 响应消息 `DisconnectResponse`：
 
@@ -144,9 +167,9 @@ grpcurl \
 
 语义：
 
-- 对展开后的每个会话逐一执行断开（`users` 展开 + `sessions` 并集、去重）。每个会话独立得到一个布尔结果：会话存在且断开成功为 `true`；会话不存在或断开过程出错为 `false`。RPC 本身不会因为个别会话失败而返回错误。
-- 按 user 展开与 Publish 相同：展开时始终校验 session lease 的 `UserID`（或本地 `Client.UserID()`），索引陈旧条目被跳过；`users` 中的空字符串返回 `InvalidArgument` 且不扫描。
-- 服务端会以指定的 `code` 与 `reason` 构造 `Disconnect` 并关闭客户端连接，客户端在协议层收到对应的断开通知（见[《客户端协议参考》](../protocol.md) 中的 Disconnect Codes 一节）。`code` 由调用方决定，服务端不做合法性校验；源码中内置的常量定义于 `disconnect.go`，例如：
+- 对展开后的每个会话逐一执行断开。每个会话独立得到一个布尔结果：会话存在且断开成功为 `true`；会话不存在或断开过程出错为 `false`。RPC 本身不会因为个别会话失败而返回错误。
+- 按 user 展开与 Publish 相同：始终校验 session lease 的 `UserID`，索引陈旧条目被跳过；`users` 中的空字符串或缺失 `namespace` 返回 `InvalidArgument` 且不扫描。
+- 服务端会以指定的 `code` 与 `reason` 构造 `Disconnect` 并关闭客户端连接，客户端在协议层收到对应的断开通知（见[《客户端协议参考》](../protocol.md) 中的 Disconnect Codes 一节）。`code` 由调用方决定，服务端不做合法性校验；源码中内置的常量定义于 internal/protocol/disconnect.go，例如：
 
 | 常量 | code | reason |
 | --- | --- | --- |
@@ -160,6 +183,10 @@ grpcurl \
 | `DisconnectPermissionDenied` | 3507 | `permission denied` |
 | `DisconnectIdleTimeout` | 3511 | `idle timeout` |
 | `DisconnectSlowConsumer` | 3512 | `slow consumer` |
+| `DisconnectInternal` | 3513 | `internal error` |
+| `DisconnectUnsupportedVersion` | 3514 | `unsupported version` |
+
+返回的错误码：`PermissionDenied`（`session.act` / `user.fanout` 能力位缺失）、`InvalidArgument`。
 
 集群感知：见 [集群感知行为](#集群感知行为)。
 
@@ -173,7 +200,8 @@ grpcurl \
 | --- | --- | --- |
 | `session_id` | `string` | 目标会话 ID |
 | `channels` | `repeated string` | 要订阅的频道列表 |
-| `user_id` | `string` | 目标用户 ID；展开为该用户的全部 session，与 `session_id` 取并集；`session_id` 与 `user_id` **都为空时**返回 `InvalidArgument` |
+| `user_id` | `string` | 目标用户 ID；展开为该用户命名空间下的全部 session，与 `session_id` 取并集 |
+| `namespace` | `string` | user 展开的作用域；`user_id` 非空时必填。`session_id` 与 `user_id` 都为空时返回 `InvalidArgument` |
 
 响应消息 `SubscribeResponse`：
 
@@ -183,10 +211,12 @@ grpcurl \
 
 语义：
 
-- 订阅以单个会话为目标（会话级管理操作，不是广播订阅），实际调用的是客户端协议中「连接时附带订阅」之外的完整订阅路径（`AddSubscription`），包括 broker 订阅注册、在线状态（presence）登记与集群状态同步，因此与客户端主动订阅行为等价。
-- 按 `user_id` 展开后，对每个频道在每个会话上执行订阅；**任一 session 成功则该频道结果为 `true`**，全部失败才为 `false`。会话不存在或订阅过程出错时对应频道为 `false`。RPC 本身不因个别频道失败而返回错误。
+- 订阅以单个会话为目标（会话级管理操作，不是广播订阅），实际调用的是与客户端主动订阅等价的完整订阅路径（`AddSubscription`），包括 broker 订阅注册、在线状态（presence）登记与集群状态同步。
+- 按 `user_id` 展开后逐会话执行：对每个频道，任一 session 订阅成功即记 `true` 并停止尝试其余 session（早停）；全部失败才为 `false`。会话不存在或订阅过程出错时对应频道为 `false`。RPC 本身不因个别频道失败而返回错误。
 - 订阅已存在的频道是幂等的，重复订阅返回 `true` 且不产生副作用。
-- `user_id` 的展开与 Publish/Disconnect 相同：校验 lease 的 `UserID`，`session_id` 与 `user_id` 都为空时 `InvalidArgument` 且不扫描。
+- `user_id` 的展开与 Publish/Disconnect 相同：校验 lease 的 `UserID`；`namespace` 缺失或 `session_id` 与 `user_id` 都为空时 `InvalidArgument` 且不扫描。
+
+返回的错误码：`PermissionDenied`（`subscribe.any` / `user.fanout` 能力位缺失）、`InvalidArgument`。
 
 集群感知：见 [集群感知行为](#集群感知行为)。
 
@@ -200,7 +230,8 @@ grpcurl \
 | --- | --- | --- |
 | `session_id` | `string` | 目标会话 ID |
 | `channels` | `repeated string` | 要取消订阅的频道列表 |
-| `user_id` | `string` | 目标用户 ID；与 Subscribe 对称：展开为用户全部 session，与 `session_id` 取并集；都为空时 `InvalidArgument` |
+| `user_id` | `string` | 目标用户 ID；与 Subscribe 对称：展开为用户命名空间下的全部 session，与 `session_id` 取并集 |
+| `namespace` | `string` | user 展开的作用域；`user_id` 非空时必填。都为空时 `InvalidArgument` |
 
 响应消息 `UnsubscribeResponse`：
 
@@ -208,7 +239,9 @@ grpcurl \
 | --- | --- | --- |
 | `results` | `map<string, bool>` | 以频道名为键、是否取消订阅成功为值 |
 
-语义：与 `Subscribe` 对称。对每个频道独立执行取消订阅（多 session 时任一 session 成功则该频道为 `true`），包括从 hub 移除订阅、broker 反注册、在线状态清除与集群状态同步。会话不存在、频道未被该会话订阅或操作出错时对应结果为 `false`。
+语义：与 `Subscribe` 对称（多 session 时任一成功即早停）。对每个频道独立执行取消订阅，包括从 hub 移除订阅、broker 反注册、在线状态清除与集群状态同步。会话不存在、频道未被该会话订阅或操作出错时对应结果为 `false`。
+
+返回的错误码：`PermissionDenied`（`subscribe.any` / `user.fanout` 能力位缺失）、`InvalidArgument`。
 
 集群感知：见 [集群感知行为](#集群感知行为)。
 
@@ -224,7 +257,7 @@ grpcurl \
 | `channel` | `string` | 目标频道；所有订阅者都会收到调查 |
 | `payload` | `shared.v2.Payload` | 调查载荷，支持 `text`、`binary`、`json`；发送给客户端时封装为二进制载荷 |
 | `metadata` | `shared.v2.Metadata` | 已声明但当前处理器未使用，会被忽略 |
-| `timeout_ms` | `int32` | 收集应答的等待时长（毫秒）；`<= 0` 时使用默认等待时长 5 秒 |
+| `timeout_ms` | `int32` | 收集应答的等待时长（毫秒）；`<= 0` 时使用频道策略的 `max_survey_timeout`（默认 5 秒） |
 
 响应消息 `SurveyResponse`：
 
@@ -239,20 +272,21 @@ grpcurl \
 | --- | --- | --- |
 | `session_id` | `string` | 应答来源会话 ID |
 | `payload` | `shared.v2.Payload` | 应答载荷，统一以二进制形式返回 |
-| `metadata` | `shared.v2.Metadata` | 附加元数据；集群模式下可能包含 `node_id` 与 `incarnation_id` 条目（见 [集群感知行为](#集群感知行为)） |
+| `metadata` | `shared.v2.Metadata` | 附加元数据；集群模式下包含 `node_id` 与 `incarnation_id` 条目（见 [集群感知行为](#集群感知行为)） |
 | `error` | `shared.v2.Error` | 该会话应答失败时的错误信息 |
 
 语义：
 
 - 调查只发送给目标频道的订阅者。发送前会记录被调查的会话集合，只有这些会话的应答才会被接受，来自其他会话的应答视为伪造并被丢弃。
+- **门限制**：调用方不持 `survey.bypass_gate` 能力位时，与客户端发起的 Survey 走相同的门——Authorizer `Decide(Survey)` 拒绝（`SURVEY_DISABLED` / `PERMISSION_DENIED`）或订阅者总数超过频道策略 `max_survey_subscribers`（默认 256）时返回 `ResourceExhausted`，零条请求下发。
+- 超时取值：`timeout_ms` 被钳制在 `[100ms, min(频道策略 max_survey_timeout, 10s)]`；`<= 0` 用策略默认（5s）。
 - 每个订阅者的调查请求发送受独立超时约束（10 秒）：发送失败的会话会以一条 `error` 应答记录失败，不会阻塞整个调查。
-- 等待应答的总时长由 `timeout_ms` 决定；`timeout_ms <= 0` 时按 5 秒处理（`defaultSurveyWaitTimeout`），而不是立即超时。
 - 应答按会话 ID 去重，同一会话的多次应答以最后一次为准。
 - 单会话失败时，对应 `SurveyResult.error` 的 `code` 固定为 `SURVEY_FAILED`，`message` 为失败原因（例如发送超时、客户端传输错误）。
-- 若调查无法执行（例如频道没有订阅者，或并发调查数量达到上限 1000），RPC 返回错误：无订阅者时返回空结果；注册表已满时返回错误信息 `survey registry full (limit 1000)`。
-- 结果为按会话 ID 排序后的列表（集群模式下排序键为节点 ID、实例 ID、会话 ID）。
+- 若调查无法执行（例如频道没有订阅者，或并发调查数量达到上限 1000），无订阅者时返回空结果；注册表已满时返回错误信息 `survey registry full (limit 1000)`。
+- 结果为按 `(节点 ID, 实例 ID, 会话 ID)` 排序后的列表。
 
-返回的错误码：`Unknown`（来自 Node 内部的错误原样透传）。
+返回的错误码：`PermissionDenied` / `ResourceExhausted`（门限制）、`Unknown`（来自 Node 内部的错误原样透传）。
 
 集群感知：见 [集群感知行为](#集群感知行为)。
 
@@ -278,13 +312,16 @@ grpcurl \
 | --- | --- | --- |
 | `session_id` | `string` | 会话 ID，与映射键一致；旧版 Redis 记录缺少该字段时回退为记录中的 `client_id` 键 |
 | `user_id` | `string` | 连接时声明的用户 ID，可为空 |
-| `client_id` | `string` | Connect 的 `client_id`（设备/端标识），**不是**会话 ID；未声明时为空 |
+| `client_id` | `string` | Connect 的 `client_id`（设备/端标识），不是会话 ID；未声明时为空 |
 | `connected_at` | `int64` | 该客户端在频道中登记的 Unix 毫秒时间戳 |
 
 语义：
 
 - 只返回订阅该频道时登记的在线客户端（订阅与在线状态登记见 [../protocol.md](../protocol.md)）。临时订阅（ephemeral）不登记在线状态。
+- **快照截断**：调用方不持 `presence.large_snapshot` 能力位时，快照按频道策略 `presence_snapshot_limit`（默认 256）截断，`truncated` 语义经 `occupancy` 计数表达。
 - 频道无在线数据时返回空映射，不报错。
+
+返回的错误码：`PermissionDenied`（`presence.read` 能力位缺失）。
 
 集群感知：见 [集群感知行为](#集群感知行为)。
 
@@ -311,19 +348,20 @@ grpcurl \
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `position` | `shared.v2.Position` | 该条消息在频道历史中的位置（`stream_epoch` + `offset`） |
-| `payload` | `shared.v2.Payload` | 消息载荷；按原始 oneof 变体返回（`text` / `binary` / `json`），不再有单独的 `is_text` 标志 |
+| `payload` | `shared.v2.Payload` | 消息载荷；按原始 oneof 变体返回（`text` / `binary` / `json`） |
 | `time` | `int64` | 消息时间（Unix 毫秒） |
 | `id` | `string` | 发布方提供的消息标识，可为空 |
 | `metadata` | `shared.v2.Metadata` | 发布方提供的元数据，无元数据时缺省 |
 
 语义：
 
-- 查询直接落到 broker 的历史存储。`since` 缺省（nil）表示从头读取（`limit` 以内）；`since.offset` 有值时从该偏移继续，两种实现下均为**包含（inclusive）**语义：返回 `offset >= since.offset` 的消息（`Broker.History` 契约；内存实现与 Redis 实现一致）。
+- 查询直接落到 broker 的历史存储。`since` 缺省（nil）表示从头读取（`limit` 以内）；`since.offset` 有值时从该偏移继续，两种实现下均为包含（inclusive）语义：返回 `offset >= since.offset` 的消息（`Broker.History` 契约；内存实现与 Redis 实现一致）。
 - `since.stream_epoch` 非空时会与 broker 当前的 epoch 比对：不匹配说明调用方的游标属于上一代日志，RPC 返回 `FailedPrecondition`（`stream epoch mismatch: history belongs to a previous log generation`），且不读取 broker。
-
 - 两种实现下，`limit <= 0` 都使用默认上限 `DefaultHistoryLimit`（1000 条）。
 - 没有分页游标：`limit` 就是单次返回的硬上限，`since` 是唯一的前进指针。
 - 历史被禁用（transient 消息）或频道无历史时返回空列表，不报错。
+
+返回的错误码：`PermissionDenied`（`history.read` 能力位缺失）、`FailedPrecondition`。
 
 集群感知：见 [集群感知行为](#集群感知行为)。
 
@@ -331,7 +369,7 @@ grpcurl \
 
 列出活跃频道及其订阅者数量。
 
-请求消息 `GetChannelsRequest`：空消息，**无分页参数**，一次返回全部活跃频道。
+请求消息 `GetChannelsRequest`：空消息，无分页参数，一次返回全部活跃频道。
 
 响应消息 `GetChannelsResponse`：
 
@@ -345,6 +383,8 @@ grpcurl \
 | --- | --- | --- |
 | `name` | `string` | 频道名 |
 | `subscribers` | `int32` | 当前订阅者数量 |
+
+返回的错误码：`PermissionDenied`（`channels.list` 能力位缺失）。
 
 集群感知：见 [集群感知行为](#集群感知行为)。
 
@@ -365,7 +405,7 @@ message Error {
 }
 ```
 
-注意：`errors.proto` 中**没有枚举**——`code`、`type` 都是自由字符串（free-form string），`metadata` 为任意结构化数据。这与客户端协议中的错误信封是一致的（见[《客户端协议参考》](../protocol.md) 的 Error Codes 一节），但取值上不共享同一个受控词汇表。
+`code`、`type` 都是自由字符串（free-form string），`metadata` 为任意结构化数据；`errors.proto` 的注释将该表定位为全仓唯一的错误码表（客户端协议的错误信封取同一词汇表，见[《客户端协议参考》](../protocol.md) 的 Error Codes 一节）。
 
 `Error` 消息在当前管理 API 中只出现于 `SurveyResult.error`，且 `code` 固定为 `SURVEY_FAILED`；`type` 与 `metadata` 未被填充。其余管理 RPC 不通过 `Error` 消息报告失败，而是直接使用 gRPC 状态码。
 
@@ -376,7 +416,9 @@ message Error {
 | gRPC 状态码 | 触发条件 |
 | --- | --- |
 | `Unauthenticated` | 鉴权拦截器判定失败：缺少 `authorization` 元数据、格式不是 `Bearer <token>`、或令牌不匹配 |
-| `InvalidArgument` | 按 user 字段中出现空字符串（`destination.users`、`Disconnect.users` 的空条目，或 `Subscribe`/`Unsubscribe` 的 `session_id` 与 `user_id` 同时为空）——**不做任何扫描** |
+| `PermissionDenied` | 能力位缺失（`requireAdminCaps`）、无 `survey.bypass_gate` 时 Authorizer 拒绝 Survey |
+| `InvalidArgument` | 按 user 字段中出现空字符串、按 user 寻址缺失 `namespace`、或 `Subscribe`/`Unsubscribe` 的 `session_id` 与 `user_id` 同时为空——均不做任何扫描 |
+| `ResourceExhausted` | 无 `survey.bypass_gate` 时频道订阅者数超过 `max_survey_subscribers` |
 | `FailedPrecondition` | `GetHistory` 的 `since.stream_epoch` 与 broker 当前 epoch 不匹配（游标属于上一代日志） |
 | `Internal` | `Publish` 请求中的所有投递尝试全部失败 |
 | `Unknown` | 其余错误：来自 Node 内部方法的错误（例如 `Survey` 调查注册表已满、presence/history 存储错误）原样透传，gRPC 框架将其映射为 `Unknown` |
@@ -385,7 +427,7 @@ message Error {
 
 ## 示例
 
-以下示例假设管理端口监听在 `127.0.0.1:9091`，且已配置 `auth_token`（示例中用 `<token>` 占位）。服务器未注册 gRPC 反射，所有命令都必须携带 `-import-path ./protocol -proto server/v2/api.proto`。JSON 载荷使用 proto3 JSON 映射的 lowerCamelCase 字段名；`binary` 载荷在 JSON 中以 base64 表示。
+以下示例假设管理端口监听在 `127.0.0.1:9091`，且已配置 `auth_token`（示例中用 `<token>` 占位）。服务器未注册 gRPC 反射，所有命令都必须携带 `-import-path ./protocol -proto server/v2/api.proto`。JSON 载荷使用 proto3 JSON 映射的 lowerCamelCase 字段名；`binary` 载荷在 JSON 中以 base64 表示。频道名示例均带命名空间前缀（`dev:`）。
 
 ### Publish
 
@@ -401,7 +443,7 @@ grpcurl \
     "requestId": "admin-publish-1",
     "publications": [{
       "id": "admin-msg-1",
-      "destination": {"channels": ["chat.general"]},
+      "destination": {"channels": ["dev:chat.general"]},
       "payload": {"text": "hello from admin"}
     }]
   }' \
@@ -415,8 +457,8 @@ grpcurl \
 grpcurl \
   -import-path ./protocol \
   -proto server/v2/api.proto \
-  -H "authorization: Bearer <token>" \
   -plaintext \
+  -H "authorization: Bearer <token>" \
   -d '{
     "publications": [{
       "id": "direct-msg-1",
@@ -428,7 +470,7 @@ grpcurl \
   messageloop.server.v2.APIService/Publish
 ```
 
-按用户发布（只填 `users`，投递给该用户的全部 session）：
+按用户发布（只填 `users`，投递给该用户的全部 session；`namespace` 必填）：
 
 ```bash
 grpcurl \
@@ -439,7 +481,7 @@ grpcurl \
   -d '{
     "publications": [{
       "id": "user-notice-1",
-      "destination": {"users": ["alice"]},
+      "destination": {"users": ["alice"], "namespace": "dev"},
       "payload": {"text": "multi-device notice"}
     }]
   }' \
@@ -457,7 +499,7 @@ grpcurl \
   -plaintext \
   -d '{
     "requestId": "admin-survey-1",
-    "channel": "chat.general",
+    "channel": "dev:chat.general",
     "payload": {"text": "ping"},
     "timeoutMs": 3000
   }' \
@@ -504,7 +546,7 @@ grpcurl \
   -plaintext \
   -d '{
     "sessionId": "abc-123",
-    "channels": ["chat.general", "notifications"]
+    "channels": ["dev:chat.general", "dev:notifications"]
   }' \
   127.0.0.1:9091 \
   messageloop.server.v2.APIService/Subscribe
@@ -520,7 +562,7 @@ grpcurl \
   -plaintext \
   -d '{
     "sessionId": "abc-123",
-    "channels": ["chat.general"]
+    "channels": ["dev:chat.general"]
   }' \
   127.0.0.1:9091 \
   messageloop.server.v2.APIService/Unsubscribe
@@ -534,7 +576,7 @@ grpcurl \
   -proto server/v2/api.proto \
   -H "authorization: Bearer <token>" \
   -plaintext \
-  -d '{"channel": "chat.general"}' \
+  -d '{"channel": "dev:chat.general"}' \
   127.0.0.1:9091 \
   messageloop.server.v2.APIService/GetPresence
 ```
@@ -547,7 +589,7 @@ grpcurl \
   -proto server/v2/api.proto \
   -H "authorization: Bearer <token>" \
   -plaintext \
-  -d '{"channel": "chat.general", "since": {"offset": 42}, "limit": 100}' \
+  -d '{"channel": "dev:chat.general", "since": {"offset": 42}, "limit": 100}' \
   127.0.0.1:9091 \
   messageloop.server.v2.APIService/GetHistory
 ```
@@ -575,9 +617,9 @@ grpcurl \
 | --- | --- |
 | `Publish`（会话投递） | 通过会话租约（session lease）解析会话所在节点；会话由远端节点持有时，投递请求经 Redis 命令总线（command bus）路由到该节点执行 |
 | `Disconnect`、`Subscribe`、`Unsubscribe` | 与 `Publish` 会话投递相同：先解析会话租约，远端会话的操作经命令总线下发到持有该会话的节点执行；会话不存在时对应条目返回 `false` |
-| 按 user 展开（`Publish.users`、`Disconnect.users`、`Subscribe/Unsubscribe.user_id`） | 本地 hub 的 user 索引（`Hub.SessionsByUser`）并上 Redis user→sessions 索引（`ml2:cluster:user:sessions:<user_id>` 集合 + `ml2:cluster:user:member:<user_id>:<session_id>` 成员键，TTL 与 session lease 相同）；展开时对每个 session 校验 lease 的 `UserID`，不匹配或缺失则跳过；索引 miss 不做全集群 SCAN，靠周期 repair 收敛 |
-| `Survey` | 除本地调查外，还会通过命令总线向集群内所有其他节点广播调查请求（排除自身，`exclude_self`），聚合各节点的应答后统一排序返回；每个 `SurveyResult` 会附带 `node_id` 与 `incarnation_id` 元数据，标识应答来源节点；集群中某个节点执行调查失败时，该节点会以一条带 `error` 的 `SurveyResult` 表示（`code` 为 `SURVEY_FAILED`） |
-| `GetChannels` | 不再查询本地 hub，而是读取集群共享的频道投影（query store），返回全集群的活跃频道与订阅者数量 |
+| 按 user 展开（`Publish.users`、`Disconnect.users`、`Subscribe/Unsubscribe.user_id`） | 本地 hub 的 user 索引并上 Redis user→sessions 索引（`ml2:cluster:user:sessions:<ns>:<user_id>` 集合 + `ml2:cluster:user:member:<ns>:<user_id>:<session_id>` 成员键，TTL 与 session lease 相同；键含命名空间段）；展开时对每个 session 校验 lease 的 `UserID`，不匹配或缺失则跳过；索引 miss 不做全集群扫描，靠周期 repair 收敛 |
+| `Survey` | 除本地调查外，还会通过命令总线向集群内所有其他节点广播调查请求（排除自身），聚合各节点的应答后统一排序返回；每个 `SurveyResult` 附带 `node_id` 与 `incarnation_id` 元数据，标识应答来源节点；集群中某个节点执行调查失败时，该节点会以一条带 `error` 的 `SurveyResult` 表示（`code` 为 `SURVEY_FAILED`） |
+| `GetChannels` | 不查询本地 hub，而是读取集群共享的频道投影（query store），返回全集群的活跃频道与订阅者数量 |
 | `GetPresence` | 在线状态存储在集群模式下替换为 Redis 支撑的存储，查询返回全集群的在线客户端 |
 | `GetHistory` | 从共享的 Redis Stream 读取历史，`since.offset` 为包含（inclusive）语义，`since.stream_epoch` 不匹配时返回 `FailedPrecondition`，数据跨节点一致 |
 
@@ -585,9 +627,9 @@ grpcurl \
 
 ## 实现说明
 
-- **共享 Node，分离监听器**：管理 API 处理器（`pkg/grpcstream/api_handler.go`）持有与客户端流服务器同一个进程内 `Node` 实例（装配见 `cmd/server/runtime.go`）。管理 RPC 与客户端流量在监听器层面完全分离：客户端流式 gRPC 监听 `transport.grpc.addr`，管理 API 监听 `server.grpc_admin.addr`；管理端口只注册 `APIService`，客户端端口只注册 `MessageLoopService`。
+- **共享 Node，分离监听器**：管理 API 处理器（internal/admin/api_handler.go）持有与客户端流服务器同一个进程内 `Node` 实例（装配见 cmd/server/runtime.go）。管理 RPC 与客户端流量在监听器层面完全分离：客户端流式 gRPC 监听 `transport.grpc.addr`，管理 API 监听 `server.grpc_admin.addr`；管理端口只注册 `APIService`，客户端端口只注册 `MessageLoopService`。
 - **监听器预绑定**：两个 gRPC 监听器都在启动预检阶段（`node.Run` 之前）完成 `net.Listen`，任一监听失败都不会留下已启动的 Node 副作用；两个监听器的组件名分别为 `grpc-client-server` 与 `grpc-admin-server`。
-- **RawCodec**：两个 gRPC 服务器都通过 `grpc.ForceServerCodec` 装配名为 `messageloop-proto` 的 `RawCodec`（`pkg/grpcstream/codec.go`）。该 codec 对普通 proto 消息仍使用标准 `proto.Marshal`/`proto.Unmarshal`，因此管理 API 的线上编码与标准 protobuf gRPC 完全兼容（这是 `grpcurl -proto` 方式可以正常调用的原因）；流式路径额外支持免二次编解码的原始帧（raw frame）优化。codec 按服务器注册而不是全局注册，避免覆盖进程内其他 gRPC 连接的默认 codec。
+- **RawCodec**：两个 gRPC 服务器都通过 `grpc.ForceServerCodec` 装配名为 `messageloop-proto` 的 `RawCodec`（pkg/transport/grpc/codec.go）。该 codec 对普通 proto 消息仍使用标准 `proto.Marshal`/`proto.Unmarshal`，因此管理 API 的线上编码与标准 protobuf gRPC 完全兼容（这是 `grpcurl -proto` 方式可以正常调用的原因）；流式路径额外支持免二次编解码的原始帧（raw frame）优化。codec 按服务器注册而不是全局注册，避免覆盖进程内其他 gRPC 连接的默认 codec。
 - **压缩**：gRPC 的 gzip 压缩编解码器已在服务器侧注册，客户端可在请求中声明 `grpc-accept-encoding: gzip`。
 - **管理服务器未设置 `MaxRecvMsgSize`**：管理服务器使用 gRPC 默认的最大接收消息大小（4 MiB）；客户端流服务器则应用 `limits.max_message_size`（默认 64 KiB，见[《配置参考》](02-configuration.md)）。
 - **调用方客户端**：Go SDK 的后端集成通过本管理 API 与服务端通信（见[《Go SDK 指南》](07-sdk-go.md)）；TypeScript SDK 是纯 WebSocket 客户端，不包含管理 API 客户端。Go SDK 生成的桩代码依赖 `server/v2/api.proto`，调用前请确保协议版本与服务器一致。
