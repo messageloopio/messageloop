@@ -40,3 +40,4 @@ config.yaml
 config-node*.yaml
 _examples/web/node_modules/
 _examples/web/dist/
+.zcode/
