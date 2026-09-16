@@ -157,7 +157,7 @@ func TestGRPC_AdminPort_ServesUnaryAPI(t *testing.T) {
 	require.NoError(t, err)
 
 	// Sanity check that the admin port remains unary-capable after the split.
-	_, err = api.GetPresence(context.Background(), &serverv2.GetPresenceRequest{Channel: "chat"})
+	_, err = api.GetPresence(context.Background(), &serverv2.GetPresenceRequest{Channel: "dev:chat"})
 	require.NoError(t, err)
 
 	_ = emptypb.Empty{}

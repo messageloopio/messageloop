@@ -14,6 +14,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/messageloopio/messageloop/internal/admin"
+	"github.com/messageloopio/messageloop/internal/authz"
 	"github.com/messageloopio/messageloop/internal/protocol"
 	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/internal/session"
@@ -29,7 +30,18 @@ func startTestGRPCServer(t *testing.T, node *runtime.Node) serverv2.APIServiceCl
 	t.Helper()
 
 	lis := bufconn.Listen(bufSize)
-	s := grpc.NewServer()
+	s := grpc.NewServer(
+		// The production admin listener authenticates via the auth chain;
+		// this bufconn fixture attaches the static superadmin identity
+		// directly (design §2.1: ["*"] scope, node ceiling caps).
+		grpc.UnaryInterceptor(func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+			return handler(admin.WithAdminIdentity(ctx, authz.AdminIdentity{
+				KeyID:      "static-token",
+				Namespaces: []string{"*"},
+				Caps:       node.AdminCapabilities(),
+			}), req)
+		}),
+	)
 	serverv2.RegisterAPIServiceServer(s, admin.NewAPIServiceHandler(node))
 	go func() { _ = s.Serve(lis) }()
 	t.Cleanup(s.GracefulStop)
@@ -82,7 +94,7 @@ func TestGRPC_AdminAPI_PublishAndDisconnect(t *testing.T) {
 		RequestId: "req-1",
 		Publications: []*serverv2.Publication{{
 			Id:          "pub-1",
-			Destination: &serverv2.Publication_Destination{Channels: []string{"chat"}},
+			Destination: &serverv2.Publication_Destination{Channels: []string{"dev:chat"}},
 			Payload:     &sharedv2.Payload{Data: &sharedv2.Payload_Text{Text: "hello"}},
 		}},
 	})
@@ -109,11 +121,11 @@ func TestGRPC_AdminAPI_SubscribeUnsubscribe(t *testing.T) {
 	// Subscribe via API
 	subResp, err := api.Subscribe(ctx, &serverv2.SubscribeRequest{
 		SessionId: "sess-2",
-		Channels:  []string{"news", "sports"},
+		Channels:  []string{"dev:news", "dev:sports"},
 	})
 	require.NoError(t, err)
-	require.True(t, subResp.Results["news"])
-	require.True(t, subResp.Results["sports"])
+	require.True(t, subResp.Results["dev:news"])
+	require.True(t, subResp.Results["dev:sports"])
 
 	// GetChannels — should show the subscribed channels
 	chResp, err := api.GetChannels(ctx, &serverv2.GetChannelsRequest{})
@@ -122,26 +134,26 @@ func TestGRPC_AdminAPI_SubscribeUnsubscribe(t *testing.T) {
 	for _, ch := range chResp.Channels {
 		channelNames[ch.Name] = ch.Subscribers
 	}
-	require.Equal(t, int32(1), channelNames["news"])
-	require.Equal(t, int32(1), channelNames["sports"])
+	require.Equal(t, int32(1), channelNames["dev:news"])
+	require.Equal(t, int32(1), channelNames["dev:sports"])
 
 	// Unsubscribe via API
 	unsubResp, err := api.Unsubscribe(ctx, &serverv2.UnsubscribeRequest{
 		SessionId: "sess-2",
-		Channels:  []string{"news"},
+		Channels:  []string{"dev:news"},
 	})
 	require.NoError(t, err)
-	require.True(t, unsubResp.Results["news"])
+	require.True(t, unsubResp.Results["dev:news"])
 
-	// GetChannels — "news" should be gone
+	// GetChannels — "dev:news" should be gone
 	chResp2, err := api.GetChannels(ctx, &serverv2.GetChannelsRequest{})
 	require.NoError(t, err)
 	channelNames2 := make(map[string]int32)
 	for _, ch := range chResp2.Channels {
 		channelNames2[ch.Name] = ch.Subscribers
 	}
-	require.Zero(t, channelNames2["news"])
-	require.Equal(t, int32(1), channelNames2["sports"])
+	require.Zero(t, channelNames2["dev:news"])
+	require.Equal(t, int32(1), channelNames2["dev:sports"])
 }
 
 func TestGRPC_AdminAPI_GetHistory(t *testing.T) {
@@ -153,7 +165,7 @@ func TestGRPC_AdminAPI_GetHistory(t *testing.T) {
 
 	// Publish some messages to build history
 	for i := 0; i < 3; i++ {
-		_, err := node.Publish("history-ch", &stream.Publication{Payload: []byte("msg"), Kind: stream.PayloadKindBinary})
+		_, err := node.Publish("dev:history-ch", &stream.Publication{Payload: []byte("msg"), Kind: stream.PayloadKindBinary})
 		require.NoError(t, err)
 	}
 
@@ -161,7 +173,7 @@ func TestGRPC_AdminAPI_GetHistory(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	resp, err := api.GetHistory(ctx, &serverv2.GetHistoryRequest{
-		Channel: "history-ch",
+		Channel: "dev:history-ch",
 		Limit:   10,
 	})
 	require.NoError(t, err)
@@ -189,14 +201,14 @@ func TestGRPC_AdminAPI_Publish_JSONPayload(t *testing.T) {
 		RequestId: "req-1",
 		Publications: []*serverv2.Publication{{
 			Id:          "pub-1",
-			Destination: &serverv2.Publication_Destination{Channels: []string{"json-admin"}},
+			Destination: &serverv2.Publication_Destination{Channels: []string{"dev:json-admin"}},
 			Payload:     &sharedv2.Payload{Data: &sharedv2.Payload_Json{Json: payloadStruct}},
 			Options:     &serverv2.Publication_Options{AddHistory: true},
 		}},
 	})
 	require.NoError(t, err)
 
-	page, err := node.Broker().History("json-admin", 0, 0)
+	page, err := node.Broker().History("dev:json-admin", 0, 0)
 	require.NoError(t, err)
 	pubs := page.Pubs()
 	require.Len(t, pubs, 1)
