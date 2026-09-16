@@ -50,7 +50,7 @@ type CompiledInterest struct {
 //     - "acme:im.*"  → Pattern "acme:im.*"
 //     - "acme:*"     → Pattern "acme:*"
 //     - Final "**" additionally sets AlsoExact to the prefix ("acme:im.**"
-//       → AlsoExact "acme:im", covering the zero-segment case).
+//     → AlsoExact "acme:im", covering the zero-segment case).
 func CompileInterest(key string) (CompiledInterest, error) {
 	if err := topics.ValidateTopic(key); err != nil {
 		return CompiledInterest{}, err
