@@ -92,7 +92,7 @@ func main() {
 			return err
 		}
 
-		grpcServers, err := prepareGRPCServers(cfg, node, metrics.AdminAuthRequests)
+		grpcServers, err := prepareGRPCServers(cfg, node, metrics.AdminAuthRequests, metrics.AdminRPCs)
 		if err != nil {
 			return err
 		}

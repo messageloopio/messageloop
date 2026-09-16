@@ -610,6 +610,42 @@ func TestAdminInterceptor(t *testing.T) {
 		require.Error(t, err)
 		assert.Equal(t, float64(1), testutil.ToFloat64(counter.WithLabelValues("proxy", "unknown", "deny")))
 	})
+
+	t.Run("rpc counter attributes method, key, and handler outcome (G7)", func(t *testing.T) {
+		const method = "/messageloop.server.v2.APIService/GetPresence"
+		rpcVec := prometheus.NewCounterVec(prometheus.CounterOpts{Name: "test_admin_rpc_total"}, []string{"method", "key_id", "result"})
+		prometheus.NewRegistry().MustRegister(rpcVec)
+
+		// Authenticated call whose handler succeeds → ok under the key's ID.
+		r, _ := newTestResolver(t, func(opts *adminAuthOptions, f *fakeAdminAuthProxy) {
+			opts.AuthTokens = []string{staticToken}
+			opts.FindProxy = func() proxy.Proxy { return f }
+			opts.RPCs = rpcVec
+		})
+		authedCtx := metadata.NewIncomingContext(context.Background(),
+			metadata.Pairs("authorization", "Bearer "+staticToken))
+
+		// Authenticated call whose handler succeeds → ok under the key's ID.
+		_, err := r.Interceptor()(authedCtx, nil,
+			&googlegrpc.UnaryServerInfo{FullMethod: method}, handler)
+		require.NoError(t, err)
+		assert.Equal(t, float64(1), testutil.ToFloat64(rpcVec.WithLabelValues(method, "static-token", "ok")))
+
+		// Authenticated call whose handler fails → error, still attributed.
+		failing := func(ctx context.Context, req any) (any, error) {
+			return nil, status.Error(codes.InvalidArgument, "boom")
+		}
+		_, err = r.Interceptor()(authedCtx, nil,
+			&googlegrpc.UnaryServerInfo{FullMethod: method}, failing)
+		require.Error(t, err)
+		assert.Equal(t, float64(1), testutil.ToFloat64(rpcVec.WithLabelValues(method, "static-token", "error")))
+
+		// Authentication rejection → denied, never reaching the handler.
+		_, err = r.Interceptor()(context.Background(), nil,
+			&googlegrpc.UnaryServerInfo{FullMethod: method}, handler)
+		require.Error(t, err)
+		assert.Equal(t, float64(1), testutil.ToFloat64(rpcVec.WithLabelValues(method, "unknown", "denied")))
+	})
 }
 
 // TestAdminIdentityContext pins the exported context helpers used by later

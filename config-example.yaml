@@ -155,6 +155,9 @@ proxy:
   - name: example-grpc
     endpoint: 127.0.0.1:10091
     timeout: 30s
+    # admin_auth: true  # Assign this proxy as the admin API key verifier
+    #                   # (exactly one entry may claim it; independent of routes).
+    #                   # See docs/developer/03-admin-api.md "API Key authentication".
     grpc:
       insecure: true
     routes:

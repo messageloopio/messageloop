@@ -88,6 +88,9 @@ type adminAuthOptions struct {
 	CacheTTL time.Duration
 	// AuthRequests is the admin_auth_requests_total counter (nil disables).
 	AuthRequests *prometheus.CounterVec
+	// RPCs is the admin_rpc_total counter (nil disables): per-identity,
+	// per-method attribution of served admin RPCs (G7).
+	RPCs *prometheus.CounterVec
 }
 
 // cacheEntry is one positive or negative cache record. The cache key is
@@ -425,10 +428,23 @@ func (r *adminAuthResolver) clampIdentity(ctx context.Context, proxyName string,
 // Verify).
 func (r *adminAuthResolver) Interceptor() googlegrpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *googlegrpc.UnaryServerInfo, handler googlegrpc.UnaryHandler) (any, error) {
+		// invoke runs the handler with the verified identity and attributes
+		// the RPC outcome (ok/error) to the identity (G7).
+		invoke := func(ctx context.Context, id authz.AdminIdentity) (any, error) {
+			resp, err := handler(WithAdminIdentity(ctx, id), req)
+			result := "ok"
+			if err != nil {
+				result = "error"
+			}
+			r.observeRPC(info.FullMethod, id.KeyID, result)
+			return resp, err
+		}
+
 		presented, found := credentialFromMetadata(ctx)
 		if !found {
 			if len(r.opts.AuthTokens) > 0 {
 				r.observe("static", unknownKeyID, "deny")
+				r.observeRPC(info.FullMethod, unknownKeyID, "denied")
 				log.WarnContext(ctx, "admin api request rejected: missing credential",
 					"verifier", "static", "key_id", unknownKeyID)
 				return nil, status.Error(codes.Unauthenticated, "missing admin credential")
@@ -438,9 +454,10 @@ func (r *adminAuthResolver) Interceptor() googlegrpc.UnaryServerInterceptor {
 				r.observe("insecure", insecureKeyID, "allow")
 				log.WarnContext(ctx, "admin api request allowed WITHOUT authentication",
 					"verifier", "insecure", "key_id", insecureKeyID)
-				return handler(WithAdminIdentity(ctx, identity), req)
+				return invoke(ctx, identity)
 			}
 			r.observe("static", unknownKeyID, "deny")
+			r.observeRPC(info.FullMethod, unknownKeyID, "denied")
 			log.WarnContext(ctx, "admin api request rejected: no credential and no authentication configured",
 				"verifier", "static", "key_id", unknownKeyID)
 			return nil, status.Error(codes.Unauthenticated, "missing admin credential")
@@ -454,12 +471,13 @@ func (r *adminAuthResolver) Interceptor() googlegrpc.UnaryServerInterceptor {
 			if subtle.ConstantTimeCompare([]byte(presented), []byte(token)) == 1 {
 				identity := authz.AdminIdentity{KeyID: staticTokenKeyID, Namespaces: []string{"*"}, Caps: r.opts.Ceiling}
 				r.observe("static", staticTokenKeyID, "allow")
-				return handler(WithAdminIdentity(ctx, identity), req)
+				return invoke(ctx, identity)
 			}
 		}
 
 		if r.opts.FindProxy == nil || r.opts.FindProxy() == nil {
 			r.observe("proxy", unknownKeyID, "deny")
+			r.observeRPC(info.FullMethod, unknownKeyID, "denied")
 			log.WarnContext(ctx, "admin api credential rejected: no admin_auth proxy assigned",
 				"key_id", unknownKeyID)
 			return nil, status.Error(codes.Unauthenticated, "invalid admin credential")
@@ -469,6 +487,7 @@ func (r *adminAuthResolver) Interceptor() googlegrpc.UnaryServerInterceptor {
 		if len(presented) < minProxyKeyChars {
 			r.rejectWithoutProxy(presented)
 			r.observe("proxy", unknownKeyID, "deny")
+			r.observeRPC(info.FullMethod, unknownKeyID, "denied")
 			log.WarnContext(ctx, "admin api credential rejected: below minimum length",
 				"key_id", unknownKeyID)
 			return nil, status.Error(codes.Unauthenticated, "invalid admin credential")
@@ -477,6 +496,7 @@ func (r *adminAuthResolver) Interceptor() googlegrpc.UnaryServerInterceptor {
 		identity, err := r.Verify(ctx, presented)
 		if err != nil {
 			r.observe("proxy", unknownKeyID, "deny")
+			r.observeRPC(info.FullMethod, unknownKeyID, "denied")
 			log.WarnContext(ctx, "admin api credential rejected",
 				"key_id", unknownKeyID, "reason", err.Error())
 			if errors.Is(err, errProxyUnavailable) {
@@ -488,7 +508,7 @@ func (r *adminAuthResolver) Interceptor() googlegrpc.UnaryServerInterceptor {
 		r.observe("proxy", identity.KeyID, "allow")
 		log.DebugContext(ctx, "admin api request authenticated via proxy",
 			"proxy", r.proxyName(), "key_id", identity.KeyID)
-		return handler(WithAdminIdentity(ctx, identity), req)
+		return invoke(ctx, identity)
 	}
 }
 
@@ -511,6 +531,16 @@ func (r *adminAuthResolver) observe(verifier, keyID, result string) {
 		return
 	}
 	r.opts.AuthRequests.WithLabelValues(verifier, keyID, result).Inc()
+}
+
+// observeRPC increments the admin_rpc_total counter (nil-safe). result is
+// "denied" when the request was rejected at authentication (the handler
+// never ran) and "ok"/"error" with the handler's outcome otherwise.
+func (r *adminAuthResolver) observeRPC(method, keyID, result string) {
+	if r.opts.RPCs == nil {
+		return
+	}
+	r.opts.RPCs.WithLabelValues(method, keyID, result).Inc()
 }
 
 // credentialFromMetadata extracts the presented credential: the Bearer

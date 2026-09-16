@@ -56,7 +56,7 @@ func newGRPCClientServer(cfg *config.Config, node *runtime.Node) (*grpc.Server, 
 	return grpc.PrepareClientServer(opts, node)
 }
 
-func newGRPCAdminServer(cfg *config.Config, node *runtime.Node, adminAuthRequests *prometheus.CounterVec) (*grpc.Server, error) {
+func newGRPCAdminServer(cfg *config.Config, node *runtime.Node, adminAuthRequests, adminRPCs *prometheus.CounterVec) (*grpc.Server, error) {
 	return admin.PrepareAdminServer(grpc.Options{
 		Addr:                   cfg.Server.GRPCAdmin.Addr,
 		TLSCertFile:            cfg.Server.GRPCAdmin.TLS.CertFile,
@@ -66,7 +66,7 @@ func newGRPCAdminServer(cfg *config.Config, node *runtime.Node, adminAuthRequest
 		AdminAuthCacheTTL:      adminAuthCacheTTL(cfg),
 		AdminFindProxy:         adminAuthFindProxy(cfg, node),
 		AdminCapabilityCeiling: cfg.Server.GRPCAdmin.Capabilities,
-	}, node, adminAuthRequests)
+	}, node, adminAuthRequests, adminRPCs)
 }
 
 // adminAuthCacheTTL parses server.grpc_admin.admin_auth_cache_ttl. An empty
@@ -115,13 +115,13 @@ func adminAuthFindProxy(cfg *config.Config, node *runtime.Node) func() proxyprox
 
 // prepareGRPCServers pre-binds both gRPC listeners. If the admin server fails
 // to prepare, the client server is closed so its listener is released.
-func prepareGRPCServers(cfg *config.Config, node *runtime.Node, adminAuthRequests *prometheus.CounterVec) (*preparedGRPCServers, error) {
+func prepareGRPCServers(cfg *config.Config, node *runtime.Node, adminAuthRequests, adminRPCs *prometheus.CounterVec) (*preparedGRPCServers, error) {
 	clientServer, err := newGRPCClientServer(cfg, node)
 	if err != nil {
 		return nil, err
 	}
 
-	adminServer, err := newGRPCAdminServer(cfg, node, adminAuthRequests)
+	adminServer, err := newGRPCAdminServer(cfg, node, adminAuthRequests, adminRPCs)
 	if err != nil {
 		_ = clientServer.Close()
 		return nil, err

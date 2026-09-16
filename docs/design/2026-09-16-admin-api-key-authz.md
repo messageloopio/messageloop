@@ -5,11 +5,13 @@
 | 文档标题 | Admin API Key 鉴权与按 Namespace 权限控制（proxy 托管 / Torchwood Key 复用） |
 | 作者 | qiulin + agent 会话设计（四轮迭代收敛） |
 | 日期 | 2026-09-16 |
-| 状态 | Draft（dogfooding 阶段设计，评审完毕待实现） |
+| 状态 | 已实现（dogfooding） |
 | 仓库路径 | `docs/design/2026-09-16-admin-api-key-authz.md` |
 | 涉及仓库 | messageloop（本仓库）、mlbridge、Torchwood（三仓协同） |
 | 阶段前提 | dogfooding：重点验证并补全机制缺口，**不考虑向后兼容**（对齐 KD-K31"无兼容期"先例） |
+| 实现还原点 | S1 875c6ad / S2 9531a0f / S3 c6fc04f / S4 8aff6a7 / S5+补遗（分支 feat/admin-api-key-authz） |
 | 修订 | 2026-09-16 rethink 复查：修正 4 项（key_id 唯一性 / scope 抹空短路 / fail-fast / 长度门顺序）、补充 2 项（auth_tokens 列表 / JWT 否决留档），见 D26-D29 |
+| 实现澄清 | ① 矩阵中 Disconnect 不可见 session 的落地形态是 results **无该键**（强于 false，不泄露存在性；Go map 读取语义等价 false）；② G7 两个指标（admin_auth_requests_total + admin_rpc_total{method,key_id,result∈denied/ok/error}）均已实现 |
 
 ---
 

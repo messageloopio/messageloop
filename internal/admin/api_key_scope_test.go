@@ -118,7 +118,7 @@ func startMatrixServer(t *testing.T, cfg *config.Server, extraIdentities map[str
 		Addr:           "127.0.0.1:0",
 		AuthTokens:     []string{matrixStaticTok},
 		AdminFindProxy: func() proxy.Proxy { return p },
-	}, node, nil)
+	}, node, nil, nil)
 	require.NoError(t, err)
 	go func() { _ = server.Start(ctx) }()
 	t.Cleanup(func() { _ = server.Stop(context.Background()) })

@@ -25,7 +25,7 @@ func TestPrepareAdminServer_RegistersOnlyAPIService(t *testing.T) {
 	require.NoError(t, node.Run(ctx))
 	t.Cleanup(node.Shutdown)
 
-	server, err := admin.PrepareAdminServer(grpc.Options{Addr: "127.0.0.1:0", AdminAllowInsecure: true}, node, nil)
+	server, err := admin.PrepareAdminServer(grpc.Options{Addr: "127.0.0.1:0", AdminAllowInsecure: true}, node, nil, nil)
 	require.NoError(t, err)
 	startPreparedServer(t, server)
 

@@ -28,7 +28,7 @@
 3. **写超时必须为正**：四个传输的 `write_timeout` 显式配置 `<= 0` 一律拒绝（省略字段则用默认值；0 会让一个卡住的对端无限拖住投递）。
 4. **心跳取值约束**：`idle_timeout` / `ping_interval` / `ping_timeout` 非 0 值必须 ≥1s；`ping_timeout` 显式 `"0s"` 仅在 `ping_interval > 0` 时被拒绝。`idle_timeout < ping_interval + ping_timeout` 时打印警告（探测窗口大于空闲超时，配置可疑但不阻断启动）。
 5. **TLS 证书/密钥成对**：以下五处的 `cert_file` 与 `key_file` 必须同时设置或同时为空：`server.grpc_admin.tls`、`transport.websocket.tls`、`transport.grpc.tls`、`transport.quic.tls`、`transport.kcp.tls`。
-6. **管理 gRPC 鉴权**：`server.grpc_admin.addr` 非空时，`auth_token` 与 `allow_insecure` 必须至少设置一个（见 [server 节](#server-节)）。
+6. **管理 gRPC 鉴权**（`validateAdminAuth`）：`server.grpc_admin.addr` 非空时必须至少配置一种凭证路径——`auth_tokens`、`proxy[].admin_auth: true` 指派或 `allow_insecure: true`，否则 Validate 失败；每把 `auth_tokens` ≥ 20 字符；`admin_auth_cache_ttl` 非空时必须是合法且为正的 Go duration；`proxy[].admin_auth` 至多一个条目可指派且该条目必须带 `name`（G3）；`allow_insecure` 只允许搭配回环 `server.grpc_admin.addr`（G5，非 loopback 即 Validate 错误）；`server.http.addr` 非 loopback 时必须配置 `server.http.auth_token`（admin HTTP 同规则对齐）。
 7. **broker 校验**：`broker.type` 必须为 `memory` 或 `redis`（空等价于 `memory`）；为 `redis` 时 `broker.redis.addr` 必填；`broker.redis.consumer_group` 非空直接拒绝（字段声明但未实现）；`broker.redis.stream_approximate` 非 true（含显式 false 与省略）直接拒绝（只实现了近似截断，必须显式确认）。
 8. **cluster 前置条件与 HMAC**：`cluster.enabled: true` 要求 `broker.type: redis`（`cluster requires broker.type=redis`）。启用集群时 HMAC 密钥源校验也在 `Validate()` 内执行：`hmac_key` 与 `hmac_key_file` 二选一（两源同设或均未设置即拒绝），内联 `hmac_key` 长度不足 32 字节即拒绝。
 9. **Admin Capability 闭集**：`server.grpc_admin.capabilities` 的每个名字都必须在闭集内（见 [server 节](#server-节)）。
@@ -75,8 +75,10 @@ server:
     # auth_token: ""            # 设置后两个端点都要求 Bearer token
   grpc_admin:
     addr: "127.0.0.1:9091"      # 管理 gRPC API（必填）
-    auth_token: ""              # Bearer token；addr 非空时必须设置 auth_token 或 allow_insecure
-    allow_insecure: false       # 仅限开发：跳过强制鉴权
+    auth_tokens:                # 静态超管 Bearer token 列表（每把 ≥ 20 字符）；
+      - "change-me-admin-token-min-20-chars"  # addr 非空时三种凭证路径至少其一
+    # admin_auth_cache_ttl: "30s"  # API Key 正缓存 TTL（默认 30s），撤销传播上界
+    allow_insecure: false       # 仅限回环绑定：非 loopback + true = Validate 错误
     # tls:
     #   cert_file: "./certs/admin.crt"
     #   key_file: "./certs/admin.key"
@@ -116,11 +118,12 @@ server:
 | 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `server.http.addr` | string | `127.0.0.1:8080` | 管理 HTTP 监听地址，暴露 `/health` 与 `/metrics`。为空时回退到 `127.0.0.1:8080`。指标说明见[《可观测性指南》](05-observability.md) |
-| `server.http.auth_token` | string | 未设置 | 管理 HTTP 的 Bearer token。设置后 `/health` 与 `/metrics` 都要求 `Authorization: Bearer <token>`（常量时间比较，失败返回 401）。未设置且绑定到非回环地址时启动打 WARN（HTTP 面无鉴权对外暴露） |
+| `server.http.auth_token` | string | 未设置 | 管理 HTTP 的 Bearer token。设置后 `/health` 与 `/metrics` 都要求 `Authorization: Bearer <token>`（常量时间比较，失败返回 401）。**绑定到非回环地址时必填**（G5 fail-closed：未设置且非 loopback 是 Validate 错误，不再是 WARN） |
 | `server.grpc_admin.addr` | string | 未设置（**必填**） | 管理 gRPC API 监听地址。启动时无条件预绑定（见 [启动要求](#启动要求)）。接口清单见[《管理 API 参考》](03-admin-api.md) |
 | `server.grpc_admin.tls.cert_file` / `.key_file` | string | 未设置 | 管理 gRPC 的 TLS 证书与私钥，二者必须成对设置（校验规则 5） |
-| `server.grpc_admin.auth_token` | string | 未设置 | 管理 API 的 Bearer token，通过 `authorization: Bearer <token>` 头传递，常量时间比较。**addr 非空时，`auth_token` 与 `allow_insecure` 必须至少设置一个**，否则启动校验失败 |
-| `server.grpc_admin.allow_insecure` | bool | `false` | 显式放弃强制鉴权：`addr` 非空且 `auth_token` 为空时，置为 true 才能通过启动校验；此时管理 API 完全不鉴权并在启动时记录 WARN。仅限受控环境（开发/内网） |
+| `server.grpc_admin.auth_tokens` | string[] | 未设置 | 静态超管 Bearer token **列表**，通过 `authorization: Bearer <token>` 头传递，逐把常数时间比较，任一命中即超管身份（namespace `["*"]` + 能力位上限）。**每把 ≥ 20 字符**（Validate 强制）。列表形态让轮换无空窗：加新 → 滚动重启 → 删旧。**no-compat 替换**：单值键 `auth_token` 已删除，配置中出现会被忽略（三种凭证路径齐缺时 Validate 拒绝启动） |
+| `server.grpc_admin.admin_auth_cache_ttl` | duration | `30s` | API Key 经 `admin_auth` 指派 proxy 校验后的正缓存 TTL（`DefaultAdminAuthCacheTTL`），同时是 Key 撤销传播的时间上界；生效值还会被 Key 自带 `max_age_seconds` 收紧、下限 1s。省略取默认；显式值必须为合法正 duration（Validate） |
+| `server.grpc_admin.allow_insecure` | bool | `false` | 显式放弃强制鉴权：无凭证请求注入 insecure 超管身份，每个请求记录 WARN。**仅限回环绑定**（G5 fail-closed）：非 loopback 的 `addr` 搭配 `true` 是 Validate 错误。仅限受控环境（开发/内网） |
 | `server.grpc_admin.capabilities` | string[] | 未设置 | Admin Capability 闭集：`history.read` / `presence.read` / `channels.list` / `session.act` / `user.fanout` / `subscribe.any` / `presence.large_snapshot` / `survey.bypass_gate` / `pattern.global`（预留）。**省略 = 除 `pattern.global` 外全部位**；**显式 `[]` = 零位**，锁死 Admin 数据面（GetHistory / GetPresence / GetChannels / 代订 / 按 user 扇出全部失败）；未知名 → Validate 错误 |
 | `server.heartbeat.idle_timeout` | string | 未设置 | 客户端空闲超时。为空或解析失败回退 300s；非 0 值必须 ≥1s；`"0s"` 表示不做空闲断开。idle 超时内无任何活动即 3511 断连。仅当 `idle_timeout` 与 `ping_interval` 都为 0 时心跳管理器完全不启动（只关 idle、开 ping 仍会跑探测循环）。WebSocket/QUIC/KCP 的读超时与其联动，见各传输节 |
 | `server.heartbeat.ping_interval` | string | `0s`（不主动 ping） | 服务端主动探测半开连接：每 `ping_interval` 发一次 Outbound `Ping`（首次在一个 interval 之后，带 0.8~1.2 抖动防齐射），随后 `ping_timeout` 内未收到任何入站帧（Pong/Ping/业务均可）即断开 3511。非 0 值必须 ≥1s。**打开后旧客户端会被踢**：不回 Pong 的旧 SDK 需要先升级。集群 session lease 随此值缩短，见 [《分布式集群指南》](04-cluster.md) |
@@ -405,6 +408,7 @@ proxy:
   - name: example-grpc          # 唯一标识
     endpoint: "127.0.0.1:10091" # gRPC: host:port；HTTP: 完整 URL
     timeout: "30s"              # 代理级超时，默认 30s
+    # admin_auth: true          # 指派为管理 API Key 校验器（全配置唯一，G3）
     grpc:                       # gRPC 后端配置（二选一）
       insecure: true
       # tls:
@@ -425,8 +429,9 @@ proxy:
 
 | 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `name` | string | 未设置 | 代理标识，用于日志与排障 |
+| `name` | string | 未设置 | 代理标识，用于日志与排障；`admin_auth: true` 时必填（按名解析校验器实例） |
 | `endpoint` | string | 未设置 | 后端地址。gRPC 后端为 `host:port`；HTTP 后端为完整 URL（`http://` / `https://` 前缀） |
+| `admin_auth` | bool | `false` | 将该代理指派为**管理 API 的 API Key 校验器**（proxy 契约的 `AuthenticateAdmin` RPC）。全配置至多一个条目可指派，两处指派即 Validate 错误（G3：显式布尔指派，不用方法名路由——**不存在 `$authenticate_admin`** 之类的管理面方法名）。指派与 `routes` 解耦：admin 认证不走 channel/method glob 匹配，客户端面 `$authenticate` 等钩子不受影响。指派语义与校验链详见[《管理 API 参考》](03-admin-api.md) |
 | `timeout` | string | `30s` | 代理级请求超时。0 或未设置取默认 30s；解析失败在启动时报错。与 `server.rpc_timeout` 的关系见 [三层超时](#三层超时) |
 | `http` | 对象 | 未设置 | HTTP 代理配置；`headers`（map[string]string）为附加请求头（默认注入 `Content-Type: application/json`）；`tls.insecure_skip_verify` 关闭证书校验；`tls.server_name` 设置 SNI。响应体上限 4 MiB |
 | `grpc` | 对象 | 未设置 | gRPC 代理配置；`insecure: true` 使用明文连接，否则用系统 CA 池做 TLS；`tls.server_name` 覆盖 SNI；`tls.insecure_skip_verify` 关闭证书校验。gRPC 响应上限固定为 4 MB |
@@ -457,6 +462,7 @@ proxy:
 | `OnSubscribed` | 订阅成功后 | 同上；错误被忽略 |
 | `OnUnsubscribed` | 取消订阅后 | 同上；错误被忽略 |
 | `OnDisconnected` | 客户端断开时 | 同上；错误被忽略 |
+| `AuthenticateAdmin` | 管理 API 携带 API Key 凭证的一元请求 | **不走此路由表**：不按方法名/glob 匹配，唯一激活方式是 proxy 条目的 `admin_auth: true` 显式指派（全配置唯一，见上表）；静态 `auth_tokens` 凭证不经过 proxy |
 
 **授权与代理的关系**：订阅/发布先过静态 `Authorizer.Decide`，再查代理——`SubscribeAcl` / `PublishAcl` 存在匹配路由时作为额外的门：代理拒绝只否决这一次请求，代理允许也不得跳过静态 deny。
 
@@ -478,15 +484,16 @@ server:
     addr: "127.0.0.1:8080"
 ```
 
-管理 HTTP 显式绑定回环地址（此处不写默认值也能工作，但显式声明更安全），对外仅暴露 `/health` 与 `/metrics`。如需给监控端点加鉴权，加一行 `auth_token`；绑定非回环地址且不设 token 时启动会打 WARN。
+管理 HTTP 显式绑定回环地址（此处不写默认值也能工作，但显式声明更安全），对外仅暴露 `/health` 与 `/metrics`。如需给监控端点加鉴权，加一行 `auth_token`；绑定非回环地址且不设 token 会直接被 Validate 拒绝（G5 fail-closed）。
 
 ```yaml
   grpc_admin:
     addr: "127.0.0.1:9091"
-    auth_token: "change-me"
+    auth_tokens:
+      - "change-me-admin-token-min-20-chars"
 ```
 
-管理 gRPC 同样绑定回环地址。`addr` 必填，且非空时 `auth_token` 与 `allow_insecure` 必须至少设置一个：只写 `addr` 不写 token 会直接启动失败。注释掉的 `capabilities` 块展示了 Admin 能力位闭集——省略时除 `pattern.global` 外全位，显式 `[]` 锁死 Admin 数据面。需要 TLS 时取消 `tls` 段注释并成对填写证书与私钥。注意：这个地址（连同 `transport.grpc.addr`）在启动时都会被无条件预绑定，必须可监听。
+管理 gRPC 同样绑定回环地址。`addr` 必填，且非空时三种凭证路径（`auth_tokens`、`proxy[].admin_auth: true` 指派、`allow_insecure`）必须至少配置一种：只写 `addr` 会直接启动失败。每把 token ≥ 20 字符（Validate）；列表形态支持轮换无空窗（加新 → 滚动重启 → 删旧）。注释掉的 `admin_auth_cache_ttl` 是 API Key 正缓存 TTL（默认 30s，需要 `proxy[].admin_auth` 指派才有意义）。注释掉的 `capabilities` 块展示了 Admin 能力位闭集——省略时除 `pattern.global` 外全位，显式 `[]` 锁死 Admin 数据面。需要 TLS 时取消 `tls` 段注释并成对填写证书与私钥。注意：这个地址（连同 `transport.grpc.addr`）在启动时都会被无条件预绑定，必须可监听。
 
 ```yaml
   heartbeat:
@@ -570,7 +577,7 @@ proxy:
         method: "*"
 ```
 
-注册名为 `example-grpc` 的 gRPC 代理，明文连接 `127.0.0.1:10091`，`channel: "*"` + `method: "*"` 匹配所有频道的所有方法。该代理同时承担 `$authenticate` 鉴权（`method: "*"` 覆盖了固定方法名）、`"subscribe"` / `"publish"` 的 ACL 裁决（作为静态 Authorizer 之外的额外门），以及 RPC 转发与四个连接生命周期通知。`timeout: 30s` 与默认一致。注释掉的 `example-http` 段展示了 HTTP 代理形态（完整 URL 端点、附加头、TLS 选项）。
+注册名为 `example-grpc` 的 gRPC 代理，明文连接 `127.0.0.1:10091`，`channel: "*"` + `method: "*"` 匹配所有频道的所有方法。该代理同时承担 `$authenticate` 鉴权（`method: "*"` 覆盖了固定方法名）、`"subscribe"` / `"publish"` 的 ACL 裁决（作为静态 Authorizer 之外的额外门），以及 RPC 转发与四个连接生命周期通知。`timeout: 30s` 与默认一致。该代理未设 `admin_auth: true`，因此不承担管理 API 的 API Key 校验——需要时显式加上（全配置唯一指派，见 [proxy 节](#proxy-节) 字段表）。注释掉的 `example-http` 段展示了 HTTP 代理形态（完整 URL 端点、附加头、TLS 选项）。
 
 ## 多节点注意
 

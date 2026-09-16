@@ -58,7 +58,12 @@ type Metrics struct {
 	// ("static" token, "insecure" escape hatch, or "proxy"-verified key),
 	// key_id, and result (allow/deny). The never logs the presented
 	// credential; key_id is the identity's ID ("unknown" when unidentifiable).
-	AdminAuthRequests             *prometheus.CounterVec
+	AdminAuthRequests *prometheus.CounterVec
+	// AdminRPCs counts served admin API RPCs by method, key_id, and outcome
+	// ("denied" = rejected at authentication, "ok"/"error" = handler
+	// outcome). The per-identity attribution half of the admin observability
+	// pair (design G7).
+	AdminRPCs                     *prometheus.CounterVec
 	SurveyClientTotal             *prometheus.CounterVec
 	BindFencedTotal               prometheus.Counter
 	BindRefreshFailTotal          prometheus.Counter
@@ -210,6 +215,11 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name:      "admin_auth_requests_total",
 			Help:      "Total number of admin API authentication attempts by verifier (static/insecure/proxy), key_id, and result (allow/deny). Never carries the presented credential.",
 		}, []string{"verifier", "key_id", "result"}),
+		AdminRPCs: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "messageloop",
+			Name:      "admin_rpc_total",
+			Help:      "Total number of admin API RPCs by method, key_id, and outcome (denied at authentication, or ok/error from the handler). Never carries the presented credential.",
+		}, []string{"method", "key_id", "result"}),
 		SurveyClientTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "messageloop",
 			Name:      "survey_client_total",
@@ -280,6 +290,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.HeartbeatIdleDisconnects,
 		m.AdminUserFanout,
 		m.AdminAuthRequests,
+		m.AdminRPCs,
 		m.SurveyClientTotal,
 		m.BindFencedTotal,
 		m.BindRefreshFailTotal,

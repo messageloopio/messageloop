@@ -150,6 +150,8 @@ MessageLoop 的核心设计目标可以归纳为四点：
 8. 处理 Connect 携带的订阅列表：先做订阅数上限检查（超限 `DisconnectChannelLimit`），逐频道命名空间守卫 / Authorizer/代理检查，`AddSubscription` + presence 登记 + 发布 join 事件。
 9. 消息恢复（流式恢复，internal/runtime/recover.go）：先发裸 `Connected`（v2 协议的 Connected 不携带历史批次与 presence 列表），再对每个 `recover=true` 的频道走统一 Replayer：`fresh=true` 或 resume 时快照 epoch 与 broker epoch 不一致（两边都非空）才从频道历史开头恢复；否则 cursor 带 offset 时从 `offset+1` 续读，cursor 未带 offset 时回退服务端已记录的 delivered offset（有则续读，无则跳过）。`broker.History` 以 `MaxRecoveredPublications`（1000，请求级配额、多频道共享）为限，逐条 `Publication(replay=true)` 经 `Session.Send` 落线（每条受 `MaxMessageSize` 约束），最后每频道一条 `RecoverComplete{channel, position, truncated, gap, gap_reason, error?}`（标 Control）。恢复失败不撤订订阅。
 
+**管理面鉴权与授权（internal/admin/auth.go + scope.go，与客户端面 `$authenticate` 正交）**：客户端面的凭证经 FindProxy(`$authenticate`) 验证；管理 gRPC 监听器则在每个一元 RPC 前过自己的认证拦截器，解析三条凭证路径——静态 `auth_tokens`（逐把常数时间比较，命中即超管身份）、`allow_insecure`（仅回环绑定，G5 fail-closed 启动门）、API Key（经 `admin_auth: true` 唯一指派的代理 `AuthenticateAdmin` 校验：sha256 缓存 + 同 Key 并发去重 + 2s 错误短缓存与 5 连错 30s 熔断保证 fail-closed 且 fail-fast，proxy 授予按节点能力上限与 namespace 语法钳制）。认证产出的 `AdminIdentity` 随后穿过 scope 层（internal/admin/scope.go）——全部 8 个管理 RPC 进 handler 前的单一 choke point：声明式能力表求值 + 全局面 channel 语法门（G4）+ 按拒绝语义矩阵改写请求（越界目标对 handler 结构性不可见），handler 因此 scope-free。详见[《管理 API 参考》](03-admin-api.md)。
+
 **命名空间守卫（internal/session/namespace.go）**：会话携带 namespace 后，`precheckNamespace` 作为统一入口门挂在 `handleMessage` 分发点，对所有携带频道引用的信封做作用域检查，各 handler 内的 `checkNamespace` 作为纵深防御保留：
 
 | 信封 | 拒绝行为 |
@@ -305,9 +307,9 @@ type Transport interface {
 ### 4.3 gRPC 流（pkg/transport/grpc/）
 
 - `client_server.go`：`PrepareClientServer` 注册 `MessageLoopService`，每个客户端一条双向流（handler.go 的 `MessageLoop` 方法），固定使用 Protobuf。
-- `server.go`：共享的 `PrepareServer`——预绑定监听器、加载 TLS、施加 `ForceServerCodec(RawCodec)` 与 `MaxRecvMsgSize`，统一生命周期；`AdminAuthInterceptor` 为管理监听器提供 Bearer Token 校验（常量时间比较）。
+- `server.go`：共享的 `PrepareServer`——预绑定监听器、加载 TLS、施加 `ForceServerCodec(RawCodec)` 与 `MaxRecvMsgSize`，统一生命周期；认证拦截器由调用方按需注入（管理面在 internal/admin 装配，见下条），客户端流监听器无认证拦截器。
 - `transport.go`：写入经单 worker goroutine 串行化（`sendCh` 深度 1，仅作 handoff，不构成第二层缓冲），默认写超时 10s，入队前拷贝消息字节（调用方可能复用池化缓冲）。关闭时先投递 `DISCONNECT_ERROR` 错误信封（数值断连码编码在 metadata 的 `disconnect_code` 条目中，队列堵塞时以 1s 超时降级为直接关闭）再退出 worker。
-- internal/admin/admin_server.go：`PrepareAdminServer` 在独立监听器注册 `APIService`（管理 API），详见[《管理 API 参考》](03-admin-api.md)。
+- internal/admin/admin_server.go：`PrepareAdminServer` 在独立监听器注册 `APIService`（管理 API），并安装管理认证拦截器（三种凭证路径：静态 `auth_tokens` / `allow_insecure` / `admin_auth` 指派 proxy 校验的 API Key），详见[《管理 API 参考》](03-admin-api.md)。
 
 ### 4.4 RawCodec（pkg/transport/grpc/codec.go）
 
@@ -475,7 +477,9 @@ Occupancy 事件不是 Publication（走 broker 的实时 `occupancy` 消息类�
 ```
 管理工具                    Admin gRPC API               Node              Broker
   │── GetHistory ─────────►│                            │                  │
-  │   (Bearer Token)       │── 鉴权拦截器 + 能力位检查     │                  │
+  │   (Bearer Token /      │── 认证拦截器（三凭证路径）    │                  │
+  │    x-api-key)          │── scope 层（能力表 + 语法门   │                  │
+  │                        │   + namespace 矩阵改写）     │                  │
   │                        │── node.Broker().History ───►                  │
   │                        │   (sinceOffset, limit)      │── 读取 ─────────►│
   │◄── HistoryResponse ────┤◄────────── publications ────┤◄── 环形缓冲/Stream│
@@ -534,7 +538,7 @@ Occupancy 事件不是 Publication（走 broker 的实时 `occupancy` 消息类�
 | internal/authz/ | Authorizer（`authorizer.go`）与求值辅助 |
 | internal/protocol/ | 协议常量：`disconnect.go`（断连码）、`version.go`（协议版本门） |
 | internal/cluster/ | 集群控制面契约（`contracts.go`、`state.go`、`epoch.go`、`user_index.go`）与子包 `hmac/`、`sim/` |
-| internal/admin/ | 管理 gRPC API：`admin_server.go`、`api_handler.go` |
+| internal/admin/ | 管理 gRPC API：`admin_server.go`、`api_handler.go`、`auth.go`（认证链：三凭证路径 + 缓存/去重/熔断）、`scope.go`（授权 scope 层：能力表 + 请求遍历改写） |
 | internal/metrics/ | Prometheus 指标定义（`metrics.go`） |
 | cmd/server/ | 可执行入口：`main.go`（装配与监听器）、`runtime.go`（gRPC 预绑定与启动顺序）、`envconfig.go`（`MESSAGELOOP_*` 环境变量覆盖） |
 | config/ | 配置结构（`config.go`）与校验 |
