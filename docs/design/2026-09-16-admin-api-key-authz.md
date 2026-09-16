@@ -11,7 +11,8 @@
 | 阶段前提 | dogfooding：重点验证并补全机制缺口，**不考虑向后兼容**（对齐 KD-K31"无兼容期"先例） |
 | 实现还原点 | S1 875c6ad / S2 9531a0f / S3 c6fc04f / S4 8aff6a7 / S5+补遗（分支 feat/admin-api-key-authz） |
 | 修订 | 2026-09-16 rethink 复查：修正 4 项（key_id 唯一性 / scope 抹空短路 / fail-fast / 长度门顺序）、补充 2 项（auth_tokens 列表 / JWT 否决留档），见 D26-D29 |
-| 实现澄清 | ① 矩阵中 Disconnect 不可见 session 的落地形态是 results **无该键**（强于 false，不泄露存在性；Go map 读取语义等价 false）；② G7 两个指标（admin_auth_requests_total + admin_rpc_total{method,key_id,result∈denied/ok/error}）均已实现；③ T4 落地为 whoami 端点（见 T4 行修订）——原"verify + apikeys.verify scope"方案因 TW 已退役 apikeys scope 而否决 |
+| 实现澄清 | ① 矩阵中 Disconnect 不可见 session 的落地形态是 results **无该键**（强于 false，不泄露存在性；Go map 读取语义等价 false）；② G7 两个指标（admin_auth_requests_total + admin_rpc_total{method,key_id,result∈denied/ok/error}）均已实现；③ T4 落地为 whoami 端点（见 T4 行修订）——原"verify + apikeys.verify scope"方案因 TW 已退役 apikeys scope 而否决；④ **whoami 线上 JSON 为 snake_case**（`key_id/project_id/max_age_seconds`）——TW grpc-gateway 全局 `UseProtoNames: true`，冻结契约的 camelCase 假设错误，mlbridge 已按实际形状解析并加回归测试；⑤ T3 平台级 key 剪裁（`api_keys.project_id NOT NULL` 需迁移，运维暂用静态 token）；⑥ T5 零改动——TW project id 生成规则（`^[a-z][a-z0-9]{0,27}$`）已是 namespace 语法严格子集，加不变量测试防未来放宽 |
+| 三仓还原点 | messageloop `feat/admin-api-key-authz`（本分支，已推送）；mlbridge `feat/authenticate-admin` 6e7eb6b+b47aaae；torchwood `feat/admin-key-whoami` 5573ac60（后两者本地未推送） |
 
 ---
 
