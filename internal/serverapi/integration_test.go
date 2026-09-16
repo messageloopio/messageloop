@@ -1,4 +1,4 @@
-package admin_test
+package serverapi_test
 
 import (
 	"context"
@@ -13,10 +13,10 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	"github.com/messageloopio/messageloop/internal/admin"
 	"github.com/messageloopio/messageloop/internal/authz"
 	"github.com/messageloopio/messageloop/internal/protocol"
 	"github.com/messageloopio/messageloop/internal/runtime"
+	"github.com/messageloopio/messageloop/internal/serverapi"
 	"github.com/messageloopio/messageloop/internal/session"
 	"github.com/messageloopio/messageloop/internal/stream"
 	"github.com/messageloopio/messageloop/shared"
@@ -31,18 +31,18 @@ func startTestGRPCServer(t *testing.T, node *runtime.Node) serverv2.APIServiceCl
 
 	lis := bufconn.Listen(bufSize)
 	s := grpc.NewServer(
-		// The production admin listener authenticates via the auth chain;
+		// The production Server API listener authenticates via the auth chain;
 		// this bufconn fixture attaches the static superadmin identity
 		// directly (design §2.1: ["*"] scope, node ceiling caps).
 		grpc.UnaryInterceptor(func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-			return handler(admin.WithAdminIdentity(ctx, authz.AdminIdentity{
+			return handler(serverapi.WithAPIIdentity(ctx, authz.APIIdentity{
 				KeyID:      "static-token",
 				Namespaces: []string{"*"},
-				Caps:       node.AdminCapabilities(),
+				Caps:       node.APICapabilities(),
 			}), req)
 		}),
 	)
-	serverv2.RegisterAPIServiceServer(s, admin.NewAPIServiceHandler(node))
+	serverv2.RegisterAPIServiceServer(s, serverapi.NewAPIServiceHandler(node))
 	go func() { _ = s.Serve(lis) }()
 	t.Cleanup(s.GracefulStop)
 
@@ -78,7 +78,7 @@ func addTestClient(t *testing.T, node *runtime.Node, sessionID, userID string) *
 	return client
 }
 
-func TestGRPC_AdminAPI_PublishAndDisconnect(t *testing.T) {
+func TestGRPC_ServerAPI_PublishAndDisconnect(t *testing.T) {
 	ctx := t.Context()
 	node := runtime.NewNode(nil)
 	require.NoError(t, node.Run(ctx))
@@ -110,7 +110,7 @@ func TestGRPC_AdminAPI_PublishAndDisconnect(t *testing.T) {
 	require.True(t, resp.Results["sess-1"])
 }
 
-func TestGRPC_AdminAPI_SubscribeUnsubscribe(t *testing.T) {
+func TestGRPC_ServerAPI_SubscribeUnsubscribe(t *testing.T) {
 	ctx := t.Context()
 	node := runtime.NewNode(nil)
 	require.NoError(t, node.Run(ctx))
@@ -156,7 +156,7 @@ func TestGRPC_AdminAPI_SubscribeUnsubscribe(t *testing.T) {
 	require.Equal(t, int32(1), channelNames2["dev:sports"])
 }
 
-func TestGRPC_AdminAPI_GetHistory(t *testing.T) {
+func TestGRPC_ServerAPI_GetHistory(t *testing.T) {
 	ctx := t.Context()
 	node := runtime.NewNode(nil)
 	require.NoError(t, node.Run(ctx))
@@ -182,9 +182,9 @@ func TestGRPC_AdminAPI_GetHistory(t *testing.T) {
 	require.Equal(t, uint64(3), resp.Publications[2].Position.GetOffset())
 }
 
-// TestGRPC_AdminAPI_Publish_JSONPayload verifies that a Payload_Json published
+// TestGRPC_ServerAPI_Publish_JSONPayload verifies that a Payload_Json published
 // through the admin API is stored as valid JSON (P0-3).
-func TestGRPC_AdminAPI_Publish_JSONPayload(t *testing.T) {
+func TestGRPC_ServerAPI_Publish_JSONPayload(t *testing.T) {
 	ctx := t.Context()
 	node := runtime.NewNode(nil)
 	require.NoError(t, node.Run(ctx))

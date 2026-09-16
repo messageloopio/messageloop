@@ -15,7 +15,7 @@ Torchwood 的公开 Server API 通信——部署时需提供 Torchwood 网关�
 与典型 Web 应用不同的三点，先说清楚：
 
 1. **端口形态**：MessageLoop 暴露四个 TCP 监听（WebSocket 9080 / 客户端 gRPC 9090 /
-   admin gRPC 9091 / health+metrics 8080），可选 QUIC/KCP（UDP）。Traefik 只路由
+   Server API gRPC 9091 / health+metrics 8080），可选 QUIC/KCP（UDP）。Traefik 只路由
    HTTP——WebSocket 与 gRPC 各配一条域名（TLS 终结），UDP 不走 Traefik；
 2. **没有迁移作业**：MessageLoop 无数据库 schema，Redis 键在首节点启动时自举，
    不需要 one-shot 作业链；
@@ -30,7 +30,7 @@ Torchwood 的公开 Server API 通信——部署时需提供 Torchwood 网关�
 - 一台装好 Docker 的服务器 + Dokploy（≥ v0.10）；
 - 本仓库可被 Dokploy 访问（GitHub/GitLab/直接 Git URL；私有仓库需配置凭证）；
 - 两个指向服务器的域名（如 `ws.example.com` 与 `grpc.example.com`），分别承载
-  WebSocket 与客户端 gRPC；admin 面不占域名（仅隧道/栈内访问）。
+  WebSocket 与客户端 gRPC；Server API 不占域名（仅隧道/栈内访问）。
 
 ## 1. 创建 Compose 服务
 
@@ -49,13 +49,13 @@ Torchwood 的公开 Server API 通信——部署时需提供 Torchwood 网关�
 ## 2. 环境变量（Environment 页签）
 
 > 逐项清单以 **`env.dokploy`** 为准（下表是说明，不是全集）。必填五项：
-> `MESSAGELOOP_SERVER_GRPC_ADMIN_AUTH_TOKENS`、`MESSAGELOOP_WS_DOMAIN`、
+> `MESSAGELOOP_SERVER_API_AUTH_TOKENS`、`MESSAGELOOP_WS_DOMAIN`、
 > `MESSAGELOOP_GRPC_DOMAIN`、`MLBRIDGE_TORCHWOOD_BASE_URL`、
 > `MLBRIDGE_TORCHWOOD_PROJECTS`。
 
 | 变量 | 必填 | 说明 |
 |------|------|------|
-| `MESSAGELOOP_SERVER_GRPC_ADMIN_AUTH_TOKENS` | ✅ | admin gRPC 的 Bearer token 列表（逗号分隔多把），`openssl rand -hex 32`；未设置拒绝启动（compose 内 `:?` 强制） |
+| `MESSAGELOOP_SERVER_API_AUTH_TOKENS` | ✅ | Server API gRPC 的 Bearer token 列表（逗号分隔多把），`openssl rand -hex 32`；未设置拒绝启动（compose 内 `:?` 强制） |
 | `MESSAGELOOP_WS_DOMAIN` | ✅ | WebSocket 域名，如 `ws.example.com`（Traefik label 路由，见 §3） |
 | `MESSAGELOOP_GRPC_DOMAIN` | ✅ | 客户端 gRPC 域名，如 `grpc.example.com`（TLS 终结 → h2c） |
 | `MLBRIDGE_TORCHWOOD_BASE_URL` | ✅ | Torchwood 网关地址。同机 Dokploy 部署走内网直连 `http://torchwood-server:9080`（Torchwood 的 server 容器名；mlbridge 已挂 dokploy-network，别名里没有 `torchwood`）；跨机/独立部署用公网 `https://tw.example.com` |
@@ -69,7 +69,7 @@ Torchwood 的公开 Server API 通信——部署时需提供 Torchwood 网关�
 | `MESSAGELOOP_TRANSPORT_WEBSOCKET_ALLOW_ALL_ORIGINS` | | 默认 `true`（token 鉴权下 Origin 不是授权边界） |
 | `MESSAGELOOP_TRANSPORT_WEBSOCKET_ALLOWED_ORIGINS` | | 收紧来源：逗号分隔列表，**且必须同时设** `…ALLOW_ALL_ORIGINS=false`（allow_all 优先级更高） |
 | `MESSAGELOOP_SERVER_HTTP_AUTH_TOKEN` | | /health、/metrics 的 token。8080 默认绑回环不发布不路由；改非回环绑定（如发布 8080）必须设置（G5 fail-closed，否则 Validate 拒绝启动），并同步改 healthcheck |
-| `MESSAGELOOP_GRPC_PORT` / `MESSAGELOOP_ADMIN_GRPC_PORT` | | 宿主回环端口，默认 `9090` / `9091`；冲突时改 |
+| `MESSAGELOOP_GRPC_PORT` / `MESSAGELOOP_API_GRPC_PORT` | | 宿主回环端口，默认 `9090` / `9091`；冲突时改 |
 | `MESSAGELOOP_IMAGE` | | 镜像引用，默认 `ghcr.io/messageloopio/messageloop:latest`；建议钉版本 tag |
 | `MESSAGELOOP_TRANSPORT_QUIC_ADDR` / `…KCP_ADDR` | | 启用 UDP 传输（默认空=关闭）；还需放开 ports 的 udp 行并配置 TLS（§4.3） |
 
@@ -130,11 +130,11 @@ Traefik 不路由 UDP。启用：Environment 设
 Redeploy。客户端直连 `宿主IP:端口`（`sdk.DialQUIC` / `sdk.DialKCP`，
 KCP 的 FEC 参数需与服务器一致）。
 
-### 4.4 admin gRPC（服务器侧）
+### 4.4 Server API gRPC（服务器侧）
 
 仅两条路：栈内网络（`messageloop:9091`，供同栈后端服务调用）或 SSH 隧道
 （`ssh -L 9091:127.0.0.1:9091`）。调用必须携带
-`authorization: Bearer <MESSAGELOOP_SERVER_GRPC_ADMIN_AUTH_TOKEN>` metadata。
+`authorization: Bearer <MESSAGELOOP_SERVER_API_AUTH_TOKENS>` metadata。
 
 ## 5. 验证
 

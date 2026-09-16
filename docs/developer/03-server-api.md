@@ -1,16 +1,16 @@
-# 管理 API 参考
+# Server API 参考（服务端 API）
 
 ## 概述
 
-管理 API（Admin API）是 MessageLoop 服务端对外提供的 gRPC 管理接口，用于以服务端身份执行发布、断连、订阅管理、在线状态查询、历史消息查询等操作。它与客户端协议（见 [../protocol.md](../protocol.md)）面向不同的使用方：客户端协议是客户端通过 WebSocket 或 gRPC 流式通道与服务器通信的协议；管理 API 则是运维工具、内部服务与 SDK 后端集成使用的独立 gRPC 服务。
+Server API（服务端 API，曾称 Admin API / 管理 API）是 MessageLoop 服务端对外提供的服务端 gRPC 接口，用于以服务端身份执行发布、断连、订阅管理、在线状态查询、历史消息查询等操作。它与客户端协议（见 [../protocol.md](../protocol.md)）面向不同的使用方：客户端协议是客户端通过 WebSocket 或 gRPC 流式通道与服务器通信的协议；Server API 则是运维工具、内部服务与 SDK 后端集成使用的独立 gRPC 服务。
 
-管理 API 定义于 `protocol/server/v2/api.proto`，服务名为 `APIService`，完整限定名（fully-qualified name）为：
+Server API 定义于 `protocol/server/v2/api.proto`，服务名为 `APIService`，完整限定名（fully-qualified name）为：
 
 ```
 messageloop.server.v2.APIService
 ```
 
-所有 RPC 均为普通一元调用（unary call），不涉及流式传输。管理 API 监听在独立的端口上，地址由配置项 `server.grpc_admin.addr` 指定（必填，见[《配置参考》](02-configuration.md)）。在进程内部，管理 API 的处理器（internal/admin/api_handler.go）与客户端流共享同一个 `Node` 实例，因此管理操作直接作用于在线客户端会话。
+所有 RPC 均为普通一元调用（unary call），不涉及流式传输。Server API 监听在独立的端口上，地址由配置项 `server.api.addr` 指定（必填，见[《配置参考》](02-configuration.md)）。在进程内部，Server API 的处理器（internal/serverapi/api_handler.go）与客户端流共享同一个 `Node` 实例，因此Server API 操作直接作用于在线客户端会话。
 
 服务共声明 8 个 RPC：
 
@@ -27,27 +27,27 @@ messageloop.server.v2.APIService
 
 ## 传输与鉴权
 
-管理 API 使用标准的 gRPC 传输，监听地址为 `server.grpc_admin.addr`。相关的配置键如下：
+Server API 使用标准的 gRPC 传输，监听地址为 `server.api.addr`。相关的配置键如下：
 
 | 配置键 | 说明 |
 | --- | --- |
-| `server.grpc_admin.addr` | 管理 API 监听地址（必填，监听器在启动预检阶段即绑定） |
-| `server.grpc_admin.auth_tokens` | 静态超管 Bearer token **列表**；每把 ≥ 20 字符（Validate 强制），任一命中即超管身份 |
-| `server.grpc_admin.admin_auth_cache_ttl` | API Key 经 proxy 校验后的正缓存 TTL（默认 `30s`），是撤销传播的时间上界 |
-| `server.grpc_admin.allow_insecure` | 显式放弃强制鉴权（仅限回环绑定：非 loopback 地址 + `allow_insecure` 是 Validate 错误，fail-closed） |
-| `server.grpc_admin.tls.cert_file` / `server.grpc_admin.tls.key_file` | TLS 证书与私钥，必须同时设置或同时留空 |
-| `server.grpc_admin.capabilities` | 节点能力位上限（每个调用方身份生效的上界），见下文[能力位](#能力位capabilities) |
-| `proxy[].admin_auth` | 将某个 proxy 条目指派为 API Key 校验器（全配置唯一），见下文[API Key 鉴权](#api-key-鉴权proxy-托管) |
+| `server.api.addr` | Server API 监听地址（必填，监听器在启动预检阶段即绑定） |
+| `server.api.auth_tokens` | 静态超管 Bearer token **列表**；每把 ≥ 20 字符（Validate 强制），任一命中即超管身份 |
+| `server.api.auth_cache_ttl` | API Key 经 proxy 校验后的正缓存 TTL（默认 `30s`），是撤销传播的时间上界 |
+| `server.api.allow_insecure` | 显式放弃强制鉴权（仅限回环绑定：非 loopback 地址 + `allow_insecure` 是 Validate 错误，fail-closed） |
+| `server.api.tls.cert_file` / `server.api.tls.key_file` | TLS 证书与私钥，必须同时设置或同时留空 |
+| `server.api.capabilities` | 节点能力位上限（每个调用方身份生效的上界），见下文[能力位](#能力位capabilities) |
+| `proxy[].api_auth` | 将某个 proxy 条目指派为 API Key 校验器（全配置唯一），见下文[API Key 鉴权](#api-key-鉴权proxy-托管) |
 
-**启动硬性要求**：`server.grpc_admin.addr` 非空时，`auth_tokens`、`proxy[].admin_auth: true` 指派、`allow_insecure: true` 三种凭证路径必须至少配置一种，否则配置校验失败——不存在"不配置即放行"的默认。
+**启动硬性要求**：`server.api.addr` 非空时，`auth_tokens`、`proxy[].api_auth: true` 指派、`allow_insecure: true` 三种凭证路径必须至少配置一种，否则配置校验失败——不存在"不配置即放行"的默认。
 
 ### 鉴权（三种凭证路径）
 
-管理认证由挂在管理 gRPC 服务器上的 unary 拦截器完成（internal/admin/auth.go，装配见 internal/admin/admin_server.go；客户端流 gRPC 监听器不安装该拦截器）。拦截器从 gRPC 元数据提取凭证：`authorization: Bearer <凭证>` 优先，`authorization` 头缺失或不是 `Bearer ` 前缀时回退 `x-api-key`。随后按固定顺序裁决：
+Server API 认证由挂在Server API gRPC 服务器上的 unary 拦截器完成（internal/serverapi/auth.go，装配见 internal/serverapi/server.go；客户端流 gRPC 监听器不安装该拦截器）。拦截器从 gRPC 元数据提取凭证：`authorization: Bearer <凭证>` 优先，`authorization` 头缺失或不是 `Bearer ` 前缀时回退 `x-api-key`。随后按固定顺序裁决：
 
 1. **无凭证**：已配置 `auth_tokens` → `Unauthenticated`；配置了 `allow_insecure` → 注入 insecure 超管身份放行（每个请求记录 WARN）；否则 `Unauthenticated`。
 2. **有凭证，先比静态列表**：凭证与 `auth_tokens` 逐把常数时间比较（`subtle.ConstantTimeCompare`，长度不匹配安全归零），任一命中即**超管身份**——KeyID `static-token`、principal `admin`、namespace 范围 `["*"]`、能力位 = 节点上限。静态比较刻意排在下文 Key 长度门**之前**（设计 D28）：较短的静态 token 不会被 Key 路径的 20 字符门误杀。
-3. **未命中静态列表**：有 `admin_auth` 指派代理 → 走 API Key 路径（见下节）；无指派 → `Unauthenticated`。
+3. **未命中静态列表**：有 `api_auth` 指派代理 → 走 API Key 路径（见下节）；无指派 → `Unauthenticated`。
 
 **静态 `auth_tokens` 列表**：
 
@@ -55,34 +55,34 @@ messageloop.server.v2.APIService
 - 每把 ≥ 20 字符（Validate 强制，避免过小的暴力空间）；
 - 语义冻结为超管（`["*"]` + 全部能力位 + 固定 principal `admin`），不支持限权——需要按调用方限权就发 API Key。它是桥接服务（mlbridge）的生产通道与运维 break-glass，不是兼容遗产。
 
-**`allow_insecure`**：无凭证请求注入 insecure 超管身份（KeyID `insecure`），仅限受控环境。G5 fail-closed 启动门：非 loopback 的 `server.grpc_admin.addr` 搭配 `allow_insecure: true` 是 **Validate 错误**（不再是启动 WARN）；admin HTTP 监听器同规则对齐——非 loopback 的 `server.http.addr` 必须配置 `server.http.auth_token`。
+**`allow_insecure`**：无凭证请求注入 insecure 超管身份（KeyID `insecure`），仅限受控环境。G5 fail-closed 启动门：非 loopback 的 `server.api.addr` 搭配 `allow_insecure: true` 是 **Validate 错误**（不再是启动 WARN）；admin HTTP 监听器同规则对齐——非 loopback 的 `server.http.addr` 必须配置 `server.http.auth_token`。
 
-生产环境应将管理端口绑定到回环或私有网络接口并配置 `auth_tokens`（见 [../deployment.md](../deployment.md)）。
+生产环境应将Server API 端口绑定到回环或私有网络接口并配置 `auth_tokens`（见 [../deployment.md](../deployment.md)）。
 
 ### API Key 鉴权（proxy 托管）
 
-静态 token 之外，管理 API 支持由后端代理托管的 **API Key** 凭证：Key 的生命周期（发放、撤销、审计）全部在代理后端（如 mlbridge → Torchwood），messageloop 自身不存储任何 Key。激活方式是 proxy 条目的显式布尔指派（全配置唯一）：
+静态 token 之外，Server API 支持由后端代理托管的 **API Key** 凭证：Key 的生命周期（发放、撤销、审计）全部在代理后端（如 mlbridge → Torchwood），messageloop 自身不存储任何 Key。激活方式是 proxy 条目的显式布尔指派（全配置唯一）：
 
 ```yaml
 proxy:
   - name: mlbridge
-    admin_auth: true   # 该代理成为管理 API Key 的唯一校验器
+    api_auth: true   # 该代理成为Server API Key 的唯一校验器
 ```
 
-- **唯一指派（G3）**：至多一个 proxy 条目可设 `admin_auth: true`，两处指派即 Validate 错误；被指派条目必须带 `name`（按名解析代理实例）。指派与 `routes` 完全解耦——admin 认证不走 channel/method glob 路由，不存在被 `method: "*"` 路由无声接管的可能；也不存在 `$authenticate_admin` 之类的方法名。
+- **唯一指派（G3）**：至多一个 proxy 条目可设 `api_auth: true`，两处指派即 Validate 错误；被指派条目必须带 `name`（按名解析代理实例）。指派与 `routes` 完全解耦——Server API 认证不走 channel/method glob 路由，不存在被 `method: "*"` 路由无声接管的可能；也不存在 `$authenticate_api_key` 之类的方法名。
 - **凭证形态**：与静态 token 相同的两种头——`authorization: Bearer <key>`（优先）或 `x-api-key: <key>`。
-- **校验流程**：静态列表未命中 → 无指派即拒 → 长度门（< 20 字符直接拒 + 负缓存，不触 proxy，防 Key 喷射）→ 调用被指派代理的 `AuthenticateAdmin` RPC（入参 Key 明文 + 审计用来源地址）。
+- **校验流程**：静态列表未命中 → 无指派即拒 → 长度门（< 20 字符直接拒 + 负缓存，不触 proxy，防 Key 喷射）→ 调用被指派代理的 `AuthenticateAPIKey` RPC（入参 Key 明文 + 审计用来源地址）。
 - **缓存**：校验结果按 Key 明文的 sha256 缓存（明文不进缓存、日志与错误信息），正负合计容量 1024 条、满则随机驱逐；同一 Key 的并发校验去重（合并为一次 proxy 调用）。
-- **TTL 与撤销传播上界**：正缓存 TTL = `admin_auth_cache_ttl`（默认 `30s`），并被 Key 自带的 `max_age_seconds` 收紧（生效 TTL = min(配置 TTL, max_age)，下限 1s）——**撤销传播上界 = TTL**，敏感 Key 由后端用 `max_age_seconds` 收紧到秒级。明确拒绝负缓存固定 5s（不配置化）。
+- **TTL 与撤销传播上界**：正缓存 TTL = `auth_cache_ttl`（默认 `30s`），并被 Key 自带的 `max_age_seconds` 收紧（生效 TTL = min(配置 TTL, max_age)，下限 1s）——**撤销传播上界 = TTL**，敏感 Key 由后端用 `max_age_seconds` 收紧到秒级。明确拒绝负缓存固定 5s（不配置化）。
 - **proxy 不可用：fail-closed 且 fail-fast（D27）**：proxy 错误（网络/超时/未实现）一律拒绝（`Unauthenticated`，错误信息注明 verifier 不可用），绝不 fail-open；错误结果进 2s 短负缓存，**连续 5 次 proxy 错误熔断 30s**，熔断期内直接快速失败、不触 proxy——否则 proxy 宕机时每条 Key 调用都会挂满 rpcTimeout（默认 30s），fail-closed 退化为 DoS 放大。熔断只影响 Key 路径：静态 token 通道永不经过 proxy，完全不受影响。后端给出明确接受/拒绝（证明 proxy 健康）即重置错误连击并退出熔断。
 - **能力/namespace 钳制（D17）**：proxy 返回的 `capabilities` 逐名映射能力位闭集（未知名 WARN 丢弃，版本偏斜容忍；全部未知 → 零能力）后与节点上限取交；`namespaces` 逐个过语法校验（非法项 WARN 丢弃），`"*"` 只允许单例（与精确项混用 → 整体坍缩为零范围，fail-closed），清洗后为空 → 零范围身份（全拒）。一句话：**proxy 决定"你是谁"，上限之内的授予是 proxy 的权限；上限本身（能力位闭集与 namespace 语法）永远是服务端配置的。**
-- **key_id 是唯一 ID 不是显示名（D26）**：proxy 返回的 `key_id` 必须是后端 Key 的唯一 ID（显示名是自由文本、可能重名）。Key 的授权主体为 `key:<key_id>`：Authorizer allow 列表（`allow_publish` 等）可按 `"key:<id>"` 精确放行单把 Key；日志与指标（`messageloop_admin_auth_requests_total{verifier,key_id,result}`）也只携带 key_id，保证可归因且不含 Key 明文。
+- **key_id 是唯一 ID 不是显示名（D26）**：proxy 返回的 `key_id` 必须是后端 Key 的唯一 ID（显示名是自由文本、可能重名）。Key 的授权主体为 `key:<key_id>`：Authorizer allow 列表（`allow_publish` 等）可按 `"key:<id>"` 精确放行单把 Key；日志与指标（`messageloop_server_api_auth_requests_total{verifier,key_id,result}`）也只携带 key_id，保证可归因且不含 Key 明文。
 - **标签约定（跨系统闭环）**：Key 上的能力标签采用 `messageloop.<能力位名>` 服务前缀语法（如 `messageloop.history.read`），由 Torchwood 存储校验、mlbridge 前缀过滤后映射为闭集能力名。该约定活在 Torchwood ↔ mlbridge 层，messageloop 契约只认闭集名；标签清单与三层知识边界见[设计文档](../design/2026-09-16-admin-api-key-authz.md) §2.6。
 - **deny 不可打洞**：API Key 的 channel 引用照常受全局 Authorizer 表约束，与静态身份同一条规则表。
 
 ### 能力位（capabilities）
 
-能力位检查集中在 scope 层的声明式能力表（internal/admin/scope.go，每个 RPC 进 handler 前求值；缺位返回 `PermissionDenied`，census 测试保证新增 RPC 必须登记）。能力位**按调用方身份生效**：静态 token / `allow_insecure` 身份持节点上限（`server.grpc_admin.capabilities`）；API Key 身份持 proxy 授予 ∩ 节点上限（见上节钳制）。
+能力位检查集中在 scope 层的声明式能力表（internal/serverapi/scope.go，每个 RPC 进 handler 前求值；缺位返回 `PermissionDenied`，census 测试保证新增 RPC 必须登记）。能力位**按调用方身份生效**：静态 token / `allow_insecure` 身份持节点上限（`server.api.capabilities`）；API Key 身份持 proxy 授予 ∩ 节点上限（见上节钳制）。
 
 | 能力位 | 控制的操作 |
 | --- | --- |
@@ -95,7 +95,7 @@ proxy:
 | `survey.bypass_gate` | `Survey` 绕过客户端 Survey 的门限制（行为开关：无此位时与客户端 Survey 同门——Authorizer 拒绝或订阅者超 `max_survey_subscribers` 即 `PermissionDenied` / `ResourceExhausted`，见 [Survey](#survey)） |
 | `presence.large_snapshot` | `GetPresence` 返回完整快照（无此位时按上限截断） |
 
-频道-only 的 `Publish`（目标只有 `channels`）不需要任何能力位——发布权限的控制单元是 namespace 范围 + Authorizer 规则，不是能力位。`capabilities` 省略时默认为除 `pattern.global`（预留位）外的全部能力；显式 `[]` 表示零能力，锁死 Admin 数据面。完整语义见[《配置参考》](02-configuration.md) server 节。
+频道-only 的 `Publish`（目标只有 `channels`）不需要任何能力位——发布权限的控制单元是 namespace 范围 + Authorizer 规则，不是能力位。`capabilities` 省略时默认为除 `pattern.global`（预留位）外的全部能力；显式 `[]` 表示零能力，锁死 Server API 数据面。完整语义见[《配置参考》](02-configuration.md) server 节。
 
 ### 命名空间
 
@@ -103,7 +103,7 @@ proxy:
 
 **身份的 namespace 范围**：每个已认证身份携带一个 namespace 范围——静态 token / `allow_insecure` / platform 级 Key 为 `["*"]`（全部）；API Key 为 proxy 授予的精确列表（空列表 = 拒绝一切，fail-closed）。范围限定了调用方能寻址的 channel、namespace 参数与 session：
 
-- **channel 引用**：越界的 channel 对该身份不可见或直接拒绝（按 RPC 形态，见下表）；语法不合法的 channel（非 `ns:topic` 形态）对**全体身份**（含静态 token）一律 `InvalidArgument`——G4 全局面语法门，admin 面与客户端面共享同一 channel 语法，死通道从静默浪费变成显式报错。
+- **channel 引用**：越界的 channel 对该身份不可见或直接拒绝（按 RPC 形态，见下表）；语法不合法的 channel（非 `ns:topic` 形态）对**全体身份**（含静态 token）一律 `InvalidArgument`——G4 全局面语法门，Server API 面与客户端面共享同一 channel 语法，死通道从静默浪费变成显式报错。
 - **namespace 参数**：`users`/`user_id` 非空时携带的 `namespace` 参数越界 → 整个 RPC `PermissionDenied`（显式、可诊断）。
 - **session ID**：跨范围 session 对该身份**不可见**（租约 namespace 无法解析或不落在范围内即视为不存在，不泄露存在性）。
 - **`GetChannels` 结果**：按身份 namespace 过滤；channel 名解析不出命名空间的条目对受限身份同样隐藏（fail-closed）。
@@ -123,7 +123,7 @@ proxy:
 
 ### TLS
 
-当 `server.grpc_admin.tls.cert_file` 与 `server.grpc_admin.tls.key_file` 成对设置时，管理服务器以 TLS 方式服务；二者必须同时设置或同时留空（配置校验见《配置参考》[02-configuration.md](02-configuration.md)）。
+当 `server.api.tls.cert_file` 与 `server.api.tls.key_file` 成对设置时，Server API 服务器以 TLS 方式服务；二者必须同时设置或同时留空（配置校验见《配置参考》[02-configuration.md](02-configuration.md)）。
 
 ### grpcurl 调用
 
@@ -186,7 +186,7 @@ grpcurl \
 - `true`：写入 broker 历史，后续可通过 `GetHistory` 补拉。
 - `false` 或未设置：以 transient 方式发布，不写历史。
 - 会话目标与用户目标不受该选项影响，始终直接投递到会话。
-- 频道的授权策略（`Authorizer` Effects）可以否决该选项：策略禁历史（`transient_only` 或 `history=false`）时 `add_history=true` 被拒绝——该条投递计为失败、不发布（避免误以为写入了历史）；`AdminCanPublish` 授权拒绝同样计为失败。
+- 频道的授权策略（`Authorizer` Effects）可以否决该选项：策略禁历史（`transient_only` 或 `history=false`）时 `add_history=true` 被拒绝——该条投递计为失败、不发布（避免误以为写入了历史）；`APICanPublish` 授权拒绝同样计为失败。
 
 响应消息 `PublishResponse`：空消息，不返回任何字段。单条出版物的投递结果（例如 broker 分配的 offset）不会暴露给调用方。
 
@@ -272,7 +272,7 @@ grpcurl \
 
 语义：
 
-- 订阅以单个会话为目标（会话级管理操作，不是广播订阅），实际调用的是与客户端主动订阅等价的完整订阅路径（`AddSubscription`），包括 broker 订阅注册、在线状态（presence）登记与集群状态同步。
+- 订阅以单个会话为目标（会话级Server API 操作，不是广播订阅），实际调用的是与客户端主动订阅等价的完整订阅路径（`AddSubscription`），包括 broker 订阅注册、在线状态（presence）登记与集群状态同步。
 - 按 `user_id` 展开后逐会话执行：对每个频道，任一 session 订阅成功即记 `true` 并停止尝试其余 session（早停）；全部失败才为 `false`。会话不存在或订阅过程出错时对应频道为 `false`。RPC 本身不因个别频道失败而返回错误。
 - 订阅已存在的频道是幂等的，重复订阅返回 `true` 且不产生副作用。
 - `user_id` 的展开与 Publish/Disconnect 相同：校验 lease 的 `UserID`；`namespace` 缺失或 `session_id` 与 `user_id` 都为空时 `InvalidArgument` 且不扫描。
@@ -456,7 +456,7 @@ grpcurl \
 
 ## 错误模型
 
-管理 API 的错误分两层：协议层错误消息与 gRPC 状态码。
+Server API 的错误分两层：协议层错误消息与 gRPC 状态码。
 
 ### 错误消息（`messageloop.shared.v2.Error`）
 
@@ -473,15 +473,15 @@ message Error {
 
 `code`、`type` 都是自由字符串（free-form string），`metadata` 为任意结构化数据；`errors.proto` 的注释将该表定位为全仓唯一的错误码表（客户端协议的错误信封取同一词汇表，见[《客户端协议参考》](../protocol.md) 的 Error Codes 一节）。
 
-`Error` 消息在当前管理 API 中只出现于 `SurveyResult.error`，且 `code` 固定为 `SURVEY_FAILED`；`type` 与 `metadata` 未被填充。其余管理 RPC 不通过 `Error` 消息报告失败，而是直接使用 gRPC 状态码。
+`Error` 消息在当前 Server API 中只出现于 `SurveyResult.error`，且 `code` 固定为 `SURVEY_FAILED`；`type` 与 `metadata` 未被填充。其余 Server API RPC 不通过 `Error` 消息报告失败，而是直接使用 gRPC 状态码。
 
 ### gRPC 状态码映射
 
-管理处理器返回失败时使用的状态码如下：
+Server API 处理器返回失败时使用的状态码如下：
 
 | gRPC 状态码 | 触发条件 |
 | --- | --- |
-| `Unauthenticated` | 认证拦截器拒绝：缺少凭证且未配置 `allow_insecure`、静态 `auth_tokens` 不匹配、无 `admin_auth` 指派、Key 长度不足 20 字符、被 proxy 明确拒绝、proxy 不可用（fail-closed + fail-fast，见[API Key 鉴权](#api-key-鉴权proxy-托管)） |
+| `Unauthenticated` | 认证拦截器拒绝：缺少凭证且未配置 `allow_insecure`、静态 `auth_tokens` 不匹配、无 `api_auth` 指派、Key 长度不足 20 字符、被 proxy 明确拒绝、proxy 不可用（fail-closed + fail-fast，见[API Key 鉴权](#api-key-鉴权proxy-托管)） |
 | `PermissionDenied` | scope 层能力位缺失（声明式能力表）、namespace 参数越界、单 channel 越界（Survey/GetPresence/GetHistory）、Authorizer 规则拒绝（Publish/Survey/GetPresence/GetHistory） |
 | `InvalidArgument` | 按 user 字段中出现空字符串、按 user 寻址缺失 `namespace`、`Subscribe`/`Unsubscribe` 的 `session_id` 与 `user_id` 同时为空——均不做任何扫描；另：channel 引用语法不合法（G4 全局面语法门，对全体身份生效） |
 | `ResourceExhausted` | 无 `survey.bypass_gate` 时频道订阅者数超过 `max_survey_subscribers` |
@@ -489,11 +489,11 @@ message Error {
 | `Internal` | `Publish` 请求中的所有投递尝试全部失败 |
 | `Unknown` | 其余错误：来自 Node 内部方法的错误（例如 `Survey` 调查注册表已满、presence/history 存储错误）原样透传，gRPC 框架将其映射为 `Unknown` |
 
-管理 API 不定义自定义状态码（自定义 code 仅存在于 `shared.v2.Error` 的自由字符串 `code` 字段中）。调用方应同时处理 gRPC 状态码（区分错误类别）与 `SurveyResult.error`（区分单个会话的失败）。
+Server API 不定义自定义状态码（自定义 code 仅存在于 `shared.v2.Error` 的自由字符串 `code` 字段中）。调用方应同时处理 gRPC 状态码（区分错误类别）与 `SurveyResult.error`（区分单个会话的失败）。
 
 ## 示例
 
-以下示例假设管理端口监听在 `127.0.0.1:9091`，且已配置 `auth_tokens`（示例中用 `<token>` 占位）。服务器未注册 gRPC 反射，所有命令都必须携带 `-import-path ./protocol -proto server/v2/api.proto`。JSON 载荷使用 proto3 JSON 映射的 lowerCamelCase 字段名；`binary` 载荷在 JSON 中以 base64 表示。频道名示例均带命名空间前缀（`dev:`）。
+以下示例假设Server API 端口监听在 `127.0.0.1:9091`，且已配置 `auth_tokens`（示例中用 `<token>` 占位）。服务器未注册 gRPC 反射，所有命令都必须携带 `-import-path ./protocol -proto server/v2/api.proto`。JSON 载荷使用 proto3 JSON 映射的 lowerCamelCase 字段名；`binary` 载荷在 JSON 中以 base64 表示。频道名示例均带命名空间前缀（`dev:`）。
 
 ### Publish
 
@@ -506,11 +506,11 @@ grpcurl \
   -H "authorization: Bearer <token>" \
   -plaintext \
   -d '{
-    "requestId": "admin-publish-1",
+    "requestId": "api-publish-1",
     "publications": [{
-      "id": "admin-msg-1",
+      "id": "api-msg-1",
       "destination": {"channels": ["dev:chat.general"]},
-      "payload": {"text": "hello from admin"}
+      "payload": {"text": "hello from server api"}
     }]
   }' \
   127.0.0.1:9091 \
@@ -564,7 +564,7 @@ grpcurl \
   -H "authorization: Bearer <token>" \
   -plaintext \
   -d '{
-    "requestId": "admin-survey-1",
+    "requestId": "api-survey-1",
     "channel": "dev:chat.general",
     "payload": {"text": "ping"},
     "timeoutMs": 3000
@@ -677,7 +677,7 @@ grpcurl \
 
 ## 集群感知行为
 
-启用集群（`cluster.enabled: true`，要求 `broker.type: redis`）后，部分管理操作的行为发生变化。集群架构与配置详见[《分布式集群指南》](04-cluster.md)。
+启用集群（`cluster.enabled: true`，要求 `broker.type: redis`）后，部分Server API 操作的行为发生变化。集群架构与配置详见[《分布式集群指南》](04-cluster.md)。
 
 | 操作 | 集群模式下的行为 |
 | --- | --- |
@@ -693,12 +693,12 @@ grpcurl \
 
 ## 实现说明
 
-- **共享 Node，分离监听器**：管理 API 处理器（internal/admin/api_handler.go）持有与客户端流服务器同一个进程内 `Node` 实例（装配见 cmd/server/runtime.go）。管理 RPC 与客户端流量在监听器层面完全分离：客户端流式 gRPC 监听 `transport.grpc.addr`，管理 API 监听 `server.grpc_admin.addr`；管理端口只注册 `APIService`，客户端端口只注册 `MessageLoopService`。
-- **认证与授权链**：管理监听器安装 unary 认证拦截器（internal/admin/auth.go，三种凭证路径见[鉴权](#鉴权三种凭证路径)）；拦截器之后、handler 之前是 scope 层单一 choke point（internal/admin/scope.go）：声明式能力表 + 全局面 channel 语法门 + 拒绝语义矩阵改写，handler 对 scope 零感知。census 双测试（internal/admin/census_test.go）保证新增 RPC 与新请求字段必须登记，否则测试红。
-- **身份可归因**：每条认证结果进 `messageloop_admin_auth_requests_total{verifier,key_id,result}`（verifier ∈ static/insecure/proxy），每个 RPC 的调用归因进 `messageloop_admin_rpc_total{method,key_id,result}`（`denied` = 认证层拒绝；`ok`/`error` = handler 结果）。两者只携带 key_id，永不含 Key 明文，完整指标见[《可观测性指南》](05-observability.md)。
-- **监听器预绑定**：两个 gRPC 监听器都在启动预检阶段（`node.Run` 之前）完成 `net.Listen`，任一监听失败都不会留下已启动的 Node 副作用；两个监听器的组件名分别为 `grpc-client-server` 与 `grpc-admin-server`。
-- **RawCodec**：两个 gRPC 服务器都通过 `grpc.ForceServerCodec` 装配名为 `messageloop-proto` 的 `RawCodec`（pkg/transport/grpc/codec.go）。该 codec 对普通 proto 消息仍使用标准 `proto.Marshal`/`proto.Unmarshal`，因此管理 API 的线上编码与标准 protobuf gRPC 完全兼容（这是 `grpcurl -proto` 方式可以正常调用的原因）；流式路径额外支持免二次编解码的原始帧（raw frame）优化。codec 按服务器注册而不是全局注册，避免覆盖进程内其他 gRPC 连接的默认 codec。
+- **共享 Node，分离监听器**：Server API 处理器（internal/serverapi/api_handler.go）持有与客户端流服务器同一个进程内 `Node` 实例（装配见 cmd/server/runtime.go）。Server API RPC 与客户端流量在监听器层面完全分离：客户端流式 gRPC 监听 `transport.grpc.addr`，Server API 监听 `server.api.addr`；Server API 端口只注册 `APIService`，客户端端口只注册 `MessageLoopService`。
+- **认证与授权链**：Server API 监听器安装 unary 认证拦截器（internal/serverapi/auth.go，三种凭证路径见[鉴权](#鉴权三种凭证路径)）；拦截器之后、handler 之前是 scope 层单一 choke point（internal/serverapi/scope.go）：声明式能力表 + 全局面 channel 语法门 + 拒绝语义矩阵改写，handler 对 scope 零感知。census 双测试（internal/serverapi/census_test.go）保证新增 RPC 与新请求字段必须登记，否则测试红。
+- **身份可归因**：每条认证结果进 `messageloop_server_api_auth_requests_total{verifier,key_id,result}`（verifier ∈ static/insecure/proxy），每个 RPC 的调用归因进 `messageloop_server_api_rpc_total{method,key_id,result}`（`denied` = 认证层拒绝；`ok`/`error` = handler 结果）。两者只携带 key_id，永不含 Key 明文，完整指标见[《可观测性指南》](05-observability.md)。
+- **监听器预绑定**：两个 gRPC 监听器都在启动预检阶段（`node.Run` 之前）完成 `net.Listen`，任一监听失败都不会留下已启动的 Node 副作用；两个监听器的组件名分别为 `grpc-client-server` 与 `grpc-api-server`。
+- **RawCodec**：两个 gRPC 服务器都通过 `grpc.ForceServerCodec` 装配名为 `messageloop-proto` 的 `RawCodec`（pkg/transport/grpc/codec.go）。该 codec 对普通 proto 消息仍使用标准 `proto.Marshal`/`proto.Unmarshal`，因此Server API 的线上编码与标准 protobuf gRPC 完全兼容（这是 `grpcurl -proto` 方式可以正常调用的原因）；流式路径额外支持免二次编解码的原始帧（raw frame）优化。codec 按服务器注册而不是全局注册，避免覆盖进程内其他 gRPC 连接的默认 codec。
 - **压缩**：gRPC 的 gzip 压缩编解码器已在服务器侧注册，客户端可在请求中声明 `grpc-accept-encoding: gzip`。
-- **管理服务器未设置 `MaxRecvMsgSize`**：管理服务器使用 gRPC 默认的最大接收消息大小（4 MiB）；客户端流服务器则应用 `limits.max_message_size`（默认 64 KiB，见[《配置参考》](02-configuration.md)）。
-- **调用方客户端**：Go SDK 的后端集成通过本管理 API 与服务端通信（见[《Go SDK 指南》](07-sdk-go.md)）；TypeScript SDK 是纯 WebSocket 客户端，不包含管理 API 客户端。Go SDK 生成的桩代码依赖 `server/v2/api.proto`，调用前请确保协议版本与服务器一致。
+- **Server API 服务器未设置 `MaxRecvMsgSize`**：Server API 服务器使用 gRPC 默认的最大接收消息大小（4 MiB）；客户端流服务器则应用 `limits.max_message_size`（默认 64 KiB，见[《配置参考》](02-configuration.md)）。
+- **调用方客户端**：Go SDK 的后端集成通过本Server API 与服务端通信（见[《Go SDK 指南》](07-sdk-go.md)）；TypeScript SDK 是纯 WebSocket 客户端，不包含Server API 客户端。Go SDK 生成的桩代码依赖 `server/v2/api.proto`，调用前请确保协议版本与服务器一致。
 - **运维**：健康检查与指标走独立的 HTTP 管理面（`server.http.addr`），不属于本 API 范围（见[《可观测性指南》](05-observability.md)）。

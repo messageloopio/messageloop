@@ -45,7 +45,7 @@ Create a local config file:
 server:
   http:
     addr: ":8080"
-  grpc_admin:
+  api:
     addr: "127.0.0.1:9091"
     auth_token: "change-me"   # Required (or set allow_insecure: true for dev only)
 
@@ -61,7 +61,7 @@ broker:
   type: memory
 ```
 
-Note: when `server.grpc_admin.addr` is set, configuration validation requires `auth_token` (or `allow_insecure: true`, which serves the admin API without authentication and is intended for development environments only).
+Note: when `server.api.addr` is set, configuration validation requires `auth_token` (or `allow_insecure: true`, which serves the Server API without authentication and is intended for development environments only).
 
 Start the server:
 
@@ -75,7 +75,7 @@ Default endpoints:
 - gRPC streaming: `localhost:9090`
 - QUIC (optional): enable `transport.quic.addr` (e.g. `:4433`) and dial with `DialQUIC`
 - KCP (optional): enable `transport.kcp.addr` (e.g. `:29900`) and dial with `DialKCP`; clients must pass the same `data_shards`/`parity_shards` FEC settings as the server
-- gRPC admin API: `127.0.0.1:9091`
+- Server API (gRPC): `127.0.0.1:9091`
 - Health: `http://localhost:8080/health`
 - Prometheus metrics: `http://localhost:8080/metrics`
 
@@ -127,7 +127,7 @@ Operational requirements:
 - Every process in the same cluster must share the same Redis namespace and broker settings.
 - `cluster.node_id` must be unique per logical node.
 - All nodes must share the same command-bus HMAC key: at least 32 bytes, configured via exactly one of `cluster.hmac_key` or `cluster.hmac_key_file` — startup is refused otherwise.
-- Session-targeted admin operations and cluster-wide survey only become cluster-aware when `cluster.enabled: true`.
+- Session-targeted Server API operations and cluster-wide survey only become cluster-aware when `cluster.enabled: true`.
 
 ## Configuration Overview
 
@@ -135,7 +135,7 @@ MessageLoop reads a single YAML file passed through `--config`.
 
 | Section | Purpose | Key Fields |
 | --- | --- | --- |
-| `server` | Admin-side listeners and core runtime behavior | `http.addr`, `grpc_admin.addr`, `grpc_admin.tls.*`, `heartbeat.idle_timeout`, `rpc_timeout`, `limits.*`, `authorizer.rules` |
+| `server` | Server-side listeners and core runtime behavior | `http.addr`, `api.addr`, `api.tls.*`, `heartbeat.idle_timeout`, `rpc_timeout`, `limits.*`, `authorizer.rules` |
 | `transport.websocket` | WebSocket listener configuration | `addr`, `path`, `check_origin`, `compression`, `write_timeout`, `tls.*` |
 | `transport.grpc` | Client gRPC streaming listener configuration | `addr`, `write_timeout`, `tls.*` |
 | `broker` | Messaging backend selection | `type`, `redis.*` |
@@ -214,11 +214,11 @@ The client protocol supports these core flows:
 
 - Presence is tracked per channel through a pluggable presence store.
 - Subscribers receive join/leave as first-class `presence_event` envelopes on the channel they subscribed to (snapshots ride on `connected.presence` / `subscribe_ack.presence` and `PresenceQuery`). A `/<channel>/__presence` companion channel is only written when the channel policy sets `legacy_presence_channel: true`; occupancy events always cross nodes over the live bus (no extra configuration, `server.presence.cluster_emit` was removed).
-- History can be queried from the broker and is exposed through the server-side gRPC admin API.
+- History can be queried from the broker and is exposed through the Server API (server-side gRPC).
 
-### Server-Side gRPC Admin API
+### Server-Side gRPC API (Server API)
 
-The admin gRPC listener exposed by `server.grpc_admin.addr` serves `messageloop.server.v2.APIService`, including:
+The Server API gRPC listener exposed by `server.api.addr` serves `messageloop.server.v2.APIService`, including:
 
 - `Publish`
 - `Survey`
@@ -362,7 +362,7 @@ npm test
 
 - [ROADMAP.md](ROADMAP.md): product roadmap (v0.2 preview → v1.0 → v1.x) and schedule
 - [docs/design](docs/design/README.md): approved design for v1.0 platform gaps
-- [docs/developer](docs/developer/README.md): developer documentation suite (Chinese) — architecture, configuration reference, admin API, distributed cluster, observability, development workflow, and SDK guides
+- [docs/developer](docs/developer/README.md): developer documentation suite (Chinese) — architecture, configuration reference, Server API, distributed cluster, observability, development workflow, and SDK guides
 - [config-example.yaml](config-example.yaml): fuller Redis and proxy example
 - [docs/deployment.md](docs/deployment.md): production deployment guide, TLS, Docker, multi-node
 - [docker/dokploy](docker/dokploy/README.md): one-click deployment on Dokploy (Compose template with Redis + Traefik domain routing)

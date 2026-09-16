@@ -1,4 +1,4 @@
-package admin_test
+package serverapi_test
 
 import (
 	"context"
@@ -13,8 +13,8 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/messageloopio/messageloop/internal/admin"
 	"github.com/messageloopio/messageloop/internal/runtime"
+	"github.com/messageloopio/messageloop/internal/serverapi"
 	"github.com/messageloopio/messageloop/pkg/transport/grpc"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
@@ -78,7 +78,7 @@ func connectClientStream(t *testing.T, conn *googlegrpc.ClientConn, clientID str
 	return stream, out.GetConnected()
 }
 
-func TestGRPC_AdminPort_DisconnectsSharedClientSession(t *testing.T) {
+func TestGRPC_APIPort_DisconnectsSharedClientSession(t *testing.T) {
 	ctx := t.Context()
 	node := runtime.NewNode(nil)
 	require.NoError(t, node.Run(ctx))
@@ -86,20 +86,20 @@ func TestGRPC_AdminPort_DisconnectsSharedClientSession(t *testing.T) {
 
 	clientServer, err := grpc.PrepareClientServer(grpc.Options{Addr: "127.0.0.1:0"}, node)
 	require.NoError(t, err)
-	adminServer, err := admin.PrepareAdminServer(grpc.Options{Addr: "127.0.0.1:0", AdminAllowInsecure: true}, node, nil, nil)
+	apiServer, err := serverapi.PrepareServer(grpc.Options{Addr: "127.0.0.1:0", APIAllowInsecure: true}, node, nil, nil)
 	require.NoError(t, err)
 	startPreparedServer(t, clientServer)
-	startPreparedServer(t, adminServer)
+	startPreparedServer(t, apiServer)
 
 	clientConn := dialPreparedServer(t, clientServer.Addr())
-	stream, connected := connectClientStream(t, clientConn, "grpc-admin-target")
+	stream, connected := connectClientStream(t, clientConn, "grpc-api-target")
 
-	adminConn := dialPreparedServer(t, adminServer.Addr())
+	adminConn := dialPreparedServer(t, apiServer.Addr())
 	api := serverv2.NewAPIServiceClient(adminConn)
 	resp, err := api.Disconnect(context.Background(), &serverv2.DisconnectRequest{
 		Sessions: []string{connected.GetSessionId()},
 		Code:     3001,
-		Reason:   "admin test",
+		Reason:   "server api test",
 	})
 	require.NoError(t, err)
 	require.True(t, resp.Results[connected.GetSessionId()])
@@ -112,17 +112,17 @@ func TestGRPC_AdminPort_DisconnectsSharedClientSession(t *testing.T) {
 	}
 }
 
-func TestGRPC_AdminPort_DoesNotExposeMessageLoopStream(t *testing.T) {
+func TestGRPC_APIPort_DoesNotExposeMessageLoopStream(t *testing.T) {
 	ctx := t.Context()
 	node := runtime.NewNode(nil)
 	require.NoError(t, node.Run(ctx))
 	t.Cleanup(node.Shutdown)
 
-	adminServer, err := admin.PrepareAdminServer(grpc.Options{Addr: "127.0.0.1:0", AdminAllowInsecure: true}, node, nil, nil)
+	apiServer, err := serverapi.PrepareServer(grpc.Options{Addr: "127.0.0.1:0", APIAllowInsecure: true}, node, nil, nil)
 	require.NoError(t, err)
-	startPreparedServer(t, adminServer)
+	startPreparedServer(t, apiServer)
 
-	conn := dialPreparedServer(t, adminServer.Addr())
+	conn := dialPreparedServer(t, apiServer.Addr())
 	stream, err := clientpb.NewMessageLoopServiceClient(conn).MessageLoop(context.Background())
 	if err == nil {
 		err = stream.Send(&clientpb.InboundMessage{
@@ -141,22 +141,22 @@ func TestGRPC_AdminPort_DoesNotExposeMessageLoopStream(t *testing.T) {
 	require.Equal(t, codes.Unimplemented, st.Code())
 }
 
-func TestGRPC_AdminPort_ServesUnaryAPI(t *testing.T) {
+func TestGRPC_APIPort_ServesUnaryAPI(t *testing.T) {
 	ctx := t.Context()
 	node := runtime.NewNode(nil)
 	require.NoError(t, node.Run(ctx))
 	t.Cleanup(node.Shutdown)
 
-	adminServer, err := admin.PrepareAdminServer(grpc.Options{Addr: "127.0.0.1:0", AdminAllowInsecure: true}, node, nil, nil)
+	apiServer, err := serverapi.PrepareServer(grpc.Options{Addr: "127.0.0.1:0", APIAllowInsecure: true}, node, nil, nil)
 	require.NoError(t, err)
-	startPreparedServer(t, adminServer)
+	startPreparedServer(t, apiServer)
 
-	conn := dialPreparedServer(t, adminServer.Addr())
+	conn := dialPreparedServer(t, apiServer.Addr())
 	api := serverv2.NewAPIServiceClient(conn)
 	_, err = api.GetChannels(context.Background(), &serverv2.GetChannelsRequest{})
 	require.NoError(t, err)
 
-	// Sanity check that the admin port remains unary-capable after the split.
+	// Sanity check that the Server API port remains unary-capable after the split.
 	_, err = api.GetPresence(context.Background(), &serverv2.GetPresenceRequest{Channel: "dev:chat"})
 	require.NoError(t, err)
 

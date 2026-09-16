@@ -72,24 +72,24 @@ func TestMetrics_ChannelPolicyTransientForcedRegistered(t *testing.T) {
 	require.True(t, found, "messageloop_channel_policy_transient_forced_total must be registered")
 }
 
-// TestMetrics_AdminUserFanoutRegistered verifies PR-06: the admin_user_fanout
+// TestMetrics_ServerAPIUserFanoutRegistered verifies PR-06: the server_api_user_fanout
 // histogram vec is registered with the op label and records fan-out sizes for
 // each user-targeted operation.
-func TestMetrics_AdminUserFanoutRegistered(t *testing.T) {
+func TestMetrics_ServerAPIUserFanoutRegistered(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	metrics := NewMetrics(reg)
 
-	metrics.AdminUserFanout.WithLabelValues("publish").Observe(3)
-	metrics.AdminUserFanout.WithLabelValues("disconnect").Observe(1)
-	metrics.AdminUserFanout.WithLabelValues("subscribe").Observe(0)
-	metrics.AdminUserFanout.WithLabelValues("unsubscribe").Observe(2)
+	metrics.ServerAPIUserFanout.WithLabelValues("publish").Observe(3)
+	metrics.ServerAPIUserFanout.WithLabelValues("disconnect").Observe(1)
+	metrics.ServerAPIUserFanout.WithLabelValues("subscribe").Observe(0)
+	metrics.ServerAPIUserFanout.WithLabelValues("unsubscribe").Observe(2)
 
 	families, err := reg.Gather()
 	require.NoError(t, err)
 	observed := make(map[string]uint64)
 	found := false
 	for _, family := range families {
-		if family.GetName() != "messageloop_admin_user_fanout" {
+		if family.GetName() != "messageloop_server_api_user_fanout" {
 			continue
 		}
 		found = true
@@ -103,7 +103,7 @@ func TestMetrics_AdminUserFanoutRegistered(t *testing.T) {
 			observed[op] = metric.GetHistogram().GetSampleCount()
 		}
 	}
-	require.True(t, found, "messageloop_admin_user_fanout must be registered")
+	require.True(t, found, "messageloop_server_api_user_fanout must be registered")
 	require.Equal(t, uint64(1), observed["publish"])
 	require.Equal(t, uint64(1), observed["disconnect"])
 	require.Equal(t, uint64(1), observed["subscribe"])

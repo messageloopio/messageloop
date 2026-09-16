@@ -1,4 +1,4 @@
-package admin
+package serverapi
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
 )
 
-// The admin scope layer (design §2.4, mechanism gaps G1/G4/G6): the single
+// The Server API scope layer (design §2.4, mechanism gaps G1/G4/G6): the single
 // choke point every APIService RPC passes before its handler. It evaluates
 // the declarative capability table (G6), enforces the global channel grammar
 // gate (G4), and rewrites the request per the rejection semantics matrix so
@@ -24,7 +24,7 @@ import (
 // and the request only contains in-scope targets (or client errors that the
 // handler's own validation rejects).
 
-// rpcScopeSpec is the registry entry of one admin RPC: the capability bits a
+// rpcScopeSpec is the registry entry of one Server API RPC: the capability bits a
 // request needs (G6, evaluated from the request) and the authorization
 // carrier classification the request carries (G1). Census test ① pins every
 // APIServiceServer method against this registry; an unregistered method
@@ -265,40 +265,40 @@ type subscribeScopeResult struct {
 	shortCircuit bool
 }
 
-// scopeAuthorize is the common prologue of every admin RPC: it returns the
+// scopeAuthorize is the common prologue of every Server API RPC: it returns the
 // verified identity after failing the RPC closed when the identity is
 // missing (defensive — the auth interceptor always attaches one) or when the
 // capability table denies a required bit (G6). An RPC missing from the
 // registry fails with Internal ("capability table entry missing"); census
 // test ① makes that unreachable.
-func (h *apiServiceHandler) scopeAuthorize(ctx context.Context, method string, req any) (authz.AdminIdentity, error) {
-	id, ok := AdminIdentityFromContext(ctx)
+func (h *apiServiceHandler) scopeAuthorize(ctx context.Context, method string, req any) (authz.APIIdentity, error) {
+	id, ok := APIIdentityFromContext(ctx)
 	if !ok {
-		return authz.AdminIdentity{}, status.Error(codes.Internal, "admin identity missing from request context")
+		return authz.APIIdentity{}, status.Error(codes.Internal, "server API identity missing from request context")
 	}
 	spec, ok := rpcScopeRegistry[method]
 	if !ok {
-		return authz.AdminIdentity{}, status.Errorf(codes.Internal, "capability table entry missing for admin RPC %s", method)
+		return authz.APIIdentity{}, status.Errorf(codes.Internal, "capability table entry missing for Server API RPC %s", method)
 	}
 	if required := spec.requiredCaps(req); id.Caps&required != required {
-		return authz.AdminIdentity{}, status.Errorf(codes.PermissionDenied, "%s requires admin capability", method)
+		return authz.APIIdentity{}, status.Errorf(codes.PermissionDenied, "%s requires server API capability", method)
 	}
 	return id, nil
 }
 
-// identityFromScope returns the admin identity the scope layer validated for
+// identityFromScope returns the Server API identity the scope layer validated for
 // this call. Every handler runs its scope wrapper first, so the identity is
 // guaranteed to be present; a zero identity fails closed downstream (its
 // Caps miss every bit and its namespace scope is empty).
-func identityFromScope(ctx context.Context) authz.AdminIdentity {
-	id, _ := AdminIdentityFromContext(ctx)
+func identityFromScope(ctx context.Context) authz.APIIdentity {
+	id, _ := APIIdentityFromContext(ctx)
 	return id
 }
 
 // identityIsGlobal reports whether the identity holds the ["*"] scope:
 // namespace checks are skipped while the global channel grammar gate (G4)
 // stays on for every identity.
-func identityIsGlobal(id authz.AdminIdentity) bool {
+func identityIsGlobal(id authz.APIIdentity) bool {
 	return slices.Contains(id.Namespaces, "*")
 }
 
@@ -306,12 +306,12 @@ func identityIsGlobal(id authz.AdminIdentity) bool {
 // global identities see everything (session addressing is only narrowed for
 // scoped keys); a scoped identity sees the session when its lease namespace
 // resolves and falls inside the identity scope. Unresolvable namespaces
-// report invisible (fail-closed, AdminSessionNamespace contract).
-func (h *apiServiceHandler) sessionVisibleTo(ctx context.Context, id authz.AdminIdentity, sessionID string) bool {
+// report invisible (fail-closed, APISessionNamespace contract).
+func (h *apiServiceHandler) sessionVisibleTo(ctx context.Context, id authz.APIIdentity, sessionID string) bool {
 	if identityIsGlobal(id) {
 		return true
 	}
-	ns, ok := h.node.AdminSessionNamespace(ctx, sessionID)
+	ns, ok := h.node.APISessionNamespace(ctx, sessionID)
 	return ok && id.AllowsNamespace(ns)
 }
 
@@ -320,7 +320,7 @@ func (h *apiServiceHandler) sessionVisibleTo(ctx context.Context, id authz.Admin
 // client error (InvalidArgument) for every identity, an out-of-namespace
 // channel is PermissionDenied for scoped identities (matrix row: single
 // channel references reject the RPC).
-func scopeChannelReference(id authz.AdminIdentity, channel string) error {
+func scopeChannelReference(id authz.APIIdentity, channel string) error {
 	if err := topics.ValidateChannel(channel); err != nil {
 		return status.Errorf(codes.InvalidArgument, "invalid channel %q: %v", channel, err)
 	}

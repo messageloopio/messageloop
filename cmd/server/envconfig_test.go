@@ -89,7 +89,7 @@ func TestBindConfigWithEnvOnlyKey(t *testing.T) {
 	source := newTestConfigSource(t, `
 server:
   namespace: from-file
-  grpc_admin:
+  api:
     addr: "127.0.0.1:9091"
     allow_insecure: true
 transport:
@@ -131,12 +131,12 @@ broker:
 		cfg.Transport.WebSocket.AllowedOrigins)
 }
 
-func TestBindConfigWithEnvAdminAuthTokens(t *testing.T) {
-	// The admin token list overrides via the plural env key (design D28):
-	// comma-separated values decode into server.grpc_admin.auth_tokens, and
+func TestBindConfigWithEnvAPIAuthTokens(t *testing.T) {
+	// The Server API token list overrides via the plural env key (design D28):
+	// comma-separated values decode into server.api.auth_tokens, and
 	// the cache TTL binding parses as a plain string.
-	t.Setenv("MESSAGELOOP_SERVER_GRPC_ADMIN_AUTH_TOKENS", "token-one-0123456789abcdef,token-two-0123456789abcdef")
-	t.Setenv("MESSAGELOOP_SERVER_GRPC_ADMIN_ADMIN_AUTH_CACHE_TTL", "45s")
+	t.Setenv("MESSAGELOOP_SERVER_API_AUTH_TOKENS", "token-one-0123456789abcdef,token-two-0123456789abcdef")
+	t.Setenv("MESSAGELOOP_SERVER_API_AUTH_CACHE_TTL", "45s")
 
 	source := newTestConfigSource(t, `
 server:
@@ -152,8 +152,8 @@ broker:
 	require.NoError(t, source.Unmarshal(&cfg))
 	assert.Equal(t,
 		[]string{"token-one-0123456789abcdef", "token-two-0123456789abcdef"},
-		cfg.Server.GRPCAdmin.AuthTokens)
-	assert.Equal(t, "45s", cfg.Server.GRPCAdmin.AdminAuthCacheTTL)
+		cfg.Server.API.AuthTokens)
+	assert.Equal(t, "45s", cfg.Server.API.AuthCacheTTL)
 }
 
 func TestBindConfigWithEnvIgnoresUnregisteredKey(t *testing.T) {

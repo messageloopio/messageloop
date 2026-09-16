@@ -41,8 +41,8 @@ task lint  # golangci-lint run
 
 ### Integration tests (require running server)
 - `pkg/transport/ws/integration_test.go` - Connect and publish via WebSocket
-- `internal/admin/integration_test.go` - gRPC streaming e2e tests
-- `pkg/transport/grpc/port_integration_test.go` (client port) and `internal/admin/port_integration_test.go` (admin port) - Port-level gRPC tests
+- `internal/serverapi/integration_test.go` - gRPC streaming e2e tests
+- `pkg/transport/grpc/port_integration_test.go` (client port) and `internal/serverapi/port_integration_test.go` (Server API port) - Port-level gRPC tests
 
 ### Run the server
 ```bash
@@ -67,13 +67,13 @@ The server exposes four required listeners plus an optional QUIC listener:
 - `transport.websocket.addr` — WebSocket client traffic (`:9080`, path `/ws`)
 - `transport.grpc.addr` — Client gRPC streaming (`:9090`)
 - `transport.quic.addr` — Optional QUIC client traffic (`:4433`, UDP; empty disables)
-- `server.grpc_admin.addr` — Server-side gRPC admin API (`127.0.0.1:9091`, exposes `messageloop.server.v2.APIService`)
+- `server.api.addr` — Server-side gRPC API (Server API, `127.0.0.1:9091`, exposes `messageloop.server.v2.APIService`)
 - `server.http.addr` — Health check and Prometheus metrics (`127.0.0.1:8080`)
 
 ## Configuration
 
 Config structure defined in `config/config.go` with example in `config-example.yaml`:
-- **server** - Admin HTTP address, admin gRPC address, heartbeat idle timeout (default: `300s`), RPC timeout (default: `30s`), per-user and per-client limits, built-in ACL rules, optional `require_auth`
+- **server** - Admin HTTP address (ops), Server API gRPC address, heartbeat idle timeout (default: `300s`), RPC timeout (default: `30s`), per-user and per-client limits, built-in ACL rules, optional `require_auth`
 - **transport** - WebSocket, client gRPC streaming, and optional QUIC listeners, plus TLS, compression, and write timeouts
 - **broker** - Type selection (`memory` or `redis`) with Redis connection, stream, and history settings
 - **cluster** - Optional Redis-backed distributed control plane with `enabled`, `node_id`, and `backend`
@@ -158,7 +158,7 @@ The system abstracts connection handling via the **Transport** interface (`inter
 
 **gRPC Stream** (`pkg/transport/grpc/`) - Bidirectional gRPC streaming:
 - `client_server.go` - Client streaming listener, manages per-connection streams
-- `admin_server.go` - Admin gRPC API server (separate listener from client traffic)
+- `server.go` - Server API gRPC server (separate listener from client traffic)
 - `server.go` - Shared server preparation, TLS loading, pre-bound listener lifecycle
 - `cmd/server/runtime.go` - Bootstrap preflight that prepares gRPC listeners before `node.Run()`
 - Uses custom `RawCodec` to avoid double-encoding messages

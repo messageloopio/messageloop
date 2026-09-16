@@ -126,9 +126,9 @@ curl -s http://127.0.0.1:8080/metrics | grep '^messageloop_'
 | `messageloop_recovery_gap_total` | counter | `reason`（`head_trimmed`/`empty_expired`） | 恢复过程中观测到历史空洞的频道恢复次数 |
 | `messageloop_live_gap_notice_total` | counter | `reason`（`middle`/`replay_truncated`） | catch-up 检出空洞后扇出给本节点订阅者的 gap 通知次数（pkg/redisbroker/pubsub.go） |
 | `messageloop_heartbeat_idle_disconnects_total` | counter | 无 | 心跳以 3511 断开的连接数：idle 超时或服务端 ping 未应答（internal/session/heartbeat.go，一次性 CAS 保证只计一次） |
-| `messageloop_admin_user_fanout` | histogram | `op`（`publish`/`disconnect`/`subscribe`/`unsubscribe`） | 按 user 定向的 Admin 操作一次扇出的 session 数；桶为计数刻度 `[1..1000]`（internal/admin/api_handler.go） |
-| `messageloop_admin_auth_requests_total` | counter | `verifier`（`static`/`insecure`/`proxy`）、`key_id`、`result`（`allow`/`deny`） | Admin API 认证尝试按验证通道与身份归因计数；只携带 key_id（无法归因时 `unknown`），永不含凭证明文（internal/admin/auth.go） |
-| `messageloop_admin_rpc_total` | counter | `method`（gRPC 全方法名）、`key_id`、`result`（`denied`/`ok`/`error`） | Admin API RPC 按调用方身份归因计数：`denied` 为认证层拒绝（未进 handler），`ok`/`error` 为 handler 结果（internal/admin/auth.go） |
+| `messageloop_server_api_user_fanout` | histogram | `op`（`publish`/`disconnect`/`subscribe`/`unsubscribe`） | 按 user 定向的 Server API 操作一次扇出的 session 数；桶为计数刻度 `[1..1000]`（internal/serverapi/api_handler.go） |
+| `messageloop_server_api_auth_requests_total` | counter | `verifier`（`static`/`insecure`/`proxy`）、`key_id`、`result`（`allow`/`deny`） | Server API 认证尝试按验证通道与身份归因计数；只携带 key_id（无法归因时 `unknown`），永不含凭证明文（internal/serverapi/auth.go） |
+| `messageloop_server_api_rpc_total` | counter | `method`（gRPC 全方法名）、`key_id`、`result`（`denied`/`ok`/`error`） | Server API RPC 按调用方身份归因计数：`denied` 为认证层拒绝（未进 handler），`ok`/`error` 为 handler 结果（internal/serverapi/auth.go） |
 | `messageloop_survey_client_total` | counter | `result`（`ok` 或顶层错误码，如 `SURVEY_DISABLED`/`PERMISSION_DENIED`/`NAMESPACE_MISMATCH`/`SURVEY_TOO_MANY_SUBSCRIBERS`/`RATE_LIMITED`） | 客户端发起的 Survey 按结果计数（internal/session/client.go） |
 | `messageloop_presence_publish_failures_total` | counter | 无 | presence join/leave 伴生频道（`ch/__presence`）发布失败累计 |
 | `messageloop_presence_failures_total` | counter | `op`（`deliver`/`store`/`companion`/`emit`/`gen`） | presence 按操作分类的失败次数：`deliver` 事件投递失败、`store` presence 存储读写失败、`companion` 伴生发布失败、`emit` LiveBus occupancy 事件发布失败、`gen` occupancy generation 签发失败 |
@@ -167,7 +167,7 @@ curl -s http://127.0.0.1:8080/metrics | grep '^messageloop_'
 | 集群：命令进入未知终态 | `cluster command entered unknown final state`（Warn） | pkg/redisbroker/cluster_command_bus.go |
 | 集群：修复循环失败 | `cluster repair failed`（Warn） | internal/runtime/cluster_repair.go |
 | 关停排空超时 | `shutdown: timed out draining client connections`（Warn） | internal/runtime/node.go |
-| 管理 API 调用 | `server side API Publish/Disconnect/Subscribe/...`（Info） | internal/admin/api_handler.go |
+| Server API 调用 | `server side API Publish/Disconnect/Subscribe/...`（Info） | internal/serverapi/api_handler.go |
 
 观察建议：以 Debug 级别运行可获得完整的消息收发轨迹，但消息体全文会进入日志（含 payload），生产环境仅在排查时临时开启。
 
@@ -234,4 +234,4 @@ curl -s http://127.0.0.1:8080/metrics | grep '^messageloop_'
 | 集群不生效 | 1) 核对 `cluster.enabled`、`cluster.node_id`、`broker.type=redis`（集群要求 Redis broker，配置校验见[《配置参考》](02-configuration.md)）；2) 查 `messageloop_cluster_command_timeouts_total` 与 `cluster node lease renewal failed` 日志；3) 调 `/health` 看 `redis` 字段；4) 确认各节点 `node_id` 唯一、HMAC 密钥一致 | Redis 不可达/延迟高；`node_id` 冲突导致租约抖动；HMAC 密钥不一致（`cluster_command_hmac_reject_total` 上升）；命令总线故障（见[《分布式集群指南》](04-cluster.md) 与[《部署指南》](../deployment.md) 的多节点章节） |
 | 消息丢失或延迟 | 1) 对比 `messageloop_messages_published_total` 与 `messageloop_messages_delivered_total` 速率；2) 查 `messageloop_delivery_failures_total` 与 `send publication error` 日志；3) 检查 `messageloop_active_channels` 是否符合预期；4) 看 `messageloop_live_drop_total` / `live_degraded_channels` 是否上升 | 慢消费者写阻塞（3512）；订阅未建立（查 `messageloop_subscriptions_total`）；pub/sub 缓冲溢出（见 §3.2 缓冲满语义）；通配订阅匹配问题（见[《架构指南》](01-architecture.md)的 topic matcher 章节） |
 | `/health` 返回 503 | 1) 读响应体：`broker` 字段为 `not ready` 还是 `redis` 字段为 `unreachable`；2) 前者等 broker 就绪（启动早期正常），后者检查 Redis 连通性 | 启动阶段 broker 未就绪；集群模式下 Redis 不可达（探测 2 秒超时） |
-| 管理 API 或监控端无响应 | 1) 确认 `server.http.addr` 端口可达（默认 `127.0.0.1:8080`，仅回环）；2) 配置了 `server.http.auth_token` 时确认请求带了正确的 Bearer 头；3) 确认与客户端监听端口区分开（见 [../deployment.md](../deployment.md) 的 Listener Model） | 端口未绑定或绑定到回环导致外部不可达；401（token 缺失/错误）；进程崩溃（配合 `messageloop_connections_total` 归零确认） |
+| Server API 或监控端无响应 | 1) 确认 `server.http.addr` 端口可达（默认 `127.0.0.1:8080`，仅回环）；2) 配置了 `server.http.auth_token` 时确认请求带了正确的 Bearer 头；3) 确认与客户端监听端口区分开（见 [../deployment.md](../deployment.md) 的 Listener Model） | 端口未绑定或绑定到回环导致外部不可达；401（token 缺失/错误）；进程崩溃（配合 `messageloop_connections_total` 归零确认） |

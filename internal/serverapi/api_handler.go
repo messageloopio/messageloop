@@ -1,4 +1,4 @@
-package admin
+package serverapi
 
 import (
 	"context"
@@ -29,7 +29,7 @@ func NewAPIServiceHandler(node *runtime.Node) serverv2.APIServiceServer {
 	return &apiServiceHandler{node: node}
 }
 
-// Every RPC method body starts with its scope wrapper (internal/admin/scope.go,
+// Every RPC method body starts with its scope wrapper (internal/serverapi/scope.go,
 // design §2.4): capability table + channel grammar gate + namespace matrix
 // rewrite. After the wrapper returns nil error the request context carries a
 // verified identity and the request holds only in-scope targets — the
@@ -91,7 +91,7 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverv2.PublishRe
 		// with every user's expanded sessions.
 		for _, sessionID := range h.unionSessions(ctx, dest.Sessions, dest.Users, dest.GetNamespace(), "publish") {
 			attempted++
-			// The admin wire payload is already shared.v2 — the same shape
+			// The Server API wire payload is already shared.v2 — the same shape
 			// the client.v2 session consumes, so it passes through directly.
 			msg := &clientpb.Message{
 				Channel: "", // Session-based, no channel
@@ -111,8 +111,8 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverv2.PublishRe
 		// Channel-based publication
 		for _, channel := range dest.Channels {
 			attempted++
-			if !h.node.AdminCanPublish(principal, channel) {
-				log.WarnContext(ctx, "admin publish denied by ACL rule", "channel", channel)
+			if !h.node.APICanPublish(principal, channel) {
+				log.WarnContext(ctx, "server API publish denied by ACL rule", "channel", channel)
 				failed++
 				continue
 			}
@@ -124,7 +124,7 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverv2.PublishRe
 				// the caller does not assume the message was written.
 				// Transient delivery is still allowed.
 				if opts != nil && opts.AddHistory {
-					log.WarnContext(ctx, "admin add_history denied by channel policy", "channel", channel)
+					log.WarnContext(ctx, "server API add_history denied by channel policy", "channel", channel)
 					failed++
 					continue
 				}
@@ -161,14 +161,14 @@ func (h *apiServiceHandler) Survey(ctx context.Context, req *serverv2.SurveyRequ
 	id := identityFromScope(ctx)
 	log.InfoContext(ctx, "server side API Survey", "channel", req.Channel, "request_id", req.RequestId)
 
-	// Without survey.bypass_gate the Admin survey runs through the same
+	// Without survey.bypass_gate the Server API survey runs through the same
 	// gates as a client survey: the Survey decision (Effects.Survey +
 	// allow_survey / deny_all) and the population cap (PR-KA-A4 §7). With
 	// the bit, today's gate-free behavior is preserved. The bit follows the
 	// caller's identity (static tokens/insecure hold the node ceiling; keys
 	// carry their own clamped bits).
 	if id.Caps&authz.CapSurveyBypassGate == 0 {
-		if !h.node.AdminDecide(id.Principal(), authz.ActionSurvey, req.Channel).Allow {
+		if !h.node.APIDecide(id.Principal(), authz.ActionSurvey, req.Channel).Allow {
 			return nil, status.Error(codes.PermissionDenied, "survey denied by ACL rule")
 		}
 		total, err := h.node.CountMatchingSubscribers(ctx, req.Channel)
@@ -182,7 +182,7 @@ func (h *apiServiceHandler) Survey(ctx context.Context, req *serverv2.SurveyRequ
 
 	// Clamp the requested timeout exactly like the client survey path
 	// (client.go: policy cap with a 5s default, a 10s hard ceiling, and a
-	// 100ms floor) so an admin request cannot pin survey slots for an
+	// 100ms floor) so a Server API request cannot pin survey slots for an
 	// unbounded time.
 	timeout := h.node.ChannelPolicy(req.Channel).MaxSurveyTimeout
 	if timeout <= 0 {
@@ -401,7 +401,7 @@ func (h *apiServiceHandler) unionSessions(ctx context.Context, explicit []string
 	}
 	for _, userID := range users {
 		expanded := h.node.ExpandUserSessions(ctx, namespace, userID)
-		h.node.ObserveAdminUserFanout(op, len(expanded))
+		h.node.ObserveAPIUserFanout(op, len(expanded))
 		for _, sessionID := range expanded {
 			seen[sessionID] = struct{}{}
 		}
@@ -423,7 +423,7 @@ func (h *apiServiceHandler) GetPresence(ctx context.Context, req *serverv2.GetPr
 
 	// The channel must be allowed for the caller's principal (presence.read
 	// is already enforced by the scope layer's capability table).
-	if !h.node.AdminDecide(id.Principal(), authz.ActionPresence, req.Channel).Allow {
+	if !h.node.APIDecide(id.Principal(), authz.ActionPresence, req.Channel).Allow {
 		return nil, status.Error(codes.PermissionDenied, "presence denied by ACL rule")
 	}
 
@@ -446,7 +446,7 @@ func (h *apiServiceHandler) GetPresence(ctx context.Context, req *serverv2.GetPr
 		}
 	}
 
-	// Without presence.large_snapshot the admin snapshot is truncated to the
+	// Without presence.large_snapshot the Server API snapshot is truncated to the
 	// channel policy cap like the client path; with the bit it stays full
 	// (PR-KA-A4 §7). The bit follows the caller's identity.
 	if id.Caps&authz.CapPresenceLargeSnapshot == 0 {
@@ -488,7 +488,7 @@ func (h *apiServiceHandler) GetHistory(ctx context.Context, req *serverv2.GetHis
 	// The channel must allow Recover for the caller's principal (history.read
 	// is already enforced by the scope layer's capability table): deny_all
 	// and transient channels are rejected before the broker is touched.
-	if !h.node.AdminDecide(id.Principal(), authz.ActionRecover, req.Channel).Allow {
+	if !h.node.APIDecide(id.Principal(), authz.ActionRecover, req.Channel).Allow {
 		return nil, status.Error(codes.PermissionDenied, "history denied by ACL rule")
 	}
 

@@ -21,14 +21,14 @@ A single MessageLoop process exposes four required network listeners plus option
 | gRPC streaming | `transport.grpc.addr` | Client pub/sub traffic | None (required) |
 | QUIC | `transport.quic.addr` | Client pub/sub traffic over UDP | Empty (disabled) |
 | KCP | `transport.kcp.addr` | Client pub/sub traffic over UDP (KCP reliability + TLS overlay) | Empty (disabled) |
-| gRPC admin | `server.grpc_admin.addr` | Server-side admin API | None (required) |
+| Server API (gRPC) | `server.api.addr` | Server-side API for backend integration | None (required) |
 | HTTP admin | `server.http.addr` | Health checks and Prometheus metrics | `127.0.0.1:8080` |
 
-Bind client-facing listeners to public interfaces and admin listeners to private/loopback interfaces.
+Bind client-facing listeners to public interfaces and the Server API + admin HTTP listeners to private/loopback interfaces.
 
 ## TLS Configuration
 
-WebSocket, gRPC, and admin listeners support optional TLS. QUIC always requires TLS 1.3 (`tls` cert/key, or `insecure: true` for a self-signed development certificate). KCP provides no encryption of its own and is always served behind a TLS overlay with the same cert/key / `insecure: true` options; clients must dial with the same `data_shards`/`parity_shards` FEC settings as the server.
+WebSocket, client gRPC, and Server API listeners support optional TLS. QUIC always requires TLS 1.3 (`tls` cert/key, or `insecure: true` for a self-signed development certificate). KCP provides no encryption of its own and is always served behind a TLS overlay with the same cert/key / `insecure: true` options; clients must dial with the same `data_shards`/`parity_shards` FEC settings as the server.
 
 ```yaml
 transport:
@@ -44,7 +44,7 @@ transport:
       key_file: "./certs/server.key"
 
 server:
-  grpc_admin:
+  api:
     addr: "127.0.0.1:9091"
     tls:
       cert_file: "./certs/admin.crt"
@@ -53,18 +53,20 @@ server:
 
 For WebSocket, TLS turns the listener into a `wss://` endpoint. For gRPC, standard gRPC TLS applies.
 
-## Admin API Authentication
+## Server API Authentication
 
-Protect the admin gRPC API with static superadmin tokens in production:
+Protect the Server API with static superadmin tokens in production:
 
 ```yaml
 server:
-  grpc_admin:
+  api:
     auth_tokens:
       - "your-secret-token-of-at-least-20-chars"
 ```
 
-Each token must be at least 20 characters (config Validate enforces it); the list form makes rotation window-free (add new → rolling restart → drop old). Clients must include the token as a `authorization: Bearer <token>` gRPC metadata header. API keys verified by a backend proxy are also supported via a `proxy[].admin_auth: true` assignment — see the [Admin API reference](developer/03-admin-api.md).
+Each token must be at least 20 characters (config Validate enforces it); the list form makes rotation window-free (add new → rolling restart → drop old). Clients must include the token as a `authorization: Bearer <token>` gRPC metadata header. API keys verified by a backend proxy are also supported via a `proxy[].api_auth: true` assignment — see the [Server API reference](developer/03-server-api.md).
+
+**Rename migration (Admin API → Server API)**: the config block was renamed from `server.grpc_admin` to `server.api` with no compatibility alias. Update environment variables accordingly: `MESSAGELOOP_SERVER_GRPC_ADMIN_ADDR` → `MESSAGELOOP_SERVER_API_ADDR`, `MESSAGELOOP_SERVER_GRPC_ADMIN_AUTH_TOKENS` → `MESSAGELOOP_SERVER_API_AUTH_TOKENS` (same for `_ALLOW_INSECURE`, `_AUTH_CACHE_TTL`, `_TLS_CERT_FILE`, `_TLS_KEY_FILE`). Prometheus metric names changed too (`messageloop_admin_*` → `messageloop_server_api_*`), so dashboards and alerts need the new names. The full mapping is in the [configuration reference](developer/02-configuration.md).
 
 ## Health And Metrics
 
@@ -238,7 +240,7 @@ docker build -t messageloop --build-arg VERSION=$(git rev-parse --short HEAD) .
 docker run --rm -p 9080:9080 -p 8080:8080 messageloop
 ```
 
-Exposed ports: 9080 (WebSocket), 9090 (client gRPC), 9091 (admin gRPC), 8080 (health/metrics).
+Exposed ports: 9080 (WebSocket), 9090 (client gRPC), 9091 (Server API gRPC), 8080 (health/metrics).
 
 ### Environment Variable Overrides
 
@@ -250,7 +252,7 @@ docker run --rm -p 9080:9080 \
   -e MESSAGELOOP_BROKER_REDIS_ADDR=redis.internal:6379 \
   -e MESSAGELOOP_BROKER_REDIS_STREAM_APPROXIMATE=true \
   -e MESSAGELOOP_SERVER_NAMESPACE=prod \
-  -e MESSAGELOOP_SERVER_GRPC_ADMIN_AUTH_TOKENS=secret-token-of-at-least-20-chars \
+  -e MESSAGELOOP_SERVER_API_AUTH_TOKENS=secret-token-of-at-least-20-chars \
   messageloop
 ```
 
@@ -260,8 +262,8 @@ To deploy on the [Dokploy](https://dokploy.com) platform, see [`docker/dokploy/R
 
 ## Production Checklist
 
-- [ ] Bind admin listeners (`server.http.addr`, `server.grpc_admin.addr`) to loopback or private interfaces.
-- [ ] Set `server.grpc_admin.auth_tokens` to strong secrets (each ≥ 20 characters).
+- [ ] Bind the admin HTTP and Server API listeners (`server.http.addr`, `server.api.addr`) to loopback or private interfaces.
+- [ ] Set `server.api.auth_tokens` to strong secrets (each ≥ 20 characters).
 - [ ] Disable `allow_all_origins` on the WebSocket transport; use `allowed_origins` instead.
 - [ ] Configure TLS on client-facing listeners or terminate TLS at a load balancer.
 - [ ] Set appropriate resource limits (`max_connections_per_user`, `max_publishes_per_second`).

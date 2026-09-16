@@ -10,7 +10,7 @@ import (
 	"github.com/messageloopio/messageloop/internal/runtime"
 )
 
-func TestPrepareGRPCServers_CleansUpClientListenerOnAdminFailure(t *testing.T) {
+func TestPrepareGRPCServers_CleansUpClientListenerOnAPIFailure(t *testing.T) {
 	reserved, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	addr := reserved.Addr().String()
@@ -18,7 +18,7 @@ func TestPrepareGRPCServers_CleansUpClientListenerOnAdminFailure(t *testing.T) {
 
 	cfg := &config.Config{
 		Server: config.Server{
-			GRPCAdmin: config.GRPCAdmin{Addr: addr},
+			API: config.ServerAPI{Addr: addr},
 		},
 		Transport: config.Transport{
 			GRPC: config.GRPCTransport{Addr: addr},
@@ -33,7 +33,7 @@ func TestPrepareGRPCServers_CleansUpClientListenerOnAdminFailure(t *testing.T) {
 	require.NoError(t, rebound.Close())
 }
 
-func TestPrepareGRPCServers_RequiresAdminAddr(t *testing.T) {
+func TestPrepareGRPCServers_RequiresAPIAddr(t *testing.T) {
 	cfg := &config.Config{
 		Transport: config.Transport{
 			GRPC: config.GRPCTransport{Addr: "127.0.0.1:0"},
@@ -41,5 +41,5 @@ func TestPrepareGRPCServers_RequiresAdminAddr(t *testing.T) {
 	}
 
 	_, err := prepareGRPCServers(cfg, runtime.NewNode(nil), nil, nil)
-	require.EqualError(t, err, "grpc-admin-server addr is required")
+	require.EqualError(t, err, "grpc-api-server addr is required")
 }

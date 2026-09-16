@@ -39,10 +39,10 @@ type Node struct {
 	// authorizer is the single authorization evaluator; it is never nil
 	// (PR-KA-A4). It replaced the ACL engine and the channel policy engine.
 	authorizer *Authorizer
-	// adminCaps carries the configured admin capability bits: nil
-	// server.grpc_admin.capabilities → DefaultAdminCapabilities; an explicit
+	// apiCaps carries the configured Server API capability bits: nil
+	// server.api.capabilities → DefaultCapabilityCeiling; an explicit
 	// empty list → zero.
-	adminCaps   Capability
+	apiCaps     Capability
 	requireAuth bool
 	// serverNamespace is the static server.namespace fallback for sessions
 	// whose auth proxy returns none (config.Server.Namespace).
@@ -166,15 +166,16 @@ func NewNode(cfg *config.Server) *Node {
 	}
 	node.authorizer = authorizer
 
-	// Admin capability bits: omitted capabilities → every closed bit except
-	// pattern.global; an explicit empty list → zero bits (locked admin data
-	// plane). Unknown names are rejected by config.Validate and skipped here.
-	node.adminCaps = DefaultAdminCapabilities
-	if cfg != nil && cfg.GRPCAdmin.Capabilities != nil {
-		node.adminCaps = 0
-		for _, name := range cfg.GRPCAdmin.Capabilities {
+	// Server API capability bits: omitted capabilities → every closed bit
+	// except pattern.global; an explicit empty list → zero bits (locked
+	// Server API data plane). Unknown names are rejected by config.Validate
+	// and skipped here.
+	node.apiCaps = DefaultCapabilityCeiling
+	if cfg != nil && cfg.API.Capabilities != nil {
+		node.apiCaps = 0
+		for _, name := range cfg.API.Capabilities {
 			if cap, ok := ClosedCapabilityNames[name]; ok {
-				node.adminCaps |= cap
+				node.apiCaps |= cap
 			}
 		}
 	}
@@ -347,31 +348,31 @@ func (n *Node) userPrincipal(userID string) Principal {
 	return Principal{Kind: PrincipalUser, UserID: userID}
 }
 
-// adminPrincipal builds the principal for the server-side admin API
-// (UserID "admin", matching allow lists like today's adminPrincipal).
-func (n *Node) adminPrincipal() Principal {
-	return Principal{Kind: PrincipalAdmin, UserID: adminPrincipal, Caps: n.adminCaps}
+// superadminPrincipal builds the principal for the server-side admin API
+// (UserID "admin", matching allow lists like today's superadminPrincipal).
+func (n *Node) apiPrincipal() Principal {
+	return Principal{Kind: PrincipalServer, UserID: superadminPrincipal, Caps: n.apiCaps}
 }
 
-// AdminPrincipal returns the node's built-in admin principal (UserID
-// "admin", capability bits from server.grpc_admin.capabilities). It is the
-// exact principal the admin API authorized with before per-call identities
-// existed; admin API callers pass it today, and S4 of the admin API key
+// APIPrincipal returns the node's built-in superadmin principal (UserID
+// "admin", capability bits from server.api.capabilities). It is the exact
+// principal the Server API authorized with before per-call identities
+// existed; Server API callers pass it today, and S4 of the API key
 // design (§2.4) replaces those call sites with the per-request identity from
 // the auth context.
-func (n *Node) AdminPrincipal() Principal {
-	return n.adminPrincipal()
+func (n *Node) APIPrincipal() Principal {
+	return n.apiPrincipal()
 }
 
-// AdminDecide evaluates one action for the caller-supplied principal p (used
+// APIDecide evaluates one action for the caller-supplied principal p (used
 // by the gRPC admin API: Recover / Presence / Survey gates). Design §2.4:
 // the principal travels with the call instead of being built here, so the
 // decision follows whatever identity the caller carries.
-func (n *Node) AdminDecide(p Principal, action Action, channel string) Decision {
+func (n *Node) APIDecide(p Principal, action Action, channel string) Decision {
 	return n.authorizer.Decide(p, action, channel)
 }
 
-// AdminSessionNamespace resolves the namespace of the session identified by
+// APISessionNamespace resolves the namespace of the session identified by
 // sessionID for the admin API (design §2.4). The local hub is consulted
 // first; on a miss with the cluster enabled, the cluster session directory
 // is queried. The boolean reports whether the session was found *with a
@@ -380,7 +381,7 @@ func (n *Node) AdminDecide(p Principal, action Action, channel string) Decision 
 // (fail-closed). Callers holding the ["*"] identity may treat the boolean as
 // pure existence. Directory lookup errors are surfaced as not-found: the
 // result only feeds visibility decisions, never writes.
-func (n *Node) AdminSessionNamespace(ctx context.Context, sessionID string) (string, bool) {
+func (n *Node) APISessionNamespace(ctx context.Context, sessionID string) (string, bool) {
 	if sessionID == "" {
 		return "", false
 	}
@@ -402,9 +403,9 @@ func (n *Node) AdminSessionNamespace(ctx context.Context, sessionID string) (str
 	return lease.Namespace, true
 }
 
-// AdminCapabilities returns the configured admin capability bits.
-func (n *Node) AdminCapabilities() Capability {
-	return n.adminCaps
+// APICapabilities returns the configured admin capability bits.
+func (n *Node) APICapabilities() Capability {
+	return n.apiCaps
 }
 
 // ReplaceRules swaps the authorizer rule table, then revokes every local

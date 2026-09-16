@@ -44,34 +44,34 @@ type Metrics struct {
 	// messageloop metric is registered behind a node_id-wrapped registerer,
 	// which is what carries the per-node attribution.
 	ClusterNodeLeaseRenewFailures prometheus.Counter
-	PresencePublishFailures         prometheus.Counter
-	PresenceFailures                *prometheus.CounterVec
-	ChannelPolicyTransientForced    prometheus.Counter
-	RecoveryTotal                   *prometheus.CounterVec
-	RecoveryPublications            *prometheus.HistogramVec
-	RecoveryTruncatedTotal          *prometheus.CounterVec
-	RecoveryGapTotal                *prometheus.CounterVec
-	LiveGapNoticeTotal              *prometheus.CounterVec
-	HeartbeatIdleDisconnects        prometheus.Counter
-	AdminUserFanout                 *prometheus.HistogramVec
-	// AdminAuthRequests counts admin API authentication outcomes by verifier
+	PresencePublishFailures       prometheus.Counter
+	PresenceFailures              *prometheus.CounterVec
+	ChannelPolicyTransientForced  prometheus.Counter
+	RecoveryTotal                 *prometheus.CounterVec
+	RecoveryPublications          *prometheus.HistogramVec
+	RecoveryTruncatedTotal        *prometheus.CounterVec
+	RecoveryGapTotal              *prometheus.CounterVec
+	LiveGapNoticeTotal            *prometheus.CounterVec
+	HeartbeatIdleDisconnects      prometheus.Counter
+	ServerAPIUserFanout           *prometheus.HistogramVec
+	// ServerAPIAuthRequests counts admin API authentication outcomes by verifier
 	// ("static" token, "insecure" escape hatch, or "proxy"-verified key),
 	// key_id, and result (allow/deny). The never logs the presented
 	// credential; key_id is the identity's ID ("unknown" when unidentifiable).
-	AdminAuthRequests *prometheus.CounterVec
-	// AdminRPCs counts served admin API RPCs by method, key_id, and outcome
+	ServerAPIAuthRequests *prometheus.CounterVec
+	// ServerAPIRPCs counts served admin API RPCs by method, key_id, and outcome
 	// ("denied" = rejected at authentication, "ok"/"error" = handler
-	// outcome). The per-identity attribution half of the admin observability
+	// outcome). The per-identity attribution half of the Server API observability
 	// pair (design G7).
-	AdminRPCs                     *prometheus.CounterVec
-	SurveyClientTotal             *prometheus.CounterVec
-	BindFencedTotal               prometheus.Counter
-	BindRefreshFailTotal          prometheus.Counter
-	EvictLag                      prometheus.Histogram
-	SessionDualActivationSeconds  prometheus.Histogram
-	OccupancyGenDiscards          prometheus.Counter
-	LiveDropTotal                 prometheus.Counter
-	LiveDegradedChannels          prometheus.Gauge
+	ServerAPIRPCs                *prometheus.CounterVec
+	SurveyClientTotal            *prometheus.CounterVec
+	BindFencedTotal              prometheus.Counter
+	BindRefreshFailTotal         prometheus.Counter
+	EvictLag                     prometheus.Histogram
+	SessionDualActivationSeconds prometheus.Histogram
+	OccupancyGenDiscards         prometheus.Counter
+	LiveDropTotal                prometheus.Counter
+	LiveDegradedChannels         prometheus.Gauge
 }
 
 // NewMetrics creates and registers all Prometheus metrics.
@@ -202,23 +202,23 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name:      "heartbeat_idle_disconnects_total",
 			Help:      "Total number of connections disconnected with 3511 by the heartbeat (idle timeout or unresponded server ping).",
 		}),
-		AdminUserFanout: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		ServerAPIUserFanout: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Namespace: "messageloop",
-			Name:      "admin_user_fanout",
-			Help:      "Number of sessions fanned out per user-targeted admin operation (publish/disconnect/subscribe/unsubscribe).",
+			Name:      "server_api_user_fanout",
+			Help:      "Number of sessions fanned out per user-targeted Server API operation (publish/disconnect/subscribe/unsubscribe).",
 			// Fan-out scale is session counts, so use a count-shaped bucket
 			// ladder instead of DefBuckets (a duration scale).
 			Buckets: []float64{1, 2, 5, 10, 25, 50, 100, 250, 500, 1000},
 		}, []string{"op"}),
-		AdminAuthRequests: prometheus.NewCounterVec(prometheus.CounterOpts{
+		ServerAPIAuthRequests: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "messageloop",
-			Name:      "admin_auth_requests_total",
-			Help:      "Total number of admin API authentication attempts by verifier (static/insecure/proxy), key_id, and result (allow/deny). Never carries the presented credential.",
+			Name:      "server_api_auth_requests_total",
+			Help:      "Total number of Server API authentication attempts by verifier (static/insecure/proxy), key_id, and result (allow/deny). Never carries the presented credential.",
 		}, []string{"verifier", "key_id", "result"}),
-		AdminRPCs: prometheus.NewCounterVec(prometheus.CounterOpts{
+		ServerAPIRPCs: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "messageloop",
-			Name:      "admin_rpc_total",
-			Help:      "Total number of admin API RPCs by method, key_id, and outcome (denied at authentication, or ok/error from the handler). Never carries the presented credential.",
+			Name:      "server_api_rpc_total",
+			Help:      "Total number of Server API RPCs by method, key_id, and outcome (denied at authentication, or ok/error from the handler). Never carries the presented credential.",
 		}, []string{"method", "key_id", "result"}),
 		SurveyClientTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "messageloop",
@@ -288,9 +288,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.RecoveryGapTotal,
 		m.LiveGapNoticeTotal,
 		m.HeartbeatIdleDisconnects,
-		m.AdminUserFanout,
-		m.AdminAuthRequests,
-		m.AdminRPCs,
+		m.ServerAPIUserFanout,
+		m.ServerAPIAuthRequests,
+		m.ServerAPIRPCs,
 		m.SurveyClientTotal,
 		m.BindFencedTotal,
 		m.BindRefreshFailTotal,

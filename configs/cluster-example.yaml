@@ -4,7 +4,7 @@
 server:
   http:
     addr: ":8080"
-  grpc_admin:
+  api:
     addr: "127.0.0.1:9091"
     auth_tokens:              # Required (or set allow_insecure: true for loopback dev only)
       - "change-me-admin-token-min-20-chars"

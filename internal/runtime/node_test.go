@@ -771,8 +771,8 @@ func (m *mockRPCProxy) OnDisconnected(ctx context.Context, req *proxy.OnDisconne
 	return &proxy.OnDisconnectedProxyResponse{}, nil
 }
 
-func (m *mockRPCProxy) AuthenticateAdmin(ctx context.Context, req *proxy.AuthenticateAdminProxyRequest) (*proxy.AuthenticateAdminProxyResponse, error) {
-	return &proxy.AuthenticateAdminProxyResponse{}, nil
+func (m *mockRPCProxy) AuthenticateAPIKey(ctx context.Context, req *proxy.AuthenticateAPIKeyProxyRequest) (*proxy.AuthenticateAPIKeyProxyResponse, error) {
+	return &proxy.AuthenticateAPIKeyProxyResponse{}, nil
 }
 
 func (m *mockRPCProxy) Name() string {

@@ -67,8 +67,8 @@ func (m *MockSlowProxy) OnDisconnected(ctx context.Context, req *proxy.OnDisconn
 	return &proxy.OnDisconnectedProxyResponse{}, nil
 }
 
-func (m *MockSlowProxy) AuthenticateAdmin(ctx context.Context, req *proxy.AuthenticateAdminProxyRequest) (*proxy.AuthenticateAdminProxyResponse, error) {
-	return &proxy.AuthenticateAdminProxyResponse{}, nil
+func (m *MockSlowProxy) AuthenticateAPIKey(ctx context.Context, req *proxy.AuthenticateAPIKeyProxyRequest) (*proxy.AuthenticateAPIKeyProxyResponse, error) {
+	return &proxy.AuthenticateAPIKeyProxyResponse{}, nil
 }
 
 func (m *MockSlowProxy) Name() string {

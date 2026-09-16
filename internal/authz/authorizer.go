@@ -40,8 +40,8 @@ type PrincipalKind int
 const (
 	// PrincipalUser is an authenticated client user.
 	PrincipalUser PrincipalKind = iota
-	// PrincipalAdmin is the server-side admin API principal.
-	PrincipalAdmin
+	// PrincipalServer is the server-side admin API principal.
+	PrincipalServer
 )
 
 // Principal is the authorization subject of a Decide call.
@@ -101,10 +101,10 @@ var ClosedCapabilityNames = map[string]Capability{
 	"pattern.global":          CapPatternGlobal,
 }
 
-// DefaultAdminCapabilities is used when server.grpc_admin.capabilities is
+// DefaultCapabilityCeiling is used when server.api.capabilities is
 // omitted: every closed bit except CapPatternGlobal (holding ** Interest must
 // be explicit).
-var DefaultAdminCapabilities Capability = CapPresenceLargeSnapshot |
+var DefaultCapabilityCeiling Capability = CapPresenceLargeSnapshot |
 	CapSurveyBypassGate |
 	CapHistoryRead |
 	CapPresenceRead |

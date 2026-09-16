@@ -1,4 +1,4 @@
-package admin
+package serverapi
 
 import (
 	"context"
@@ -22,7 +22,7 @@ import (
 	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
-// The admin API key rejection semantics matrix (design §2.4), driven end to
+// The Server API key rejection semantics matrix (design §2.4), driven end to
 // end: real gRPC server + auth interceptor + scope layer + handler. Two
 // tenants (acme, beta) each hold one live session; every identity class of
 // the matrix (scoped acme / scoped beta / global ["*"] key / static token)
@@ -52,7 +52,7 @@ const (
 )
 
 // matrixFullCaps is the full non-global capability label set (the node
-// ceiling is DefaultAdminCapabilities: every bit except pattern.global).
+// ceiling is DefaultCapabilityCeiling: every bit except pattern.global).
 var matrixFullCaps = []string{
 	"session.act",
 	"user.fanout",
@@ -64,28 +64,28 @@ var matrixFullCaps = []string{
 	"presence.large_snapshot",
 }
 
-// keyedAdminAuthProxy answers AuthenticateAdmin from a presented-key →
+// keyedAPIAuthProxy answers AuthenticateAPIKey from a presented-key →
 // identity table (the fake findProxy path: scoped identities enter through
 // the real auth chain). Everything else is inherited no-op from
-// fakeAdminAuthProxy.
-type keyedAdminAuthProxy struct {
-	fakeAdminAuthProxy
+// fakeAPIAuthProxy.
+type keyedAPIAuthProxy struct {
+	fakeAPIAuthProxy
 	mu         sync.Mutex
-	identities map[string]*proxy.AdminIdentityInfo
+	identities map[string]*proxy.APIKeyInfo
 	verifyalls int
 }
 
-func (f *keyedAdminAuthProxy) AuthenticateAdmin(ctx context.Context, req *proxy.AuthenticateAdminProxyRequest) (*proxy.AuthenticateAdminProxyResponse, error) {
+func (f *keyedAPIAuthProxy) AuthenticateAPIKey(ctx context.Context, req *proxy.AuthenticateAPIKeyProxyRequest) (*proxy.AuthenticateAPIKeyProxyResponse, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.verifyalls++
 	identity, ok := f.identities[req.APIKey]
 	if !ok {
-		return &proxy.AuthenticateAdminProxyResponse{
-			Error: &sharedv2.Error{Code: "KEY_NOT_FOUND", Message: "unknown admin api key"},
+		return &proxy.AuthenticateAPIKeyProxyResponse{
+			Error: &sharedv2.Error{Code: "KEY_NOT_FOUND", Message: "unknown server api key"},
 		}, nil
 	}
-	return &proxy.AuthenticateAdminProxyResponse{Identity: identity}, nil
+	return &proxy.AuthenticateAPIKeyProxyResponse{Identity: identity}, nil
 }
 
 // matrixServer bundles the e2e fixtures of one scenario.
@@ -94,18 +94,18 @@ type matrixServer struct {
 	api  serverv2.APIServiceClient
 }
 
-// startMatrixServer boots a real admin gRPC server: static auth_tokens
-// (superadmin) + a fake admin_auth proxy issuing scoped identities. All
+// startMatrixServer boots a real Server API gRPC server: static auth_tokens
+// (superadmin) + a fake api_auth proxy issuing scoped identities. All
 // keys share max_age 60s (positive cache 30s default — stable within a
 // test).
-func startMatrixServer(t *testing.T, cfg *config.Server, extraIdentities map[string]*proxy.AdminIdentityInfo) *matrixServer {
+func startMatrixServer(t *testing.T, cfg *config.Server, extraIdentities map[string]*proxy.APIKeyInfo) *matrixServer {
 	t.Helper()
 	ctx := t.Context()
 	node := runtime.NewNode(cfg)
 	require.NoError(t, node.Run(ctx))
 	t.Cleanup(node.Shutdown)
 
-	p := &keyedAdminAuthProxy{identities: map[string]*proxy.AdminIdentityInfo{
+	p := &keyedAPIAuthProxy{identities: map[string]*proxy.APIKeyInfo{
 		matrixAcmeKey:   {KeyID: "key-acme-1", Namespaces: []string{matrixNsAcme}, Capabilities: matrixFullCaps, MaxAgeSeconds: matrixMaxAgeSecs},
 		matrixBetaKey:   {KeyID: "key-beta-1", Namespaces: []string{matrixNsBeta}, Capabilities: matrixFullCaps, MaxAgeSeconds: matrixMaxAgeSecs},
 		matrixGlobalKey: {KeyID: "key-global-1", Namespaces: []string{"*"}, Capabilities: matrixFullCaps, MaxAgeSeconds: matrixMaxAgeSecs},
@@ -114,10 +114,10 @@ func startMatrixServer(t *testing.T, cfg *config.Server, extraIdentities map[str
 		p.identities[key] = identity
 	}
 
-	server, err := PrepareAdminServer(grpc.Options{
-		Addr:           "127.0.0.1:0",
-		AuthTokens:     []string{matrixStaticTok},
-		AdminFindProxy: func() proxy.Proxy { return p },
+	server, err := PrepareServer(grpc.Options{
+		Addr:         "127.0.0.1:0",
+		AuthTokens:   []string{matrixStaticTok},
+		APIFindProxy: func() proxy.Proxy { return p },
 	}, node, nil, nil)
 	require.NoError(t, err)
 	go func() { _ = server.Start(ctx) }()
@@ -157,11 +157,11 @@ func requireResultsEntry(t *testing.T, results map[string]bool, key string, want
 	require.Equal(t, want, results[key], "results[%q]", key)
 }
 
-// TestAdminMatrix_Publish_ChannelLists covers the channel-carrier row of the
+// TestAPIMatrix_Publish_ChannelLists covers the channel-carrier row of the
 // matrix: out-of-namespace channels count failed while in-scope ones still
 // deliver (partial success preserved); an all-out-of-scope request fails
 // the whole RPC; global/static identities cross namespaces freely.
-func TestAdminMatrix_Publish_ChannelLists(t *testing.T) {
+func TestAPIMatrix_Publish_ChannelLists(t *testing.T) {
 	ms := startMatrixServer(t, nil, nil)
 
 	pub := func(key, id string, channels ...string) *serverv2.PublishRequest {
@@ -203,10 +203,10 @@ func TestAdminMatrix_Publish_ChannelLists(t *testing.T) {
 	}
 }
 
-// TestAdminMatrix_Publish_Sessions_InvisibleErased covers the session-ID
+// TestAPIMatrix_Publish_Sessions_InvisibleErased covers the session-ID
 // carrier: invisible sessions are erased, not reported — the response shape
 // equals the "session not found" behavior (attempted, skipped, no error).
-func TestAdminMatrix_Publish_Sessions_InvisibleErased(t *testing.T) {
+func TestAPIMatrix_Publish_Sessions_InvisibleErased(t *testing.T) {
 	ms := startMatrixServer(t, nil, nil)
 	acmeTransport := addMatrixSession(t, ms.node, matrixAcmeSess, matrixAcmeUser, matrixNsAcme)
 	betaTransport := addMatrixSession(t, ms.node, matrixBetaSess, "matrix-beta-user", matrixNsBeta)
@@ -253,10 +253,10 @@ func TestAdminMatrix_Publish_Sessions_InvisibleErased(t *testing.T) {
 	}, 2*time.Second, 20*time.Millisecond, "static identities address sessions in every namespace")
 }
 
-// TestAdminMatrix_Publish_Users_NamespaceParam covers the namespace
+// TestAPIMatrix_Publish_Users_NamespaceParam covers the namespace
 // parameter carrier on Publish: mismatch rejects the whole RPC before any
 // expansion; the in-scope expansion fans out.
-func TestAdminMatrix_Publish_Users_NamespaceParam(t *testing.T) {
+func TestAPIMatrix_Publish_Users_NamespaceParam(t *testing.T) {
 	ms := startMatrixServer(t, nil, nil)
 	acmeTransport := addMatrixSession(t, ms.node, matrixAcmeSess, matrixAcmeUser, matrixNsAcme)
 
@@ -287,11 +287,11 @@ func TestAdminMatrix_Publish_Users_NamespaceParam(t *testing.T) {
 	}, 2*time.Second, 20*time.Millisecond, "the in-scope user expansion must fan out")
 }
 
-// TestAdminMatrix_Disconnect_Sessions covers Disconnect per the matrix: the
+// TestAPIMatrix_Disconnect_Sessions covers Disconnect per the matrix: the
 // invisible session is absent from the results map (reads false — not-found,
 // never an error), the in-scope session reports true, static identities see
 // everything.
-func TestAdminMatrix_Disconnect_Sessions(t *testing.T) {
+func TestAPIMatrix_Disconnect_Sessions(t *testing.T) {
 	ms := startMatrixServer(t, nil, nil)
 	acmeTransport := addMatrixSession(t, ms.node, matrixAcmeSess, matrixAcmeUser, matrixNsAcme)
 	betaTransport := addMatrixSession(t, ms.node, matrixBetaSess, "matrix-beta-user", matrixNsBeta)
@@ -326,10 +326,10 @@ func TestAdminMatrix_Disconnect_Sessions(t *testing.T) {
 	require.True(t, betaTransport.closed)
 }
 
-// TestAdminMatrix_Disconnect_Users_NamespaceParam covers the namespace
+// TestAPIMatrix_Disconnect_Users_NamespaceParam covers the namespace
 // parameter carrier on Disconnect: mismatch rejects the whole RPC, in-scope
 // user fan-out disconnects the tenant's own sessions.
-func TestAdminMatrix_Disconnect_Users_NamespaceParam(t *testing.T) {
+func TestAPIMatrix_Disconnect_Users_NamespaceParam(t *testing.T) {
 	ms := startMatrixServer(t, nil, nil)
 	acmeTransport := addMatrixSession(t, ms.node, matrixAcmeSess, matrixAcmeUser, matrixNsAcme)
 	addMatrixSession(t, ms.node, matrixBetaSess, "matrix-beta-user", matrixNsBeta)
@@ -353,10 +353,10 @@ func TestAdminMatrix_Disconnect_Users_NamespaceParam(t *testing.T) {
 	require.True(t, acmeTransport.closed)
 }
 
-// TestAdminMatrix_Subscribe_Channels covers the Subscribe channel carrier:
+// TestAPIMatrix_Subscribe_Channels covers the Subscribe channel carrier:
 // out-of-namespace channels report explicit results=false while the
 // in-scope channel subscribes; static identities subscribe everywhere.
-func TestAdminMatrix_Subscribe_Channels(t *testing.T) {
+func TestAPIMatrix_Subscribe_Channels(t *testing.T) {
 	ms := startMatrixServer(t, nil, nil)
 	addMatrixSession(t, ms.node, matrixAcmeSess, matrixAcmeUser, matrixNsAcme)
 	addMatrixSession(t, ms.node, matrixBetaSess, "matrix-beta-user", matrixNsBeta)
@@ -382,12 +382,12 @@ func TestAdminMatrix_Subscribe_Channels(t *testing.T) {
 	requireResultsEntry(t, resp.Results, matrixBetaCh, true)
 }
 
-// TestAdminMatrix_Subscribe_InvisibleSession_ShortCircuit is the rethink-fix
+// TestAPIMatrix_Subscribe_InvisibleSession_ShortCircuit is the rethink-fix
 // regression: an acme key addressing only a beta session gets a synthesized
 // not-found response (results[ch]=false for every channel) — never the
 // handler's "session_id and user_id must not both be empty"
 // InvalidArgument, which would leak that the session was special-cased.
-func TestAdminMatrix_Subscribe_InvisibleSession_ShortCircuit(t *testing.T) {
+func TestAPIMatrix_Subscribe_InvisibleSession_ShortCircuit(t *testing.T) {
 	ms := startMatrixServer(t, nil, nil)
 	addMatrixSession(t, ms.node, matrixAcmeSess, matrixAcmeUser, matrixNsAcme)
 	addMatrixSession(t, ms.node, matrixBetaSess, "matrix-beta-user", matrixNsBeta)
@@ -410,9 +410,9 @@ func TestAdminMatrix_Subscribe_InvisibleSession_ShortCircuit(t *testing.T) {
 	requireResultsEntry(t, resp2.Results, matrixAcmeCh, false)
 }
 
-// TestAdminMatrix_Subscribe_UserID_NamespaceParam covers the user_id carrier
+// TestAPIMatrix_Subscribe_UserID_NamespaceParam covers the user_id carrier
 // on Subscribe/Unsubscribe: the namespace parameter must stay in scope.
-func TestAdminMatrix_Subscribe_UserID_NamespaceParam(t *testing.T) {
+func TestAPIMatrix_Subscribe_UserID_NamespaceParam(t *testing.T) {
 	ms := startMatrixServer(t, nil, nil)
 	addMatrixSession(t, ms.node, matrixAcmeSess, matrixAcmeUser, matrixNsAcme)
 
@@ -440,11 +440,11 @@ func TestAdminMatrix_Subscribe_UserID_NamespaceParam(t *testing.T) {
 	requireResultsEntry(t, resp.Results, matrixAcmeCh, true)
 }
 
-// TestAdminMatrix_SingleChannelRPCs_Namespace covers the single-channel
+// TestAPIMatrix_SingleChannelRPCs_Namespace covers the single-channel
 // matrix row (Survey/GetPresence/GetHistory): an out-of-namespace channel
 // rejects the RPC with PermissionDenied for scoped keys; in-scope channels
 // are served; global/static identities are unaffected.
-func TestAdminMatrix_SingleChannelRPCs_Namespace(t *testing.T) {
+func TestAPIMatrix_SingleChannelRPCs_Namespace(t *testing.T) {
 	ms := startMatrixServer(t, nil, nil)
 	addMatrixSession(t, ms.node, matrixAcmeSess, matrixAcmeUser, matrixNsAcme)
 
@@ -482,12 +482,12 @@ func TestAdminMatrix_SingleChannelRPCs_Namespace(t *testing.T) {
 	}
 }
 
-// TestAdminMatrix_ChannelGrammarGate is the G4 tightening: every identity —
+// TestAPIMatrix_ChannelGrammarGate is the G4 tightening: every identity —
 // including the static token and global keys — gets InvalidArgument for
 // channel references without a namespace, and the grammar gate fires before
 // the namespace scope check (a syntactically invalid channel in a foreign
 // namespace is still InvalidArgument, never PermissionDenied).
-func TestAdminMatrix_ChannelGrammarGate(t *testing.T) {
+func TestAPIMatrix_ChannelGrammarGate(t *testing.T) {
 	ms := startMatrixServer(t, nil, nil)
 	addMatrixSession(t, ms.node, matrixAcmeSess, matrixAcmeUser, matrixNsAcme)
 
@@ -522,10 +522,10 @@ func TestAdminMatrix_ChannelGrammarGate(t *testing.T) {
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 
-// TestAdminMatrix_GetChannels_FilteredByNamespace pins the response-side
+// TestAPIMatrix_GetChannels_FilteredByNamespace pins the response-side
 // namespace filter: scoped keys list only their own channels (channels that
 // do not parse under ns:topic are hidden too); global/static keys see all.
-func TestAdminMatrix_GetChannels_FilteredByNamespace(t *testing.T) {
+func TestAPIMatrix_GetChannels_FilteredByNamespace(t *testing.T) {
 	ms := startMatrixServer(t, nil, nil)
 	addMatrixSession(t, ms.node, matrixAcmeSess, matrixAcmeUser, matrixNsAcme)
 	addMatrixSession(t, ms.node, matrixBetaSess, "matrix-beta-user", matrixNsBeta)
@@ -564,10 +564,10 @@ func TestAdminMatrix_GetChannels_FilteredByNamespace(t *testing.T) {
 	}
 }
 
-// TestAdminMatrix_DenyAll_BindsEveryIdentity pins "deny 不可打洞": an
+// TestAPIMatrix_DenyAll_BindsEveryIdentity pins "deny 不可打洞": an
 // authorizer deny_all rule binds scoped keys exactly like static/global
 // identities — no capability or namespace scope punches through it.
-func TestAdminMatrix_DenyAll_BindsEveryIdentity(t *testing.T) {
+func TestAPIMatrix_DenyAll_BindsEveryIdentity(t *testing.T) {
 	cfg := &config.Server{
 		Authorizer: config.AuthorizerConfig{
 			Rules: []config.AuthorizerRule{{Pattern: "acme:**", DenyAll: true}},
@@ -600,15 +600,15 @@ func TestAdminMatrix_DenyAll_BindsEveryIdentity(t *testing.T) {
 	require.Error(t, err, "deny_all binds static identities as well")
 }
 
-// TestAdminMatrix_CapabilityGates pins the capability half of the chain:
+// TestAPIMatrix_CapabilityGates pins the capability half of the chain:
 // the key's own clamped bits decide (not the node ceiling) — a key without
 // history.read is denied GetHistory while its other bits keep working, and
-// a key without survey.bypass_gate walks the AdminDecide gate path (its
+// a key without survey.bypass_gate walks the APIDecide gate path (its
 // survey is rejected by the default survey-off policy). A zero-label key
 // authenticates but every capability-gated RPC denies (D24) while plain
 // channel publish stays available (D23); a zero-scope key is denied
 // everywhere (D5 fail-closed).
-func TestAdminMatrix_CapabilityGates(t *testing.T) {
+func TestAPIMatrix_CapabilityGates(t *testing.T) {
 	noHistoryKey := "sk-acme-nohistory-key-9988776655443322"
 	noBypassKey := "sk-acme-nobypass-key-1122334455667788"
 	zeroLabelKey := "sk-acme-zerolabel-key-5566778899001122"
@@ -631,7 +631,7 @@ func TestAdminMatrix_CapabilityGates(t *testing.T) {
 		return filtered
 	}
 
-	ms := startMatrixServer(t, nil, map[string]*proxy.AdminIdentityInfo{
+	ms := startMatrixServer(t, nil, map[string]*proxy.APIKeyInfo{
 		noHistoryKey: {KeyID: "key-acme-nohistory", Namespaces: []string{matrixNsAcme}, Capabilities: capsWithout("history.read"), MaxAgeSeconds: matrixMaxAgeSecs},
 		noBypassKey:  {KeyID: "key-acme-nobypass", Namespaces: []string{matrixNsAcme}, Capabilities: capsWithout("survey.bypass_gate"), MaxAgeSeconds: matrixMaxAgeSecs},
 	})
@@ -643,7 +643,7 @@ func TestAdminMatrix_CapabilityGates(t *testing.T) {
 	_, err = ms.api.GetPresence(matrixCtx(noHistoryKey), &serverv2.GetPresenceRequest{Channel: matrixAcmeCh})
 	require.NoError(t, err, "the other capability bits of the key are untouched")
 
-	// survey.bypass_gate missing → the survey runs through the AdminDecide
+	// survey.bypass_gate missing → the survey runs through the APIDecide
 	// gate (default policy: survey off) and is rejected; the full key and
 	// the static token skip the gate.
 	_, err = ms.api.Survey(matrixCtx(noBypassKey), &serverv2.SurveyRequest{Channel: matrixAcmeCh})
@@ -655,7 +655,7 @@ func TestAdminMatrix_CapabilityGates(t *testing.T) {
 
 	// D24: a zero-label key authenticates but every capability-gated RPC
 	// denies, while plain channel publishing stays available (D23).
-	msZeroLabel := startMatrixServer(t, nil, map[string]*proxy.AdminIdentityInfo{
+	msZeroLabel := startMatrixServer(t, nil, map[string]*proxy.APIKeyInfo{
 		zeroLabelKey: {KeyID: "key-acme-zero", Namespaces: []string{matrixNsAcme}, Capabilities: nil, MaxAgeSeconds: matrixMaxAgeSecs},
 	})
 	_, err = msZeroLabel.api.GetChannels(matrixCtx(zeroLabelKey), &serverv2.GetChannelsRequest{})
@@ -671,7 +671,7 @@ func TestAdminMatrix_CapabilityGates(t *testing.T) {
 	require.NoError(t, err, "channel publishing is not capability-gated (D23)")
 
 	// D5: a zero-scope key (empty namespace grant) is denied everywhere.
-	msZeroScope := startMatrixServer(t, nil, map[string]*proxy.AdminIdentityInfo{
+	msZeroScope := startMatrixServer(t, nil, map[string]*proxy.APIKeyInfo{
 		zeroScopeKey: {KeyID: "key-acme-zeroscope", Namespaces: []string{}, Capabilities: matrixFullCaps, MaxAgeSeconds: matrixMaxAgeSecs},
 	})
 	_, err = msZeroScope.api.GetHistory(matrixCtx(zeroScopeKey), &serverv2.GetHistoryRequest{Channel: matrixAcmeCh})

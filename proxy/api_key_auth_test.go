@@ -17,38 +17,38 @@ import (
 )
 
 // Compile-time interface completeness: both transports must keep implementing
-// the full Proxy surface, including AuthenticateAdmin.
+// the full Proxy surface, including AuthenticateAPIKey.
 var (
 	_ Proxy = (*GRPCProxy)(nil)
 	_ Proxy = (*HTTPProxy)(nil)
 )
 
-// AuthenticateAdmin implements Proxy.AuthenticateAdmin for the router test
+// AuthenticateAPIKey implements Proxy.AuthenticateAPIKey for the router test
 // mock (mockRPCProxy, declared in router_test.go). Go allows a method on a
 // package type to live in any file of the package, so the interface extension
 // lands here and the existing test files stay untouched.
-func (m *mockRPCProxy) AuthenticateAdmin(ctx context.Context, req *AuthenticateAdminProxyRequest) (*AuthenticateAdminProxyResponse, error) {
-	return &AuthenticateAdminProxyResponse{}, nil
+func (m *mockRPCProxy) AuthenticateAPIKey(ctx context.Context, req *AuthenticateAPIKeyProxyRequest) (*AuthenticateAPIKeyProxyResponse, error) {
+	return &AuthenticateAPIKeyProxyResponse{}, nil
 }
 
 // --- gRPC contract ---
 
-// fakeAdminAuthServer is a ProxyService fake for the AuthenticateAdmin
+// fakeAPIKeyAuthServer is a ProxyService fake for the AuthenticateAPIKey
 // contract: it records the request it received and answers from a handler.
-type fakeAdminAuthServer struct {
+type fakeAPIKeyAuthServer struct {
 	proxypb.UnimplementedProxyServiceServer
-	gotReq  chan *proxypb.AuthenticateAdminRequest
-	handler func(req *proxypb.AuthenticateAdminRequest) *proxypb.AuthenticateAdminResponse
+	gotReq  chan *proxypb.AuthenticateAPIKeyRequest
+	handler func(req *proxypb.AuthenticateAPIKeyRequest) *proxypb.AuthenticateAPIKeyResponse
 }
 
-func (s *fakeAdminAuthServer) AuthenticateAdmin(ctx context.Context, req *proxypb.AuthenticateAdminRequest) (*proxypb.AuthenticateAdminResponse, error) {
+func (s *fakeAPIKeyAuthServer) AuthenticateAPIKey(ctx context.Context, req *proxypb.AuthenticateAPIKeyRequest) (*proxypb.AuthenticateAPIKeyResponse, error) {
 	s.gotReq <- req
 	return s.handler(req), nil
 }
 
-// newGRPCAdminAuthProxy starts an in-process gRPC server serving srv and
+// newGRPCAPIKeyAuthProxy starts an in-process gRPC server serving srv and
 // returns a GRPCProxy pointed at it (transport_test.go listener pattern).
-func newGRPCAdminAuthProxy(t *testing.T, srv *fakeAdminAuthServer) *GRPCProxy {
+func newGRPCAPIKeyAuthProxy(t *testing.T, srv *fakeAPIKeyAuthServer) *GRPCProxy {
 	t.Helper()
 
 	lis, err := net.Listen("tcp", "localhost:0")
@@ -60,7 +60,7 @@ func newGRPCAdminAuthProxy(t *testing.T, srv *fakeAdminAuthServer) *GRPCProxy {
 	t.Cleanup(s.Stop)
 
 	p, err := NewGRPCProxy(&ProxyConfig{
-		Name:     "test-grpc-admin",
+		Name:     "test-grpc-apiauth",
 		Endpoint: lis.Addr().String(),
 		GRPC:     &GRPCProxyConfig{Insecure: true},
 	})
@@ -69,27 +69,27 @@ func newGRPCAdminAuthProxy(t *testing.T, srv *fakeAdminAuthServer) *GRPCProxy {
 	return p
 }
 
-// TestGRPCProxy_AuthenticateAdmin locks the gRPC round-trip contract: the
+// TestGRPCProxy_AuthenticateAPIKey locks the gRPC round-trip contract: the
 // request fields must reach the backend untouched and the response error and
 // identity (all four fields) must map into the proxy response types, covering
 // the full identity, nil identity + error, and empty-lists branches.
-func TestGRPCProxy_AuthenticateAdmin(t *testing.T) {
+func TestGRPCProxy_AuthenticateAPIKey(t *testing.T) {
 	cases := []struct {
 		name    string
-		backend *proxypb.AuthenticateAdminResponse
-		verify  func(t *testing.T, resp *AuthenticateAdminProxyResponse)
+		backend *proxypb.AuthenticateAPIKeyResponse
+		verify  func(t *testing.T, resp *AuthenticateAPIKeyProxyResponse)
 	}{
 		{
 			name: "identity fully mapped",
-			backend: &proxypb.AuthenticateAdminResponse{
-				Identity: &proxypb.AdminIdentityInfo{
+			backend: &proxypb.AuthenticateAPIKeyResponse{
+				Identity: &proxypb.APIKeyInfo{
 					KeyId:         "key-42",
 					Namespaces:    []string{"acme", "beta"},
 					Capabilities:  []string{"session.act", "history.read"},
 					MaxAgeSeconds: 30,
 				},
 			},
-			verify: func(t *testing.T, resp *AuthenticateAdminProxyResponse) {
+			verify: func(t *testing.T, resp *AuthenticateAPIKeyProxyResponse) {
 				require.Nil(t, resp.Error)
 				require.NotNil(t, resp.Identity)
 				assert.Equal(t, "key-42", resp.Identity.KeyID)
@@ -100,10 +100,10 @@ func TestGRPCProxy_AuthenticateAdmin(t *testing.T) {
 		},
 		{
 			name: "nil identity with backend error",
-			backend: &proxypb.AuthenticateAdminResponse{
+			backend: &proxypb.AuthenticateAPIKeyResponse{
 				Error: &sharedv2.Error{Code: "INVALID_API_KEY", Type: "auth_error", Message: "key rejected"},
 			},
-			verify: func(t *testing.T, resp *AuthenticateAdminProxyResponse) {
+			verify: func(t *testing.T, resp *AuthenticateAPIKeyProxyResponse) {
 				require.Nil(t, resp.Identity, "an identity the backend never decided stays nil")
 				require.NotNil(t, resp.Error)
 				assert.Equal(t, "INVALID_API_KEY", resp.Error.Code)
@@ -113,10 +113,10 @@ func TestGRPCProxy_AuthenticateAdmin(t *testing.T) {
 		},
 		{
 			name: "empty lists deny everything with zero capabilities",
-			backend: &proxypb.AuthenticateAdminResponse{
-				Identity: &proxypb.AdminIdentityInfo{KeyId: "key-43"},
+			backend: &proxypb.AuthenticateAPIKeyResponse{
+				Identity: &proxypb.APIKeyInfo{KeyId: "key-43"},
 			},
-			verify: func(t *testing.T, resp *AuthenticateAdminProxyResponse) {
+			verify: func(t *testing.T, resp *AuthenticateAPIKeyProxyResponse) {
 				require.Nil(t, resp.Error)
 				require.NotNil(t, resp.Identity)
 				assert.Equal(t, "key-43", resp.Identity.KeyID)
@@ -129,20 +129,20 @@ func TestGRPCProxy_AuthenticateAdmin(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			srv := &fakeAdminAuthServer{
-				gotReq:  make(chan *proxypb.AuthenticateAdminRequest, 1),
-				handler: func(req *proxypb.AuthenticateAdminRequest) *proxypb.AuthenticateAdminResponse { return tc.backend },
+			srv := &fakeAPIKeyAuthServer{
+				gotReq:  make(chan *proxypb.AuthenticateAPIKeyRequest, 1),
+				handler: func(req *proxypb.AuthenticateAPIKeyRequest) *proxypb.AuthenticateAPIKeyResponse { return tc.backend },
 			}
-			p := newGRPCAdminAuthProxy(t, srv)
+			p := newGRPCAPIKeyAuthProxy(t, srv)
 
-			resp, err := p.AuthenticateAdmin(context.Background(), &AuthenticateAdminProxyRequest{
-				APIKey:     "sk-test-admin-key-material",
+			resp, err := p.AuthenticateAPIKey(context.Background(), &AuthenticateAPIKeyProxyRequest{
+				APIKey:     "sk-test-server-api-key-material",
 				RemoteAddr: "10.0.0.9:5555",
 			})
 			require.NoError(t, err)
 
 			got := <-srv.gotReq
-			assert.Equal(t, "sk-test-admin-key-material", got.ApiKey, "api key must pass through to the backend")
+			assert.Equal(t, "sk-test-server-api-key-material", got.ApiKey, "api key must pass through to the backend")
 			assert.Equal(t, "10.0.0.9:5555", got.RemoteAddr, "remote addr must pass through to the backend")
 
 			tc.verify(t, resp)
@@ -152,10 +152,10 @@ func TestGRPCProxy_AuthenticateAdmin(t *testing.T) {
 
 // --- HTTP contract ---
 
-// TestHTTPProxy_AuthenticateAdmin_RequestCarriesKeyAndRemoteAddr verifies the
+// TestHTTPProxy_AuthenticateAPIKey_RequestCarriesKeyAndRemoteAddr verifies the
 // request body the backend receives: marshalProxyJSON emits proto field names
 // (snake_case), so api_key and remote_addr must arrive under those members.
-func TestHTTPProxy_AuthenticateAdmin_RequestCarriesKeyAndRemoteAddr(t *testing.T) {
+func TestHTTPProxy_AuthenticateAPIKey_RequestCarriesKeyAndRemoteAddr(t *testing.T) {
 	bodyCh := make(chan map[string]any, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
@@ -168,28 +168,28 @@ func TestHTTPProxy_AuthenticateAdmin_RequestCarriesKeyAndRemoteAddr(t *testing.T
 
 	p := newTestHTTPProxy(t, server)
 
-	_, err := p.AuthenticateAdmin(context.Background(), &AuthenticateAdminProxyRequest{
-		APIKey:     "sk-test-admin-key-material",
+	_, err := p.AuthenticateAPIKey(context.Background(), &AuthenticateAPIKeyProxyRequest{
+		APIKey:     "sk-test-server-api-key-material",
 		RemoteAddr: "10.0.0.9:5555",
 	})
 	require.NoError(t, err)
 
 	body := <-bodyCh
-	assert.Equal(t, "sk-test-admin-key-material", body["api_key"])
+	assert.Equal(t, "sk-test-server-api-key-material", body["api_key"])
 	assert.Equal(t, "10.0.0.9:5555", body["remote_addr"])
 }
 
-// TestHTTPProxy_AuthenticateAdmin_ResponseBothJSONFieldNames locks the
+// TestHTTPProxy_AuthenticateAPIKey_ResponseBothJSONFieldNames locks the
 // response parse contract: the protojson decoder must accept both the proto3
 // JSON contract (camelCase such as keyId/maxAgeSeconds) and the original proto
 // field names (key_id/max_age_seconds), and the identity and error members
 // must map to the proxy response types including the nil-identity and
 // empty-lists branches.
-func TestHTTPProxy_AuthenticateAdmin_ResponseBothJSONFieldNames(t *testing.T) {
+func TestHTTPProxy_AuthenticateAPIKey_ResponseBothJSONFieldNames(t *testing.T) {
 	cases := []struct {
 		name     string
 		respBody string
-		verify   func(t *testing.T, resp *AuthenticateAdminProxyResponse)
+		verify   func(t *testing.T, resp *AuthenticateAPIKeyProxyResponse)
 	}{
 		{
 			name:     "camelCase JSON contract",
@@ -204,7 +204,7 @@ func TestHTTPProxy_AuthenticateAdmin_ResponseBothJSONFieldNames(t *testing.T) {
 		{
 			name:     "error only leaves identity nil",
 			respBody: `{"error":{"code":"INVALID_API_KEY","type":"auth_error","message":"key rejected"}}`,
-			verify: func(t *testing.T, resp *AuthenticateAdminProxyResponse) {
+			verify: func(t *testing.T, resp *AuthenticateAPIKeyProxyResponse) {
 				require.Nil(t, resp.Identity, "an identity the backend never decided stays nil")
 				require.NotNil(t, resp.Error)
 				assert.Equal(t, "INVALID_API_KEY", resp.Error.Code)
@@ -215,7 +215,7 @@ func TestHTTPProxy_AuthenticateAdmin_ResponseBothJSONFieldNames(t *testing.T) {
 		{
 			name:     "empty identity lists deny everything",
 			respBody: `{"identity":{"keyId":"key-10"}}`,
-			verify: func(t *testing.T, resp *AuthenticateAdminProxyResponse) {
+			verify: func(t *testing.T, resp *AuthenticateAPIKeyProxyResponse) {
 				require.Nil(t, resp.Error)
 				require.NotNil(t, resp.Identity)
 				assert.Equal(t, "key-10", resp.Identity.KeyID)
@@ -236,8 +236,8 @@ func TestHTTPProxy_AuthenticateAdmin_ResponseBothJSONFieldNames(t *testing.T) {
 
 			p := newTestHTTPProxy(t, server)
 
-			resp, err := p.AuthenticateAdmin(context.Background(), &AuthenticateAdminProxyRequest{
-				APIKey:     "sk-test-admin-key-material",
+			resp, err := p.AuthenticateAPIKey(context.Background(), &AuthenticateAPIKeyProxyRequest{
+				APIKey:     "sk-test-server-api-key-material",
 				RemoteAddr: "10.0.0.9:5555",
 			})
 			require.NoError(t, err)
@@ -247,10 +247,10 @@ func TestHTTPProxy_AuthenticateAdmin_ResponseBothJSONFieldNames(t *testing.T) {
 }
 
 // verifyFullIdentity asserts the fully populated identity shared by the two
-// JSON-shape subtests of TestHTTPProxy_AuthenticateAdmin_ResponseBothJSONFieldNames.
-func verifyFullIdentity(t *testing.T) func(t *testing.T, resp *AuthenticateAdminProxyResponse) {
+// JSON-shape subtests of TestHTTPProxy_AuthenticateAPIKey_ResponseBothJSONFieldNames.
+func verifyFullIdentity(t *testing.T) func(t *testing.T, resp *AuthenticateAPIKeyProxyResponse) {
 	t.Helper()
-	return func(t *testing.T, resp *AuthenticateAdminProxyResponse) {
+	return func(t *testing.T, resp *AuthenticateAPIKeyProxyResponse) {
 		require.Nil(t, resp.Error)
 		require.NotNil(t, resp.Identity)
 		assert.Equal(t, "key-9", resp.Identity.KeyID)

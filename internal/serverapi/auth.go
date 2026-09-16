@@ -1,4 +1,4 @@
-package admin
+package serverapi
 
 import (
 	"context"
@@ -23,24 +23,24 @@ import (
 	"github.com/messageloopio/messageloop/proxy"
 )
 
-// The admin API key authentication chain (design §2.3): a unary interceptor
-// backed by adminAuthResolver. Credentials come from `authorization: Bearer`
+// The Server API key authentication chain (design §2.3): a unary interceptor
+// backed by apiAuthResolver. Credentials come from `authorization: Bearer`
 // (preferred) or `x-api-key`; static auth_tokens are compared first (D28:
 // before the length gate), and anything else is verified through the
-// admin_auth-assigned proxy with a bounded cache, in-flight dedup, and a
+// api_auth-assigned proxy with a bounded cache, in-flight dedup, and a
 // consecutive-error breaker (D27).
 const (
-	// staticTokenKeyID is the AdminIdentity.KeyID of a static auth_tokens hit.
+	// staticTokenKeyID is the APIIdentity.KeyID of a static auth_tokens hit.
 	staticTokenKeyID = "static-token"
-	// insecureKeyID is the AdminIdentity.KeyID of the allow_insecure path.
+	// insecureKeyID is the APIIdentity.KeyID of the allow_insecure path.
 	insecureKeyID = "insecure"
 	// unknownKeyID labels metrics/logs for credentials that could not be
 	// attributed to an identity.
 	unknownKeyID = "unknown"
 
-	// defaultAdminAuthCacheTTL mirrors config.DefaultAdminAuthCacheTTL
-	// (server.grpc_admin.admin_auth_cache_ttl, design D15).
-	defaultAdminAuthCacheTTL = 30 * time.Second
+	// defaultAuthCacheTTL mirrors config.DefaultAuthCacheTTL
+	// (server.api.auth_cache_ttl, design D15).
+	defaultAuthCacheTTL = 30 * time.Second
 	// negativeAuthCacheTTL is the fixed rejection cache TTL (not configurable).
 	negativeAuthCacheTTL = 5 * time.Second
 	// proxyErrorCacheTTL is the short negative cache for proxy transport
@@ -67,36 +67,36 @@ const (
 // credential, and they let the interceptor distinguish "the key is bad"
 // from "the verifier is unreachable".
 var (
-	errAdminKeyRejected = errors.New("admin api key rejected by verifier")
-	errProxyUnavailable = errors.New("admin api key verifier unavailable")
+	errAPIKeyRejected   = errors.New("server api key rejected by verifier")
+	errProxyUnavailable = errors.New("server api key verifier unavailable")
 )
 
-// adminAuthOptions configures the admin auth chain, assembled from
-// server.grpc_admin / proxy.admin_auth at PrepareAdminServer time.
-type adminAuthOptions struct {
+// apiAuthOptions configures the Server API auth chain, assembled from
+// server.api / proxy.api_auth at PrepareServer time.
+type apiAuthOptions struct {
 	// AuthTokens is the static superadmin token list (any match wins).
 	AuthTokens []string
-	// AllowInsecure serves the admin API unauthenticated (no credential →
+	// AllowInsecure serves the Server API unauthenticated (no credential →
 	// insecure superadmin identity). G5 keeps it loopback-only via Validate.
 	AllowInsecure bool
-	// FindProxy returns the admin_auth-assigned proxy (nil when unassigned).
+	// FindProxy returns the api_auth-assigned proxy (nil when unassigned).
 	FindProxy func() proxy.Proxy
 	// Ceiling is the node capability upper bound every granted identity is
 	// clamped against (D17).
 	Ceiling authz.Capability
 	// CacheTTL is the configured positive cache TTL (0 → default).
 	CacheTTL time.Duration
-	// AuthRequests is the admin_auth_requests_total counter (nil disables).
+	// AuthRequests is the server_api_auth_requests_total counter (nil disables).
 	AuthRequests *prometheus.CounterVec
-	// RPCs is the admin_rpc_total counter (nil disables): per-identity,
-	// per-method attribution of served admin RPCs (G7).
+	// RPCs is the server_api_rpc_total counter (nil disables): per-identity,
+	// per-method attribution of served Server API RPCs (G7).
 	RPCs *prometheus.CounterVec
 }
 
 // cacheEntry is one positive or negative cache record. The cache key is
 // sha256(presented); the presented credential itself is never stored.
 type cacheEntry struct {
-	identity authz.AdminIdentity
+	identity authz.APIIdentity
 	allowed  bool
 	err      error // the rejection error for negative entries
 	expireAt time.Time
@@ -107,17 +107,17 @@ type cacheEntry struct {
 // dialing the proxy themselves (~25-line singleflight, no dependency).
 type verifyCall struct {
 	done     chan struct{}
-	identity authz.AdminIdentity
+	identity authz.APIIdentity
 	err      error
 	allowed  bool
 	expireAt time.Time
 }
 
-// adminAuthResolver verifies admin credentials against the static token
-// list and the admin_auth-assigned proxy, caching every verdict (positive
+// apiAuthResolver verifies Server API credentials against the static token
+// list and the api_auth-assigned proxy, caching every verdict (positive
 // and negative) under the sha256 of the presented credential.
-type adminAuthResolver struct {
-	opts adminAuthOptions
+type apiAuthResolver struct {
+	opts apiAuthOptions
 	ttl  time.Duration
 
 	mu                sync.Mutex
@@ -127,14 +127,14 @@ type adminAuthResolver struct {
 	breakerOpenAt     time.Time // zero = closed
 }
 
-// newAdminAuthResolver builds the resolver. ttl <= 0 resolves to the 30s
-// default (config server.grpc_admin.admin_auth_cache_ttl).
-func newAdminAuthResolver(opts adminAuthOptions) *adminAuthResolver {
+// newAPIAuthResolver builds the resolver. ttl <= 0 resolves to the 30s
+// default (config server.api.auth_cache_ttl).
+func newAPIAuthResolver(opts apiAuthOptions) *apiAuthResolver {
 	ttl := opts.CacheTTL
 	if ttl <= 0 {
-		ttl = defaultAdminAuthCacheTTL
+		ttl = defaultAuthCacheTTL
 	}
-	return &adminAuthResolver{
+	return &apiAuthResolver{
 		opts:     opts,
 		ttl:      ttl,
 		entries:  make(map[string]cacheEntry),
@@ -149,14 +149,14 @@ func cacheKey(presented string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// Verify resolves one presented credential to a clamped AdminIdentity.
+// Verify resolves one presented credential to a clamped APIIdentity.
 // Verdicts are cached (positive for ttl, rejections for 5s, proxy errors
 // for 2s), same-credential concurrency is deduplicated, and consecutive
 // proxy errors open a 30s breaker that fails fast without touching the
-// proxy (D27). A returned error is one of errAdminKeyRejected /
+// proxy (D27). A returned error is one of errAPIKeyRejected /
 // errProxyUnavailable (or context cancellation) and never carries the
 // presented credential.
-func (r *adminAuthResolver) Verify(ctx context.Context, presented string) (authz.AdminIdentity, error) {
+func (r *apiAuthResolver) Verify(ctx context.Context, presented string) (authz.APIIdentity, error) {
 	key := cacheKey(presented)
 	now := time.Now()
 
@@ -177,7 +177,7 @@ func (r *adminAuthResolver) Verify(ctx context.Context, presented string) (authz
 			}
 			err := e.err
 			r.mu.Unlock()
-			return authz.AdminIdentity{}, err
+			return authz.APIIdentity{}, err
 		}
 		delete(r.entries, key)
 	}
@@ -186,7 +186,7 @@ func (r *adminAuthResolver) Verify(ctx context.Context, presented string) (authz
 	if !r.breakerOpenAt.IsZero() {
 		if now.Sub(r.breakerOpenAt) < breakerCooldown {
 			r.mu.Unlock()
-			return authz.AdminIdentity{}, errProxyUnavailable
+			return authz.APIIdentity{}, errProxyUnavailable
 		}
 		// Cooldown elapsed: close the breaker and start a fresh streak.
 		r.breakerOpenAt = time.Time{}
@@ -199,12 +199,12 @@ func (r *adminAuthResolver) Verify(ctx context.Context, presented string) (authz
 		select {
 		case <-call.done:
 		case <-ctx.Done():
-			return authz.AdminIdentity{}, ctx.Err()
+			return authz.APIIdentity{}, ctx.Err()
 		}
 		if call.allowed {
 			return call.identity, nil
 		}
-		return authz.AdminIdentity{}, call.err
+		return authz.APIIdentity{}, call.err
 	}
 
 	call := &verifyCall{done: make(chan struct{})}
@@ -229,7 +229,7 @@ func (r *adminAuthResolver) Verify(ctx context.Context, presented string) (authz
 		r.storeLocked(key, cacheEntry{allowed: true, identity: identity, expireAt: call.expireAt})
 	case verdictDeny:
 		r.consecutiveErrors = 0
-		r.storeLocked(key, cacheEntry{allowed: false, err: errAdminKeyRejected, expireAt: now.Add(negativeAuthCacheTTL)})
+		r.storeLocked(key, cacheEntry{allowed: false, err: errAPIKeyRejected, expireAt: now.Add(negativeAuthCacheTTL)})
 	case verdictError:
 		r.recordProxyErrorLocked()
 		r.storeLocked(key, cacheEntry{allowed: false, err: errProxyUnavailable, expireAt: now.Add(proxyErrorCacheTTL)})
@@ -237,7 +237,7 @@ func (r *adminAuthResolver) Verify(ctx context.Context, presented string) (authz
 	r.mu.Unlock()
 
 	if verdict != verdictAllow {
-		return authz.AdminIdentity{}, verdictErr
+		return authz.APIIdentity{}, verdictErr
 	}
 	return identity, nil
 }
@@ -268,7 +268,7 @@ func (v verdict) resolveTTL(positive time.Duration) time.Duration {
 
 // recordProxyErrorLocked bumps the consecutive-error streak and opens the
 // breaker at the threshold. Callers must hold r.mu.
-func (r *adminAuthResolver) recordProxyErrorLocked() {
+func (r *apiAuthResolver) recordProxyErrorLocked() {
 	r.consecutiveErrors++
 	if r.consecutiveErrors >= breakerThreshold {
 		r.breakerOpenAt = time.Now()
@@ -279,7 +279,7 @@ func (r *adminAuthResolver) recordProxyErrorLocked() {
 // storeLocked inserts an entry, evicting a random one at the capacity cap
 // (Go map iteration order is randomized, which is the "random eviction").
 // Callers must hold r.mu.
-func (r *adminAuthResolver) storeLocked(key string, e cacheEntry) {
+func (r *apiAuthResolver) storeLocked(key string, e cacheEntry) {
 	if len(r.entries) >= maxAuthCacheEntries {
 		for k := range r.entries {
 			delete(r.entries, k)
@@ -291,11 +291,11 @@ func (r *adminAuthResolver) storeLocked(key string, e cacheEntry) {
 
 // rejectWithoutProxy inserts a negative cache entry without contacting the
 // proxy (G9: the length gate stops credential spraying at the door).
-func (r *adminAuthResolver) rejectWithoutProxy(presented string) {
+func (r *apiAuthResolver) rejectWithoutProxy(presented string) {
 	r.mu.Lock()
 	r.storeLocked(cacheKey(presented), cacheEntry{
 		allowed:  false,
-		err:      errAdminKeyRejected,
+		err:      errAPIKeyRejected,
 		expireAt: time.Now().Add(negativeAuthCacheTTL),
 	})
 	r.mu.Unlock()
@@ -304,22 +304,22 @@ func (r *adminAuthResolver) rejectWithoutProxy(presented string) {
 // verifyViaProxy performs one proxy round-trip and clamps the result. The
 // returned TTL is the effective positive cache duration for this entry;
 // verdictErr never embeds the presented credential.
-func (r *adminAuthResolver) verifyViaProxy(ctx context.Context, presented string) (authz.AdminIdentity, time.Duration, verdict, error) {
+func (r *apiAuthResolver) verifyViaProxy(ctx context.Context, presented string) (authz.APIIdentity, time.Duration, verdict, error) {
 	p := r.opts.FindProxy()
 	if p == nil {
 		// The interceptor checks the assignment before calling Verify; this
 		// is the defensive path for a revoked assignment mid-flight.
-		return authz.AdminIdentity{}, 0, verdictError, errProxyUnavailable
+		return authz.APIIdentity{}, 0, verdictError, errProxyUnavailable
 	}
 
-	resp, err := p.AuthenticateAdmin(ctx, &proxy.AuthenticateAdminProxyRequest{
+	resp, err := p.AuthenticateAPIKey(ctx, &proxy.AuthenticateAPIKeyProxyRequest{
 		APIKey:     presented,
 		RemoteAddr: remoteAddrFromContext(ctx),
 	})
 	if err != nil {
-		log.WarnContext(ctx, "admin api key verification failed: proxy unreachable",
+		log.WarnContext(ctx, "server api key verification failed: proxy unreachable",
 			"proxy", p.Name(), "error", err.Error())
-		return authz.AdminIdentity{}, 0, verdictError, errProxyUnavailable
+		return authz.APIIdentity{}, 0, verdictError, errProxyUnavailable
 	}
 	// A backend decision (accept or reject) proves the proxy is healthy.
 	if resp.Error != nil || resp.Identity == nil {
@@ -327,15 +327,15 @@ func (r *adminAuthResolver) verifyViaProxy(ctx context.Context, presented string
 		if resp.Error != nil {
 			errorCode = resp.Error.Code
 		}
-		log.WarnContext(ctx, "admin api key rejected by verifier",
+		log.WarnContext(ctx, "server api key rejected by verifier",
 			"proxy", p.Name(), "key_id", unknownKeyID,
 			"error_code", errorCode)
-		return authz.AdminIdentity{}, 0, verdictDeny, errAdminKeyRejected
+		return authz.APIIdentity{}, 0, verdictDeny, errAPIKeyRejected
 	}
 
 	identity, positiveTTL := r.clampIdentity(ctx, p.Name(), resp.Identity)
 	if identity.KeyID == "" {
-		log.WarnContext(ctx, "proxy returned an admin identity without key_id; attributing as unknown",
+		log.WarnContext(ctx, "proxy returned a Server API identity without key_id; attributing as unknown",
 			"proxy", p.Name())
 		identity.KeyID = unknownKeyID
 	}
@@ -348,7 +348,7 @@ func (r *adminAuthResolver) verifyViaProxy(ctx context.Context, presented string
 // unknown/invalid entries dropped with a WARN, empty result → zero-scope),
 // and the positive TTL resolves to min(configured TTL, max_age) floored at
 // 1s. It returns the clamped identity and the effective positive TTL.
-func (r *adminAuthResolver) clampIdentity(ctx context.Context, proxyName string, info *proxy.AdminIdentityInfo) (authz.AdminIdentity, time.Duration) {
+func (r *apiAuthResolver) clampIdentity(ctx context.Context, proxyName string, info *proxy.APIKeyInfo) (authz.APIIdentity, time.Duration) {
 	caps := authz.Capability(0)
 	known := 0
 	for _, name := range info.Capabilities {
@@ -356,7 +356,7 @@ func (r *adminAuthResolver) clampIdentity(ctx context.Context, proxyName string,
 		if !ok {
 			// Version skew tolerance: unknown closed-set names are dropped
 			// toward safety, never error.
-			log.WarnContext(ctx, "dropping unknown admin capability name from proxy",
+			log.WarnContext(ctx, "dropping unknown Server API capability name from proxy",
 				"proxy", proxyName, "capability", name)
 			continue
 		}
@@ -364,7 +364,7 @@ func (r *adminAuthResolver) clampIdentity(ctx context.Context, proxyName string,
 		known++
 	}
 	if len(info.Capabilities) > 0 && known == 0 {
-		log.WarnContext(ctx, "proxy returned no known admin capability names; identity gets zero capabilities",
+		log.WarnContext(ctx, "proxy returned no known Server API capability names; identity gets zero capabilities",
 			"proxy", proxyName)
 	}
 	caps &= r.opts.Ceiling
@@ -377,7 +377,7 @@ func (r *adminAuthResolver) clampIdentity(ctx context.Context, proxyName string,
 			continue
 		}
 		if err := topics.ValidateNamespace(ns); err != nil {
-			log.WarnContext(ctx, "dropping invalid admin namespace from proxy",
+			log.WarnContext(ctx, "dropping invalid Server API namespace from proxy",
 				"proxy", proxyName, "error", err.Error())
 			continue
 		}
@@ -387,7 +387,7 @@ func (r *adminAuthResolver) clampIdentity(ctx context.Context, proxyName string,
 	case len(info.Namespaces) == 0:
 		// Fail-closed (D5): an empty grant is a zero-scope identity.
 		namespaces = []string{}
-		log.WarnContext(ctx, "proxy returned an admin identity with no namespaces; zero-scope identity",
+		log.WarnContext(ctx, "proxy returned a Server API identity with no namespaces; zero-scope identity",
 			"proxy", proxyName, "key_id", info.KeyID)
 	case sawWildcard && len(namespaces) == 0:
 		namespaces = []string{"*"}
@@ -396,10 +396,10 @@ func (r *adminAuthResolver) clampIdentity(ctx context.Context, proxyName string,
 		// whole grant collapses to zero scope (fail-closed) rather than
 		// silently widening to "*" or shrinking to the exact remainder.
 		namespaces = []string{}
-		log.WarnContext(ctx, "proxy returned \"*\" mixed with exact admin namespaces; collapsing to zero-scope identity",
+		log.WarnContext(ctx, "proxy returned \"*\" mixed with exact Server API namespaces; collapsing to zero-scope identity",
 			"proxy", proxyName, "key_id", info.KeyID)
 	case len(namespaces) == 0:
-		log.WarnContext(ctx, "all admin namespaces from proxy were invalid; zero-scope identity",
+		log.WarnContext(ctx, "all Server API namespaces from proxy were invalid; zero-scope identity",
 			"proxy", proxyName, "key_id", info.KeyID)
 	}
 
@@ -413,25 +413,25 @@ func (r *adminAuthResolver) clampIdentity(ctx context.Context, proxyName string,
 		ttl = minCacheTTL
 	}
 
-	return authz.AdminIdentity{
+	return authz.APIIdentity{
 		KeyID:      info.KeyID,
 		Namespaces: namespaces,
 		Caps:       caps,
 	}, ttl
 }
 
-// Interceptor returns the admin authentication unary interceptor. Order per
+// Interceptor returns the Server API authentication unary interceptor. Order per
 // design §2.3: extract credential (Bearer preferred, x-api-key fallback) →
 // no-credential path (tokens configured → reject; allow_insecure → insecure
 // identity; else reject) → static token comparison (constant-time, BEFORE
 // the length gate, D28) → proxy path (assignment check → length gate →
 // Verify).
-func (r *adminAuthResolver) Interceptor() googlegrpc.UnaryServerInterceptor {
+func (r *apiAuthResolver) Interceptor() googlegrpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *googlegrpc.UnaryServerInfo, handler googlegrpc.UnaryHandler) (any, error) {
 		// invoke runs the handler with the verified identity and attributes
 		// the RPC outcome (ok/error) to the identity (G7).
-		invoke := func(ctx context.Context, id authz.AdminIdentity) (any, error) {
-			resp, err := handler(WithAdminIdentity(ctx, id), req)
+		invoke := func(ctx context.Context, id authz.APIIdentity) (any, error) {
+			resp, err := handler(WithAPIIdentity(ctx, id), req)
 			result := "ok"
 			if err != nil {
 				result = "error"
@@ -445,22 +445,22 @@ func (r *adminAuthResolver) Interceptor() googlegrpc.UnaryServerInterceptor {
 			if len(r.opts.AuthTokens) > 0 {
 				r.observe("static", unknownKeyID, "deny")
 				r.observeRPC(info.FullMethod, unknownKeyID, "denied")
-				log.WarnContext(ctx, "admin api request rejected: missing credential",
+				log.WarnContext(ctx, "server api request rejected: missing credential",
 					"verifier", "static", "key_id", unknownKeyID)
-				return nil, status.Error(codes.Unauthenticated, "missing admin credential")
+				return nil, status.Error(codes.Unauthenticated, "missing server API credential")
 			}
 			if r.opts.AllowInsecure {
-				identity := authz.AdminIdentity{KeyID: insecureKeyID, Namespaces: []string{"*"}, Caps: r.opts.Ceiling}
+				identity := authz.APIIdentity{KeyID: insecureKeyID, Namespaces: []string{"*"}, Caps: r.opts.Ceiling}
 				r.observe("insecure", insecureKeyID, "allow")
-				log.WarnContext(ctx, "admin api request allowed WITHOUT authentication",
+				log.WarnContext(ctx, "server api request allowed WITHOUT authentication",
 					"verifier", "insecure", "key_id", insecureKeyID)
 				return invoke(ctx, identity)
 			}
 			r.observe("static", unknownKeyID, "deny")
 			r.observeRPC(info.FullMethod, unknownKeyID, "denied")
-			log.WarnContext(ctx, "admin api request rejected: no credential and no authentication configured",
+			log.WarnContext(ctx, "server api request rejected: no credential and no authentication configured",
 				"verifier", "static", "key_id", unknownKeyID)
-			return nil, status.Error(codes.Unauthenticated, "missing admin credential")
+			return nil, status.Error(codes.Unauthenticated, "missing server API credential")
 		}
 
 		// Static token list first — deliberately before the proxy length
@@ -469,7 +469,7 @@ func (r *adminAuthResolver) Interceptor() googlegrpc.UnaryServerInterceptor {
 			// Constant-time so token timing cannot leak the match;
 			// ConstantTimeCompare is length-safe (mismatched lengths → 0).
 			if subtle.ConstantTimeCompare([]byte(presented), []byte(token)) == 1 {
-				identity := authz.AdminIdentity{KeyID: staticTokenKeyID, Namespaces: []string{"*"}, Caps: r.opts.Ceiling}
+				identity := authz.APIIdentity{KeyID: staticTokenKeyID, Namespaces: []string{"*"}, Caps: r.opts.Ceiling}
 				r.observe("static", staticTokenKeyID, "allow")
 				return invoke(ctx, identity)
 			}
@@ -478,9 +478,9 @@ func (r *adminAuthResolver) Interceptor() googlegrpc.UnaryServerInterceptor {
 		if r.opts.FindProxy == nil || r.opts.FindProxy() == nil {
 			r.observe("proxy", unknownKeyID, "deny")
 			r.observeRPC(info.FullMethod, unknownKeyID, "denied")
-			log.WarnContext(ctx, "admin api credential rejected: no admin_auth proxy assigned",
+			log.WarnContext(ctx, "server api credential rejected: no api_auth proxy assigned",
 				"key_id", unknownKeyID)
-			return nil, status.Error(codes.Unauthenticated, "invalid admin credential")
+			return nil, status.Error(codes.Unauthenticated, "invalid server API credential")
 		}
 
 		// G9 length gate: short credentials never reach the proxy.
@@ -488,25 +488,25 @@ func (r *adminAuthResolver) Interceptor() googlegrpc.UnaryServerInterceptor {
 			r.rejectWithoutProxy(presented)
 			r.observe("proxy", unknownKeyID, "deny")
 			r.observeRPC(info.FullMethod, unknownKeyID, "denied")
-			log.WarnContext(ctx, "admin api credential rejected: below minimum length",
+			log.WarnContext(ctx, "server api credential rejected: below minimum length",
 				"key_id", unknownKeyID)
-			return nil, status.Error(codes.Unauthenticated, "invalid admin credential")
+			return nil, status.Error(codes.Unauthenticated, "invalid server API credential")
 		}
 
 		identity, err := r.Verify(ctx, presented)
 		if err != nil {
 			r.observe("proxy", unknownKeyID, "deny")
 			r.observeRPC(info.FullMethod, unknownKeyID, "denied")
-			log.WarnContext(ctx, "admin api credential rejected",
+			log.WarnContext(ctx, "server api credential rejected",
 				"key_id", unknownKeyID, "reason", err.Error())
 			if errors.Is(err, errProxyUnavailable) {
-				return nil, status.Error(codes.Unauthenticated, "admin credential verification unavailable (verifier proxy unreachable)")
+				return nil, status.Error(codes.Unauthenticated, "server API credential verification unavailable (verifier proxy unreachable)")
 			}
-			return nil, status.Error(codes.Unauthenticated, "invalid admin credential")
+			return nil, status.Error(codes.Unauthenticated, "invalid server API credential")
 		}
 
 		r.observe("proxy", identity.KeyID, "allow")
-		log.DebugContext(ctx, "admin api request authenticated via proxy",
+		log.DebugContext(ctx, "server api request authenticated via proxy",
 			"proxy", r.proxyName(), "key_id", identity.KeyID)
 		return invoke(ctx, identity)
 	}
@@ -514,7 +514,7 @@ func (r *adminAuthResolver) Interceptor() googlegrpc.UnaryServerInterceptor {
 
 // proxyName returns the assigned proxy's name for logs ("unknown" when
 // unassigned or unnamed).
-func (r *adminAuthResolver) proxyName() string {
+func (r *apiAuthResolver) proxyName() string {
 	if r.opts.FindProxy == nil {
 		return unknownKeyID
 	}
@@ -525,18 +525,18 @@ func (r *adminAuthResolver) proxyName() string {
 	return p.Name()
 }
 
-// observe increments the admin_auth_requests_total counter (nil-safe).
-func (r *adminAuthResolver) observe(verifier, keyID, result string) {
+// observe increments the server_api_auth_requests_total counter (nil-safe).
+func (r *apiAuthResolver) observe(verifier, keyID, result string) {
 	if r.opts.AuthRequests == nil {
 		return
 	}
 	r.opts.AuthRequests.WithLabelValues(verifier, keyID, result).Inc()
 }
 
-// observeRPC increments the admin_rpc_total counter (nil-safe). result is
+// observeRPC increments the server_api_rpc_total counter (nil-safe). result is
 // "denied" when the request was rejected at authentication (the handler
 // never ran) and "ok"/"error" with the handler's outcome otherwise.
-func (r *adminAuthResolver) observeRPC(method, keyID, result string) {
+func (r *apiAuthResolver) observeRPC(method, keyID, result string) {
 	if r.opts.RPCs == nil {
 		return
 	}
@@ -573,19 +573,19 @@ func remoteAddrFromContext(ctx context.Context) string {
 	return ""
 }
 
-// adminIdentityContextKey is the unexported context key for the verified
+// apiIdentityContextKey is the unexported context key for the verified
 // admin identity.
-type adminIdentityContextKey struct{}
+type apiIdentityContextKey struct{}
 
-// WithAdminIdentity attaches the verified admin identity to the context for
+// WithAPIIdentity attaches the verified Server API identity to the context for
 // downstream handlers (the S3+ scope layer reads it from here).
-func WithAdminIdentity(ctx context.Context, id authz.AdminIdentity) context.Context {
-	return context.WithValue(ctx, adminIdentityContextKey{}, id)
+func WithAPIIdentity(ctx context.Context, id authz.APIIdentity) context.Context {
+	return context.WithValue(ctx, apiIdentityContextKey{}, id)
 }
 
-// AdminIdentityFromContext returns the verified admin identity previously
-// attached by WithAdminIdentity, and whether one is present.
-func AdminIdentityFromContext(ctx context.Context) (authz.AdminIdentity, bool) {
-	id, ok := ctx.Value(adminIdentityContextKey{}).(authz.AdminIdentity)
+// APIIdentityFromContext returns the verified Server API identity previously
+// attached by WithAPIIdentity, and whether one is present.
+func APIIdentityFromContext(ctx context.Context) (authz.APIIdentity, bool) {
+	id, ok := ctx.Value(apiIdentityContextKey{}).(authz.APIIdentity)
 	return id, ok
 }

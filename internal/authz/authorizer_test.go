@@ -22,7 +22,7 @@ func userPrincipal(userID string) Principal {
 }
 
 func adminPrincipalWith(caps Capability) Principal {
-	return Principal{Kind: PrincipalAdmin, UserID: "admin", Caps: caps}
+	return Principal{Kind: PrincipalServer, UserID: "admin", Caps: caps}
 }
 
 func authzBoolPtr(v bool) *bool { return &v }
@@ -289,10 +289,10 @@ func TestAuthorizer_InvalidRulePatterns(t *testing.T) {
 	}
 }
 
-// TestAuthorizer_AdminSubscribe verifies the admin subscribe path: without
+// TestAuthorizer_ServerAPISubscribe verifies the Server API subscribe path: without
 // subscribe.any the admin must appear in allow lists (as "admin"); with the
 // bit the allow list is skipped; bare "*" / "**" always fail.
-func TestAuthorizer_AdminSubscribe(t *testing.T) {
+func TestAuthorizer_ServerAPISubscribe(t *testing.T) {
 	a := newTestAuthorizer(t, config.AuthorizerConfig{
 		Rules: []config.AuthorizerRule{
 			{Pattern: "private.*", AllowSubscribe: []string{"alice", "admin"}},
@@ -309,7 +309,7 @@ func TestAuthorizer_AdminSubscribe(t *testing.T) {
 		},
 	})
 	assert.False(t, locked.Decide(adminNoCaps, ActionSubscribePattern, "private.room").Allow)
-	// subscribe.any skips the static allow list (Node.AdminCanSubscribe
+	// subscribe.any skips the static allow list (Node.APICanSubscribe
 	// encodes this; Decide itself still consults the list).
 	assert.False(t, locked.Decide(adminWithAny, ActionSubscribePattern, "private.room").Allow)
 
@@ -323,9 +323,9 @@ func TestAuthorizer_AdminSubscribe(t *testing.T) {
 	assert.Equal(t, "not_routable", dec.Reason)
 }
 
-// TestDefaultAdminCapabilities verifies the default bits: every closed bit
+// TestDefaultCapabilityCeiling verifies the default bits: every closed bit
 // except CapPatternGlobal.
-func TestDefaultAdminCapabilities(t *testing.T) {
+func TestDefaultCapabilityCeiling(t *testing.T) {
 	expected := Capability(0)
 	for name, bit := range ClosedCapabilityNames {
 		assert.NotZero(t, bit, "capability %q must have a bit set", name)
@@ -333,8 +333,8 @@ func TestDefaultAdminCapabilities(t *testing.T) {
 			expected |= bit
 		}
 	}
-	assert.Equal(t, expected, DefaultAdminCapabilities)
-	assert.NotZero(t, DefaultAdminCapabilities&CapHistoryRead)
-	assert.NotZero(t, DefaultAdminCapabilities&CapPresenceRead)
-	assert.Zero(t, DefaultAdminCapabilities&CapPatternGlobal)
+	assert.Equal(t, expected, DefaultCapabilityCeiling)
+	assert.NotZero(t, DefaultCapabilityCeiling&CapHistoryRead)
+	assert.NotZero(t, DefaultCapabilityCeiling&CapPresenceRead)
+	assert.Zero(t, DefaultCapabilityCeiling&CapPatternGlobal)
 }

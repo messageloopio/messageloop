@@ -1,6 +1,6 @@
 # Client Protocol Reference
 
-This document describes the client protocol of the current standalone version (KD-K31); envelope definitions live in `protocol/client/v2`. The server-side admin gRPC API is likewise `server.v2` (switched in PR-KA-D6; the earlier B3 keep-v1 decision is reversed).
+This document describes the client protocol of the current standalone version (KD-K31); envelope definitions live in `protocol/client/v2`. The server-side Server API (gRPC) is likewise `server.v2` (switched in PR-KA-D6; the earlier B3 keep-v1 decision is reversed).
 
 MessageLoop uses a bidirectional message protocol over WebSocket, gRPC streaming, or QUIC. All messages are wrapped in `InboundMessage` (client → server) and `OutboundMessage` (server → client) envelopes.
 
@@ -368,7 +368,7 @@ Optional `content_type` field can specify the MIME type (e.g., `application/json
 The server preserves the original `Payload` oneof variant end to end: a
 message published as `json` (or `text`/`binary`) is delivered to subscribers
 in real time, replayed during streamed recovery, and returned by the
-admin `GetHistory` API in the same variant. Before this guarantee existed,
+Server API `GetHistory` in the same variant. Before this guarantee existed,
 `json` payloads were collapsed to `text` on the wire.
 
 Known limitation: JSON numbers larger than 2^53 lose precision at the
@@ -412,7 +412,7 @@ RPC requests are forwarded to a proxy backend matching the channel and method pa
 
 A client can ask every subscriber of a channel to answer, and collects the
 answers asynchronously. This is a separate, client-initiated flow from the
-admin `Survey` RPC.
+Server API `Survey` RPC.
 
 ```json
 {
@@ -452,7 +452,7 @@ Rules (PR-07):
 - When the channel's subscriber count (local fast path, then a cluster-wide
   count preflight) exceeds `max_survey_subscribers` (default 256), the
   survey fails with `SURVEY_TOO_MANY_SUBSCRIBERS` (`survey_error`) and
-  **zero** `survey_request` frames are delivered. The admin `Survey` RPC is
+  **zero** `survey_request` frames are delivered. The Server API `Survey` RPC is
   not subject to this cap.
 - A single answer payload is capped at 4096 bytes; larger answers become a
   `SURVEY_ANSWER_TOO_LARGE` error with an empty payload. The whole encoded
@@ -572,11 +572,11 @@ Presence is tracked per subscribed channel. A subscription is tracked only when 
 - By default no companion channel is written. With `legacy_presence_channel: true` (exact channels only), join/leave is additionally published transiently on `<channel>/__presence` in the legacy JSON format.
 - Phase 1 delivers presence events locally only (no cross-node emit). With `server.presence.cluster_emit: true` (default `false`; enable only after every node runs PR-04a+) join/leave events are published through the broker on the exact channel and rewritten by every node, so members on other nodes receive them too; the joiner/leaver still never receives its own event.
 
-Presence state is also served via the admin `GetPresence` API (backed by the presence store).
+Presence state is also served via the Server API `GetPresence` (backed by the presence store).
 
-## Server-Side Admin API
+## Server-Side API (Server API)
 
-The gRPC admin API (`messageloop.server.v2.APIService`) provides server-side management. The admin surface is `server.v2` (PR-KA-D6; the earlier B3 keep-v1 decision is reversed):
+The Server API (`messageloop.server.v2.APIService`, gRPC) provides server-side operations. The surface is `server.v2` (PR-KA-D6; the earlier B3 keep-v1 decision is reversed):
 
 | RPC | Description |
 | --- | --- |

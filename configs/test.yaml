@@ -4,7 +4,7 @@
 server:
   http:
     addr: "127.0.0.1:8080"
-  grpc_admin:
+  api:
     addr: "127.0.0.1:9091"
     auth_tokens:
       - "test-admin-token-0123456789"

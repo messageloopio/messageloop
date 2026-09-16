@@ -3,7 +3,7 @@
 //
 //   - Authenticate: demo token -> user resolution
 //   - RPC: chat.roll (dice), chat.stats / chat.history / chat.kick via the
-//     server-side admin gRPC API
+//     server-side api gRPC API
 //   - ACL: private:* channels require a per-subscription token
 //   - Lifecycle hooks: announce connect/disconnect to the lobby
 //
@@ -27,10 +27,10 @@ import (
 	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
-// adminAddr points at the demo server's admin gRPC API; align with config.yaml.
+// apiAddr points at the demo server's api gRPC API; align with config.yaml.
 const (
-	adminAddr   = chatroom.DefaultAdminAddr
-	adminToken  = "chatroom-admin"
+	apiAddr   = chatroom.DefaultAPIAddr
+	apiToken  = "chatroom-api-token-0123456789"
 	backendAddr = ":8090"
 )
 
@@ -39,17 +39,17 @@ func main() {
 	flag.StringVar(&addr, "addr", backendAddr, "listen address")
 	flag.Parse()
 
-	admin, err := chatroom.NewAdminClient(context.Background(), adminAddr, adminToken)
+	api, err := chatroom.NewAPIClient(context.Background(), apiAddr, apiToken)
 	if err != nil {
-		log.Fatalf("connect admin API: %v", err)
+		log.Fatalf("connect api API: %v", err)
 	}
-	defer admin.Close()
+	defer api.Close()
 
 	service := &messageloopgo.HandlerImpl{}
-	service.RPCHandler = newRPCMux(admin)
+	service.RPCHandler = newRPCMux(api)
 	service.AuthHandler = &authService{}
 	service.ACLHandler = &aclService{}
-	service.LifecycleHandler = &lifecycleService{admin: admin, room: chatroom.Lobby}
+	service.LifecycleHandler = &lifecycleService{api: api, room: chatroom.Lobby}
 
 	server, err := messageloopgo.NewProxyServer(messageloopgo.ProxyServerOptions{
 		Addr:     addr,
@@ -59,7 +59,7 @@ func main() {
 		log.Fatalf("create proxy server: %v", err)
 	}
 
-	log.Printf("chatroom backend listening on %s (admin api %s)", addr, adminAddr)
+	log.Printf("chatroom backend listening on %s (api api %s)", addr, apiAddr)
 	if err := server.Start(context.Background()); err != nil {
 		log.Fatalf("proxy server: %v", err)
 	}
@@ -131,8 +131,8 @@ func (s *aclService) CheckPublishACL(ctx context.Context, channel, token string)
 // RPC
 
 // newRPCMux registers the demo RPC methods with middleware.
-func newRPCMux(admin *chatroom.AdminClient) *messageloopgo.RPCMux {
-	rpc := &rpcService{admin: admin, room: chatroom.Lobby}
+func newRPCMux(api *chatroom.APIClient) *messageloopgo.RPCMux {
+	rpc := &rpcService{api: api, room: chatroom.Lobby}
 	mux := messageloopgo.NewRPCMux()
 	mux.Use(loggingMiddleware)
 	mux.Handle("chat.roll", rpc.handleRoll)
@@ -145,7 +145,7 @@ func newRPCMux(admin *chatroom.AdminClient) *messageloopgo.RPCMux {
 
 // rpcService implements the chat commands.
 type rpcService struct {
-	admin *chatroom.AdminClient
+	api *chatroom.APIClient
 	room  string
 }
 
@@ -158,23 +158,23 @@ func (s *rpcService) handleRoll(ctx context.Context, req *messageloopgo.RPCReque
 	}, nil
 }
 
-// handleStats calls the admin GetChannels + GetHistory APIs and returns a
-// human-readable summary. Demonstrates backend -> admin API integration.
+// handleStats calls the api GetChannels + GetHistory APIs and returns a
+// human-readable summary. Demonstrates backend -> api API integration.
 func (s *rpcService) handleStats(ctx context.Context, req *messageloopgo.RPCRequest) (*messageloopgo.RPCResponse, error) {
-	channels, err := s.admin.Channels(ctx)
+	channels, err := s.api.Channels(ctx)
 	if err != nil {
-		return rpcError("ADMIN_ERROR", "GetChannels failed: "+err.Error()), nil
+		return rpcError("API_ERROR", "GetChannels failed: "+err.Error()), nil
 	}
 	var b strings.Builder
 	b.WriteString("active channels:\n")
 	for _, ch := range channels {
 		b.WriteString(fmt.Sprintf("  %s  subscribers=%d", ch.Name, ch.Subscribers))
-		if presence, perr := s.admin.Presence(ctx, ch.Name); perr == nil && len(presence) > 0 {
+		if presence, perr := s.api.Presence(ctx, ch.Name); perr == nil && len(presence) > 0 {
 			b.WriteString(fmt.Sprintf("  present=%d", len(presence)))
 		}
 		b.WriteString("\n")
 	}
-	if history, herr := s.admin.History(ctx, s.room, 0, 5); herr == nil {
+	if history, herr := s.api.History(ctx, s.room, 0, 5); herr == nil {
 		b.WriteString(fmt.Sprintf("last %d messages in %s:\n", len(history), s.room))
 		for _, pub := range history {
 			b.WriteString(fmt.Sprintf("  #%d %s\n", pub.GetPosition().GetOffset(), pub.Id))
@@ -186,7 +186,7 @@ func (s *rpcService) handleStats(ctx context.Context, req *messageloopgo.RPCRequ
 	}, nil
 }
 
-// handleHistory returns persisted channel history via the admin GetHistory API.
+// handleHistory returns persisted channel history via the api GetHistory API.
 func (s *rpcService) handleHistory(ctx context.Context, req *messageloopgo.RPCRequest) (*messageloopgo.RPCResponse, error) {
 	limit := 20
 	if req.Payload != nil {
@@ -196,9 +196,9 @@ func (s *rpcService) handleHistory(ctx context.Context, req *messageloopgo.RPCRe
 			limit = n
 		}
 	}
-	history, err := s.admin.History(ctx, s.room, 0, limit)
+	history, err := s.api.History(ctx, s.room, 0, limit)
 	if err != nil {
-		return rpcError("ADMIN_ERROR", "GetHistory failed: "+err.Error()), nil
+		return rpcError("API_ERROR", "GetHistory failed: "+err.Error()), nil
 	}
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("history of %s (%d entries):\n", s.room, len(history)))
@@ -211,7 +211,7 @@ func (s *rpcService) handleHistory(ctx context.Context, req *messageloopgo.RPCRe
 	}, nil
 }
 
-// handleKick force-disconnects a user through the admin Disconnect API and
+// handleKick force-disconnects a user through the api Disconnect API and
 // announces it to the lobby.
 func (s *rpcService) handleKick(ctx context.Context, req *messageloopgo.RPCRequest) (*messageloopgo.RPCResponse, error) {
 	target := ""
@@ -226,9 +226,9 @@ func (s *rpcService) handleKick(ctx context.Context, req *messageloopgo.RPCReque
 	if !ok {
 		return rpcError("UNKNOWN_USER", "no such user: "+target), nil
 	}
-	results, err := s.admin.DisconnectUser(ctx, user.ID, 3400, "kicked by admin")
+	results, err := s.api.DisconnectUser(ctx, user.ID, 3400, "kicked by api")
 	if err != nil {
-		return rpcError("ADMIN_ERROR", "Disconnect failed: "+err.Error()), nil
+		return rpcError("API_ERROR", "Disconnect failed: "+err.Error()), nil
 	}
 	kicked := 0
 	for _, ok := range results {
@@ -236,7 +236,7 @@ func (s *rpcService) handleKick(ctx context.Context, req *messageloopgo.RPCReque
 			kicked++
 		}
 	}
-	_ = s.admin.PublishToChannel(ctx, s.room, "kick-"+target,
+	_ = s.api.PublishToChannel(ctx, s.room, "kick-"+target,
 		&chatroom.ChatMessage{User: "system", Kind: "system", Text: target + " was kicked (" + fmt.Sprint(kicked) + " session(s))"},
 		false)
 	return &messageloopgo.RPCResponse{
@@ -275,9 +275,9 @@ func loggingMiddleware(next messageloopgo.RPCHandlerFunc) messageloopgo.RPCHandl
 // Lifecycle
 
 // lifecycleService logs lifecycle hooks and announces joins/leaves to the
-// lobby via the admin API.
+// lobby via the api API.
 type lifecycleService struct {
-	admin *chatroom.AdminClient
+	api *chatroom.APIClient
 	room  string
 }
 
@@ -309,6 +309,6 @@ func (s *lifecycleService) OnUnsubscribed(ctx context.Context, sessionID, channe
 func (s *lifecycleService) announce(text string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return s.admin.PublishToChannel(ctx, s.room, "sys-"+fmt.Sprint(time.Now().UnixNano()),
+	return s.api.PublishToChannel(ctx, s.room, "sys-"+fmt.Sprint(time.Now().UnixNano()),
 		&chatroom.ChatMessage{User: "system", Kind: "system", Text: text}, false)
 }

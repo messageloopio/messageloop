@@ -14,28 +14,28 @@ func denyAllRule(pattern string) config.AuthorizerRule {
 	return config.AuthorizerRule{Pattern: pattern, DenyAll: true}
 }
 
-// TestNode_AdminCapabilitiesConfig verifies the capabilities wiring:
-// omitted → DefaultAdminCapabilities; explicit [] → zero bits; explicit list
+// TestNode_APICapabilitiesConfig verifies the capabilities wiring:
+// omitted → DefaultCapabilityCeiling; explicit [] → zero bits; explicit list
 // → only those bits.
-func TestNode_AdminCapabilitiesConfig(t *testing.T) {
+func TestNode_APICapabilitiesConfig(t *testing.T) {
 	omitted := NewNode(nil)
-	assert.Equal(t, DefaultAdminCapabilities, omitted.AdminCapabilities())
+	assert.Equal(t, DefaultCapabilityCeiling, omitted.APICapabilities())
 
-	empty := NewNode(&config.Server{GRPCAdmin: config.GRPCAdmin{Capabilities: []string{}}})
-	assert.Zero(t, empty.AdminCapabilities(), "an explicit empty list locks the admin data plane")
+	empty := NewNode(&config.Server{API: config.ServerAPI{Capabilities: []string{}}})
+	assert.Zero(t, empty.APICapabilities(), "an explicit empty list locks the Server API data plane")
 
-	partial := NewNode(&config.Server{GRPCAdmin: config.GRPCAdmin{
+	partial := NewNode(&config.Server{API: config.ServerAPI{
 		Capabilities: []string{"history.read", "channels.list"},
 	}})
-	assert.Equal(t, CapHistoryRead|CapChannelsList, partial.AdminCapabilities())
+	assert.Equal(t, CapHistoryRead|CapChannelsList, partial.APICapabilities())
 }
 
-// TestNode_AdminCanSubscribeAndPublish verifies §8.4 through the Node.
-func TestNode_AdminCanSubscribeAndPublish(t *testing.T) {
-	// Explicit capabilities without subscribe.any: the admin must appear in
+// TestNode_APICanSubscribeAndPublish verifies §8.4 through the Node.
+func TestNode_APICanSubscribeAndPublish(t *testing.T) {
+	// Explicit capabilities without subscribe.any: the caller must appear in
 	// allow lists like any user.
 	node := NewNode(&config.Server{
-		GRPCAdmin: config.GRPCAdmin{Capabilities: []string{"history.read"}},
+		API: config.ServerAPI{Capabilities: []string{"history.read"}},
 		Authorizer: config.AuthorizerConfig{
 			Rules: []config.AuthorizerRule{
 				{Pattern: "private.*", AllowSubscribe: []string{"alice"}},
@@ -43,20 +43,20 @@ func TestNode_AdminCanSubscribeAndPublish(t *testing.T) {
 			},
 		},
 	})
-	// Without subscribe.any the admin cannot subscribe to an allow-listed
+	// Without subscribe.any the caller cannot subscribe to an allow-listed
 	// channel it is not on.
-	admin := node.adminPrincipal()
-	assert.False(t, node.AdminCanSubscribe(admin, "private.room"))
-	// Pattern.compile failures fail admin subscribe too.
-	assert.False(t, node.AdminCanSubscribe(admin, "**"))
-	assert.False(t, node.AdminCanSubscribe(admin, "*.room"))
-	// deny_all blocks admin publish.
-	assert.False(t, node.AdminCanPublish(admin, "secret.1"))
-	assert.True(t, node.AdminCanPublish(admin, "private.room"))
+	admin := node.apiPrincipal()
+	assert.False(t, node.APICanSubscribe(admin, "private.room"))
+	// Pattern.compile failures fail Server API subscribe too.
+	assert.False(t, node.APICanSubscribe(admin, "**"))
+	assert.False(t, node.APICanSubscribe(admin, "*.room"))
+	// deny_all blocks Server API publish.
+	assert.False(t, node.APICanPublish(admin, "secret.1"))
+	assert.True(t, node.APICanPublish(admin, "private.room"))
 
 	// With subscribe.any the static allow list is skipped.
 	anyNode := NewNode(&config.Server{
-		GRPCAdmin: config.GRPCAdmin{Capabilities: []string{"subscribe.any"}},
+		API: config.ServerAPI{Capabilities: []string{"subscribe.any"}},
 		Authorizer: config.AuthorizerConfig{
 			Rules: []config.AuthorizerRule{
 				{Pattern: "private.*", AllowSubscribe: []string{"alice"}},
@@ -64,12 +64,12 @@ func TestNode_AdminCanSubscribeAndPublish(t *testing.T) {
 			},
 		},
 	})
-	anyAdmin := anyNode.adminPrincipal()
-	assert.True(t, anyNode.AdminCanSubscribe(anyAdmin, "private.room"))
-	assert.False(t, anyNode.AdminCanSubscribe(anyAdmin, "**"), "subscribe.any must not unlock bare ** (A3)")
-	assert.False(t, anyNode.AdminCanSubscribe(anyAdmin, "secret.1"),
+	anyAdmin := anyNode.apiPrincipal()
+	assert.True(t, anyNode.APICanSubscribe(anyAdmin, "private.room"))
+	assert.False(t, anyNode.APICanSubscribe(anyAdmin, "**"), "subscribe.any must not unlock bare ** (A3)")
+	assert.False(t, anyNode.APICanSubscribe(anyAdmin, "secret.1"),
 		"subscribe.any must not punch a hole in a deny_all rule")
-	assert.False(t, anyNode.AdminCanPublish(anyAdmin, "secret.1"), "subscribe.any must not bypass publish deny_all")
+	assert.False(t, anyNode.APICanPublish(anyAdmin, "secret.1"), "subscribe.any must not bypass publish deny_all")
 }
 
 // TestNode_ReplaceRulesRevokesSubscriptions verifies §9.11: after replacing

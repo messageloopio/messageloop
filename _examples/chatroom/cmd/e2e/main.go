@@ -9,9 +9,9 @@
 //  5. survey             channel poll with aggregated answers
 //  6. transient          non-persisted messages reach nobody and no history
 //  7. recovery           new subscriber replays channel history (recover)
-//  8. admin API          server-side publish / channels / presence
+//  8. server API         server-side publish / channels / presence
 //  9. ACL                private channel requires a subscription token
-//  10. resume             auto-reconnect after admin kick, no message loss
+//  10. resume             auto-reconnect after server-side kick, no message loss
 //
 // Start the stack first:
 //
@@ -38,8 +38,8 @@ import (
 var (
 	wsURL      = "ws://127.0.0.1:9080/ws"
 	grpcURL    = "127.0.0.1:9090"
-	adminAddr  = chatroom.DefaultAdminAddr
-	adminToken = "chatroom-admin"
+	apiAddr  = chatroom.DefaultAPIAddr
+	apiToken = "chatroom-admin-token-0123456789"
 
 	mu        sync.Mutex
 	passed    = 0
@@ -183,24 +183,24 @@ func step(format string, args ...any) {
 func main() {
 	flag.StringVar(&wsURL, "ws-addr", wsURL, "websocket address")
 	flag.StringVar(&grpcURL, "grpc-addr", grpcURL, "client gRPC address")
-	flag.StringVar(&adminAddr, "admin-addr", adminAddr, "admin gRPC address")
-	flag.StringVar(&adminToken, "admin-token", adminToken, "admin bearer token")
+	flag.StringVar(&apiAddr, "api-addr", apiAddr, "Server API gRPC address")
+	flag.StringVar(&apiToken, "api-token", apiToken, "Server API bearer token")
 	flag.Parse()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 
-	admin, err := chatroom.NewAdminClient(ctx, adminAddr, adminToken)
+	api, err := chatroom.NewAPIClient(ctx, apiAddr, apiToken)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "connect admin api: %v\n", err)
+		fmt.Fprintf(os.Stderr, "connect server api: %v\n", err)
 		os.Exit(1)
 	}
-	defer admin.Close()
+	defer api.Close()
 
 	// Wait until the stack is reachable.
 	step("waiting for the demo stack (backend + server)...")
-	if !waitFor(30*time.Second, "admin api readiness", func() bool {
-		_, err := admin.Channels(ctx)
+	if !waitFor(30*time.Second, "server api readiness", func() bool {
+		_, err := api.Channels(ctx)
 		return err == nil
 	}) {
 		printSummary()
@@ -212,11 +212,11 @@ func main() {
 	runPhase03RPC(ctx)
 	runPhase04Presence(ctx)
 	runPhase05Survey(ctx)
-	runPhase06Transient(ctx, admin)
+	runPhase06Transient(ctx, api)
 	runPhase07Recovery(ctx)
-	runPhase08AdminAPI(ctx, admin)
+	runPhase08ServerAPI(ctx, api)
 	runPhase09ACL(ctx)
-	runPhase10Resume(ctx, admin)
+	runPhase10Resume(ctx, api)
 
 	printSummary()
 	if failed > 0 {
@@ -398,7 +398,7 @@ func runPhase05Survey(ctx context.Context) {
 // ---------------------------------------------------------------------------
 // Phase 6: transient publish
 
-func runPhase06Transient(ctx context.Context, admin *chatroom.AdminClient) {
+func runPhase06Transient(ctx context.Context, api *chatroom.APIClient) {
 	step("--- 6. transient publish ---")
 	alice, bob, _, _ := globals()
 
@@ -412,8 +412,8 @@ func runPhase06Transient(ctx context.Context, admin *chatroom.AdminClient) {
 	check(alice.hasText("invisible whisper"), "transient message delivered to online subscriber")
 
 	// ...but they never enter the persisted history.
-	history, err := admin.History(ctx, chatroom.Lobby, 0, 100)
-	check(err == nil, "admin GetHistory ok (err=%v)", err)
+	history, err := api.History(ctx, chatroom.Lobby, 0, 100)
+	check(err == nil, "server API GetHistory ok (err=%v)", err)
 	transientInHistory := false
 	for _, pub := range history {
 		if strings.Contains(pub.Id, "invisible-whisper") {
@@ -450,37 +450,37 @@ func runPhase07Recovery(ctx context.Context) {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 8: admin API
+// Phase 8: server API
 
-func runPhase08AdminAPI(ctx context.Context, admin *chatroom.AdminClient) {
-	step("--- 8. admin API ---")
+func runPhase08ServerAPI(ctx context.Context, api *chatroom.APIClient) {
+	step("--- 8. server API ---")
 	alice, bob, carol, dave := globals()
 
-	err := admin.PublishToChannel(ctx, chatroom.Lobby, "admin-announcement",
+	err := api.PublishToChannel(ctx, chatroom.Lobby, "admin-announcement",
 		&chatroom.ChatMessage{User: "system", Kind: "system", Text: "announcement from admin"}, true)
-	check(err == nil, "admin Publish ok (err=%v)", err)
+	check(err == nil, "server API Publish ok (err=%v)", err)
 
-	waitFor(5*time.Second, "everyone receives the admin message", func() bool {
+	waitFor(5*time.Second, "everyone receives the server API message", func() bool {
 		return alice.hasText("announcement from admin") && bob.hasText("announcement from admin") &&
 			carol.hasText("announcement from admin") && dave.hasText("announcement from admin")
 	})
 	check(alice.hasText("announcement from admin") && bob.hasText("announcement from admin") &&
 		carol.hasText("announcement from admin") && dave.hasText("announcement from admin"),
-		"admin message delivered to all 4 subscribers")
+		"server API message delivered to all 4 subscribers")
 
-	channels, err := admin.Channels(ctx)
-	check(err == nil, "admin GetChannels ok (err=%v)", err)
+	channels, err := api.Channels(ctx)
+	check(err == nil, "server API GetChannels ok (err=%v)", err)
 	found := false
 	for _, ch := range channels {
 		if ch.Name == chatroom.Lobby {
 			found = true
 		}
 	}
-	check(found, "admin GetChannels lists %s", chatroom.Lobby)
+	check(found, "server API GetChannels lists %s", chatroom.Lobby)
 
-	presence, err := admin.Presence(ctx, chatroom.Lobby)
-	check(err == nil, "admin GetPresence ok (err=%v)", err)
-	check(len(presence) >= 4, "admin GetPresence sees >=4 clients (got %d)", len(presence))
+	presence, err := api.Presence(ctx, chatroom.Lobby)
+	check(err == nil, "server API GetPresence ok (err=%v)", err)
+	check(len(presence) >= 4, "server API GetPresence sees >=4 clients (got %d)", len(presence))
 }
 
 // ---------------------------------------------------------------------------
@@ -529,15 +529,15 @@ func runPhase09ACL(ctx context.Context) {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 10: session resume after admin kick
+// Phase 10: session resume after a server-side kick
 
-func runPhase10Resume(ctx context.Context, admin *chatroom.AdminClient) {
+func runPhase10Resume(ctx context.Context, api *chatroom.APIClient) {
 	step("--- 10. resume after disconnect ---")
 	alice, bob, _, _ := globals()
 
-	results, err := admin.DisconnectUser(ctx, "user-alice", 3400, "e2e phase 10")
-	check(err == nil, "admin Disconnect ok (err=%v)", err)
-	check(len(results) > 0, "admin Disconnect targeted alice's session (results=%v)", results)
+	results, err := api.DisconnectUser(ctx, "user-alice", 3400, "e2e phase 10")
+	check(err == nil, "server API Disconnect ok (err=%v)", err)
+	check(len(results) > 0, "server API Disconnect targeted alice's session (results=%v)", results)
 
 	// Give the disconnect a moment to propagate, then publish while alice is
 	// (possibly still) offline. Alice's SDK auto-reconnects with its

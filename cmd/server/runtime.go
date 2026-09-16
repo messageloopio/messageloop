@@ -8,8 +8,8 @@ import (
 	"github.com/lynx-go/lynx"
 
 	"github.com/messageloopio/messageloop/config"
-	"github.com/messageloopio/messageloop/internal/admin"
 	"github.com/messageloopio/messageloop/internal/runtime"
+	"github.com/messageloopio/messageloop/internal/serverapi"
 	"github.com/messageloopio/messageloop/pkg/transport/grpc"
 	proxyproxy "github.com/messageloopio/messageloop/proxy"
 )
@@ -56,44 +56,44 @@ func newGRPCClientServer(cfg *config.Config, node *runtime.Node) (*grpc.Server, 
 	return grpc.PrepareClientServer(opts, node)
 }
 
-func newGRPCAdminServer(cfg *config.Config, node *runtime.Node, adminAuthRequests, adminRPCs *prometheus.CounterVec) (*grpc.Server, error) {
-	return admin.PrepareAdminServer(grpc.Options{
-		Addr:                   cfg.Server.GRPCAdmin.Addr,
-		TLSCertFile:            cfg.Server.GRPCAdmin.TLS.CertFile,
-		TLSKeyFile:             cfg.Server.GRPCAdmin.TLS.KeyFile,
-		AuthTokens:             cfg.Server.GRPCAdmin.AuthTokens,
-		AdminAllowInsecure:     cfg.Server.GRPCAdmin.AllowInsecure,
-		AdminAuthCacheTTL:      adminAuthCacheTTL(cfg),
-		AdminFindProxy:         adminAuthFindProxy(cfg, node),
-		AdminCapabilityCeiling: cfg.Server.GRPCAdmin.Capabilities,
+func newGRPCAPIServer(cfg *config.Config, node *runtime.Node, adminAuthRequests, adminRPCs *prometheus.CounterVec) (*grpc.Server, error) {
+	return serverapi.PrepareServer(grpc.Options{
+		Addr:                 cfg.Server.API.Addr,
+		TLSCertFile:          cfg.Server.API.TLS.CertFile,
+		TLSKeyFile:           cfg.Server.API.TLS.KeyFile,
+		AuthTokens:           cfg.Server.API.AuthTokens,
+		APIAllowInsecure:     cfg.Server.API.AllowInsecure,
+		APIAuthCacheTTL:      apiAuthCacheTTL(cfg),
+		APIFindProxy:         apiAuthFindProxy(cfg, node),
+		APICapabilityCeiling: cfg.Server.API.Capabilities,
 	}, node, adminAuthRequests, adminRPCs)
 }
 
-// adminAuthCacheTTL parses server.grpc_admin.admin_auth_cache_ttl. An empty
+// apiAuthCacheTTL parses server.api.auth_cache_ttl. An empty
 // value resolves to 0 (= the resolver's 30s default); unparsable or
 // non-positive values cannot occur — config.Validate rejects them — and are
 // defensively treated as 0.
-func adminAuthCacheTTL(cfg *config.Config) time.Duration {
-	if cfg.Server.GRPCAdmin.AdminAuthCacheTTL == "" {
+func apiAuthCacheTTL(cfg *config.Config) time.Duration {
+	if cfg.Server.API.AuthCacheTTL == "" {
 		return 0
 	}
-	d, err := time.ParseDuration(cfg.Server.GRPCAdmin.AdminAuthCacheTTL)
+	d, err := time.ParseDuration(cfg.Server.API.AuthCacheTTL)
 	if err != nil || d <= 0 {
 		return 0
 	}
 	return d
 }
 
-// adminAuthFindProxy returns the proxy assigned with admin_auth: true (at
+// apiAuthFindProxy returns the proxy assigned with api_auth: true (at
 // most one — config.Validate enforces the uniqueness), or nil when nothing
 // is assigned. The instance is resolved by probing the node's proxy router
 // with the assigned entry's own route patterns: AddFromConfig compiles each
 // pattern into a glob, and a glob always matches its own pattern text, so
 // the probe is guaranteed to hit at least the assigned entry's routes.
-func adminAuthFindProxy(cfg *config.Config, node *runtime.Node) func() proxyproxy.Proxy {
+func apiAuthFindProxy(cfg *config.Config, node *runtime.Node) func() proxyproxy.Proxy {
 	var assigned *config.ProxyConfig
 	for i := range cfg.Proxy {
-		if cfg.Proxy[i].AdminAuth {
+		if cfg.Proxy[i].APIAuth {
 			assigned = &cfg.Proxy[i]
 			break
 		}
@@ -121,7 +121,7 @@ func prepareGRPCServers(cfg *config.Config, node *runtime.Node, adminAuthRequest
 		return nil, err
 	}
 
-	adminServer, err := newGRPCAdminServer(cfg, node, adminAuthRequests, adminRPCs)
+	adminServer, err := newGRPCAPIServer(cfg, node, adminAuthRequests, adminRPCs)
 	if err != nil {
 		_ = clientServer.Close()
 		return nil, err

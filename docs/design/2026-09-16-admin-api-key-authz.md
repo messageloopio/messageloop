@@ -1,5 +1,7 @@
 # Admin API 的 API Key 鉴权与按 Namespace 权限控制
 
+> **术语注记（2026-09-16 改名）**：本文所述「Admin API / 管理 API / 服务端 API」现统一更名为 **Server API**——配置键现为 `server.api.*`（原 `server.grpc_admin.*`）、`proxy[].api_auth`（原 `admin_auth`）、包 `internal/serverapi`（原 `internal/admin`）、proxy 契约 `AuthenticateAPIKey`（原 `AuthenticateAdmin`）、指标 `messageloop_server_api_*`（原 `messageloop_admin_*`）。正文按历史原文保留旧名，对照见[《配置参考》迁移表](../developer/02-configuration.md)。
+
 | 字段 | 值 |
 | --- | --- |
 | 文档标题 | Admin API Key 鉴权与按 Namespace 权限控制（proxy 托管 / Torchwood Key 复用） |

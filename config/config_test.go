@@ -22,7 +22,7 @@ func validTransport() Transport {
 // the static namespace (require_auth is off, so server.namespace is mandatory).
 func validServer() Server {
 	return Server{
-		GRPCAdmin: GRPCAdmin{Addr: "127.0.0.1:9091", AuthTokens: []string{"test-admin-token-0123456789"}},
+		API:       ServerAPI{Addr: "127.0.0.1:9091", AuthTokens: []string{"test-admin-token-0123456789"}},
 		Namespace: "dev",
 	}
 }
@@ -219,92 +219,92 @@ func TestClusterConfig_ResolveHMACKey(t *testing.T) {
 	require.ErrorContains(t, err, "only one of hmac_key or hmac_key_file")
 }
 
-// TestValidate_AdminAuthThreeWay pins the relaxed three-way requirement
-// (design §2.7): the admin listener needs auth_tokens, an admin_auth proxy
+// TestValidate_APIAuthThreeWay pins the relaxed three-way requirement
+// (design §2.7): the Server API listener needs auth_tokens, an api_auth proxy
 // assignment, or an explicit allow_insecure — anything less fails Validate.
-func TestValidate_AdminAuthThreeWay(t *testing.T) {
+func TestValidate_APIAuthThreeWay(t *testing.T) {
 	cfg := &Config{
 		Transport: validTransport(),
 		Server: Server{
-			GRPCAdmin: GRPCAdmin{Addr: "127.0.0.1:9091"},
+			API:       ServerAPI{Addr: "127.0.0.1:9091"},
 			Namespace: "dev",
 		},
 	}
-	assert.ErrorContains(t, cfg.Validate(), "server.grpc_admin requires auth_tokens, a proxy entry with admin_auth: true, or allow_insecure: true")
+	assert.ErrorContains(t, cfg.Validate(), "server.api requires auth_tokens, a proxy entry with api_auth: true, or allow_insecure: true")
 
 	// allow_insecure satisfies the requirement (loopback-only, G5).
-	cfg.Server.GRPCAdmin.AllowInsecure = true
+	cfg.Server.API.AllowInsecure = true
 	assert.NoError(t, cfg.Validate())
 
 	// The static token list satisfies it (D28 list form).
-	cfg.Server.GRPCAdmin.AllowInsecure = false
-	cfg.Server.GRPCAdmin.AuthTokens = []string{"test-admin-token-0123456789"}
+	cfg.Server.API.AllowInsecure = false
+	cfg.Server.API.AuthTokens = []string{"test-admin-token-0123456789"}
 	assert.NoError(t, cfg.Validate())
 
-	// An admin_auth-assigned proxy satisfies it (G3 explicit assignment).
-	cfg.Server.GRPCAdmin.AuthTokens = nil
-	cfg.Proxy = []ProxyConfig{{Name: "mlbridge", AdminAuth: true}}
+	// An api_auth-assigned proxy satisfies it (G3 explicit assignment).
+	cfg.Server.API.AuthTokens = nil
+	cfg.Proxy = []ProxyConfig{{Name: "mlbridge", APIAuth: true}}
 	assert.NoError(t, cfg.Validate())
 }
 
-// TestValidate_AdminTokenLength pins the ≥20-characters-per-token gate
+// TestValidate_APITokenLength pins the ≥20-characters-per-token gate
 // (design D28).
-func TestValidate_AdminTokenLength(t *testing.T) {
+func TestValidate_APITokenLength(t *testing.T) {
 	cfg := &Config{
 		Transport: validTransport(),
 		Server:    validServer(),
 	}
-	cfg.Server.GRPCAdmin.AuthTokens = []string{"only-eighteen-chars"}
-	assert.ErrorContains(t, cfg.Validate(), "server.grpc_admin.auth_tokens[0] must be at least 20 characters (got 19)")
+	cfg.Server.API.AuthTokens = []string{"only-eighteen-chars"}
+	assert.ErrorContains(t, cfg.Validate(), "server.api.auth_tokens[0] must be at least 20 characters (got 19)")
 
-	cfg.Server.GRPCAdmin.AuthTokens = []string{"this-one-is-long-enough-1234567890", "still-too-short"}
-	assert.ErrorContains(t, cfg.Validate(), "server.grpc_admin.auth_tokens[1] must be at least 20 characters")
+	cfg.Server.API.AuthTokens = []string{"this-one-is-long-enough-1234567890", "still-too-short"}
+	assert.ErrorContains(t, cfg.Validate(), "server.api.auth_tokens[1] must be at least 20 characters")
 }
 
-// TestValidate_AdminAuthCacheTTL pins the admin_auth_cache_ttl validation:
+// TestValidate_AuthCacheTTL pins the auth_cache_ttl validation:
 // an unparsable or non-positive value is rejected; an empty value (default)
 // and a valid duration pass.
-func TestValidate_AdminAuthCacheTTL(t *testing.T) {
+func TestValidate_AuthCacheTTL(t *testing.T) {
 	cfg := &Config{
 		Transport: validTransport(),
 		Server:    validServer(),
 	}
-	assert.NoError(t, cfg.Validate(), "an omitted admin_auth_cache_ttl uses the default")
+	assert.NoError(t, cfg.Validate(), "an omitted auth_cache_ttl uses the default")
 
 	for _, ttl := range []string{"not-a-duration", "0s", "-5s"} {
-		cfg.Server.GRPCAdmin.AdminAuthCacheTTL = ttl
+		cfg.Server.API.AuthCacheTTL = ttl
 		err := cfg.Validate()
 		assert.Error(t, err, "ttl %q must be rejected", ttl)
 		if ttl == "not-a-duration" {
-			assert.ErrorContains(t, err, "invalid duration for server.grpc_admin.admin_auth_cache_ttl")
+			assert.ErrorContains(t, err, "invalid duration for server.api.auth_cache_ttl")
 		} else {
-			assert.ErrorContains(t, err, "admin_auth_cache_ttl must be positive")
+			assert.ErrorContains(t, err, "auth_cache_ttl must be positive")
 		}
 	}
 
-	cfg.Server.GRPCAdmin.AdminAuthCacheTTL = "10s"
+	cfg.Server.API.AuthCacheTTL = "10s"
 	assert.NoError(t, cfg.Validate())
 }
 
-// TestValidate_AdminAuthAssignmentUniqueness pins G3: at most one proxy
-// entry may claim admin_auth, and the entry must carry a name.
-func TestValidate_AdminAuthAssignmentUniqueness(t *testing.T) {
+// TestValidate_APIAuthAssignmentUniqueness pins G3: at most one proxy
+// entry may claim api_auth, and the entry must carry a name.
+func TestValidate_APIAuthAssignmentUniqueness(t *testing.T) {
 	base := func() *Config {
 		return &Config{
 			Transport: validTransport(),
 			Server:    validServer(),
-			Proxy:     []ProxyConfig{{Name: "mlbridge", AdminAuth: true}},
+			Proxy:     []ProxyConfig{{Name: "mlbridge", APIAuth: true}},
 		}
 	}
-	assert.NoError(t, base().Validate(), "a single named admin_auth assignment is valid")
+	assert.NoError(t, base().Validate(), "a single named api_auth assignment is valid")
 
 	cfg := base()
 	cfg.Proxy[0].Name = ""
-	assert.ErrorContains(t, cfg.Validate(), "proxy[0].admin_auth requires proxy[0].name")
+	assert.ErrorContains(t, cfg.Validate(), "proxy[0].api_auth requires proxy[0].name")
 
 	cfg = base()
-	cfg.Proxy = append(cfg.Proxy, ProxyConfig{Name: "other", AdminAuth: true})
-	assert.ErrorContains(t, cfg.Validate(), "proxy.admin_auth must be assigned to exactly one proxy entry (got 2)")
+	cfg.Proxy = append(cfg.Proxy, ProxyConfig{Name: "other", APIAuth: true})
+	assert.ErrorContains(t, cfg.Validate(), "proxy.api_auth must be assigned to exactly one proxy entry (got 2)")
 }
 
 // TestValidate_G5FailClosedStartupGate pins the G5 fail-closed startup gate:
@@ -315,21 +315,21 @@ func TestValidate_G5FailClosedStartupGate(t *testing.T) {
 	cfg := &Config{
 		Transport: validTransport(),
 		Server: Server{
-			GRPCAdmin: GRPCAdmin{Addr: "0.0.0.0:9091", AllowInsecure: true},
+			API:       ServerAPI{Addr: "0.0.0.0:9091", AllowInsecure: true},
 			Namespace: "dev",
 		},
 	}
-	assert.ErrorContains(t, cfg.Validate(), "server.grpc_admin.allow_insecure requires a loopback server.grpc_admin.addr")
+	assert.ErrorContains(t, cfg.Validate(), "server.api.allow_insecure requires a loopback server.api.addr")
 
 	// Static tokens make the non-loopback bind acceptable without insecure.
-	cfg.Server.GRPCAdmin.AllowInsecure = false
-	cfg.Server.GRPCAdmin.AuthTokens = []string{"test-admin-token-0123456789"}
+	cfg.Server.API.AllowInsecure = false
+	cfg.Server.API.AuthTokens = []string{"test-admin-token-0123456789"}
 	assert.NoError(t, cfg.Validate())
 
 	// allow_insecure on a loopback bind stays valid.
-	cfg.Server.GRPCAdmin.AuthTokens = nil
-	cfg.Server.GRPCAdmin.AllowInsecure = true
-	cfg.Server.GRPCAdmin.Addr = "127.0.0.1:9091"
+	cfg.Server.API.AuthTokens = nil
+	cfg.Server.API.AllowInsecure = true
+	cfg.Server.API.Addr = "127.0.0.1:9091"
 	assert.NoError(t, cfg.Validate())
 
 	// Admin HTTP alignment: a non-loopback server.http bind without a token
@@ -601,7 +601,7 @@ func TestValidate_AuthorizerValid(t *testing.T) {
 					},
 				},
 			},
-			GRPCAdmin: GRPCAdmin{Addr: "127.0.0.1:9091", AuthTokens: []string{"test-admin-token-0123456789"}, Capabilities: []string{
+			API: ServerAPI{Addr: "127.0.0.1:9091", AuthTokens: []string{"test-admin-token-0123456789"}, Capabilities: []string{
 				"history.read", "presence.read", "channels.list", "session.act",
 				"user.fanout", "subscribe.any", "presence.large_snapshot",
 				"survey.bypass_gate", "pattern.global",
@@ -626,7 +626,7 @@ func TestValidate_RejectsServerACL(t *testing.T) {
 	cfg2 := &Config{
 		Transport: validTransport(),
 		Server: Server{
-			GRPCAdmin: validServer().GRPCAdmin,
+			API:       validServer().API,
 			Namespace: "dev",
 			Authorizer: AuthorizerConfig{
 				Rules: []AuthorizerRule{
@@ -668,10 +668,10 @@ func TestValidate_UnknownCapability(t *testing.T) {
 	cfg := &Config{
 		Transport: validTransport(),
 		Server: Server{
-			GRPCAdmin: GRPCAdmin{Capabilities: []string{"history.read", "presence.write"}},
+			API: ServerAPI{Capabilities: []string{"history.read", "presence.write"}},
 		},
 	}
-	assert.ErrorContains(t, cfg.Validate(), "server.grpc_admin.capabilities[1]: unknown capability \"presence.write\"")
+	assert.ErrorContains(t, cfg.Validate(), "server.api.capabilities[1]: unknown capability \"presence.write\"")
 }
 
 // TestValidate_CapabilitiesEmptyAllowed verifies an explicit empty
@@ -680,7 +680,7 @@ func TestValidate_CapabilitiesEmptyAllowed(t *testing.T) {
 	cfg := &Config{
 		Transport: validTransport(),
 		Server: Server{
-			GRPCAdmin: GRPCAdmin{Addr: "127.0.0.1:9091", AuthTokens: []string{"test-admin-token-0123456789"}, Capabilities: []string{}},
+			API:       ServerAPI{Addr: "127.0.0.1:9091", AuthTokens: []string{"test-admin-token-0123456789"}, Capabilities: []string{}},
 			Namespace: "dev",
 		},
 	}
@@ -707,7 +707,7 @@ func TestValidate_PresenceClusterEmitRemoved(t *testing.T) {
 	} {
 		cfg = &Config{
 			Transport: validTransport(),
-			Server:    Server{GRPCAdmin: validServer().GRPCAdmin, Presence: tc},
+			Server:    Server{API: validServer().API, Presence: tc},
 		}
 		err := cfg.Validate()
 		require.Error(t, err)

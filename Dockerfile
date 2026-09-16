@@ -34,7 +34,7 @@ COPY configs/docker.yaml /etc/messageloop/docker.yaml
 
 USER messageloop
 
-# 8080 health/metrics HTTP, 9080 WebSocket, 9090 client gRPC, 9091 admin gRPC
+# 8080 health/metrics HTTP, 9080 WebSocket, 9090 client gRPC, 9091 Server API gRPC
 EXPOSE 8080 9080 9090 9091
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \

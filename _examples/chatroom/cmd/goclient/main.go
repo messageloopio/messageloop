@@ -8,9 +8,9 @@
 //	/join <room>       subscribe to a room
 //	/leave <room>      unsubscribe from a room
 //	/roll              dice RPC via the backend
-//	/stats             room stats RPC via the backend (admin API)
+//	/stats             room stats RPC via the backend (server API)
 //	/history [n]       last n history entries RPC
-//	/kick <name>       force-disconnect a user RPC (admin API)
+//	/kick <name>       force-disconnect a user RPC (server API)
 //	/whoami            echo RPC metadata
 //	/presence          query the presence snapshot of the current room
 //	/poll <question>   start a survey in the current room
@@ -355,9 +355,9 @@ func printHelp() {
   /join <room>       subscribe to a room
   /leave <room>      unsubscribe from a room
   /roll              dice RPC via the backend
-  /stats             room stats RPC via the backend (admin API)
+  /stats             room stats RPC via the backend (server API)
   /history [n]       last n history entries RPC
-  /kick <name>       force-disconnect a user RPC (admin API)
+  /kick <name>       force-disconnect a user RPC (server API)
   /whoami            echo RPC metadata
   /presence          query the presence snapshot of the current room
   /poll <question>   start a survey in the current room

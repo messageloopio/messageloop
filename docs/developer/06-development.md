@@ -23,7 +23,7 @@
 | `internal/stream/` | Broker 契约与内存实现 |
 | `internal/channel/`、`internal/occupancy/`、`internal/survey/`、`internal/protocol/`、`internal/authz/`、`internal/metrics/` | 叶子契约：频道策略与 Interest 编译、在线状态、Survey、断连码/版本门、授权器、指标 |
 | `internal/cluster/` | 集群控制面契约（`contracts.go`、`epoch.go`、`user_index.go`）与 `hmac/`、`sim/` |
-| `internal/admin/` | 管理 gRPC API（`admin_server.go`、`api_handler.go`） |
+| `internal/serverapi/` | Server API（`server.go`、`api_handler.go`） |
 | `cmd/server/` | 服务端入口 `main.go`、gRPC 启动预检 `runtime.go`、环境变量覆盖 `envconfig.go`，基于 `lynx` 框架 |
 | `config/` | 配置结构体定义与校验（`config.go`） |
 | `protocol/` | Protobuf 源文件（单一 buf module），下分 `shared/v2/`、`client/v2/`、`server/v2/`、`proxy/v2/` |
@@ -196,7 +196,7 @@ breaking:
   - `pkg/transport/grpc/integration_test.go`、`pkg/transport/grpc/port_integration_test.go`：gRPC 流端到端与端口分离。
   - `internal/runtime/cluster_redis_integration_test.go`：需要 Redis 的多节点集群行为。
   - `internal/runtime/cluster_sim_test.go` 与 `internal/cluster/sim/`：不依赖 Redis 的确定性 fencing 模拟（见[《分布式集群指南》](04-cluster.md) 第 12 节）。
-- 双进程黑盒 e2e 位于 `sdks/go/e2e_process_test.go`（`TestE2EProcess`）：测试 `go build` 出真实 `cmd/server` 子进程，用 Go SDK 过真实 socket 跑 WS 全流程、历史回放、gRPC 传输与 admin gRPC 冒烟；运行方式为 `cd sdks/go && go test -count=1 -run TestE2EProcess .`。Redis 变体按 `MESSAGELOOP_TEST_REDIS_ADDR`（默认 `127.0.0.1:6379`）探测，连不上自动 skip（使用 DB 13）。
+- 双进程黑盒 e2e 位于 `sdks/go/e2e_process_test.go`（`TestE2EProcess`）：测试 `go build` 出真实 `cmd/server` 子进程，用 Go SDK 过真实 socket 跑 WS 全流程、历史回放、gRPC 传输与 Server API 冒烟；运行方式为 `cd sdks/go && go test -count=1 -run TestE2EProcess .`。Redis 变体按 `MESSAGELOOP_TEST_REDIS_ADDR`（默认 `127.0.0.1:6379`）探测，连不上自动 skip（使用 DB 13）。
 - 默认以 `task test`（`go test -race ./...`）作为完整门禁，与 CI 一致。
 
 ## 本地运行开发服务器
@@ -218,14 +218,14 @@ go run ./cmd/server --config ./config.yaml
 | 客户端 gRPC 流 | `transport.grpc.addr` | 无默认（必填） |
 | 客户端 QUIC | `transport.quic.addr` | 空（不启动） |
 | 客户端 KCP | `transport.kcp.addr` | 空（不启动） |
-| gRPC 管理 API | `server.grpc_admin.addr` | 无默认（必填，启动预检阶段无条件预绑定） |
+| Server API (gRPC) | `server.api.addr` | 无默认（必填，启动预检阶段无条件预绑定） |
 | HTTP 健康检查与指标 | `server.http.addr` | `127.0.0.1:8080` |
 
 仓库内的配置示例用途：
 
 - `config.yaml`：默认开发配置；broker 类型为 `redis`，连接 `127.0.0.1:6379`（密码 `123456`，DB 10），并注册一个指向 `127.0.0.1:8090` 的示例代理。
 - `config-node1.yaml` / `config-node2.yaml`：双节点集群演示，端口分别使用 `18/19` 与 `28/29` 前缀（如 WebSocket `:19080` / `:29080`），两个节点共享同一个 Redis 实例，用于本地验证集群功能（需自行补 `cluster` 段与 HMAC 密钥）。
-- `configs/test.yaml`：端到端测试配置，明确 `grpc_admin` 为 `127.0.0.1:9091`，broker 为 Redis。
+- `configs/test.yaml`：端到端测试配置，明确 `api` 为 `127.0.0.1:9091`，broker 为 Redis。
 - `config-example.yaml`：完整字段参考，所有配置项的权威示例。
 
 ## TypeScript SDK 开发
@@ -262,7 +262,7 @@ npm test           # Jest 测试（ts-jest，测试位于 test/）
 - 协议定义：[《客户端协议参考》](../protocol.md)
 - 架构：[《架构指南》](01-architecture.md)
 - 配置：[《配置参考》](02-configuration.md)
-- 管理 API：[《管理 API 参考》](03-admin-api.md)
+- Server API：[《Server API 参考》](03-server-api.md)
 - 集群：[《分布式集群指南》](04-cluster.md)
 - 可观测性：[《可观测性指南》](05-observability.md)
 - Go SDK：[《Go SDK 指南》](07-sdk-go.md)

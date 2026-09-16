@@ -6,64 +6,64 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// TestAdminIdentity_Principal pins the principal mapping (design §2.1 /
+// TestAPIIdentity_Principal pins the principal mapping (design §2.1 /
 // D26): static token and allow_insecure keep the fixed "admin" principal,
-// proxy keys get "key:"+KeyID, Kind is always PrincipalAdmin, and the
+// proxy keys get "key:"+KeyID, Kind is always PrincipalServer, and the
 // (already clamped) capability bits pass through untouched.
-func TestAdminIdentity_Principal(t *testing.T) {
+func TestAPIIdentity_Principal(t *testing.T) {
 	assert := assert.New(t)
 
-	static := AdminIdentity{KeyID: "static-token", Namespaces: []string{"*"}, Caps: CapHistoryRead | CapSessionAct}
+	static := APIIdentity{KeyID: "static-token", Namespaces: []string{"*"}, Caps: CapHistoryRead | CapSessionAct}
 	p := static.Principal()
-	assert.Equal(PrincipalAdmin, p.Kind)
+	assert.Equal(PrincipalServer, p.Kind)
 	assert.Equal("admin", p.UserID)
 	assert.Equal(static.Caps, p.Caps)
 
-	insecure := AdminIdentity{KeyID: "insecure", Namespaces: []string{"*"}, Caps: CapPresenceRead}
+	insecure := APIIdentity{KeyID: "insecure", Namespaces: []string{"*"}, Caps: CapPresenceRead}
 	p = insecure.Principal()
-	assert.Equal(PrincipalAdmin, p.Kind)
+	assert.Equal(PrincipalServer, p.Kind)
 	assert.Equal("admin", p.UserID)
 	assert.Equal(insecure.Caps, p.Caps)
 
-	key := AdminIdentity{KeyID: "key-42", Namespaces: []string{"acme"}, Caps: CapHistoryRead}
+	key := APIIdentity{KeyID: "key-42", Namespaces: []string{"acme"}, Caps: CapHistoryRead}
 	p = key.Principal()
-	assert.Equal(PrincipalAdmin, p.Kind)
+	assert.Equal(PrincipalServer, p.Kind)
 	assert.Equal("key:key-42", p.UserID)
 	assert.Equal(key.Caps, p.Caps)
 }
 
-// TestAdminIdentity_AllowsNamespace covers the namespace scope semantics:
+// TestAPIIdentity_AllowsNamespace covers the namespace scope semantics:
 // ["*"] allows everything, an exact list decides membership, and the empty
 // list rejects everything (fail-closed, D5).
-func TestAdminIdentity_AllowsNamespace(t *testing.T) {
+func TestAPIIdentity_AllowsNamespace(t *testing.T) {
 	assert := assert.New(t)
 
-	all := AdminIdentity{Namespaces: []string{"*"}}
+	all := APIIdentity{Namespaces: []string{"*"}}
 	assert.True(all.AllowsNamespace("acme"))
 	assert.True(all.AllowsNamespace("beta"))
 
-	scoped := AdminIdentity{Namespaces: []string{"acme", "beta"}}
+	scoped := APIIdentity{Namespaces: []string{"acme", "beta"}}
 	assert.True(scoped.AllowsNamespace("acme"))
 	assert.True(scoped.AllowsNamespace("beta"))
 	assert.False(scoped.AllowsNamespace("gamma"))
 
 	// Empty list = deny everything.
-	empty := AdminIdentity{Namespaces: nil}
+	empty := APIIdentity{Namespaces: nil}
 	assert.False(empty.AllowsNamespace("acme"))
-	empty = AdminIdentity{Namespaces: []string{}}
+	empty = APIIdentity{Namespaces: []string{}}
 	assert.False(empty.AllowsNamespace("acme"))
 }
 
-// TestAdminIdentity_AllowsChannel is table-driven over the channel grammar
+// TestAPIIdentity_AllowsChannel is table-driven over the channel grammar
 // boundary: valid namespaced channels resolve via topics.NamespaceOf and
 // follow AllowsNamespace; malformed channels (no colon, multiple colons,
 // invalid namespace characters, empty namespace) are rejected regardless of
 // scope — even for the ["*"] identity.
-func TestAdminIdentity_AllowsChannel(t *testing.T) {
+func TestAPIIdentity_AllowsChannel(t *testing.T) {
 	assert := assert.New(t)
-	all := AdminIdentity{Namespaces: []string{"*"}}
-	scoped := AdminIdentity{Namespaces: []string{"acme"}}
-	empty := AdminIdentity{Namespaces: nil}
+	all := APIIdentity{Namespaces: []string{"*"}}
+	scoped := APIIdentity{Namespaces: []string{"acme"}}
+	empty := APIIdentity{Namespaces: nil}
 
 	cases := []struct {
 		channel string

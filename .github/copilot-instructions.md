@@ -20,7 +20,7 @@
 - **Transports**: Pluggable connection handling abstraction:
   - `WebSocket`: Handles HTTP upgrades and negotiates encoding (json/proto).
   - `gRPC client streaming`: Handles bidirectional client sessions with custom `RawCodec` to avoid double-encoding.
-  - `gRPC admin API`: Exposes `messageloop.server.v2.APIService` on a separate listener.
+  - `Server API (gRPC)`: Exposes `messageloop.server.v2.APIService` on a separate listener.
 - **Protocol**: Protobuf-defined client envelopes and shared payloads.
   - `InboundMessage`/`OutboundMessage` contain operations such as Connect, Publish, Subscribe, RPC, and Survey.
   - `sharedpb.Payload` supports Binary, Text, or JSON data fields.
@@ -29,7 +29,7 @@
 
 - `transport.websocket.addr`: WebSocket client traffic
 - `transport.grpc.addr`: client gRPC streaming traffic
-- `server.grpc_admin.addr`: server-side gRPC admin API
+- `server.api.addr`: Server API (server-side gRPC)
 - `server.http.addr`: health and Prometheus metrics
 
 ## Key Conventions
@@ -52,7 +52,7 @@
 ## gRPC Package Structure
 
 - `pkg/transport/grpc/client_server.go`: client streaming listener/component
-- `internal/admin/admin_server.go`: admin gRPC listener/component
+- `internal/serverapi/server.go`: Server API gRPC listener/component
 - `pkg/transport/grpc/server.go`: shared preparation, validation, TLS loading, and pre-bound listener lifecycle
 - `cmd/server/runtime.go`: bootstrap preflight that prepares gRPC listeners before `node.Run(...)`
 

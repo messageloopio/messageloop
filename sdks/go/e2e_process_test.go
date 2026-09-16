@@ -28,7 +28,7 @@ import (
 // config on pre-allocated free ports, and drives it with the real Go SDK over
 // real sockets. It backs every contract wired in cmd/server: config loading,
 // listener setup, the D2 version gate (the SDK default version "2.0.0"), the
-// WS and gRPC transports, history/recovery, and the admin gRPC API.
+// WS and gRPC transports, history/recovery, and the Server API.
 //
 // All synchronization is done via readiness polling and message waits; there
 // are no fixed sleeps. The child process is always killed and reaped via
@@ -48,8 +48,8 @@ const (
 type e2eServerProcess struct {
 	wsURL      string
 	grpcAddr   string
-	adminAddr  string
-	adminToken string
+	apiAddr  string
+	apiToken string
 	pid        int
 }
 
@@ -94,8 +94,8 @@ func TestE2EProcess(t *testing.T) {
 }
 
 // runE2EScenarios runs scenarios 2-5 of the spec against one spawned server:
-// WS full flow, history replay, gRPC transport, admin gRPC smoke. Clients stay
-// connected for the whole function so the admin checks observe live state.
+// WS full flow, history replay, gRPC transport, Server API smoke. Clients stay
+// connected for the whole function so the Server API checks observe live state.
 func runE2EScenarios(t *testing.T, srv *e2eServerProcess) {
 	ns := e2eNamespace()
 	chatCh := ns + ".chat"
@@ -103,7 +103,7 @@ func runE2EScenarios(t *testing.T, srv *e2eServerProcess) {
 	grpcCh := ns + ".grpc"
 
 	// Scenario 2: WS full flow (connect + subscribe + publish + receive). The
-	// subscriber stays connected until the end of the function (admin smoke
+	// subscriber stays connected until the end of the function (Server API smoke
 	// below asserts its presence).
 	runE2EWSFlow(t, srv, chatCh)
 
@@ -157,9 +157,9 @@ func runE2EScenarios(t *testing.T, srv *e2eServerProcess) {
 		t.Fatalf("gRPC payload = %v, want %v (byte-equal)", msg.Data.AsBinary(), grpcPayload)
 	}
 
-	// Scenario 5: admin gRPC smoke with Bearer auth: GetChannels lists the
+	// Scenario 5: Server API smoke with Bearer auth: GetChannels lists the
 	// live channels, GetPresence reports at least one online session.
-	runE2EAdminSmoke(t, srv, chatCh, grpcCh)
+	runE2EAPISmoke(t, srv, chatCh, grpcCh)
 }
 
 // runE2EWSFlow connects a WS SDK client subscribed to channel, publishes one
@@ -187,25 +187,25 @@ func runE2EWSFlow(t *testing.T, srv *e2eServerProcess, channel string) {
 	}
 }
 
-// runE2EAdminSmoke calls GetChannels and GetPresence on the admin gRPC API
+// runE2EAPISmoke calls GetChannels and GetPresence on the Server API
 // with Bearer-token metadata and asserts the live channels and sessions.
-func runE2EAdminSmoke(t *testing.T, srv *e2eServerProcess, wantChannels ...string) {
+func runE2EAPISmoke(t *testing.T, srv *e2eServerProcess, wantChannels ...string) {
 	t.Helper()
 
-	conn, err := grpc.NewClient(srv.adminAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(srv.apiAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		t.Fatalf("admin gRPC dial failed: %v", err)
+		t.Fatalf("server API dial failed: %v", err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 
 	ctx, cancel := context.WithTimeout(context.Background(), e2eStepTimeout)
 	defer cancel()
-	ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+srv.adminToken)
+	ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+srv.apiToken)
 
-	admin := serverv2.NewAPIServiceClient(conn)
-	channelsResp, err := admin.GetChannels(ctx, &serverv2.GetChannelsRequest{})
+	api := serverv2.NewAPIServiceClient(conn)
+	channelsResp, err := api.GetChannels(ctx, &serverv2.GetChannelsRequest{})
 	if err != nil {
-		t.Fatalf("admin GetChannels failed: %v", err)
+		t.Fatalf("server API GetChannels failed: %v", err)
 	}
 	seen := make(map[string]bool, len(channelsResp.GetChannels()))
 	for _, ch := range channelsResp.GetChannels() {
@@ -213,16 +213,16 @@ func runE2EAdminSmoke(t *testing.T, srv *e2eServerProcess, wantChannels ...strin
 	}
 	for _, want := range wantChannels {
 		if !seen[want] {
-			t.Fatalf("admin GetChannels missing %q, got %v", want, seen)
+			t.Fatalf("server API GetChannels missing %q, got %v", want, seen)
 		}
 	}
 
-	presenceResp, err := admin.GetPresence(ctx, &serverv2.GetPresenceRequest{Channel: wantChannels[0]})
+	presenceResp, err := api.GetPresence(ctx, &serverv2.GetPresenceRequest{Channel: wantChannels[0]})
 	if err != nil {
-		t.Fatalf("admin GetPresence failed: %v", err)
+		t.Fatalf("server API GetPresence failed: %v", err)
 	}
 	if len(presenceResp.GetClients()) < 1 {
-		t.Fatalf("admin GetPresence(%q) returned no clients, want at least one online session", wantChannels[0])
+		t.Fatalf("server API GetPresence(%q) returned no clients, want at least one online session", wantChannels[0])
 	}
 }
 
@@ -262,13 +262,13 @@ func startE2EServer(t *testing.T, binPath, brokerType, redisAddr, redisPassword 
 	srv := &e2eServerProcess{
 		wsURL:      "ws://" + wsAddr + "/ws",
 		grpcAddr:   e2eFreeAddr(t),
-		adminAddr:  e2eFreeAddr(t),
-		adminToken: e2eAdminToken(),
+		apiAddr:  e2eFreeAddr(t),
+		apiToken: e2eAPIToken(),
 	}
 
 	cfgDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "e2e-config.yaml")
-	if err := os.WriteFile(cfgPath, []byte(e2eConfigYAML(httpAddr, srv.adminAddr, srv.adminToken, wsAddr, srv.grpcAddr, brokerType, redisAddr, redisPassword)), 0o600); err != nil {
+	if err := os.WriteFile(cfgPath, []byte(e2eConfigYAML(httpAddr, srv.apiAddr, srv.apiToken, wsAddr, srv.grpcAddr, brokerType, redisAddr, redisPassword)), 0o600); err != nil {
 		t.Fatalf("write server config: %v", err)
 	}
 
@@ -290,8 +290,8 @@ func startE2EServer(t *testing.T, binPath, brokerType, redisAddr, redisPassword 
 		<-exited
 	})
 
-	t.Logf("spawned server pid=%d broker=%s ws=%s grpc=%s admin=%s http=%s",
-		srv.pid, brokerType, wsAddr, srv.grpcAddr, srv.adminAddr, httpAddr)
+	t.Logf("spawned server pid=%d broker=%s ws=%s grpc=%s api=%s http=%s",
+		srv.pid, brokerType, wsAddr, srv.grpcAddr, srv.apiAddr, httpAddr)
 
 	healthURL := "http://" + httpAddr + "/health"
 	healthClient := &http.Client{Timeout: time.Second}
@@ -318,12 +318,12 @@ func startE2EServer(t *testing.T, binPath, brokerType, redisAddr, redisPassword 
 }
 
 // e2eConfigYAML renders a full server config for the given listeners and
-// broker. The admin token is always set (admin auth is mandatory by config
+// broker. The Server API token is always set (Server API auth is mandatory by config
 // validation). The redis variant selects the dedicated e2e logical DB and the
 // required stream_approximate flag.
-func e2eConfigYAML(httpAddr, adminAddr, adminToken, wsAddr, grpcAddr, brokerType, redisAddr, redisPassword string) string {
+func e2eConfigYAML(httpAddr, apiAddr, apiToken, wsAddr, grpcAddr, brokerType, redisAddr, redisPassword string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "server:\n  http:\n    addr: %q\n  grpc_admin:\n    addr: %q\n    auth_tokens:\n      - %q\n", httpAddr, adminAddr, adminToken)
+	fmt.Fprintf(&b, "server:\n  http:\n    addr: %q\n  api:\n    addr: %q\n    auth_tokens:\n      - %q\n", httpAddr, apiAddr, apiToken)
 	// require_auth stays off, so the static namespace is mandatory (the
 	// server fails config validation without it).
 	b.WriteString("  namespace: \"dev\"\n")
@@ -353,9 +353,9 @@ func e2eFreeAddr(t *testing.T) string {
 	return l.Addr().String()
 }
 
-// e2eAdminToken generates a per-run admin token.
-func e2eAdminToken() string {
-	return "e2e-admin-" + uuid.NewString()
+// e2eAPIToken generates a per-run Server API token.
+func e2eAPIToken() string {
+	return "e2e-server-api-" + uuid.NewString()
 }
 
 // e2eNamespace returns a run-unique namespaced channel prefix so repeated

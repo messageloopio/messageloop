@@ -1,4 +1,4 @@
-package admin
+package serverapi
 
 import (
 	"context"
@@ -22,19 +22,19 @@ import (
 	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
-// fakeAdminAuthProxy is a controllable proxy.Proxy for resolver tests: it
-// counts AuthenticateAdmin calls and answers from the configured fields.
-type fakeAdminAuthProxy struct {
+// fakeAPIAuthProxy is a controllable proxy.Proxy for resolver tests: it
+// counts AuthenticateAPIKey calls and answers from the configured fields.
+type fakeAPIAuthProxy struct {
 	mu         sync.Mutex
 	calls      int
 	lastAPIKey string
-	identity   *proxy.AdminIdentityInfo
+	identity   *proxy.APIKeyInfo
 	respErr    *sharedv2.Error
 	err        error
-	block      chan struct{} // non-nil: AuthenticateAdmin blocks until closed
+	block      chan struct{} // non-nil: AuthenticateAPIKey blocks until closed
 }
 
-func (f *fakeAdminAuthProxy) AuthenticateAdmin(ctx context.Context, req *proxy.AuthenticateAdminProxyRequest) (*proxy.AuthenticateAdminProxyResponse, error) {
+func (f *fakeAPIAuthProxy) AuthenticateAPIKey(ctx context.Context, req *proxy.AuthenticateAPIKeyProxyRequest) (*proxy.AuthenticateAPIKeyProxyResponse, error) {
 	f.mu.Lock()
 	f.calls++
 	f.lastAPIKey = req.APIKey
@@ -50,48 +50,48 @@ func (f *fakeAdminAuthProxy) AuthenticateAdmin(ctx context.Context, req *proxy.A
 	if f.err != nil {
 		return nil, f.err
 	}
-	return &proxy.AuthenticateAdminProxyResponse{Error: f.respErr, Identity: f.identity}, nil
+	return &proxy.AuthenticateAPIKeyProxyResponse{Error: f.respErr, Identity: f.identity}, nil
 }
 
-func (f *fakeAdminAuthProxy) callCount() int {
+func (f *fakeAPIAuthProxy) callCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.calls
 }
 
-func (f *fakeAdminAuthProxy) RPC(context.Context, *proxy.RPCProxyRequest) (*proxy.RPCProxyResponse, error) {
+func (f *fakeAPIAuthProxy) RPC(context.Context, *proxy.RPCProxyRequest) (*proxy.RPCProxyResponse, error) {
 	return nil, nil
 }
-func (f *fakeAdminAuthProxy) Authenticate(context.Context, *proxy.AuthenticateProxyRequest) (*proxy.AuthenticateProxyResponse, error) {
+func (f *fakeAPIAuthProxy) Authenticate(context.Context, *proxy.AuthenticateProxyRequest) (*proxy.AuthenticateProxyResponse, error) {
 	return &proxy.AuthenticateProxyResponse{}, nil
 }
-func (f *fakeAdminAuthProxy) SubscribeAcl(context.Context, *proxy.SubscribeAclProxyRequest) (*proxy.SubscribeAclProxyResponse, error) {
+func (f *fakeAPIAuthProxy) SubscribeAcl(context.Context, *proxy.SubscribeAclProxyRequest) (*proxy.SubscribeAclProxyResponse, error) {
 	return &proxy.SubscribeAclProxyResponse{}, nil
 }
-func (f *fakeAdminAuthProxy) PublishAcl(context.Context, *proxy.PublishAclProxyRequest) (*proxy.PublishAclProxyResponse, error) {
+func (f *fakeAPIAuthProxy) PublishAcl(context.Context, *proxy.PublishAclProxyRequest) (*proxy.PublishAclProxyResponse, error) {
 	return &proxy.PublishAclProxyResponse{}, nil
 }
-func (f *fakeAdminAuthProxy) OnConnected(context.Context, *proxy.OnConnectedProxyRequest) (*proxy.OnConnectedProxyResponse, error) {
+func (f *fakeAPIAuthProxy) OnConnected(context.Context, *proxy.OnConnectedProxyRequest) (*proxy.OnConnectedProxyResponse, error) {
 	return &proxy.OnConnectedProxyResponse{}, nil
 }
-func (f *fakeAdminAuthProxy) OnSubscribed(context.Context, *proxy.OnSubscribedProxyRequest) (*proxy.OnSubscribedProxyResponse, error) {
+func (f *fakeAPIAuthProxy) OnSubscribed(context.Context, *proxy.OnSubscribedProxyRequest) (*proxy.OnSubscribedProxyResponse, error) {
 	return &proxy.OnSubscribedProxyResponse{}, nil
 }
-func (f *fakeAdminAuthProxy) OnUnsubscribed(context.Context, *proxy.OnUnsubscribedProxyRequest) (*proxy.OnUnsubscribedProxyResponse, error) {
+func (f *fakeAPIAuthProxy) OnUnsubscribed(context.Context, *proxy.OnUnsubscribedProxyRequest) (*proxy.OnUnsubscribedProxyResponse, error) {
 	return &proxy.OnUnsubscribedProxyResponse{}, nil
 }
-func (f *fakeAdminAuthProxy) OnDisconnected(context.Context, *proxy.OnDisconnectedProxyRequest) (*proxy.OnDisconnectedProxyResponse, error) {
+func (f *fakeAPIAuthProxy) OnDisconnected(context.Context, *proxy.OnDisconnectedProxyRequest) (*proxy.OnDisconnectedProxyResponse, error) {
 	return &proxy.OnDisconnectedProxyResponse{}, nil
 }
-func (f *fakeAdminAuthProxy) Name() string { return "fake-admin-auth" }
-func (f *fakeAdminAuthProxy) Close() error { return nil }
+func (f *fakeAPIAuthProxy) Name() string { return "fake-admin-auth" }
+func (f *fakeAPIAuthProxy) Close() error { return nil }
 
 // newTestResolver builds a resolver around the fake proxy with sane
 // defaults; individual tests override via the returned fake.
-func newTestResolver(t *testing.T, mutate func(*adminAuthOptions, *fakeAdminAuthProxy)) (*adminAuthResolver, *fakeAdminAuthProxy) {
+func newTestResolver(t *testing.T, mutate func(*apiAuthOptions, *fakeAPIAuthProxy)) (*apiAuthResolver, *fakeAPIAuthProxy) {
 	t.Helper()
-	fake := &fakeAdminAuthProxy{}
-	opts := adminAuthOptions{
+	fake := &fakeAPIAuthProxy{}
+	opts := apiAuthOptions{
 		FindProxy: func() proxy.Proxy { return fake },
 		Ceiling:   authz.CapHistoryRead | authz.CapSessionAct | authz.CapChannelsList,
 		CacheTTL:  30 * time.Second,
@@ -99,14 +99,14 @@ func newTestResolver(t *testing.T, mutate func(*adminAuthOptions, *fakeAdminAuth
 	if mutate != nil {
 		mutate(&opts, fake)
 	}
-	return newAdminAuthResolver(opts), fake
+	return newAPIAuthResolver(opts), fake
 }
 
 func adminIdentityKeyID(presented string) string { return cacheKey(presented) }
 
 // fullIdentity is the happy-path backend answer used by most tests.
-func fullIdentity() *proxy.AdminIdentityInfo {
-	return &proxy.AdminIdentityInfo{
+func fullIdentity() *proxy.APIKeyInfo {
+	return &proxy.APIKeyInfo{
 		KeyID:        "key-42",
 		Namespaces:   []string{"acme", "beta"},
 		Capabilities: []string{"history.read", "session.act"},
@@ -114,7 +114,7 @@ func fullIdentity() *proxy.AdminIdentityInfo {
 }
 
 func TestAdminAuthResolver_VerifyCacheHit(t *testing.T) {
-	r, fake := newTestResolver(t, func(_ *adminAuthOptions, f *fakeAdminAuthProxy) {
+	r, fake := newTestResolver(t, func(_ *apiAuthOptions, f *fakeAPIAuthProxy) {
 		f.identity = fullIdentity()
 	})
 
@@ -134,7 +134,7 @@ func TestAdminAuthResolver_VerifyCacheHit(t *testing.T) {
 }
 
 func TestAdminAuthResolver_VerifyExpiry(t *testing.T) {
-	r, fake := newTestResolver(t, func(_ *adminAuthOptions, f *fakeAdminAuthProxy) {
+	r, fake := newTestResolver(t, func(_ *apiAuthOptions, f *fakeAPIAuthProxy) {
 		f.identity = fullIdentity()
 	})
 	r.opts.CacheTTL = 30 * time.Millisecond
@@ -172,7 +172,7 @@ func TestAdminAuthResolver_VerifyMaxAgeClamp(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			r, fake := newTestResolver(t, func(opts *adminAuthOptions, f *fakeAdminAuthProxy) {
+			r, fake := newTestResolver(t, func(opts *apiAuthOptions, f *fakeAPIAuthProxy) {
 				opts.CacheTTL = tc.cfgTTL
 				f.identity = fullIdentity()
 				f.identity.MaxAgeSeconds = tc.maxAgeSec
@@ -192,13 +192,13 @@ func TestAdminAuthResolver_VerifyMaxAgeClamp(t *testing.T) {
 }
 
 func TestAdminAuthResolver_VerifyNegativeCache(t *testing.T) {
-	r, fake := newTestResolver(t, func(_ *adminAuthOptions, f *fakeAdminAuthProxy) {
+	r, fake := newTestResolver(t, func(_ *apiAuthOptions, f *fakeAPIAuthProxy) {
 		f.respErr = &sharedv2.Error{Code: "INVALID_API_KEY", Type: "auth_error"}
 	})
 
 	key := "sk-rejected-key-material-0001"
 	_, err := r.Verify(context.Background(), key)
-	require.ErrorIs(t, err, errAdminKeyRejected)
+	require.ErrorIs(t, err, errAPIKeyRejected)
 
 	// The rejection is cached for negativeAuthCacheTTL (5s).
 	entry := r.entries[adminIdentityKeyID(key)]
@@ -207,7 +207,7 @@ func TestAdminAuthResolver_VerifyNegativeCache(t *testing.T) {
 
 	// The cached rejection answers again without a proxy round-trip.
 	_, err = r.Verify(context.Background(), key)
-	require.ErrorIs(t, err, errAdminKeyRejected)
+	require.ErrorIs(t, err, errAPIKeyRejected)
 	assert.Equal(t, 1, fake.callCount())
 
 	// The negative error text never carries the presented credential.
@@ -218,14 +218,14 @@ func TestAdminAuthResolver_VerifyNegativeCache(t *testing.T) {
 // same key attach to one in-flight call — the proxy sees exactly one round
 // trip (G9).
 func TestAdminAuthResolver_VerifyConcurrentDedup(t *testing.T) {
-	r, fake := newTestResolver(t, func(_ *adminAuthOptions, f *fakeAdminAuthProxy) {
+	r, fake := newTestResolver(t, func(_ *apiAuthOptions, f *fakeAPIAuthProxy) {
 		f.identity = fullIdentity()
 		f.block = make(chan struct{})
 	})
 
 	const workers = 10
 	var wg sync.WaitGroup
-	results := make([]authz.AdminIdentity, workers)
+	results := make([]authz.APIIdentity, workers)
 	errs := make([]error, workers)
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
@@ -251,18 +251,18 @@ func TestAdminAuthResolver_VerifyConcurrentDedup(t *testing.T) {
 // → zero) and AND-ed with the node ceiling.
 func TestAdminAuthResolver_VerifyCapsClamp(t *testing.T) {
 	cases := []struct {
-		name         string
-		caps         []string
-		ceiling      authz.Capability
-		wantCaps     authz.Capability
+		name     string
+		caps     []string
+		ceiling  authz.Capability
+		wantCaps authz.Capability
 	}{
 		{"grant above ceiling intersects", []string{"history.read", "session.act", "channels.list"}, authz.CapHistoryRead, authz.CapHistoryRead},
-		{"unknown names dropped", []string{"history.read", "brand.new.cap"}, authz.DefaultAdminCapabilities, authz.CapHistoryRead},
-		{"all unknown means zero", []string{"nope", "nada"}, authz.DefaultAdminCapabilities, 0},
+		{"unknown names dropped", []string{"history.read", "brand.new.cap"}, authz.DefaultCapabilityCeiling, authz.CapHistoryRead},
+		{"all unknown means zero", []string{"nope", "nada"}, authz.DefaultCapabilityCeiling, 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			r, _ := newTestResolver(t, func(opts *adminAuthOptions, f *fakeAdminAuthProxy) {
+			r, _ := newTestResolver(t, func(opts *apiAuthOptions, f *fakeAPIAuthProxy) {
 				opts.Ceiling = tc.ceiling
 				f.identity = fullIdentity()
 				f.identity.Capabilities = tc.caps
@@ -294,7 +294,7 @@ func TestAdminAuthResolver_VerifyNamespaceSanitize(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			r, _ := newTestResolver(t, func(_ *adminAuthOptions, f *fakeAdminAuthProxy) {
+			r, _ := newTestResolver(t, func(_ *apiAuthOptions, f *fakeAPIAuthProxy) {
 				f.identity = fullIdentity()
 				f.identity.Namespaces = tc.namespaces
 			})
@@ -315,7 +315,7 @@ func TestAdminAuthResolver_VerifyNamespaceSanitize(t *testing.T) {
 // TestAdminAuthResolver_ProxyErrorNegativeCache: a transport error enters
 // the short 2s negative cache and answers repeats without a proxy call.
 func TestAdminAuthResolver_ProxyErrorNegativeCache(t *testing.T) {
-	r, fake := newTestResolver(t, func(_ *adminAuthOptions, f *fakeAdminAuthProxy) {
+	r, fake := newTestResolver(t, func(_ *apiAuthOptions, f *fakeAPIAuthProxy) {
 		f.err = fmt.Errorf("connection refused")
 	})
 
@@ -338,7 +338,7 @@ func TestAdminAuthResolver_ProxyErrorNegativeCache(t *testing.T) {
 // the proxy; once the cooldown elapses a fresh (successful) call closes it
 // and clears the streak.
 func TestAdminAuthResolver_Breaker(t *testing.T) {
-	r, fake := newTestResolver(t, func(_ *adminAuthOptions, f *fakeAdminAuthProxy) {
+	r, fake := newTestResolver(t, func(_ *apiAuthOptions, f *fakeAPIAuthProxy) {
 		f.err = fmt.Errorf("connection refused")
 	})
 
@@ -409,7 +409,7 @@ func TestAdminInterceptor(t *testing.T) {
 	const shortKey = "short-key"
 
 	handler := func(ctx context.Context, req any) (any, error) {
-		id, ok := AdminIdentityFromContext(ctx)
+		id, ok := APIIdentityFromContext(ctx)
 		require.True(t, ok, "the handler context must carry the verified identity")
 		return id, nil
 	}
@@ -418,22 +418,22 @@ func TestAdminInterceptor(t *testing.T) {
 	// authenticate — the static comparison runs before the length gate.
 	const deliberatelyShortStaticToken = "tok"
 
-	call := func(r *adminAuthResolver, values ...string) (authz.AdminIdentity, error) {
+	call := func(r *apiAuthResolver, values ...string) (authz.APIIdentity, error) {
 		ctx := context.Background()
 		if len(values) > 0 {
 			ctx = metadata.NewIncomingContext(ctx, metadata.Pairs(values...))
 		}
 		resp, err := r.Interceptor()(ctx, nil, &googlegrpc.UnaryServerInfo{}, handler)
 		if err != nil {
-			return authz.AdminIdentity{}, err
+			return authz.APIIdentity{}, err
 		}
-		id, ok := resp.(authz.AdminIdentity)
+		id, ok := resp.(authz.APIIdentity)
 		require.True(t, ok)
 		return id, nil
 	}
 
 	newMetrics := func() *prometheus.CounterVec {
-		vec := prometheus.NewCounterVec(prometheus.CounterOpts{Name: "test_admin_auth_requests_total"}, []string{"verifier", "key_id", "result"})
+		vec := prometheus.NewCounterVec(prometheus.CounterOpts{Name: "test_api_auth_requests_total"}, []string{"verifier", "key_id", "result"})
 		// A throwaway registry per call: subtests each get their own
 		// collector without colliding on the global registry.
 		prometheus.NewRegistry().MustRegister(vec)
@@ -442,7 +442,7 @@ func TestAdminInterceptor(t *testing.T) {
 
 	t.Run("static token hit injects superadmin identity", func(t *testing.T) {
 		counter := newMetrics()
-		r, fake := newTestResolver(t, func(opts *adminAuthOptions, f *fakeAdminAuthProxy) {
+		r, fake := newTestResolver(t, func(opts *apiAuthOptions, f *fakeAPIAuthProxy) {
 			opts.AuthTokens = []string{staticToken}
 			opts.FindProxy = func() proxy.Proxy { return f }
 			opts.AuthRequests = counter
@@ -458,7 +458,7 @@ func TestAdminInterceptor(t *testing.T) {
 	})
 
 	t.Run("short static token not killed by the length gate (D28)", func(t *testing.T) {
-		r, fake := newTestResolver(t, func(opts *adminAuthOptions, f *fakeAdminAuthProxy) {
+		r, fake := newTestResolver(t, func(opts *apiAuthOptions, f *fakeAPIAuthProxy) {
 			opts.AuthTokens = []string{deliberatelyShortStaticToken}
 			opts.FindProxy = func() proxy.Proxy { return f }
 		})
@@ -470,7 +470,7 @@ func TestAdminInterceptor(t *testing.T) {
 	})
 
 	t.Run("static token miss falls through to the proxy", func(t *testing.T) {
-		r, fake := newTestResolver(t, func(opts *adminAuthOptions, f *fakeAdminAuthProxy) {
+		r, fake := newTestResolver(t, func(opts *apiAuthOptions, f *fakeAPIAuthProxy) {
 			opts.AuthTokens = []string{staticToken}
 			opts.FindProxy = func() proxy.Proxy { return f }
 			f.identity = fullIdentity()
@@ -483,7 +483,7 @@ func TestAdminInterceptor(t *testing.T) {
 	})
 
 	t.Run("x-api-key fallback", func(t *testing.T) {
-		r, fake := newTestResolver(t, func(opts *adminAuthOptions, f *fakeAdminAuthProxy) {
+		r, fake := newTestResolver(t, func(opts *apiAuthOptions, f *fakeAPIAuthProxy) {
 			opts.FindProxy = func() proxy.Proxy { return f }
 			f.identity = fullIdentity()
 		})
@@ -495,7 +495,7 @@ func TestAdminInterceptor(t *testing.T) {
 	})
 
 	t.Run("bearer preferred over x-api-key", func(t *testing.T) {
-		r, fake := newTestResolver(t, func(opts *adminAuthOptions, f *fakeAdminAuthProxy) {
+		r, fake := newTestResolver(t, func(opts *apiAuthOptions, f *fakeAPIAuthProxy) {
 			opts.AuthTokens = []string{staticToken}
 			opts.FindProxy = func() proxy.Proxy { return f }
 		})
@@ -506,13 +506,13 @@ func TestAdminInterceptor(t *testing.T) {
 		))
 		resp, err := r.Interceptor()(ctx, nil, &googlegrpc.UnaryServerInfo{}, handler)
 		require.NoError(t, err)
-		id := resp.(authz.AdminIdentity)
+		id := resp.(authz.APIIdentity)
 		assert.Equal(t, "static-token", id.KeyID, "authorization Bearer must win over x-api-key")
 		assert.Equal(t, 0, fake.callCount())
 	})
 
 	t.Run("non-bearer authorization falls back to x-api-key", func(t *testing.T) {
-		r, _ := newTestResolver(t, func(opts *adminAuthOptions, f *fakeAdminAuthProxy) {
+		r, _ := newTestResolver(t, func(opts *apiAuthOptions, f *fakeAPIAuthProxy) {
 			opts.FindProxy = func() proxy.Proxy { return f }
 			f.identity = fullIdentity()
 		})
@@ -523,7 +523,7 @@ func TestAdminInterceptor(t *testing.T) {
 	})
 
 	t.Run("length gate rejects short keys without touching the proxy (G9)", func(t *testing.T) {
-		r, fake := newTestResolver(t, func(opts *adminAuthOptions, f *fakeAdminAuthProxy) {
+		r, fake := newTestResolver(t, func(opts *apiAuthOptions, f *fakeAPIAuthProxy) {
 			opts.FindProxy = func() proxy.Proxy { return f }
 		})
 
@@ -542,7 +542,7 @@ func TestAdminInterceptor(t *testing.T) {
 
 	t.Run("no credential with allow_insecure injects the insecure identity", func(t *testing.T) {
 		counter := newMetrics()
-		r, fake := newTestResolver(t, func(opts *adminAuthOptions, f *fakeAdminAuthProxy) {
+		r, fake := newTestResolver(t, func(opts *apiAuthOptions, f *fakeAPIAuthProxy) {
 			opts.AllowInsecure = true
 			opts.FindProxy = func() proxy.Proxy { return f }
 			opts.AuthRequests = counter
@@ -558,7 +558,7 @@ func TestAdminInterceptor(t *testing.T) {
 	})
 
 	t.Run("no credential with tokens configured is rejected", func(t *testing.T) {
-		r, _ := newTestResolver(t, func(opts *adminAuthOptions, _ *fakeAdminAuthProxy) {
+		r, _ := newTestResolver(t, func(opts *apiAuthOptions, _ *fakeAPIAuthProxy) {
 			opts.AuthTokens = []string{staticToken}
 		})
 
@@ -576,7 +576,7 @@ func TestAdminInterceptor(t *testing.T) {
 	})
 
 	t.Run("credential with no proxy assignment is rejected", func(t *testing.T) {
-		r, _ := newTestResolver(t, func(opts *adminAuthOptions, _ *fakeAdminAuthProxy) {
+		r, _ := newTestResolver(t, func(opts *apiAuthOptions, _ *fakeAPIAuthProxy) {
 			opts.FindProxy = nil
 		})
 
@@ -586,7 +586,7 @@ func TestAdminInterceptor(t *testing.T) {
 	})
 
 	t.Run("proxy outage surfaces a distinct unavailable message", func(t *testing.T) {
-		r, _ := newTestResolver(t, func(opts *adminAuthOptions, f *fakeAdminAuthProxy) {
+		r, _ := newTestResolver(t, func(opts *apiAuthOptions, f *fakeAPIAuthProxy) {
 			opts.FindProxy = func() proxy.Proxy { return f }
 			f.err = fmt.Errorf("dial timeout")
 		})
@@ -600,7 +600,7 @@ func TestAdminInterceptor(t *testing.T) {
 
 	t.Run("deny metrics carry the proxy verifier and unknown key", func(t *testing.T) {
 		counter := newMetrics()
-		r, _ := newTestResolver(t, func(opts *adminAuthOptions, f *fakeAdminAuthProxy) {
+		r, _ := newTestResolver(t, func(opts *apiAuthOptions, f *fakeAPIAuthProxy) {
 			opts.FindProxy = func() proxy.Proxy { return f }
 			opts.AuthRequests = counter
 			f.respErr = &sharedv2.Error{Code: "INVALID_API_KEY", Type: "auth_error"}
@@ -617,7 +617,7 @@ func TestAdminInterceptor(t *testing.T) {
 		prometheus.NewRegistry().MustRegister(rpcVec)
 
 		// Authenticated call whose handler succeeds → ok under the key's ID.
-		r, _ := newTestResolver(t, func(opts *adminAuthOptions, f *fakeAdminAuthProxy) {
+		r, _ := newTestResolver(t, func(opts *apiAuthOptions, f *fakeAPIAuthProxy) {
 			opts.AuthTokens = []string{staticToken}
 			opts.FindProxy = func() proxy.Proxy { return f }
 			opts.RPCs = rpcVec
@@ -651,14 +651,14 @@ func TestAdminInterceptor(t *testing.T) {
 // TestAdminIdentityContext pins the exported context helpers used by later
 // handler-side phases.
 func TestAdminIdentityContext(t *testing.T) {
-	id := authz.AdminIdentity{KeyID: "key-7", Namespaces: []string{"acme"}, Caps: authz.CapHistoryRead}
+	id := authz.APIIdentity{KeyID: "key-7", Namespaces: []string{"acme"}, Caps: authz.CapHistoryRead}
 
-	ctx := WithAdminIdentity(context.Background(), id)
-	got, ok := AdminIdentityFromContext(ctx)
+	ctx := WithAPIIdentity(context.Background(), id)
+	got, ok := APIIdentityFromContext(ctx)
 	require.True(t, ok)
 	assert.Equal(t, id, got)
 
-	_, ok = AdminIdentityFromContext(context.Background())
+	_, ok = APIIdentityFromContext(context.Background())
 	assert.False(t, ok)
 }
 
@@ -666,7 +666,7 @@ func TestAdminIdentityContext(t *testing.T) {
 // asserts the returned error strings never embed the presented credential.
 func TestCredentialExtractionNeverLogsPlaintext(t *testing.T) {
 	secrets := []string{"sk-secret-credential-material-1", "another-secret-value"}
-	r, _ := newTestResolver(t, func(opts *adminAuthOptions, f *fakeAdminAuthProxy) {
+	r, _ := newTestResolver(t, func(opts *apiAuthOptions, f *fakeAPIAuthProxy) {
 		opts.FindProxy = func() proxy.Proxy { return f }
 		opts.AuthTokens = []string{"static-admin-token-0123456789"}
 		f.err = fmt.Errorf("backend exploded")
@@ -703,7 +703,7 @@ func TestCredentialExtractionNeverLogsPlaintext(t *testing.T) {
 
 // TestResolverMetricsNilSafe: a resolver without a counter must not panic.
 func TestResolverMetricsNilSafe(t *testing.T) {
-	r, _ := newTestResolver(t, func(opts *adminAuthOptions, f *fakeAdminAuthProxy) {
+	r, _ := newTestResolver(t, func(opts *apiAuthOptions, f *fakeAPIAuthProxy) {
 		opts.FindProxy = func() proxy.Proxy { return f }
 		f.identity = fullIdentity()
 	})
@@ -716,7 +716,7 @@ func TestResolverMetricsNilSafe(t *testing.T) {
 // TestEvictionAndDedupUnderRapidReuse is a light concurrency smoke over the
 // shared mutable state (run with -race in CI).
 func TestEvictionAndDedupUnderRapidReuse(t *testing.T) {
-	r, fake := newTestResolver(t, func(_ *adminAuthOptions, f *fakeAdminAuthProxy) {
+	r, fake := newTestResolver(t, func(_ *apiAuthOptions, f *fakeAPIAuthProxy) {
 		f.identity = fullIdentity()
 	})
 

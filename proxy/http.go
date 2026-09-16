@@ -388,8 +388,8 @@ func (p *HTTPProxy) OnDisconnected(ctx context.Context, req *OnDisconnectedProxy
 	return result.(*OnDisconnectedProxyResponse), nil
 }
 
-// AuthenticateAdmin implements Proxy.AuthenticateAdmin.
-func (p *HTTPProxy) AuthenticateAdmin(ctx context.Context, req *AuthenticateAdminProxyRequest) (*AuthenticateAdminProxyResponse, error) {
+// AuthenticateAPIKey implements Proxy.AuthenticateAPIKey.
+func (p *HTTPProxy) AuthenticateAPIKey(ctx context.Context, req *AuthenticateAPIKeyProxyRequest) (*AuthenticateAPIKeyProxyResponse, error) {
 	ctx, cancel := p.withTimeout(ctx)
 	defer cancel()
 
@@ -404,9 +404,9 @@ func (p *HTTPProxy) AuthenticateAdmin(ctx context.Context, req *AuthenticateAdmi
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	result, err := p.doRequest(ctx, httpReq, "AuthenticateAdmin", req.RemoteAddr, "",
+	result, err := p.doRequest(ctx, httpReq, "AuthenticateAPIKey", req.RemoteAddr, "",
 		func(respBody []byte) (any, error) {
-			var protoResp proxypb.AuthenticateAdminResponse
+			var protoResp proxypb.AuthenticateAPIKeyResponse
 			// Parse with protojson like the Authenticate path: protojson accepts
 			// both the JSON name (camelCase such as identity) and the original
 			// proto field name, and DiscardUnknown keeps a backend adding an
@@ -415,13 +415,13 @@ func (p *HTTPProxy) AuthenticateAdmin(ctx context.Context, req *AuthenticateAdmi
 			if err := opts.Unmarshal(respBody, &protoResp); err != nil {
 				return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 			}
-			return FromProtoAuthenticateAdminResponse(&protoResp), nil
+			return FromProtoAuthenticateAPIKeyResponse(&protoResp), nil
 		},
 	)
 	if err != nil {
 		return nil, err
 	}
-	return result.(*AuthenticateAdminProxyResponse), nil
+	return result.(*AuthenticateAPIKeyProxyResponse), nil
 }
 
 // doRequest is a helper function for making HTTP requests.

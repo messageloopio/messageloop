@@ -91,7 +91,7 @@ func TestGRPC_ClientPort_MessageLoopConnects(t *testing.T) {
 	require.NotEmpty(t, connected.GetSessionId())
 }
 
-func TestGRPC_ClientPort_DoesNotExposeAdminAPI(t *testing.T) {
+func TestGRPC_ClientPort_DoesNotExposeServerAPI(t *testing.T) {
 	ctx := t.Context()
 	node := runtime.NewNode(nil)
 	require.NoError(t, node.Run(ctx))

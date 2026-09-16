@@ -19,7 +19,7 @@ import (
 )
 
 // cluster_v1_e2e_test.go covers the four PR-10 cluster paths: admin
-// disconnect by user (existing TestAdmin_DisconnectUsersAcrossNodes),
+// disconnect by user (existing TestAPI_DisconnectUsersAcrossNodes),
 // wildcard x presence across nodes (below), Subscribe recovery on the Redis
 // broker (below) and the client-initiated Survey aggregated across nodes
 // (below). All tests require a live Redis (requireClusterRedis) and Skip

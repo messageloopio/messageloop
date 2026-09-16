@@ -91,9 +91,9 @@ func TestConnect_SubscribeNamespaceMismatchSkipped(t *testing.T) {
 	client, _, err := NewClient(ctx, node, transport, JSONMarshaler{})
 	require.NoError(t, err)
 	require.NoError(t, client.HandleMessage(ctx, connectEnvelope("m1", &clientpb.Connect{
-		Version:   testProtocolVersion,
-		ClientId:  "client-1",
-		Token:     "t",
+		Version:  testProtocolVersion,
+		ClientId: "client-1",
+		Token:    "t",
 		Subscriptions: []*clientpb.Subscription{
 			{Channel: "other:chat"},
 			{Channel: "acme:chat"},
@@ -197,7 +197,7 @@ func TestSession_SnapshotCarriesNamespace(t *testing.T) {
 }
 
 // TestNode_AdminSessionNamespace_Local pins the local-hub path of
-// AdminSessionNamespace (admin API key design §2.4): a session with a
+// APISessionNamespace (admin API key design §2.4): a session with a
 // resolved namespace reports it, while a namespace-less session and an
 // unknown session ID report not-found — a namespace-less session must stay
 // invisible to scoped identities (fail-closed).
@@ -209,23 +209,23 @@ func TestNode_AdminSessionNamespace_Local(t *testing.T) {
 	require.NoError(t, node.AddClient(client))
 
 	// Namespace not yet resolved: invisible ("", false).
-	ns, ok := node.AdminSessionNamespace(context.Background(), "sess-ns")
+	ns, ok := node.APISessionNamespace(context.Background(), "sess-ns")
 	assert.False(t, ok)
 	assert.Empty(t, ns)
 
 	client.SetNamespaceForTest("acme")
-	ns, ok = node.AdminSessionNamespace(context.Background(), "sess-ns")
+	ns, ok = node.APISessionNamespace(context.Background(), "sess-ns")
 	assert.True(t, ok)
 	assert.Equal(t, "acme", ns)
 
 	// Unknown session: not found.
-	ns, ok = node.AdminSessionNamespace(context.Background(), "sess-missing")
+	ns, ok = node.APISessionNamespace(context.Background(), "sess-missing")
 	assert.False(t, ok)
 	assert.Empty(t, ns)
 }
 
 // TestNode_AdminSessionNamespace_Cluster pins the cluster-directory fallback
-// of AdminSessionNamespace (design §2.4): a session unknown locally resolves
+// of APISessionNamespace (design §2.4): a session unknown locally resolves
 // through its lease namespace; a namespace-less lease and a missing lease
 // report not-found (fail-closed).
 func TestNode_AdminSessionNamespace_Cluster(t *testing.T) {
@@ -247,17 +247,17 @@ func TestNode_AdminSessionNamespace_Cluster(t *testing.T) {
 	node.SetCluster(rt)
 
 	// Remote session with a namespace: resolved through the directory.
-	ns, ok := node.AdminSessionNamespace(context.Background(), "sess-remote")
+	ns, ok := node.APISessionNamespace(context.Background(), "sess-remote")
 	assert.True(t, ok)
 	assert.Equal(t, "acme", ns)
 
 	// Lease without a namespace: invisible ("", false).
-	ns, ok = node.AdminSessionNamespace(context.Background(), "sess-nsless")
+	ns, ok = node.APISessionNamespace(context.Background(), "sess-nsless")
 	assert.False(t, ok)
 	assert.Empty(t, ns)
 
 	// No lease at all: not found.
-	ns, ok = node.AdminSessionNamespace(context.Background(), "sess-missing")
+	ns, ok = node.APISessionNamespace(context.Background(), "sess-missing")
 	assert.False(t, ok)
 	assert.Empty(t, ns)
 }

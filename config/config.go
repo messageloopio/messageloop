@@ -15,8 +15,8 @@ import (
 	"github.com/messageloopio/messageloop/proxy"
 )
 
-// CapabilityNames is the closed set of admin capability names accepted under
-// server.grpc_admin.capabilities. It mirrors internal/authz's
+// CapabilityNames is the closed set of Server API capability names accepted
+// under server.api.capabilities. It mirrors internal/authz's
 // ClosedCapabilityNames (internal/authz cannot import config, so the two
 // lists are kept in sync manually).
 var CapabilityNames = map[string]struct{}{
@@ -31,15 +31,16 @@ var CapabilityNames = map[string]struct{}{
 	"pattern.global":          {},
 }
 
-// minAdminAuthTokenChars is the minimum accepted length of one static admin
-// auth token (design D28). The floor keeps the proxy-path credential length
-// gate (≥20 characters, G9) from ever rejecting a configured static token.
-const minAdminAuthTokenChars = 20
+// minAPIAuthTokenChars is the minimum accepted length of one static Server
+// API auth token (design D28). The floor keeps the proxy-path credential
+// length gate (≥20 characters, G9) from ever rejecting a configured static
+// token.
+const minAPIAuthTokenChars = 20
 
-// DefaultAdminAuthCacheTTL is used when server.grpc_admin.admin_auth_cache_ttl
-// is omitted: proxy-verified admin identities are reused for this long
+// DefaultAuthCacheTTL is used when server.api.auth_cache_ttl
+// is omitted: proxy-verified Server API identities are reused for this long
 // (design D15 — the revocation upper bound).
-const DefaultAdminAuthCacheTTL = "30s"
+const DefaultAuthCacheTTL = "30s"
 
 type Config struct {
 	Server    Server        `yaml:"server" json:"server" mapstructure:"server"`
@@ -99,7 +100,7 @@ func (c ClusterConfig) ResolveHMACKey() ([]byte, error) {
 
 type Server struct {
 	Http        HttpServer `yaml:"http" json:"http" mapstructure:"http"`
-	GRPCAdmin   GRPCAdmin  `yaml:"grpc_admin" json:"grpc_admin" mapstructure:"grpc_admin"`
+	API         ServerAPI  `yaml:"api" json:"api" mapstructure:"api"`
 	Heartbeat   Heartbeat  `yaml:"heartbeat" json:"heartbeat" mapstructure:"heartbeat"`
 	RPCTimeout  string     `yaml:"rpc_timeout" json:"rpc_timeout" mapstructure:"rpc_timeout"` // default: "30s"
 	Limits      Limits     `yaml:"limits" json:"limits" mapstructure:"limits"`
@@ -223,28 +224,30 @@ type HttpServer struct {
 	AuthToken string `yaml:"auth_token" json:"auth_token" mapstructure:"auth_token"`
 }
 
-type GRPCAdmin struct {
-	Addr      string    `yaml:"addr" json:"addr" mapstructure:"addr"`
-	TLS       TLSConfig `yaml:"tls" json:"tls" mapstructure:"tls"`
-	// AuthTokens is the static admin bearer token list (design D28): any
-	// match grants the superadmin identity. The list form makes rotation
+// ServerAPI configures the server-side gRPC API listener (Server API, the
+// APIService surface served on server.api.addr).
+type ServerAPI struct {
+	Addr string    `yaml:"addr" json:"addr" mapstructure:"addr"`
+	TLS  TLSConfig `yaml:"tls" json:"tls" mapstructure:"tls"`
+	// AuthTokens is the static Server API bearer token list (design D28):
+	// any match grants the superadmin identity. The list form makes rotation
 	// window-free (add new → rolling restart → drop old). Every token must
-	// be at least minAdminAuthTokenChars characters (Validate enforces it).
+	// be at least minAPIAuthTokenChars characters (Validate enforces it).
 	AuthTokens []string `yaml:"auth_tokens" json:"auth_tokens" mapstructure:"auth_tokens"`
-	// AdminAuthCacheTTL is the positive cache TTL for admin API keys verified
-	// through the admin_auth-assigned proxy (design D15: the revocation
-	// upper bound). Empty → DefaultAdminAuthCacheTTL; Validate rejects
+	// AuthCacheTTL is the positive cache TTL for Server API keys verified
+	// through the api_auth-assigned proxy (design D15: the revocation
+	// upper bound). Empty → DefaultAuthCacheTTL; Validate rejects
 	// unparsable and non-positive values, and the resolver floors at 1s.
-	AdminAuthCacheTTL string `yaml:"admin_auth_cache_ttl" json:"admin_auth_cache_ttl" mapstructure:"admin_auth_cache_ttl"`
+	AuthCacheTTL string `yaml:"auth_cache_ttl" json:"auth_cache_ttl" mapstructure:"auth_cache_ttl"`
 	// AllowInsecure explicitly opts out of the mandatory auth_token: the
-	// admin API is served without authentication and a WARN is logged at
+	// Server API is served without authentication and a WARN is logged at
 	// startup. Only for controlled environments. On a non-loopback bind it
 	// is a Validate error (G5 fail-closed startup gate).
 	AllowInsecure bool `yaml:"allow_insecure" json:"allow_insecure" mapstructure:"allow_insecure"`
-	// Capabilities is the admin capability set (PR-KA-A4 §7). Omitted (nil) →
-	// DefaultAdminCapabilities (every closed bit except pattern.global);
-	// explicitly empty ([]) → zero bits, locking the admin data plane.
-	// Unknown names are a Validate error.
+	// Capabilities is the Server API capability ceiling (PR-KA-A4 §7).
+	// Omitted (nil) → DefaultCapabilityCeiling (every closed bit except
+	// pattern.global); explicitly empty ([]) → zero bits, locking the Server
+	// API data plane. Unknown names are a Validate error.
 	Capabilities []string `yaml:"capabilities" json:"capabilities" mapstructure:"capabilities"`
 }
 
@@ -303,9 +306,9 @@ type QUICTransport struct {
 // own, so TLS is mandatory: provide cert/key or set Insecure to generate an
 // ephemeral self-signed certificate (dev only).
 type KCPTransport struct {
-	Addr         string    `yaml:"addr" json:"addr" mapstructure:"addr"`
-	WriteTimeout string    `yaml:"write_timeout" json:"write_timeout" mapstructure:"write_timeout"`
-	ReadTimeout  string    `yaml:"read_timeout" json:"read_timeout" mapstructure:"read_timeout"`
+	Addr         string `yaml:"addr" json:"addr" mapstructure:"addr"`
+	WriteTimeout string `yaml:"write_timeout" json:"write_timeout" mapstructure:"write_timeout"`
+	ReadTimeout  string `yaml:"read_timeout" json:"read_timeout" mapstructure:"read_timeout"`
 	// DataShards / ParityShards configure forward error correction (Reed
 	// Solomon). 0/0 (the default) disables FEC. Clients must dial with the
 	// same shard counts.
@@ -319,16 +322,16 @@ type KCPTransport struct {
 type ProxyConfig struct {
 	Name     string `yaml:"name" json:"name" mapstructure:"name"`
 	Endpoint string `yaml:"endpoint" json:"endpoint" mapstructure:"endpoint"`
-	// AdminAuth assigns this proxy as the admin API key verifier (design
+	// APIAuth assigns this proxy as the Server API key verifier (design
 	// G3/D18′): explicit activation instead of glob routing, and exactly one
 	// entry may claim it — a second assignment is a Validate error. It stays
 	// config-layer only: proxy.ProxyConfig deliberately does not carry it,
-	// the admin auth wiring reads the assignment from here.
-	AdminAuth bool                     `yaml:"admin_auth" json:"admin_auth" mapstructure:"admin_auth"`
-	Timeout   string                   `yaml:"timeout" json:"timeout" mapstructure:"timeout"` // duration string
-	HTTP      *proxy.HTTPProxyConfig   `yaml:"http" json:"http" mapstructure:"http"`
-	GRPC      *proxy.GRPCProxyConfig   `yaml:"grpc" json:"grpc" mapstructure:"grpc"`
-	Routes    []proxy.RouteConfig      `yaml:"routes" json:"routes" mapstructure:"routes"`
+	// the Server API auth wiring reads the assignment from here.
+	APIAuth bool                   `yaml:"api_auth" json:"api_auth" mapstructure:"api_auth"`
+	Timeout string                 `yaml:"timeout" json:"timeout" mapstructure:"timeout"` // duration string
+	HTTP    *proxy.HTTPProxyConfig `yaml:"http" json:"http" mapstructure:"http"`
+	GRPC    *proxy.GRPCProxyConfig `yaml:"grpc" json:"grpc" mapstructure:"grpc"`
+	Routes  []proxy.RouteConfig    `yaml:"routes" json:"routes" mapstructure:"routes"`
 }
 
 // ToProxyConfig converts the config YAML struct to proxy.ProxyConfig.
@@ -503,7 +506,7 @@ func (c *Config) Validate() error {
 		name string
 		tls  TLSConfig
 	}{
-		{"server.grpc_admin.tls", c.Server.GRPCAdmin.TLS},
+		{"server.api.tls", c.Server.API.TLS},
 		{"transport.websocket.tls", c.Transport.WebSocket.TLS},
 		{"transport.grpc.tls", c.Transport.GRPC.TLS},
 		{"transport.quic.tls", c.Transport.QUIC.TLS},
@@ -514,10 +517,10 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	// Admin gRPC authentication (design §2.7): static token list integrity,
-	// positive cache TTL, the admin_auth assignment uniqueness (G3), the
-	// fail-closed G5 startup gates, and the three-way auth requirement.
-	if err := c.validateAdminAuth(); err != nil {
+	// Server API gRPC authentication (design §2.7): static token list
+	// integrity, positive cache TTL, the api_auth assignment uniqueness (G3),
+	// the fail-closed G5 startup gates, and the three-way auth requirement.
+	if err := c.validateAPIAuth(); err != nil {
 		return err
 	}
 
@@ -566,11 +569,11 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	// Validate the admin capability names: the set is closed, unknown names
-	// are rejected up front (PR-KA-A4 §7).
-	for i, name := range c.Server.GRPCAdmin.Capabilities {
+	// Validate the Server API capability names: the set is closed, unknown
+	// names are rejected up front (PR-KA-A4 §7).
+	for i, name := range c.Server.API.Capabilities {
 		if _, ok := CapabilityNames[name]; !ok {
-			return fmt.Errorf("server.grpc_admin.capabilities[%d]: unknown capability %q", i, name)
+			return fmt.Errorf("server.api.capabilities[%d]: unknown capability %q", i, name)
 		}
 	}
 
@@ -618,15 +621,16 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("server.namespace is required when server.require_auth is disabled (no auth proxy to supply a namespace)")
 	}
 
-	// The admin gRPC listener is always constructed (prepareGRPCServers); an
-	// empty address would only fail late in startup, after the cluster and
+	// The Server API gRPC listener is always constructed (prepareGRPCServers);
+	// an empty address would only fail late in startup, after the cluster and
 	// broker have already been wired. The check runs last so the more
 	// specific field errors above are reported first.
-	if c.Server.GRPCAdmin.Addr == "" {
-		return fmt.Errorf("server.grpc_admin.addr is required")
+	if c.Server.API.Addr == "" {
+		return fmt.Errorf("server.api.addr is required")
 	}
 	return nil
 }
+
 // isLoopbackAddr reports whether the host part of addr is loopback (or
 // empty). Same implementation as the former cmd/server copy; the G5 startup
 // gates need it at Validate time, so it lives here.
@@ -642,71 +646,71 @@ func isLoopbackAddr(addr string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// validateAdminAuth validates the admin gRPC authentication configuration
+// validateAPIAuth validates the Server API gRPC authentication configuration
 // (design §2.7): every static token meets the minimum length, the positive
 // cache TTL parses and is positive, at most one proxy entry claims
-// admin_auth (G3), allow_insecure never combines with a non-loopback bind
+// api_auth (G3), allow_insecure never combines with a non-loopback bind
 // (G5, mirrored for the admin HTTP listener), and at least one of the three
-// auth paths (auth_tokens / admin_auth assignment / allow_insecure) is
+// auth paths (auth_tokens / api_auth assignment / allow_insecure) is
 // configured when the listener is enabled.
-func (c *Config) validateAdminAuth() error {
-	ga := c.Server.GRPCAdmin
+func (c *Config) validateAPIAuth() error {
+	ga := c.Server.API
 
 	// Token length gate (D28): a configured static token shorter than the
 	// floor would be rejected by the proxy-path length gate at request time
 	// and keeps too small a brute-force space.
 	for i, token := range ga.AuthTokens {
-		if len(token) < minAdminAuthTokenChars {
-			return fmt.Errorf("server.grpc_admin.auth_tokens[%d] must be at least %d characters (got %d)", i, minAdminAuthTokenChars, len(token))
+		if len(token) < minAPIAuthTokenChars {
+			return fmt.Errorf("server.api.auth_tokens[%d] must be at least %d characters (got %d)", i, minAPIAuthTokenChars, len(token))
 		}
 	}
 
-	// Positive cache TTL: empty falls back to DefaultAdminAuthCacheTTL at
+	// Positive cache TTL: empty falls back to DefaultAuthCacheTTL at
 	// resolve time; an explicit value must parse and be positive (the
 	// resolver additionally floors the effective TTL at 1s).
-	if ga.AdminAuthCacheTTL != "" {
-		d, err := time.ParseDuration(ga.AdminAuthCacheTTL)
+	if ga.AuthCacheTTL != "" {
+		d, err := time.ParseDuration(ga.AuthCacheTTL)
 		if err != nil {
-			return fmt.Errorf("invalid duration for server.grpc_admin.admin_auth_cache_ttl: %w", err)
+			return fmt.Errorf("invalid duration for server.api.auth_cache_ttl: %w", err)
 		}
 		if d <= 0 {
-			return fmt.Errorf("server.grpc_admin.admin_auth_cache_ttl must be positive, got %q (omit the field for the %s default)", ga.AdminAuthCacheTTL, DefaultAdminAuthCacheTTL)
+			return fmt.Errorf("server.api.auth_cache_ttl must be positive, got %q (omit the field for the %s default)", ga.AuthCacheTTL, DefaultAuthCacheTTL)
 		}
 	}
 
-	// admin_auth assignment (G3): explicit, unique, and nameable — the fill
+	// api_auth assignment (G3): explicit, unique, and nameable — the fill
 	// point resolves the proxy instance by entry name.
 	assigned := 0
 	for i := range c.Proxy {
-		if !c.Proxy[i].AdminAuth {
+		if !c.Proxy[i].APIAuth {
 			continue
 		}
 		assigned++
 		if c.Proxy[i].Name == "" {
-			return fmt.Errorf("proxy[%d].admin_auth requires proxy[%d].name so the proxy can be resolved", i, i)
+			return fmt.Errorf("proxy[%d].api_auth requires proxy[%d].name so the proxy can be resolved", i, i)
 		}
 	}
 	if assigned > 1 {
-		return fmt.Errorf("proxy.admin_auth must be assigned to exactly one proxy entry (got %d)", assigned)
+		return fmt.Errorf("proxy.api_auth must be assigned to exactly one proxy entry (got %d)", assigned)
 	}
 
-	// G5 fail-closed startup gate: allow_insecure plus a non-loopback admin
-	// listener used to be a startup WARN (silent fail-open); it is now a
+	// G5 fail-closed startup gate: allow_insecure plus a non-loopback Server
+	// API listener used to be a startup WARN (silent fail-open); it is now a
 	// Validate error. The admin HTTP listener follows the same rule with its
 	// auth_token standing in for allow_insecure.
 	if ga.Addr != "" && ga.AllowInsecure && !isLoopbackAddr(ga.Addr) {
-		return fmt.Errorf("server.grpc_admin.allow_insecure requires a loopback server.grpc_admin.addr (got %q); configure auth_tokens instead", ga.Addr)
+		return fmt.Errorf("server.api.allow_insecure requires a loopback server.api.addr (got %q); configure auth_tokens instead", ga.Addr)
 	}
 	if c.Server.Http.Addr != "" && !isLoopbackAddr(c.Server.Http.Addr) && c.Server.Http.AuthToken == "" {
 		return fmt.Errorf("server.http.addr %q is a non-loopback bind and requires server.http.auth_token (or a loopback address)", c.Server.Http.Addr)
 	}
 
-	// Three-way requirement: the admin listener must have static tokens, an
-	// admin_auth proxy assignment, or an explicit allow_insecure — serving
+	// Three-way requirement: the Server API listener must have static tokens,
+	// an api_auth proxy assignment, or an explicit allow_insecure — serving
 	// it with no credential path at all would expose session takeover,
 	// publish, and disconnect capabilities to anyone on the wire.
 	if ga.Addr != "" && len(ga.AuthTokens) == 0 && assigned == 0 && !ga.AllowInsecure {
-		return fmt.Errorf("server.grpc_admin requires auth_tokens, a proxy entry with admin_auth: true, or allow_insecure: true to explicitly run without authentication")
+		return fmt.Errorf("server.api requires auth_tokens, a proxy entry with api_auth: true, or allow_insecure: true to explicitly run without authentication")
 	}
 	return nil
 }

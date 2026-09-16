@@ -1,4 +1,4 @@
-package admin
+package serverapi
 
 import (
 	"reflect"
@@ -13,7 +13,7 @@ import (
 	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
 )
 
-// The admin scope census (design §2.5, mechanism gap G2 — the admin-plane
+// The Server API scope census (design §2.5, mechanism gap G2 — the Server API plane
 // port of the session-plane "mechanism gap G1, review #4" census): scattered
 // execution points were proven to leak, so the coverage itself is pinned by
 // red-line tests.
@@ -41,13 +41,13 @@ var scopeCensusMessages = []proto.Message{
 	&serverv2.Publication_Destination{},
 }
 
-// TestAdminScopeCensus_Methods reflects over the APIServiceServer interface
+// TestServerAPIScopeCensus_Methods reflects over the APIServiceServer interface
 // and asserts every RPC is registered in rpcScopeRegistry with a capability
 // evaluator and a carrier classification. An unregistered RPC fails the
-// whole admin plane closed in scopeAuthorize (Internal "capability table
+// whole Server API plane closed in scopeAuthorize (Internal "capability table
 // entry missing") — this census turns that latent outage into a red test
 // instead.
-func TestAdminScopeCensus_Methods(t *testing.T) {
+func TestServerAPIScopeCensus_Methods(t *testing.T) {
 	assert := assert.New(t)
 
 	interfaceType := reflect.TypeOf((*serverv2.APIServiceServer)(nil)).Elem()
@@ -64,7 +64,7 @@ func TestAdminScopeCensus_Methods(t *testing.T) {
 	for _, name := range methods {
 		spec, registered := rpcScopeRegistry[name]
 		assert.True(registered,
-			"admin RPC %q is not registered in rpcScopeRegistry (capability table + carrier classification) — register it in internal/admin/scope.go before it ships", name)
+			"Server API RPC %q is not registered in rpcScopeRegistry (capability table + carrier classification) — register it in internal/serverapi/scope.go before it ships", name)
 		if !registered {
 			continue
 		}
@@ -75,12 +75,12 @@ func TestAdminScopeCensus_Methods(t *testing.T) {
 		"rpcScopeRegistry must list exactly the APIServiceServer RPCs (an entry was renamed or removed without updating the registry)")
 }
 
-// TestAdminScopeCensus_RequestFields reflects over every request message and
+// TestServerAPIScopeCensus_RequestFields reflects over every request message and
 // asserts each field is classified: either processed by the scope layer
 // (scopeFieldHandled) or explicitly exempt (scopeFieldExempt). It also
 // rejects stale table entries whose message/field no longer exists, so a
 // rename cannot leave dead coverage behind.
-func TestAdminScopeCensus_RequestFields(t *testing.T) {
+func TestServerAPIScopeCensus_RequestFields(t *testing.T) {
 	assert := assert.New(t)
 
 	type fieldKey struct {
@@ -133,11 +133,11 @@ func TestAdminScopeCensus_RequestFields(t *testing.T) {
 	}
 }
 
-// TestAdminScopeCensus_CarriersMatchFields cross-checks the registry's
+// TestServerAPIScopeCensus_CarriersMatchFields cross-checks the registry's
 // carrier classification against the handled-field table so the two census
 // structures cannot drift: the fields a carrier classification implies must
 // be marked handled on the corresponding message.
-func TestAdminScopeCensus_CarriersMatchFields(t *testing.T) {
+func TestServerAPIScopeCensus_CarriersMatchFields(t *testing.T) {
 	assert := assert.New(t)
 
 	expectations := []struct {
@@ -194,11 +194,11 @@ func TestAdminScopeCensus_CarriersMatchFields(t *testing.T) {
 	}
 }
 
-// TestAdminScopeCensus_CapabilityTableSemantics pins the capability table's
+// TestServerAPIScopeCensus_CapabilityTableSemantics pins the capability table's
 // per-RPC semantics against the design table (§2.4/§2.6): single-channel
 // reads gate on their bit, Survey has no precondition bits, and the
 // session/user gates combine exactly as specified.
-func TestAdminScopeCensus_CapabilityTableSemantics(t *testing.T) {
+func TestServerAPIScopeCensus_CapabilityTableSemantics(t *testing.T) {
 	assert := assert.New(t)
 
 	// Survey: no precondition bits (bypass_gate is a behavior switch, not a

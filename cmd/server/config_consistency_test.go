@@ -18,7 +18,7 @@ import (
 // the repository and asserts that (a) Validate passes and (b) both gRPC
 // listeners (client + admin) can be pre-bound on ephemeral ports. This guards
 // against a regression where the default config cannot start the server
-// (e.g. a missing server.grpc_admin section).
+// (e.g. a missing server.api section).
 func TestRepositoryConfigsValidateAndPrebind(t *testing.T) {
 	files := []string{
 		"../../config.yaml",
@@ -47,7 +47,7 @@ func TestRepositoryConfigsValidateAndPrebind(t *testing.T) {
 			// collide with a local service, then verify both gRPC listeners
 			// can be prepared exactly like startup does.
 			cfg.Transport.GRPC.Addr = "127.0.0.1:0"
-			cfg.Server.GRPCAdmin.Addr = "127.0.0.1:0"
+			cfg.Server.API.Addr = "127.0.0.1:0"
 
 			servers, err := prepareGRPCServers(cfg, runtime.NewNode(nil), nil, nil)
 			require.NoError(t, err, "gRPC servers must pre-bind with the config's addresses")

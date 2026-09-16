@@ -22,23 +22,23 @@ type Options struct {
 	WriteTimeout time.Duration `yaml:"write_timeout" json:"write_timeout"`
 	TLSCertFile  string
 	TLSKeyFile   string
-	// AuthTokens is the static admin bearer token list: any constant-time
-	// match grants the superadmin identity (design D28). Admin listener only.
+	// AuthTokens is the static Server API bearer token list: any constant-time
+	// match grants the superadmin identity (design D28). Server API listener only.
 	AuthTokens []string
-	// AdminAllowInsecure serves the admin API without authentication
-	// (requires config server.grpc_admin.allow_insecure: true).
-	AdminAllowInsecure bool
-	// AdminAuthCacheTTL is the positive cache TTL for admin API keys verified
-	// through the admin_auth-assigned proxy (0 = the 30s resolver default).
-	AdminAuthCacheTTL time.Duration
-	// AdminFindProxy returns the admin_auth-assigned proxy (nil = no
+	// APIAllowInsecure serves the Server API without authentication
+	// (requires config server.api.allow_insecure: true).
+	APIAllowInsecure bool
+	// APIAuthCacheTTL is the positive cache TTL for Server API keys verified
+	// through the api_auth-assigned proxy (0 = the 30s resolver default).
+	APIAuthCacheTTL time.Duration
+	// APIFindProxy returns the api_auth-assigned proxy (nil = no
 	// assignment; key verification then does not exist).
-	AdminFindProxy func() proxy.Proxy
-	// AdminCapabilityCeiling is the node capability upper bound as closed-set
-	// capability names (nil → the default admin capability set at the admin
-	// layer). Admin listener only.
-	AdminCapabilityCeiling []string
-	MaxRecvMsgSize         int // Max inbound message size in bytes (0 = gRPC default)
+	APIFindProxy func() proxy.Proxy
+	// APICapabilityCeiling is the node capability upper bound as closed-set
+	// capability names (nil → the default capability ceiling at the Server API
+	// layer). Server API listener only.
+	APICapabilityCeiling []string
+	MaxRecvMsgSize       int // Max inbound message size in bytes (0 = gRPC default)
 }
 
 func validateOptions(name string, opts Options) error {
@@ -63,7 +63,7 @@ func PrepareServer(name string, opts Options, register func(*googlegrpc.Server),
 	// a global registration under the default "proto" name would override the
 	// standard codec for every gRPC connection in the process. RawCodec also
 	// handles regular proto messages, so non-streaming services on this server
-	// (e.g. the admin API) are unaffected.
+	// (e.g. the Server API) are unaffected.
 	grpcOpts = append(grpcOpts, googlegrpc.ForceServerCodec(&RawCodec{}))
 	if opts.MaxRecvMsgSize > 0 {
 		grpcOpts = append(grpcOpts, googlegrpc.MaxRecvMsgSize(opts.MaxRecvMsgSize))
@@ -93,10 +93,10 @@ func PrepareServer(name string, opts Options, register func(*googlegrpc.Server),
 }
 
 // The former single-token admin interceptor was removed (design D18′/KD-K31
-// no-compat): admin authentication now lives in internal/admin/auth.go — a
+// no-compat): Server API authentication now lives in internal/serverapi/auth.go — a
 // resolver-backed interceptor supporting the auth_tokens list,
-// allow_insecure, and admin_auth proxy assignment, wired by
-// admin.PrepareAdminServer.
+// allow_insecure, and api_auth proxy assignment, wired by
+// serverapi.PrepareServer.
 
 type Server struct {
 	name string

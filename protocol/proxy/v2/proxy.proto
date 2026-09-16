@@ -22,8 +22,8 @@ service ProxyService {
   rpc OnSubscribed(OnSubscribedRequest) returns (OnSubscribedResponse);
   rpc OnUnsubscribed(OnUnsubscribedRequest) returns (OnUnsubscribedResponse);
   rpc OnDisconnected(OnDisconnectedRequest) returns (OnDisconnectedResponse);
-  // Admin API Key 校验（admin_auth 指派的 proxy 后端实现）
-  rpc AuthenticateAdmin(AuthenticateAdminRequest) returns (AuthenticateAdminResponse);
+  // Server API Key 校验（api_auth 指派的 proxy 后端实现）
+  rpc AuthenticateAPIKey(AuthenticateAPIKeyRequest) returns (AuthenticateAPIKeyResponse);
 }
 
 // --- RPC ---
@@ -131,26 +131,26 @@ message OnDisconnectedRequest {
 }
 message OnDisconnectedResponse {}
 
-// --- AuthenticateAdmin ---
+// --- AuthenticateAPIKey ---
 
-message AuthenticateAdminRequest {
+message AuthenticateAPIKeyRequest {
   string api_key = 1;       // 调用方出示的完整 Key 明文（由 proxy 后端校验）
   string remote_addr = 2;   // 审计用
 }
 
-// AdminIdentityInfo 是 proxy 后端裁定的 admin 身份。key_id 必须是后端 Key 的
+// APIKeyInfo 是 proxy 后端裁定的 Server API 调用方身份。key_id 必须是后端 Key 的
 // 唯一 ID（非显示名：调用方 allow 列表按 "key:<id>" 匹配 principal，显示名
 // 不唯一会串权限——设计 D26）。namespaces 空列表 = 拒绝一切（fail-closed）；
 // capabilities 是能力位名称闭集，空 = 零能力；max_age_seconds 是相对时长
 // （本验证结果至多再用多久，规避两系统时钟偏斜——D14/G8），0 = 用调用方配置 TTL。
-message AdminIdentityInfo {
+message APIKeyInfo {
   string key_id = 1;
   repeated string namespaces = 2;
   repeated string capabilities = 3;
   int64 max_age_seconds = 4;
 }
 
-message AuthenticateAdminResponse {
+message AuthenticateAPIKeyResponse {
   messageloop.shared.v2.Error error = 1;
-  AdminIdentityInfo identity = 2;
+  APIKeyInfo identity = 2;
 }

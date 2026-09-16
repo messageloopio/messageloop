@@ -2,7 +2,7 @@
 #
 # 拓扑：redis（broker：streams 历史 + pub/sub，AOF 持久化；mlbridge 会话索引共用实例）
 #       + messageloop（WebSocket :9080 / 客户端 gRPC :9090 /
-#         admin gRPC :9091 / health+metrics :8080，require_auth 开启）
+#         Server API gRPC :9091 / health+metrics :8080，require_auth 开启）
 #       + mlbridge（ProxyService gRPC :9070，栈内私有——身份/策略/计量/写穿透到 Torchwood）
 #
 # 集成模型：客户端 Connect 携 Torchwood access token → messageloop 经
@@ -46,7 +46,7 @@ x-app-env: &app-env
   # 否则 Validate 拒绝启动）。要对外发布 8080：改本值为 0.0.0.0:8080
   # 【并】设 MESSAGELOOP_SERVER_HTTP_AUTH_TOKEN。
   MESSAGELOOP_SERVER_HTTP_ADDR: 127.0.0.1:8080
-  MESSAGELOOP_SERVER_GRPC_ADMIN_ADDR: 0.0.0.0:9091
+  MESSAGELOOP_SERVER_API_ADDR: 0.0.0.0:9091
   MESSAGELOOP_TRANSPORT_WEBSOCKET_ADDR: 0.0.0.0:9080
   MESSAGELOOP_TRANSPORT_WEBSOCKET_PATH: /ws
   MESSAGELOOP_TRANSPORT_GRPC_ADDR: 0.0.0.0:9090
@@ -62,9 +62,9 @@ x-app-env: &app-env
   # 仅实现近似裁剪，Validate 强制显式 true
   MESSAGELOOP_BROKER_REDIS_STREAM_APPROXIMATE: "true"
   MESSAGELOOP_BROKER_REDIS_STREAM_MAX_LENGTH: ${MESSAGELOOP_BROKER_REDIS_STREAM_MAX_LENGTH:-10000}
-  # admin gRPC 强制持静态 token（列表形态，逗号分隔；无 token 直接拒绝启动）；
-  # openssl rand -hex 32。mlbridge 复用同一 token 调 admin 面（复验断连 + 写穿扇出）。
-  MESSAGELOOP_SERVER_GRPC_ADMIN_AUTH_TOKENS: ${MESSAGELOOP_SERVER_GRPC_ADMIN_AUTH_TOKENS:?请在 Dokploy Environment 设置 openssl rand -hex 32}
+  # Server API gRPC 强制持静态 token（列表形态，逗号分隔；无 token 直接拒绝启动）；
+  # openssl rand -hex 32。mlbridge 复用同一 token 调 Server API（复验断连 + 写穿扇出）。
+  MESSAGELOOP_SERVER_API_AUTH_TOKENS: ${MESSAGELOOP_SERVER_API_AUTH_TOKENS:?请在 Dokploy Environment 设置 openssl rand -hex 32}
   # /health、/metrics 的 Bearer token。默认留空：8080 不发布、不路由，
   # 仅容器网络内可达；若自行发布 8080 必须设置 token，并同步改下方
   # healthcheck（wget 需带 Authorization 头，否则一直 401 判死）
@@ -91,7 +91,7 @@ x-bridge-env: &bridge-env
   MLBRIDGE_TORCHWOOD_PROJECTS: ${MLBRIDGE_TORCHWOOD_PROJECTS:?请在 Dokploy Environment 设置 JSON 数组，如 [{"project_id":"myproj","api_key":"sk-..."}]}
   # admin 面：栈内 messageloop，token 与其共享同一变量。
   MLBRIDGE_MESSAGELOOP_ADMIN_ADDR: messageloop:9091
-  MLBRIDGE_MESSAGELOOP_ADMIN_TOKEN: ${MESSAGELOOP_SERVER_GRPC_ADMIN_AUTH_TOKENS}
+  MLBRIDGE_MESSAGELOOP_ADMIN_TOKEN: ${MESSAGELOOP_SERVER_API_AUTH_TOKENS}
   # 会话索引：与 broker 共用栈内 redis（键前缀 mlb:*，互不冲突）。
   MLBRIDGE_REDIS_ADDR: redis:6379
   MLBRIDGE_REDIS_DB: ${MLBRIDGE_REDIS_DB:-0}
@@ -100,7 +100,7 @@ x-bridge-env: &bridge-env
   # 计量：批量上报 TW analytics。
   MLBRIDGE_METERING_ENABLED: ${MLBRIDGE_METERING_ENABLED:-true}
   MLBRIDGE_METERING_FLUSH_INTERVAL: ${MLBRIDGE_METERING_FLUSH_INTERVAL:-15s}
-  # 写穿：send RPC 先落 TW 文档再经 admin 面扇出；channels 是 JSON 数组，
+  # 写穿：send RPC 先落 TW 文档再经 Server API 扇出；channels 是 JSON 数组，
   # 通配语言与 ML 频道一致（不带命名空间前缀）。
   MLBRIDGE_WRITE_THROUGH_ENABLED: ${MLBRIDGE_WRITE_THROUGH_ENABLED:-true}
   MLBRIDGE_WRITE_THROUGH_DATABASE: ${MLBRIDGE_WRITE_THROUGH_DATABASE:-messageloop}
@@ -168,13 +168,13 @@ services:
     # 宿主端口只绑回环：公网 gRPC 走上方域名 TLS（标准 gRPC 客户端），
     # 回环供 SSH 隧道明文直连兜底——仓库自带 Go SDK 的 DialGRPC 当前为
     # 明文实现（insecure 硬编码），隧道 + DialGRPC("127.0.0.1:9090") 即
-    # 其接入路径。admin gRPC(9091) 仅隧道/栈内访问（mlbridge 经栈内网直连）。
+    # 其接入路径。Server API gRPC(9091) 仅隧道/栈内访问（mlbridge 经栈内网直连）。
     # QUIC/KCP（UDP，可选）：Traefik 不路由 UDP，启用时在 Environment 设
     # MESSAGELOOP_TRANSPORT_QUIC_ADDR / MESSAGELOOP_TRANSPORT_KCP_ADDR
     # （及 TLS 证书路径）后放开对应行；客户端按相同协议直连宿主端口。
     ports:
       - "127.0.0.1:${MESSAGELOOP_GRPC_PORT:-9090}:9090"
-      - "127.0.0.1:${MESSAGELOOP_ADMIN_GRPC_PORT:-9091}:9091"
+      - "127.0.0.1:${MESSAGELOOP_API_GRPC_PORT:-9091}:9091"
       # - "${MESSAGELOOP_QUIC_PORT:-4433}:4433/udp"
       # - "${MESSAGELOOP_KCP_PORT:-29900}:29900/udp"
     restart: unless-stopped

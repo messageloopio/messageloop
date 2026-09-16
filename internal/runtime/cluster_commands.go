@@ -61,18 +61,18 @@ func (n *Node) DisconnectSession(ctx context.Context, sessionID string, disconne
 	return clusterCommandSucceeded(result), err
 }
 
-// adminPrincipal is the fixed authorization identity used for admin API
+// superadminPrincipal is the fixed authorization identity used for Server API
 // operations (server-side gRPC API): "admin" matches allow lists exactly like
 // a user ID (PR-KA-A4 §5.3).
-const adminPrincipal = "admin"
+const superadminPrincipal = "admin"
 
 // SubscribeSession subscribes a local or remote session to a channel.
 // The channel is checked against the Authorizer with the caller-supplied
 // principal p before any command is dispatched; cluster command handlers
 // trust the initiating node's check.
 func (n *Node) SubscribeSession(ctx context.Context, p Principal, sessionID, channel string) (bool, error) {
-	if !n.AdminCanSubscribe(p, channel) {
-		return false, fmt.Errorf("admin subscribe denied by ACL rule for channel %s", channel)
+	if !n.APICanSubscribe(p, channel) {
+		return false, fmt.Errorf("server API subscribe denied by ACL rule for channel %s", channel)
 	}
 	result, err := n.dispatchSessionCommand(ctx, sessionID, &ClusterCommand{
 		Type:      ClusterCommandSubscribe,
@@ -86,8 +86,8 @@ func (n *Node) SubscribeSession(ctx context.Context, p Principal, sessionID, cha
 // The authorization follows the caller-supplied principal p, exactly like
 // SubscribeSession.
 func (n *Node) UnsubscribeSession(ctx context.Context, p Principal, sessionID, channel string) (bool, error) {
-	if !n.AdminCanSubscribe(p, channel) {
-		return false, fmt.Errorf("admin unsubscribe denied by ACL rule for channel %s", channel)
+	if !n.APICanSubscribe(p, channel) {
+		return false, fmt.Errorf("server API unsubscribe denied by ACL rule for channel %s", channel)
 	}
 	result, err := n.dispatchSessionCommand(ctx, sessionID, &ClusterCommand{
 		Type:      ClusterCommandUnsubscribe,
@@ -97,13 +97,13 @@ func (n *Node) UnsubscribeSession(ctx context.Context, p Principal, sessionID, c
 	return clusterCommandSucceeded(result), err
 }
 
-// AdminCanSubscribe reports whether principal p may subscribe a session to
+// APICanSubscribe reports whether principal p may subscribe a session to
 // channel (PR-KA-A4 §8.4): the key must compile (bare "*"/"**" always fail,
 // even with pattern.global), subscribe.any on p skips the static allow lists
 // (deny_all still binds), and otherwise the subscribe decision must allow p.
 // The principal is supplied by the caller (design §2.4): whatever identity
 // the admin call carries decides, not a node-internal default.
-func (n *Node) AdminCanSubscribe(p Principal, channel string) bool {
+func (n *Node) APICanSubscribe(p Principal, channel string) bool {
 	if _, err := CompileInterest(channel); err != nil {
 		return false
 	}
@@ -113,9 +113,9 @@ func (n *Node) AdminCanSubscribe(p Principal, channel string) bool {
 	return n.authorizer.Decide(p, ActionSubscribePattern, channel).Allow
 }
 
-// AdminCanPublish reports whether principal p may publish to channel under
+// APICanPublish reports whether principal p may publish to channel under
 // the authorizer rules (PR-KA-A4 §8.4, design §2.4).
-func (n *Node) AdminCanPublish(p Principal, channel string) bool {
+func (n *Node) APICanPublish(p Principal, channel string) bool {
 	return n.authorizer.Decide(p, ActionPublish, channel).Allow
 }
 

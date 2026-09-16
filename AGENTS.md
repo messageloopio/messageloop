@@ -6,7 +6,7 @@ This file provides guidance for agentic coding agents operating in this reposito
 
 MessageLoop is a realtime messaging platform server written in Go. It provides pub/sub messaging over WebSocket and gRPC using protobuf-defined message envelopes and shared payload types.
 
-**Namespaces (multi-tenant, P1)**: every client-visible channel is namespaced — `ns:topic` (e.g. `acme:chat.room1`). `:` participates in topic segment matching alongside `.` (see `pkg/topics`). The namespace is resolved at connect time from the auth proxy response (`UserInfo.namespace`), falling back to the static `server.namespace` (mandatory when `require_auth` is disabled); out-of-namespace channel operations are rejected with `NAMESPACE_MISMATCH`, and cross-namespace resume is refused (3500). Per-user connection limits and the admin/cluster user index are scoped to `(namespace, user)`.
+**Namespaces (multi-tenant, P1)**: every client-visible channel is namespaced — `ns:topic` (e.g. `acme:chat.room1`). `:` participates in topic segment matching alongside `.` (see `pkg/topics`). The namespace is resolved at connect time from the auth proxy response (`UserInfo.namespace`), falling back to the static `server.namespace` (mandatory when `require_auth` is disabled); out-of-namespace channel operations are rejected with `NAMESPACE_MISMATCH`, and cross-namespace resume is refused (3500). Per-user connection limits and the server API/cluster user index are scoped to `(namespace, user)`.
 
 Current listener model:
 
@@ -14,7 +14,7 @@ Current listener model:
 - Client gRPC streaming on `transport.grpc.addr`.
 - Optional client QUIC on `transport.quic.addr` (UDP, TLS 1.3; empty addr disables it).
 - Optional client KCP on `transport.kcp.addr` (UDP, KCP reliability layer with a TLS overlay; empty addr disables it).
-- Server-side gRPC admin API on `server.grpc_admin.addr`.
+- Server-side gRPC API (Server API) on `server.api.addr`.
 - Admin HTTP health/metrics on `server.http.addr`.
 
 ## Build Commands
@@ -142,7 +142,7 @@ func TestCSTrieMatcher(t *testing.T) {
 
 - **Sharding**: Hub uses 64 shards, subscription locks use 16384 shards
 - **Protocol abstraction**: Core logic independent of transport (WebSocket/gRPC)
-- **Split gRPC surfaces**: Client streaming and admin RPCs run on separate listeners but share the same in-process `Node`
+- **Split gRPC surfaces**: Client streaming and Server API RPCs run on separate listeners but share the same in-process `Node`
 - **Marshaler pattern**: `Marshaler` interface with `JSONMarshaler` and `ProtobufMarshaler`
 - **Disconnect handling**: Typed errors for graceful disconnection with codes
 
@@ -155,7 +155,7 @@ func TestCSTrieMatcher(t *testing.T) {
 - `cmd/server/main.go`: Bootstrap wiring and listener setup
 - `cmd/server/runtime.go`: gRPC preflight and startup ordering helpers
 - `pkg/transport/grpc/client_server.go`: Client gRPC streaming server component
-- `internal/admin/admin_server.go`: Admin gRPC server component
+- `internal/serverapi/server.go`: Server API gRPC server component
 - `pkg/transport/grpc/server.go`: Shared gRPC server preparation and listener lifecycle
 - `pkg/transport/quic/`: Optional QUIC client transport (length-prefixed frames over one bidirectional stream)
 - `pkg/transport/kcp/`: Optional KCP client transport (length-prefixed frames over a TLS-secured KCP session)

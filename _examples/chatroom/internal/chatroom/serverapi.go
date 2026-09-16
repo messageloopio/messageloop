@@ -13,27 +13,27 @@ import (
 	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
-// DefaultAdminAddr is where the demo server exposes its admin gRPC API.
-const DefaultAdminAddr = "127.0.0.1:19091"
+// DefaultAPIAddr is where the demo server exposes its Server API (server.api.addr).
+const DefaultAPIAddr = "127.0.0.1:19091"
 
-// AdminClient wraps the server-side gRPC admin API (server.grpc_admin.addr)
+// APIClient wraps the server-side gRPC API (Server API)
 // with bearer-token authentication. The demo backend and the e2e runner use
 // it to publish system messages, kick users, and inspect state.
-type AdminClient struct {
+type APIClient struct {
 	conn   *grpc.ClientConn
 	client serverv2.APIServiceClient
 	token  string
 }
 
-// NewAdminClient dials the admin API with the configured auth token.
-func NewAdminClient(ctx context.Context, addr, token string) (*AdminClient, error) {
+// NewAPIClient dials the Server API with the configured auth token.
+func NewAPIClient(ctx context.Context, addr, token string) (*APIClient, error) {
 	conn, err := grpc.NewClient(addr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("dial admin %s: %w", addr, err)
+		return nil, fmt.Errorf("dial server API %s: %w", addr, err)
 	}
-	return &AdminClient{
+	return &APIClient{
 		conn:   conn,
 		client: serverv2.NewAPIServiceClient(conn),
 		token:  token,
@@ -41,24 +41,24 @@ func NewAdminClient(ctx context.Context, addr, token string) (*AdminClient, erro
 }
 
 // Close releases the underlying connection.
-func (a *AdminClient) Close() error {
+func (a *APIClient) Close() error {
 	return a.conn.Close()
 }
 
-// ctxAuth returns a context carrying the admin bearer token.
-func (a *AdminClient) ctxAuth(ctx context.Context) context.Context {
+// ctxAuth returns a context carrying the Server API bearer token.
+func (a *APIClient) ctxAuth(ctx context.Context) context.Context {
 	return metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+a.token)
 }
 
 // PublishToChannel publishes one JSON payload to a channel and, when
-// addHistory is true, persists it into the channel history (admin Publish).
-func (a *AdminClient) PublishToChannel(ctx context.Context, channel, id string, msg *ChatMessage, addHistory bool) error {
+// addHistory is true, persists it into the channel history (Server API Publish).
+func (a *APIClient) PublishToChannel(ctx context.Context, channel, id string, msg *ChatMessage, addHistory bool) error {
 	payload, err := JSONPayload(msg)
 	if err != nil {
 		return err
 	}
 	req := &serverv2.PublishRequest{
-		RequestId: "admin-" + id,
+		RequestId: "api-" + id,
 		Publications: []*serverv2.Publication{{
 			Id: id,
 			Destination: &serverv2.Publication_Destination{
@@ -72,8 +72,8 @@ func (a *AdminClient) PublishToChannel(ctx context.Context, channel, id string, 
 	return err
 }
 
-// DisconnectUser force-disconnects every session of a user (admin Disconnect).
-func (a *AdminClient) DisconnectUser(ctx context.Context, userID string, code uint32, reason string) (map[string]bool, error) {
+// DisconnectUser force-disconnects every session of a user (Server API Disconnect).
+func (a *APIClient) DisconnectUser(ctx context.Context, userID string, code uint32, reason string) (map[string]bool, error) {
 	resp, err := a.client.Disconnect(a.ctxAuth(ctx), &serverv2.DisconnectRequest{
 		Users:  []string{userID},
 		Code:   code,
@@ -85,8 +85,8 @@ func (a *AdminClient) DisconnectUser(ctx context.Context, userID string, code ui
 	return resp.Results, nil
 }
 
-// Channels lists the currently active channels (admin GetChannels).
-func (a *AdminClient) Channels(ctx context.Context) ([]*serverv2.ChannelInfo, error) {
+// Channels lists the currently active channels (Server API GetChannels).
+func (a *APIClient) Channels(ctx context.Context) ([]*serverv2.ChannelInfo, error) {
 	resp, err := a.client.GetChannels(a.ctxAuth(ctx), &serverv2.GetChannelsRequest{})
 	if err != nil {
 		return nil, err
@@ -94,8 +94,8 @@ func (a *AdminClient) Channels(ctx context.Context) ([]*serverv2.ChannelInfo, er
 	return resp.Channels, nil
 }
 
-// Presence returns the presence snapshot of a channel (admin GetPresence).
-func (a *AdminClient) Presence(ctx context.Context, channel string) (map[string]*serverv2.PresenceInfo, error) {
+// Presence returns the presence snapshot of a channel (Server API GetPresence).
+func (a *APIClient) Presence(ctx context.Context, channel string) (map[string]*serverv2.PresenceInfo, error) {
 	resp, err := a.client.GetPresence(a.ctxAuth(ctx), &serverv2.GetPresenceRequest{Channel: channel})
 	if err != nil {
 		return nil, err
@@ -103,9 +103,9 @@ func (a *AdminClient) Presence(ctx context.Context, channel string) (map[string]
 	return resp.Clients, nil
 }
 
-// History returns the persisted history of a channel (admin GetHistory).
+// History returns the persisted history of a channel (Server API GetHistory).
 // A since offset of 0 reads from the head; a positive offset resumes from it.
-func (a *AdminClient) History(ctx context.Context, channel string, since uint64, limit int) ([]*serverv2.HistoryPublication, error) {
+func (a *APIClient) History(ctx context.Context, channel string, since uint64, limit int) ([]*serverv2.HistoryPublication, error) {
 	var sincePos *sharedv2.Position
 	if since > 0 {
 		sincePos = &sharedv2.Position{Offset: &since}

@@ -6,11 +6,11 @@ import (
 	"github.com/messageloopio/messageloop/pkg/topics"
 )
 
-// AdminIdentity is the authenticated identity of one admin API call
+// APIIdentity is the authenticated identity of one admin API call
 // (design §2.1). It is produced by the admin auth chain: the static
 // auth_tokens list, the allow_insecure escape hatch, or a proxy-verified
 // API key (clamped by the node capability ceiling).
-type AdminIdentity struct {
+type APIIdentity struct {
 	// KeyID identifies the credential: "static-token" for the static
 	// auth_tokens list, "insecure" for allow_insecure, and the backend's
 	// unique Key ID for proxy-verified keys (design D26: the unique ID, not
@@ -24,31 +24,31 @@ type AdminIdentity struct {
 	Caps Capability
 }
 
-// AdminIdentity key IDs. The static token list and the allow_insecure
+// APIIdentity key IDs. The static token list and the allow_insecure
 // escape hatch share the fixed "admin" principal; proxy keys are namespaced
 // under "key:" so per-Key allow lists (allow_publish etc.) can match them.
 const (
-	adminIdentityKeyIDStatic   = "static-token"
-	adminIdentityKeyIDInsecure = "insecure"
-	adminPrincipalUserID       = "admin"
+	apiKeyIDStatic            = "static-token"
+	apiKeyIDInsecure          = "insecure"
+	superadminPrincipalUserID = "admin"
 )
 
 // Principal returns the authorization subject for the identity. Static
 // tokens and allow_insecure keep the historical fixed "admin" principal;
-// a proxy-verified key maps to "key:"+KeyID. Kind is always PrincipalAdmin
+// a proxy-verified key maps to "key:"+KeyID. Kind is always PrincipalServer
 // and the (already clamped) capability bits pass through.
-func (i AdminIdentity) Principal() Principal {
-	userID := adminPrincipalUserID
-	if i.KeyID != adminIdentityKeyIDStatic && i.KeyID != adminIdentityKeyIDInsecure {
+func (i APIIdentity) Principal() Principal {
+	userID := superadminPrincipalUserID
+	if i.KeyID != apiKeyIDStatic && i.KeyID != apiKeyIDInsecure {
 		userID = "key:" + i.KeyID
 	}
-	return Principal{Kind: PrincipalAdmin, UserID: userID, Caps: i.Caps}
+	return Principal{Kind: PrincipalServer, UserID: userID, Caps: i.Caps}
 }
 
 // AllowsNamespace reports whether ns is inside the identity's namespace
 // scope: ["*"] allows everything, otherwise the exact list decides (an
 // empty list allows nothing).
-func (i AdminIdentity) AllowsNamespace(ns string) bool {
+func (i APIIdentity) AllowsNamespace(ns string) bool {
 	if slices.Contains(i.Namespaces, "*") {
 		return true
 	}
@@ -58,7 +58,7 @@ func (i AdminIdentity) AllowsNamespace(ns string) bool {
 // AllowsChannel reports whether the identity's namespace scope covers the
 // namespaced channel ch. A channel that does not parse under the
 // ns:topic grammar is rejected (fail-closed), regardless of scope.
-func (i AdminIdentity) AllowsChannel(ch string) bool {
+func (i APIIdentity) AllowsChannel(ch string) bool {
 	ns, err := topics.NamespaceOf(ch)
 	if err != nil {
 		return false

@@ -15,11 +15,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/messageloopio/messageloop/config"
-	"github.com/messageloopio/messageloop/internal/admin"
-	clusterpkg "github.com/messageloopio/messageloop/internal/cluster"
 	"github.com/messageloopio/messageloop/internal/authz"
+	clusterpkg "github.com/messageloopio/messageloop/internal/cluster"
 	"github.com/messageloopio/messageloop/internal/protocol"
 	"github.com/messageloopio/messageloop/internal/runtime"
+	"github.com/messageloopio/messageloop/internal/serverapi"
 	"github.com/messageloopio/messageloop/internal/session"
 	"github.com/messageloopio/messageloop/internal/survey"
 	"github.com/messageloopio/messageloop/pkg/redisbroker"
@@ -78,8 +78,8 @@ func (m *integrationAuthProxy) OnDisconnected(context.Context, *proxy.OnDisconne
 	return &proxy.OnDisconnectedProxyResponse{}, nil
 }
 
-func (m *integrationAuthProxy) AuthenticateAdmin(context.Context, *proxy.AuthenticateAdminProxyRequest) (*proxy.AuthenticateAdminProxyResponse, error) {
-	return &proxy.AuthenticateAdminProxyResponse{}, nil
+func (m *integrationAuthProxy) AuthenticateAPIKey(context.Context, *proxy.AuthenticateAPIKeyProxyRequest) (*proxy.AuthenticateAPIKeyProxyResponse, error) {
+	return &proxy.AuthenticateAPIKeyProxyResponse{}, nil
 }
 
 func (m *integrationAuthProxy) Name() string { return "integration-auth-stub" }
@@ -160,7 +160,7 @@ func (c *integrationCapturingTransport) messagesSnapshot() [][]byte {
 	return out
 }
 
-func TestClusterRedis_RemoteSessionAdminAndQueries(t *testing.T) {
+func TestClusterRedis_RemoteSessionAPIAndQueries(t *testing.T) {
 	redisCfg := requireClusterRedis(t, clusterRedisIntegrationDB)
 	ctx := context.Background()
 
@@ -174,7 +174,7 @@ func TestClusterRedis_RemoteSessionAdminAndQueries(t *testing.T) {
 	require.NoError(t, nodeA.AddClient(client))
 
 	channel := "cluster-admin-" + uuid.NewString()
-	ok, err := nodeB.SubscribeSession(ctx, nodeB.AdminPrincipal(), client.SessionID(), channel)
+	ok, err := nodeB.SubscribeSession(ctx, nodeB.APIPrincipal(), client.SessionID(), channel)
 	require.NoError(t, err)
 	require.True(t, ok)
 
@@ -200,7 +200,7 @@ func TestClusterRedis_RemoteSessionAdminAndQueries(t *testing.T) {
 		return false
 	}, 5*time.Second, 50*time.Millisecond)
 
-	ok, err = nodeB.UnsubscribeSession(ctx, nodeB.AdminPrincipal(), client.SessionID(), channel)
+	ok, err = nodeB.UnsubscribeSession(ctx, nodeB.APIPrincipal(), client.SessionID(), channel)
 	require.NoError(t, err)
 	require.True(t, ok)
 
@@ -887,10 +887,10 @@ func TestPresence_OccupancyAcrossRedisExactlyOne(t *testing.T) {
 		"occupancy frames must never become publications")
 }
 
-// TestAdmin_DisconnectUsersAcrossNodes verifies PR-06 cross-node: user U has
+// TestAPI_DisconnectUsersAcrossNodes verifies PR-06 cross-node: user U has
 // one session on nodeA and one on nodeB; an admin Disconnect with
 // users=[U] resolves both through the Redis user index and disconnects both.
-func TestAdmin_DisconnectUsersAcrossNodes(t *testing.T) {
+func TestAPI_DisconnectUsersAcrossNodes(t *testing.T) {
 	redisCfg := requireClusterRedis(t, clusterRedisIntegrationDB)
 	ctx := context.Background()
 
@@ -928,11 +928,11 @@ func TestAdmin_DisconnectUsersAcrossNodes(t *testing.T) {
 	// The handler requires a verified identity in the request context (the
 	// admin interceptor normally provides one); this test drives the handler
 	// directly, so it injects the static superadmin identity itself.
-	handler := admin.NewAPIServiceHandler(nodeA)
-	ctx = admin.WithAdminIdentity(ctx, authz.AdminIdentity{
+	handler := serverapi.NewAPIServiceHandler(nodeA)
+	ctx = serverapi.WithAPIIdentity(ctx, authz.APIIdentity{
 		KeyID:      "static-token",
 		Namespaces: []string{"*"},
-		Caps:       nodeA.AdminCapabilities(),
+		Caps:       nodeA.APICapabilities(),
 	})
 	resp, err := handler.Disconnect(ctx, &serverv2.DisconnectRequest{
 		Namespace: "dev",

@@ -74,8 +74,8 @@ func (m *connectAuthProxyStub) OnDisconnected(context.Context, *proxy.OnDisconne
 	return &proxy.OnDisconnectedProxyResponse{}, nil
 }
 
-func (m *connectAuthProxyStub) AuthenticateAdmin(context.Context, *proxy.AuthenticateAdminProxyRequest) (*proxy.AuthenticateAdminProxyResponse, error) {
-	return &proxy.AuthenticateAdminProxyResponse{}, nil
+func (m *connectAuthProxyStub) AuthenticateAPIKey(context.Context, *proxy.AuthenticateAPIKeyProxyRequest) (*proxy.AuthenticateAPIKeyProxyResponse, error) {
+	return &proxy.AuthenticateAPIKeyProxyResponse{}, nil
 }
 
 func (m *connectAuthProxyStub) Name() string { return "connect-auth-stub" }
@@ -333,8 +333,8 @@ func (m *denyingACLProxyStub) OnDisconnected(context.Context, *proxy.OnDisconnec
 	return &proxy.OnDisconnectedProxyResponse{}, nil
 }
 
-func (m *denyingACLProxyStub) AuthenticateAdmin(context.Context, *proxy.AuthenticateAdminProxyRequest) (*proxy.AuthenticateAdminProxyResponse, error) {
-	return &proxy.AuthenticateAdminProxyResponse{}, nil
+func (m *denyingACLProxyStub) AuthenticateAPIKey(context.Context, *proxy.AuthenticateAPIKeyProxyRequest) (*proxy.AuthenticateAPIKeyProxyResponse, error) {
+	return &proxy.AuthenticateAPIKeyProxyResponse{}, nil
 }
 
 func (m *denyingACLProxyStub) Name() string { return "denying-acl-stub" }

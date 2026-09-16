@@ -34,8 +34,8 @@ type Proxy interface {
 	// OnDisconnected notifies the backend when a client disconnects.
 	OnDisconnected(ctx context.Context, req *OnDisconnectedProxyRequest) (*OnDisconnectedProxyResponse, error)
 
-	// AuthenticateAdmin forwards an admin API key verification request to the backend service.
-	AuthenticateAdmin(ctx context.Context, req *AuthenticateAdminProxyRequest) (*AuthenticateAdminProxyResponse, error)
+	// AuthenticateAPIKey forwards a Server API key verification request to the backend service.
+	AuthenticateAPIKey(ctx context.Context, req *AuthenticateAPIKeyProxyRequest) (*AuthenticateAPIKeyProxyResponse, error)
 
 	// Name returns the name of this proxy instance.
 	Name() string
@@ -403,27 +403,27 @@ func FromProtoOnDisconnectedResponse(resp *proxypb.OnDisconnectedResponse) *OnDi
 	return &OnDisconnectedProxyResponse{}
 }
 
-// AuthenticateAdminProxyRequest represents an admin API key verification request to be proxied.
-type AuthenticateAdminProxyRequest struct {
+// AuthenticateAPIKeyProxyRequest represents a Server API key verification request to be proxied.
+type AuthenticateAPIKeyProxyRequest struct {
 	APIKey     string
 	RemoteAddr string
 }
 
-// ToProtoRequest converts an AuthenticateAdminProxyRequest to the protobuf AuthenticateAdminRequest.
-func (r *AuthenticateAdminProxyRequest) ToProtoRequest() *proxypb.AuthenticateAdminRequest {
-	return &proxypb.AuthenticateAdminRequest{
+// ToProtoRequest converts an AuthenticateAPIKeyProxyRequest to the protobuf AuthenticateAPIKeyRequest.
+func (r *AuthenticateAPIKeyProxyRequest) ToProtoRequest() *proxypb.AuthenticateAPIKeyRequest {
+	return &proxypb.AuthenticateAPIKeyRequest{
 		ApiKey:     r.APIKey,
 		RemoteAddr: r.RemoteAddr,
 	}
 }
 
-// AuthenticateAdminProxyResponse represents an admin authentication response from the proxy backend.
-type AuthenticateAdminProxyResponse struct {
+// AuthenticateAPIKeyProxyResponse represents a Server API key authentication response from the proxy backend.
+type AuthenticateAPIKeyProxyResponse struct {
 	Error    *sharedv2.Error
-	Identity *AdminIdentityInfo
+	Identity *APIKeyInfo
 }
 
-// AdminIdentityInfo represents the admin identity decided by the proxy backend.
+// APIKeyInfo represents the Server API caller identity decided by the proxy backend.
 // KeyID is the backend's unique key ID (not the display name: allow lists match
 // principals as "key:<id>" and display names are not unique — design D26).
 // Empty Namespaces means deny everything (fail-closed); Capabilities is a
@@ -431,29 +431,29 @@ type AuthenticateAdminProxyResponse struct {
 // MaxAgeSeconds is a relative duration (how much longer this verification
 // result may be reused, avoiding clock skew between the two systems); 0 means
 // the caller's configured TTL.
-type AdminIdentityInfo struct {
+type APIKeyInfo struct {
 	KeyID         string
 	Namespaces    []string
 	Capabilities  []string
 	MaxAgeSeconds int64
 }
 
-// FromProtoAuthenticateAdminResponse creates an AuthenticateAdminProxyResponse from the protobuf AuthenticateAdminResponse.
+// FromProtoAuthenticateAPIKeyResponse creates an AuthenticateAPIKeyProxyResponse from the protobuf AuthenticateAPIKeyResponse.
 // Identity stays nil when the backend decided no identity (e.g. it answered with an error only).
-func FromProtoAuthenticateAdminResponse(resp *proxypb.AuthenticateAdminResponse) *AuthenticateAdminProxyResponse {
+func FromProtoAuthenticateAPIKeyResponse(resp *proxypb.AuthenticateAPIKeyResponse) *AuthenticateAPIKeyProxyResponse {
 	if resp == nil {
-		return &AuthenticateAdminProxyResponse{}
+		return &AuthenticateAPIKeyProxyResponse{}
 	}
-	var identity *AdminIdentityInfo
+	var identity *APIKeyInfo
 	if resp.Identity != nil {
-		identity = &AdminIdentityInfo{
+		identity = &APIKeyInfo{
 			KeyID:         resp.Identity.KeyId,
 			Namespaces:    resp.Identity.Namespaces,
 			Capabilities:  resp.Identity.Capabilities,
 			MaxAgeSeconds: resp.Identity.MaxAgeSeconds,
 		}
 	}
-	return &AuthenticateAdminProxyResponse{
+	return &AuthenticateAPIKeyProxyResponse{
 		Error:    resp.Error,
 		Identity: identity,
 	}

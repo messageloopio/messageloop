@@ -50,10 +50,10 @@ func (n *Node) ExpandUserSessions(ctx context.Context, namespace, userID string)
 	return result
 }
 
-// ObserveAdminUserFanout records the fan-out size (number of sessions) of one
+// ObserveAPIUserFanout records the fan-out size (number of sessions) of one
 // user-targeted admin operation (op: publish|disconnect|subscribe|unsubscribe).
-func (n *Node) ObserveAdminUserFanout(op string, sessions int) {
+func (n *Node) ObserveAPIUserFanout(op string, sessions int) {
 	if n.metrics != nil {
-		n.metrics.AdminUserFanout.WithLabelValues(op).Observe(float64(sessions))
+		n.metrics.ServerAPIUserFanout.WithLabelValues(op).Observe(float64(sessions))
 	}
 }

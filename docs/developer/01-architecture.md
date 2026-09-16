@@ -2,7 +2,7 @@
 
 本文档描述 MessageLoop 服务器的总体架构与核心组件设计，面向希望理解或修改服务端代码的开发者。文中所有类型名、方法名、常量与行为均以仓库源码为准。
 
-配套文档：[《配置参考》](02-configuration.md)、[《管理 API 参考》](03-admin-api.md)、[《分布式集群指南》](04-cluster.md)、[《可观测性指南》](05-observability.md)、[《开发指南》](06-development.md)、[《客户端协议参考》](../protocol.md) 与[《部署指南》](../deployment.md)。
+配套文档：[《配置参考》](02-configuration.md)、[《Server API 参考》](03-server-api.md)、[《分布式集群指南》](04-cluster.md)、[《可观测性指南》](05-observability.md)、[《开发指南》](06-development.md)、[《客户端协议参考》](../protocol.md) 与[《部署指南》](../deployment.md)。
 
 ## 1. 概述
 
@@ -20,7 +20,7 @@ MessageLoop 的核心设计目标可以归纳为四点：
 客户端 ──► gRPC 流监听器  (transport.grpc.addr)        ──┤
 客户端 ──► QUIC 监听器    (transport.quic.addr, 可选)  ──┤
 客户端 ──► KCP 监听器     (transport.kcp.addr, 可选)   ──┤
-管理工具 ─► gRPC 管理 API  (server.grpc_admin.addr)     ──┼─► Node（中央协调者）
+服务端调用方 ─► Server API (gRPC)  (server.api.addr)     ──┼─► Node（中央协调者）
 运维系统 ─► HTTP 健康/指标  (server.http.addr)          ──┘
                                                               │
          ┌──────────────┬───────────────┬─────────────────────┼───────────────┬──────────────┬──────────────┐
@@ -49,7 +49,7 @@ MessageLoop 的核心设计目标可以归纳为四点：
 | `Broker` | internal/stream/broker.go、broker_memory.go、pkg/redisbroker/ | 发布/订阅与历史存储；内存实现与 Redis 实现 |
 | `Presence` | internal/occupancy/、pkg/redisbroker/presence_redis.go | 频道内在线成员追踪与 join/leave 事件分发 |
 | `Survey` | internal/survey/survey.go、internal/runtime/node.go | 向频道订阅者广播请求并带超时收集响应 |
-| `Authorizer` | internal/authz/authorizer.go | 单一授权求值器：一个 `Decide`、一张 `server.authorizer` 表、一种通配语言；频道策略 Effects 与 Admin Capability 闭集 |
+| `Authorizer` | internal/authz/authorizer.go | 单一授权求值器：一个 `Decide`、一张 `server.authorizer` 表、一种通配语言；频道策略 Effects 与 Server API 能力位闭集 |
 | `Proxy` | proxy/ | RPC 转发与鉴权/ACL/生命周期钩子的后端集成 |
 | `Cluster` | internal/runtime/cluster.go 及 cluster_*.go（契约在 internal/cluster） | 可选的 Redis 支撑分布式控制面（详见[《分布式集群指南》](04-cluster.md)） |
 | `Metrics` | internal/metrics/metrics.go | Prometheus 指标收集（详见[《可观测性指南》](05-observability.md)） |
@@ -87,7 +87,7 @@ MessageLoop 的核心设计目标可以归纳为四点：
   └─► newBroker: 按 broker.type 选 memory/redis; node.SetBroker
   └─► 若 broker 支持 Ping，注册为健康探针 (SetHealthCheck)
   └─► setupProxy: 从配置构造 HTTP/gRPC 代理并注册路由
-  └─► prepareGRPCServers: 预绑定客户端 gRPC 与管理 gRPC 两个监听器（失败则释放已绑定的）
+  └─► prepareGRPCServers: 预绑定客户端 gRPC 与Server API gRPC 两个监听器（失败则释放已绑定的）
   └─► newWebSocketServer / newAdminServer
   └─► app.OnStart(node.Run)   // broker 就绪后开始服务
   └─► app.OnStop(node.Shutdown)
@@ -114,7 +114,7 @@ MessageLoop 的核心设计目标可以归纳为四点：
 | `LookupSession` / `LookupSubscriber` | 会话与订阅查找（返回 `*Session`） |
 | `PrepareSessionUser` | 跨用户本机 resume 前原子执行：目标用户 `maxConnsPerUser` 限额检查 + `connShard` 用户归属迁移；失败不改动任何状态（旧会话保持 Attached） |
 | `RemoveSessionIfMatches` | 仅在注册的会话与当前会话一致时移除，防止失败的旧连接把已接管/已恢复的会话驱逐出去 |
-| `GetActiveChannels` | 管理 API 用的活跃频道列表（含订阅者数） |
+| `GetActiveChannels` | Server API 用的活跃频道列表（含订阅者数） |
 | `DrainAll` | 并发向所有连接发送 `Close(disconnect)` 并等待关闭 |
 
 消息 ID 规则：实时投递与恢复共用 `publicationID(channel, offset)`（`"频道-offset"`），客户端据此去重；瞬时事件（offset 为 0）回退为随机 UUID，避免同一频道所有瞬时事件共享同一个 ID。
@@ -150,7 +150,7 @@ MessageLoop 的核心设计目标可以归纳为四点：
 8. 处理 Connect 携带的订阅列表：先做订阅数上限检查（超限 `DisconnectChannelLimit`），逐频道命名空间守卫 / Authorizer/代理检查，`AddSubscription` + presence 登记 + 发布 join 事件。
 9. 消息恢复（流式恢复，internal/runtime/recover.go）：先发裸 `Connected`（v2 协议的 Connected 不携带历史批次与 presence 列表），再对每个 `recover=true` 的频道走统一 Replayer：`fresh=true` 或 resume 时快照 epoch 与 broker epoch 不一致（两边都非空）才从频道历史开头恢复；否则 cursor 带 offset 时从 `offset+1` 续读，cursor 未带 offset 时回退服务端已记录的 delivered offset（有则续读，无则跳过）。`broker.History` 以 `MaxRecoveredPublications`（1000，请求级配额、多频道共享）为限，逐条 `Publication(replay=true)` 经 `Session.Send` 落线（每条受 `MaxMessageSize` 约束），最后每频道一条 `RecoverComplete{channel, position, truncated, gap, gap_reason, error?}`（标 Control）。恢复失败不撤订订阅。
 
-**管理面鉴权与授权（internal/admin/auth.go + scope.go，与客户端面 `$authenticate` 正交）**：客户端面的凭证经 FindProxy(`$authenticate`) 验证；管理 gRPC 监听器则在每个一元 RPC 前过自己的认证拦截器，解析三条凭证路径——静态 `auth_tokens`（逐把常数时间比较，命中即超管身份）、`allow_insecure`（仅回环绑定，G5 fail-closed 启动门）、API Key（经 `admin_auth: true` 唯一指派的代理 `AuthenticateAdmin` 校验：sha256 缓存 + 同 Key 并发去重 + 2s 错误短缓存与 5 连错 30s 熔断保证 fail-closed 且 fail-fast，proxy 授予按节点能力上限与 namespace 语法钳制）。认证产出的 `AdminIdentity` 随后穿过 scope 层（internal/admin/scope.go）——全部 8 个管理 RPC 进 handler 前的单一 choke point：声明式能力表求值 + 全局面 channel 语法门（G4）+ 按拒绝语义矩阵改写请求（越界目标对 handler 结构性不可见），handler 因此 scope-free。详见[《管理 API 参考》](03-admin-api.md)。
+**Server API 鉴权与授权（internal/serverapi/auth.go + scope.go，与客户端面 `$authenticate` 正交）**：客户端面的凭证经 FindProxy(`$authenticate`) 验证；Server API gRPC 监听器则在每个一元 RPC 前过自己的认证拦截器，解析三条凭证路径——静态 `auth_tokens`（逐把常数时间比较，命中即超管身份）、`allow_insecure`（仅回环绑定，G5 fail-closed 启动门）、API Key（经 `api_auth: true` 唯一指派的代理 `AuthenticateAPIKey` 校验：sha256 缓存 + 同 Key 并发去重 + 2s 错误短缓存与 5 连错 30s 熔断保证 fail-closed 且 fail-fast，proxy 授予按节点能力上限与 namespace 语法钳制）。认证产出的 `APIIdentity` 随后穿过 scope 层（internal/serverapi/scope.go）——全部 8 个 Server API RPC 进 handler 前的单一 choke point：声明式能力表求值 + 全局面 channel 语法门（G4）+ 按拒绝语义矩阵改写请求（越界目标对 handler 结构性不可见），handler 因此 scope-free。详见[《Server API 参考》](03-server-api.md)。
 
 **命名空间守卫（internal/session/namespace.go）**：会话携带 namespace 后，`precheckNamespace` 作为统一入口门挂在 `handleMessage` 分发点，对所有携带频道引用的信封做作用域检查，各 handler 内的 `checkNamespace` 作为纵深防御保留：
 
@@ -241,11 +241,11 @@ join/leave 事件以 **Occupancy** 概念分发：每次 Join/Leave 取一个单
 5. `survey.Wait(ctx)` 收集应答直到超时或 ctx 取消；`timeout <= 0` 时回退到 `DefaultSurveyWaitTimeout`（5s）；
 6. 集群模式下经命令总线广播 `ClusterCommandSurvey`，汇总各节点结果并统一排序。
 
-**客户端发起的 Survey（`handleSurvey`，internal/session/client.go）**：客户端可对精确频道发起 Survey 并异步收集应答，与 Admin 流程独立：
+**客户端发起的 Survey（`handleSurvey`，internal/session/client.go）**：客户端可对精确频道发起 Survey 并异步收集应答，与 Server API 流程独立：
 
 1. 同步校验，任一失败即回顶层 Error 信封（不断连、不撤订阅）：channel 为空或是通配 → `BAD_REQUEST`；`sessionCoversChannel` 未覆盖（精确订阅或通配命中，授权放行不能偷看未加入的频道）→ `PERMISSION_DENIED`；Authorizer `Decide(Survey)` 拒绝——`Effects.Survey=false`（默认关）→ `SURVEY_DISABLED`，未配 `allow_survey` 或 deny 命中 → `PERMISSION_DENIED`；同会话已有一笔在途 Survey 或超过 1/s 限流 → `RATE_LIMITED`。
 2. 通过校验后不阻塞读循环：标记 in-flight，worker goroutine 先做 `countMatchingSubscribers` 集群 `count_only` 预检（本地快路径 + 广播，超过 `max_survey_subscribers` → `SURVEY_TOO_MANY_SUBSCRIBERS`，零条 outbound `SurveyRequest`），再调 `Node.Survey`，汇总后异步回 `SurveyResult`（回显发起方 `request_id`）。
-3. Admin `Node.Survey`：持有 `survey.bypass_gate` 能力位时不受 `Decide(Survey)` 与 `max_survey_subscribers` 门限制约；无此位则与客户端走相同的门。
+3. Server API `Node.Survey`：持有 `survey.bypass_gate` 能力位时不受 `Decide(Survey)` 与 `max_survey_subscribers` 门限制约；无此位则与客户端走相同的门。
 
 ### 3.7 Authorizer（internal/authz/authorizer.go）
 
@@ -262,7 +262,7 @@ join/leave 事件以 **Occupancy** 概念分发：每次 Join/Leave 取一个单
 
 `Effects(ch)` = `DefaultChannelPolicy()` overlay `server.authorizer.default`，再按表顺序 overlay 每条匹配规则（后写覆盖先写，不是 first-match）；`TransientOnly` 强制 `History=false` 且 `Recover=false`。
 
-**Admin Capability 闭集**：`history.read` / `presence.read` / `channels.list` / `session.act` / `user.fanout` / `subscribe.any` / `presence.large_snapshot` / `survey.bypass_gate` / `pattern.global`（预留）。`server.grpc_admin.capabilities` 省略 = 除 `pattern.global` 外全位；显式 `[]` = 零位（锁死 Admin 数据面）；未知名 = Validate 错误。`GetHistory`/`GetPresence`/`GetChannels`/代订/按 user 扇出必须持位，不得旁路。
+**Server API 能力位闭集**：`history.read` / `presence.read` / `channels.list` / `session.act` / `user.fanout` / `subscribe.any` / `presence.large_snapshot` / `survey.bypass_gate` / `pattern.global`（预留）。`server.api.capabilities` 省略 = 除 `pattern.global` 外全位；显式 `[]` = 零位（锁死 Server API 数据面）；未知名 = Validate 错误。`GetHistory`/`GetPresence`/`GetChannels`/代订/按 user 扇出必须持位，不得旁路。
 
 **与代理 ACL 的关系**：订阅/发布先过静态 `Decide`，再问代理——代理命中时 `SubscribeAcl`/`PublishAcl` 作为额外的门；代理允许不得跳过静态 deny（见 `checkSubscribeACL` 与 `handlePublish`），代理拒绝只否决这一次请求。
 
@@ -307,9 +307,9 @@ type Transport interface {
 ### 4.3 gRPC 流（pkg/transport/grpc/）
 
 - `client_server.go`：`PrepareClientServer` 注册 `MessageLoopService`，每个客户端一条双向流（handler.go 的 `MessageLoop` 方法），固定使用 Protobuf。
-- `server.go`：共享的 `PrepareServer`——预绑定监听器、加载 TLS、施加 `ForceServerCodec(RawCodec)` 与 `MaxRecvMsgSize`，统一生命周期；认证拦截器由调用方按需注入（管理面在 internal/admin 装配，见下条），客户端流监听器无认证拦截器。
+- `server.go`：共享的 `PrepareServer`——预绑定监听器、加载 TLS、施加 `ForceServerCodec(RawCodec)` 与 `MaxRecvMsgSize`，统一生命周期；认证拦截器由调用方按需注入（Server API 面在 internal/serverapi 装配，见下条），客户端流监听器无认证拦截器。
 - `transport.go`：写入经单 worker goroutine 串行化（`sendCh` 深度 1，仅作 handoff，不构成第二层缓冲），默认写超时 10s，入队前拷贝消息字节（调用方可能复用池化缓冲）。关闭时先投递 `DISCONNECT_ERROR` 错误信封（数值断连码编码在 metadata 的 `disconnect_code` 条目中，队列堵塞时以 1s 超时降级为直接关闭）再退出 worker。
-- internal/admin/admin_server.go：`PrepareAdminServer` 在独立监听器注册 `APIService`（管理 API），并安装管理认证拦截器（三种凭证路径：静态 `auth_tokens` / `allow_insecure` / `admin_auth` 指派 proxy 校验的 API Key），详见[《管理 API 参考》](03-admin-api.md)。
+- internal/serverapi/server.go：`PrepareServer` 在独立监听器注册 `APIService`（Server API），并安装 Server API 认证拦截器（三种凭证路径：静态 `auth_tokens` / `allow_insecure` / `api_auth` 指派 proxy 校验的 API Key），详见[《Server API 参考》](03-server-api.md)。
 
 ### 4.4 RawCodec（pkg/transport/grpc/codec.go）
 
@@ -418,11 +418,11 @@ Hub 的 `wcSubs` 记录每个通配符订阅（键 `sessionID:channel`），广�
   │                   │  代理错误→PROXY_ERROR）                  │
 ```
 
-### (d) Survey 请求 / 回复（Admin 与客户端两条路径）
+### (d) Survey 请求 / 回复（Server API 与客户端两条路径）
 
 ```
-Admin 路径：
-管理方               Node (Survey)          SurveyRegistry        订阅客户端
+Server API 路径：
+Server API 调用方       Node (Survey)          SurveyRegistry        订阅客户端
   │── Survey ───────►│                       │                      │
   │                  │── GetMatchingSubscribers
   │                  │── NewSurvey(id,ch,payload,timeout)
@@ -472,10 +472,10 @@ Admin 路径：
 
 Occupancy 事件不是 Publication（走 broker 的实时 `occupancy` 消息类型，Redis 端与 `pub` 信封分开解析），不复用 `PublishTransient`，`Hub.broadcastPublication` 只扇 `Publication`。
 
-### (f) 经管理 API 查询历史
+### (f) 经 Server API 查询历史
 
 ```
-管理工具                    Admin gRPC API               Node              Broker
+服务端调用方                Server API (gRPC)           Node              Broker
   │── GetHistory ─────────►│                            │                  │
   │   (Bearer Token /      │── 认证拦截器（三凭证路径）    │                  │
   │    x-api-key)          │── scope 层（能力表 + 语法门   │                  │
@@ -538,7 +538,7 @@ Occupancy 事件不是 Publication（走 broker 的实时 `occupancy` 消息类�
 | internal/authz/ | Authorizer（`authorizer.go`）与求值辅助 |
 | internal/protocol/ | 协议常量：`disconnect.go`（断连码）、`version.go`（协议版本门） |
 | internal/cluster/ | 集群控制面契约（`contracts.go`、`state.go`、`epoch.go`、`user_index.go`）与子包 `hmac/`、`sim/` |
-| internal/admin/ | 管理 gRPC API：`admin_server.go`、`api_handler.go`、`auth.go`（认证链：三凭证路径 + 缓存/去重/熔断）、`scope.go`（授权 scope 层：能力表 + 请求遍历改写） |
+| internal/serverapi/ | Server API gRPC API：`admin_server.go`、`api_handler.go`、`auth.go`（认证链：三凭证路径 + 缓存/去重/熔断）、`scope.go`（授权 scope 层：能力表 + 请求遍历改写） |
 | internal/metrics/ | Prometheus 指标定义（`metrics.go`） |
 | cmd/server/ | 可执行入口：`main.go`（装配与监听器）、`runtime.go`（gRPC 预绑定与启动顺序）、`envconfig.go`（`MESSAGELOOP_*` 环境变量覆盖） |
 | config/ | 配置结构（`config.go`）与校验 |

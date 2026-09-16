@@ -77,8 +77,8 @@ const (
 )
 
 const (
-	PrincipalUser  = authz.PrincipalUser
-	PrincipalAdmin = authz.PrincipalAdmin
+	PrincipalUser   = authz.PrincipalUser
+	PrincipalServer = authz.PrincipalServer
 )
 
 const (
@@ -95,7 +95,7 @@ const (
 
 var (
 	ClosedCapabilityNames    = authz.ClosedCapabilityNames
-	DefaultAdminCapabilities = authz.DefaultAdminCapabilities
+	DefaultCapabilityCeiling = authz.DefaultCapabilityCeiling
 	ErrInvalidRulePattern    = authz.ErrInvalidRulePattern
 	NewAuthorizer            = authz.NewAuthorizer
 )
@@ -189,13 +189,13 @@ type (
 )
 
 const (
-	ClusterCommandDisconnect       = cluster.ClusterCommandDisconnect
-	ClusterCommandSubscribe        = cluster.ClusterCommandSubscribe
-	ClusterCommandUnsubscribe      = cluster.ClusterCommandUnsubscribe
-	ClusterCommandPublish          = cluster.ClusterCommandPublish
-	ClusterCommandTakeover         = cluster.ClusterCommandTakeover
-	ClusterCommandSurvey           = cluster.ClusterCommandSurvey
-	ClusterCommandMetaExcludeSelf  = cluster.ClusterCommandMetaExcludeSelf
+	ClusterCommandDisconnect      = cluster.ClusterCommandDisconnect
+	ClusterCommandSubscribe       = cluster.ClusterCommandSubscribe
+	ClusterCommandUnsubscribe     = cluster.ClusterCommandUnsubscribe
+	ClusterCommandPublish         = cluster.ClusterCommandPublish
+	ClusterCommandTakeover        = cluster.ClusterCommandTakeover
+	ClusterCommandSurvey          = cluster.ClusterCommandSurvey
+	ClusterCommandMetaExcludeSelf = cluster.ClusterCommandMetaExcludeSelf
 )
 
 const (

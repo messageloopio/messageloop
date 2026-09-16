@@ -311,7 +311,7 @@ func TestHeartbeat_ValidateRejectsSubSecond(t *testing.T) {
 			GRPC:      config.GRPCTransport{Addr: ":9090"},
 		},
 		Server: config.Server{
-			GRPCAdmin: config.GRPCAdmin{Addr: "127.0.0.1:9091", AuthTokens: []string{"test-admin-token-0123456789"}},
+			API:       config.ServerAPI{Addr: "127.0.0.1:9091", AuthTokens: []string{"test-admin-token-0123456789"}},
 			Namespace: "dev",
 		},
 	}

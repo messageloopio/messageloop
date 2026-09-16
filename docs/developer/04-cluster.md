@@ -2,7 +2,7 @@
 
 本文档描述 MessageLoop 的分布式集群（distributed cluster）机制：多个服务端节点如何通过共享的 Redis 构成一个逻辑集群，以及会话归属、远端接管、集群级 Survey、投影修复、Presence 聚合等集群特有行为的原理与运维要点。文中所有类型名、方法名、Redis 键、默认值与行为均以仓库源码为准。
 
-配套文档：[《架构指南》](01-architecture.md)（通用架构）、[《配置参考》](02-configuration.md)（全部配置字段）、[《管理 API 参考》](03-admin-api.md)、[《可观测性指南》](05-observability.md)、[《开发指南》](06-development.md)，以及[《客户端协议参考》](../protocol.md) 与[《部署指南》](../deployment.md)。
+配套文档：[《架构指南》](01-architecture.md)（通用架构）、[《配置参考》](02-configuration.md)（全部配置字段）、[《Server API 参考》](03-server-api.md)、[《可观测性指南》](05-observability.md)、[《开发指南》](06-development.md)，以及[《客户端协议参考》](../protocol.md) 与[《部署指南》](../deployment.md)。
 
 ## 1. 概述
 
@@ -18,12 +18,12 @@ MessageLoop 可以以两种形态运行：
 | **Redis broker** | `broker.type: redis` | 消息管道：发布经 Redis Streams 写历史、经 Redis Pub/Sub 实时分发，所有节点共享同一份历史与实时流量 |
 | **集群控制面（cluster control plane）** | `cluster.enabled: true` | 节点间协调：会话目录（session directory）、命令总线（command bus）、频道投影（query store）、节点租约（node lease）、投影修复（projection repair），实现跨节点会话管理与集群级操作 |
 
-启用 `broker.type: redis` 但 `cluster.enabled: false` 时，各节点仍然共享消息与历史（例如多个无状态节点前端挂同一个 Redis），但节点之间互不感知：会话属于连接所在节点，管理操作只作用于本节点。只有 `cluster.enabled: true` 才开启分布式控制面——节点彼此发现、会话可以跨节点接管、Survey 与频道查询是全集群范围的。`cluster.enabled` 是控制面的总开关，这一点请与 `broker.type` 区分清楚。
+启用 `broker.type: redis` 但 `cluster.enabled: false` 时，各节点仍然共享消息与历史（例如多个无状态节点前端挂同一个 Redis），但节点之间互不感知：会话属于连接所在节点，Server API 操作只作用于本节点。只有 `cluster.enabled: true` 才开启分布式控制面——节点彼此发现、会话可以跨节点接管、Survey 与频道查询是全集群范围的。`cluster.enabled` 是控制面的总开关，这一点请与 `broker.type` 区分清楚。
 
 适用场景：
 
 - 单节点无法承载全部在线连接，需要横向扩容，且要求会话在节点间可迁移、断线可在任意节点恢复；
-- 需要集群级管理操作：远程断开/订阅/退订、跨节点会话定向投递、全集群 Survey；
+- 需要集群级 Server API 操作：远程断开/订阅/退订、跨节点会话定向投递、全集群 Survey；
 - 需要全集群统一的频道列表与在线状态视图。
 
 代价是引入对 Redis 的强依赖（见第 9 节故障与恢复）。
@@ -177,7 +177,7 @@ cluster:
 
 命令类型（`ClusterCommandType`）：`disconnect`、`subscribe`、`unsubscribe`、`publish`、`takeover`、`survey`。命令结果状态（`ClusterCommandStatus`）：`pending`、`succeeded`、`failed`、`in_progress`、`unknown_final_state`。
 
-远程 `subscribe`/`unsubscribe` 执行时还会附带本地副作用：presence 登记/清除与 join/leave 事件的发布，因此经管理 API 远程订阅的会话在全集群的 presence 视图中同样可见。
+远程 `subscribe`/`unsubscribe` 执行时还会附带本地副作用：presence 登记/清除与 join/leave 事件的发布，因此经Server API 远程订阅的会话在全集群的 presence 视图中同样可见。
 
 ## 4. 会话归属与接管
 
@@ -228,7 +228,7 @@ Attach 失败则走真正的 `Close`（presence Leave、撤订阅、删目录状
 3. 否则向旧 owner 发送 `takeover` 命令（携带 `LeaseVersion` 与元数据 `new_node_id` / `new_incarnation_id`）。目标节点校验 `LeaseVersion` 与本地一致（不一致返回 `LEASE_VERSION_MISMATCH`）后，对旧连接执行 `Fence(DisconnectStale)`：撤本地订阅与 Hub 条目、关附件——不 Leave、不删目录条目（新 owner 的 fencing 已就位）。目标节点上会话已不存在时返回 `SESSION_NOT_FOUND`，发起方视为成功继续。目标节点进程完全不在（client 对象缺失）时同样按成功应答。
 4. **接管失败时的降级**：takeover 命令失败（目标节点刚宕机、命令超时，或目标存活预检报 `TARGET_NODE_NOT_ALIVE`）时，检查目标节点的节点租约——节点租约也已不存在时，视为旧节点已死，继续执行恢复；节点租约仍在则中止恢复，并把抢占到的租约 CAS 回滚到原 owner（把 fencing 还回去，`rollbackSessionTakeover`）；节点租约查询本身失败时同样先尝试回滚再返回错误。
 5. 恢复成功后在本地重建会话状态：身份字段、订阅集合、`clusterLeaseVersion = 旧租约版本 + 1`，并 `AddClient` 注册；随后 `restoreSessionSubscriptions` 逐频道重建订阅 + presence 登记 + 本节点投影 +1。**hydrate 是逐频道软失败**：某频道 restore/presence 失败 → 该频道不恢复（presence 失败会把刚加的订阅一并撤掉，投影从未 +1 故无需补偿）、记入失败列表、继续其余频道；不做整体回滚——会话以部分订阅存活，全部频道失败时亦然。`Connected` 发出之后，每个失败频道收到一个顶层 Error 信封：`code=RECOVER_FAILED`、`type=recover_error`、`metadata.entries["channel"]=<ch>`；失败频道同时被排除在快照频道的恢复续读集合之外，客户端按既有顶层错误路径自行重订。
-6. **hydrate 不重新过 Authorizer/ACL**：恢复是已授权会话的延续，快照里的订阅关系在建立时已通过当时的 ACL；若权限在会话存活期间被回收，由管理面（Disconnect/权限变更后的强制下线）而非恢复路径负责。
+6. **hydrate 不重新过 Authorizer/ACL**：恢复是已授权会话的延续，快照里的订阅关系在建立时已通过当时的 ACL；若权限在会话存活期间被回收，由 Server API（Disconnect/权限变更后的强制下线）而非恢复路径负责。
 
 ### 4.4 跨节点恢复与 epoch
 
@@ -242,7 +242,7 @@ Attach 失败则走真正的 `Close`（presence Leave、撤订阅、删目录状
 
 ### 4.5 按 user 展开的用户索引（user index）
 
-管理 API 支持按 `user_id` 对用户的全部 session 做 Publish / Disconnect / Subscribe / Unsubscribe（见[《管理 API 参考》](03-admin-api.md)）。展开 = 本地 `Hub.SessionsByUser` ∪ 集群 user 索引（按命名空间作用域），随后对每个 session 校验 lease 的 `UserID` 与 `Namespace`（索引不是权威），最后复用现有 session 级命令，不新增集群命令类型。
+Server API 支持按 `user_id` 对用户的全部 session 做 Publish / Disconnect / Subscribe / Unsubscribe（见[《Server API 参考》](03-server-api.md)）。展开 = 本地 `Hub.SessionsByUser` ∪ 集群 user 索引（按命名空间作用域），随后对每个 session 校验 lease 的 `UserID` 与 `Namespace`（索引不是权威），最后复用现有 session 级命令，不新增集群命令类型。
 
 **本地索引**（internal/session/hub.go 的 `SessionsByUser`）：遍历 `connShard.users` 中该 user 所在分片。空 user_id 的匿名连接不进入按 user API。
 
@@ -274,7 +274,7 @@ Attach 失败则走真正的 `Close`（presence Leave、撤订阅、删目录状
 1. **本地调查**：`localSurvey` 正常执行（含发送超时 10 秒、应答会话白名单校验、注册表上限 1000 等既有语义），结果为每条应答标注本节点的 `NodeID` / `IncarnationID`。
 2. **集群广播**：经命令总线 `BroadcastCommand` 发送 `ClusterCommandSurvey`，元数据携带 `exclude_self=true` 与 `survey_timeout_ms`（调用方超时换算成毫秒）。广播目标由扫描节点租约键得出（见 3.2），因此只覆盖当前存活的节点实例。
 
-远端节点执行 `handleClusterSurveyCommand`：在其本地执行 `localSurvey`（超时默认 5 秒，可被 `survey_timeout_ms` 覆盖），结果编码进应答元数据返回。客户端发起的 Survey 在广播前还有一步 `count_only` 预检命令（只统计订阅者数不下发请求，用于 `max_survey_subscribers` 门），Admin 路径不受影响。
+远端节点执行 `handleClusterSurveyCommand`：在其本地执行 `localSurvey`（超时默认 5 秒，可被 `survey_timeout_ms` 覆盖），结果编码进应答元数据返回。客户端发起的 Survey 在广播前还有一步 `count_only` 预检命令（只统计订阅者数不下发请求，用于 `max_survey_subscribers` 门），Server API 路径不受影响。
 
 聚合（`expandClusterSurveyResults`）：本地结果 + 各远端节点的结果合并；某个节点执行失败（命令失败、超时、结果解码失败）时，该节点以一条带 `error` 的 `SurveyResult` 表示（错误码如 `CLUSTER_COMMAND_SEND_FAILED`），整体调查不因此失败。最终结果按 `(NodeID, IncarnationID, SessionID)` 排序。
 
@@ -282,7 +282,7 @@ Attach 失败则走真正的 `Close`（presence Leave、撤订阅、删目录状
 
 ## 6. 修复器（repairer）与 membership OnLeave
 
-**解决的问题**：集群级的活跃频道列表（管理 API `GetChannels`、`Node.Channels`）来自共享查询投影。投影由每次订阅/退订的 ±1 增量维护（`AdjustChannelSubscriptions`）。若持有订阅的节点突然宕机，其增量（+N）永远无法回退，投影会出现「幽灵订阅者」——频道明明已无人订阅，计数却不为零。同理，user→sessions 索引与死节点的会话 fencing 也需要一个控制面循环来收敛。
+**解决的问题**：集群级的活跃频道列表（Server API `GetChannels`、`Node.Channels`）来自共享查询投影。投影由每次订阅/退订的 ±1 增量维护（`AdjustChannelSubscriptions`）。若持有订阅的节点突然宕机，其增量（+N）永远无法回退，投影会出现「幽灵订阅者」——频道明明已无人订阅，计数却不为零。同理，user→sessions 索引与死节点的会话 fencing 也需要一个控制面循环来收敛。
 
 **数据结构**：投影按节点隔离（pkg/redisbroker/cluster_query_store.go）。每个节点实例拥有一个 Redis hash：
 
@@ -376,9 +376,9 @@ hash 的字段是频道名、值是本节点在该频道的订阅者计数。增
 
 集群模式下健康端点（`/health`，`server.http.addr`）附加 Redis 连通性探测：以 2 秒超时调用 broker 的 `Ping`，失败时返回 503、JSON 中 `status: "not ready"`、`redis: "unreachable"`（internal/runtime/health.go）。关键日志关键字：`cluster command received`（含 `command_id`、`issued_by`）、`cluster command dedupe hit`、`cluster command timed out waiting for reply`、`cluster repair failed`、`cluster node lease renewal failed`。
 
-## 11. 管理 API 的集群感知行为
+## 11. Server API 的集群感知行为
 
-管理 API 在集群模式下行为变化，概览如下（完整语义见[《管理 API 参考》](03-admin-api.md)）：
+Server API 在集群模式下行为变化，概览如下（完整语义见[《Server API 参考》](03-server-api.md)）：
 
 | 操作 | 集群模式下的行为 |
 | --- | --- |

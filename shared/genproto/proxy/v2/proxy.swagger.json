@@ -53,7 +53,7 @@
         }
       }
     },
-    "v2AdminIdentityInfo": {
+    "v2APIKeyInfo": {
       "type": "object",
       "properties": {
         "keyId": {
@@ -76,16 +76,16 @@
           "format": "int64"
         }
       },
-      "title": "AdminIdentityInfo 是 proxy 后端裁定的 admin 身份。key_id 必须是后端 Key 的\n唯一 ID（非显示名：调用方 allow 列表按 \"key:\u003cid\u003e\" 匹配 principal，显示名\n不唯一会串权限——设计 D26）。namespaces 空列表 = 拒绝一切（fail-closed）；\ncapabilities 是能力位名称闭集，空 = 零能力；max_age_seconds 是相对时长\n（本验证结果至多再用多久，规避两系统时钟偏斜——D14/G8），0 = 用调用方配置 TTL。"
+      "title": "APIKeyInfo 是 proxy 后端裁定的 Server API 调用方身份。key_id 必须是后端 Key 的\n唯一 ID（非显示名：调用方 allow 列表按 \"key:\u003cid\u003e\" 匹配 principal，显示名\n不唯一会串权限——设计 D26）。namespaces 空列表 = 拒绝一切（fail-closed）；\ncapabilities 是能力位名称闭集，空 = 零能力；max_age_seconds 是相对时长\n（本验证结果至多再用多久，规避两系统时钟偏斜——D14/G8），0 = 用调用方配置 TTL。"
     },
-    "v2AuthenticateAdminResponse": {
+    "v2AuthenticateAPIKeyResponse": {
       "type": "object",
       "properties": {
         "error": {
           "$ref": "#/definitions/v2Error"
         },
         "identity": {
-          "$ref": "#/definitions/v2AdminIdentityInfo"
+          "$ref": "#/definitions/v2APIKeyInfo"
         }
       }
     },
