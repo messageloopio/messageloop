@@ -8,12 +8,7 @@ MessageLoop is a realtime messaging platform server written in Go. It provides p
 
 ## Build and Test Commands
 
-**Note:** This project uses [Task](https://taskfile.dev) for build automation. Install with `go install github.com/go-task/task/v3/cmd/task@latest`.
-
-### Initialize development environment
-```bash
-task init  # Installs protoc-gen-go and buf
-```
+**Note:** This project uses [mise](https://mise.jdx.dev) for build automation. Install mise with `curl https://mise.run | sh`, then `mise install` (go / buf / node / golangci-lint pinned in `mise.toml`).
 
 ### Build
 ```bash
@@ -22,21 +17,21 @@ go build ./...
 
 ### Generate protocol buffers
 ```bash
-task generate-protocol
+mise run generate-protocol
 ```
 
 ### Run tests
 ```bash
 go test ./...
-go test -race ./...         # With race detector (task test)
+go test -race ./...         # With race detector (mise run test)
 go test -v ./pkg/topics/... # Run tests for specific package
 go test -v ./pkg/topics/... -run TestCSTrieMatcher # Run a single test
 ```
 
 ### Lint and vet
 ```bash
-task vet   # go vet ./...
-task lint  # golangci-lint run
+mise run vet   # go vet ./...
+mise run lint  # golangci-lint run
 ```
 
 ### Integration tests (require running server)
@@ -54,11 +49,12 @@ go run ./cmd/server --config ./config.yaml
 cd sdks/ts && npm install && npm run build && npm test
 ```
 
-### Other Task commands
+### Other mise commands
 ```bash
-task upgrade-lynx  # Update lynx framework and contrib deps
-task release-tag   # Tag and push a release
-task release-sdk-ts # Build and publish TypeScript SDK to npm
+mise run upgrade-lynx                        # Update lynx framework and contrib deps
+mise run release-tag -- v0.2.0 "release v0.2.0"  # Tag and push a release (env: VERSION / COMMENT)
+mise run release-all -- v0.2.0 "release v0.2.0"  # Tag root + shared + sdks/go
+mise run release-sdk-ts                      # Build and publish TypeScript SDK to npm
 ```
 
 ## Listener Model

@@ -36,10 +36,10 @@ go test -v ./pkg/topics/...
 go test -v ./pkg/topics/... -run TestCSTrieMatcher
 
 # Generate protocol buffers (requires buf)
-task generate-protocol
+mise run generate-protocol
 
-# Initialize dev environment (installs protoc-gen-go and buf)
-task init
+# Initialize dev environment (installs go / buf / node / golangci-lint)
+mise install
 
 # Run the server
 go run ./cmd/server --config ./config.yaml

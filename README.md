@@ -33,9 +33,9 @@ The project supports a simple single-node setup with in-memory components and ca
 
 ### Requirements
 
-- Go 1.25+
+- Go 1.26.5+
 - Redis 7+ if you want Redis broker or cluster features
-- `task` and `buf` only if you need to regenerate protobuf code
+- `mise` (with `buf` from `mise install`) only if you need to regenerate protobuf code
 
 ### Run A Single Node With In-Memory Broker
 
@@ -337,16 +337,16 @@ go test -v ./pkg/topics/... -run TestCSTrieMatcher
 
 ### Regenerate Protobuf Code
 
-Install toolchain:
+Install toolchain (go / buf / node / golangci-lint, pinned in `mise.toml`):
 
 ```bash
-task init
+mise install
 ```
 
 Generate code:
 
 ```bash
-task generate-protocol
+mise run generate-protocol
 ```
 
 ### TypeScript SDK

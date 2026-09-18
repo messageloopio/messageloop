@@ -27,12 +27,16 @@ go.work.sum
 # env file
 .env
 
+# mise 本地覆盖
+mise.local.toml
+
 # Editor/IDE
 .idea/
 .vscode/
 
 /nul
 .claude/settings.local.json
+.zcode/
 
 config.yaml
 /sdks/go/bin/
@@ -40,4 +44,3 @@ config.yaml
 config-node*.yaml
 _examples/web/node_modules/
 _examples/web/dist/
-.zcode/

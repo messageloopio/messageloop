@@ -6,7 +6,7 @@
 - **Test All**: `go test ./...`
 - **Test Package**: `go test -v ./pkg/topics/...`
 - **Single Test**: `go test -v ./pkg/topics/ -run TestCSTrieMatcher`
-- **Generate Protocol**: `task generate-protocol` (run `task init` first to install dependencies like `buf`)
+- **Generate Protocol**: `mise run generate-protocol` (run `mise install` first to install dependencies like `buf`)
 - **Run Server**: `go run cmd/server/main.go --config ./config.yaml`
 - **TypeScript SDK**: `cd sdks/ts && npm install && npm run build`
 

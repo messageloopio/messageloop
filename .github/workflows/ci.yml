@@ -22,9 +22,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
+      # 工具链唯一来源：mise.toml（go / buf / node / golangci-lint 全钉版本）
+      - uses: jdx/mise-action@v4
         with:
-          go-version-file: go.mod
+          version: 2026.9.5
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-${{ runner.os }}-${{ hashFiles('go.work.sum', '**/go.sum') }}
+          restore-keys: go-${{ runner.os }}-
 
       - name: Build
         run: go build ./...
@@ -32,11 +41,10 @@ jobs:
       - name: Vet
         run: go vet ./...
 
-      # buf version pinned here and in Taskfile.yml (init) must stay in sync.
+      # buf 版本由 mise.toml 钉住（原 Taskfile init 与本文件内联的双处钉版已收敛）。
       - name: Check generated protocol code is up to date
         run: |
-          go install github.com/bufbuild/buf/cmd/buf@v1.65.0
-          buf generate
+          mise run generate-protocol
           git diff --exit-code
 
       - name: Test with race detector
@@ -70,11 +78,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - uses: jdx/mise-action@v4
         with:
-          node-version: 24.11.1
-          cache: npm
-          cache-dependency-path: sdks/ts/package-lock.json
+          version: 2026.9.5
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ hashFiles('sdks/ts/package-lock.json') }}
+          restore-keys: npm-${{ runner.os }}-
 
       - name: Install dependencies
         run: npm ci
@@ -90,12 +102,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
+      - uses: jdx/mise-action@v4
         with:
-          go-version-file: go.mod
+          version: 2026.9.5
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-${{ runner.os }}-${{ hashFiles('go.work.sum', '**/go.sum') }}
+          restore-keys: go-${{ runner.os }}-
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v7
-        with:
-          # Pinned for reproducible lint results.
-          version: v2.12.2
+        run: mise run lint

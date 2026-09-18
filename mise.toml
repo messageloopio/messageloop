@@ -1,0 +1,78 @@
+# MessageLoop 开发环境与任务（mise-en-place）
+#
+#   mise install      安装 [tools] 钉版工具（go / buf / node / golangci-lint）
+#   mise tasks        列出全部任务
+#   mise run <task>   执行任务
+#
+# 任务统一用 sh 执行：Linux 自带，Windows 需 Git Bash 的 sh 在 PATH。
+
+[tools]
+go = "1.26.5"              # go.mod / go.work 的 `go 1.26.5`
+buf = "1.65.0"             # 全家族统一（torchwood / lynx-clean-template 同版本）
+node = "24.19.0"           # 全家族统一（torchwood 同版本）
+golangci-lint = "2.12.2"   # 全家族统一（torchwood / lynx 同版本）
+
+[task_config]
+shell = "sh -o errexit -c"
+
+[tasks."generate-protocol"]
+description = "buf generate（shared/genproto + sdks/ts/src/proto）"
+run = "buf generate"
+
+[tasks."upgrade-lynx"]
+description = "更新 lynx 框架与 contrib 依赖并 tidy"
+run = [
+  "go get -u github.com/lynx-go/x",
+  "go get -u github.com/lynx-go/lynx",
+  "go get -u github.com/lynx-go/lynx/contrib/zap",
+  "go get -u github.com/lynx-go/lynx/contrib/pubsub",
+  "go get -u github.com/lynx-go/lynx/contrib/kafka",
+  "go get -u github.com/lynx-go/lynx/contrib/schedule",
+  "go mod tidy",
+]
+
+[tasks."release-tag"]
+description = "打单个模块的 annotated tag 并推送"
+usage = '''
+arg "<version>" env="VERSION" help="tag 版本；子模块传 shared/vX.Y.Z 或 sdks/go/vX.Y.Z"
+arg "<comment>" env="COMMENT" help="annotated tag 说明"
+'''
+run = '''
+git tag -a "$usage_version" -m "$usage_comment"
+git push origin "$usage_version"
+'''
+
+[tasks."release-all"]
+description = "按固定顺序为根模块、shared、sdks/go 打 tag 并推送"
+usage = '''
+arg "<version>" env="VERSION" help="版本号，如 v0.2.0"
+arg "<comment>" env="COMMENT" help="annotated tag 说明"
+'''
+run = '''
+for prefix in "" shared sdks/go; do
+  tag="${prefix:+$prefix/}$usage_version"
+  git tag -a "$tag" -m "$usage_comment"
+  git push origin "$tag"
+done
+'''
+
+[tasks."release-sdk-ts"]
+description = "构建并发布 TS SDK 到 npm"
+dir = "sdks/ts"
+run = [
+  "npm exec rimraf -- dist",
+  "npm run build",
+  "npm publish --access public --registry https://registry.npmjs.org/",
+]
+
+[tasks.test]
+description = "go test -race ./..."
+run = "go test -race ./..."
+
+[tasks.vet]
+description = "go vet ./..."
+run = "go vet ./..."
+
+[tasks.lint]
+description = "golangci-lint run"
+run = "golangci-lint run"
