@@ -148,7 +148,8 @@ function buildWireSubscription(spec: WireSubscriptionSpec): Subscription {
     channel: spec.channel,
     ephemeral: spec.ephemeral,
     token: spec.token || "",
-    recover: spec.recover === true,
+    // fresh 蕴含 recover（Go WithFresh 契约：Recover=true+Fresh=true）——服务端 recover 门只认 recover，单发 fresh 裁决 NONE（2026-09-20 活桥实证）
+    recover: spec.recover === true || spec.fresh === true,
     cursor: spec.cursor
       ? {
           streamEpoch: spec.cursor.streamEpoch || "",
@@ -189,7 +190,8 @@ export function createSubscribeMessage(
         channel: spec.channel,
         ephemeral,
         token: spec.token || "",
-        recover: spec.recover === true,
+        // fresh 蕴含 recover（Go WithFresh 契约：Recover=true+Fresh=true）——服务端 recover 门只认 recover，单发 fresh 裁决 NONE（2026-09-20 活桥实证）
+    recover: spec.recover === true || spec.fresh === true,
         cursor: spec.cursor
           ? {
               streamEpoch: spec.cursor.streamEpoch || "",
