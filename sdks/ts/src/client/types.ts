@@ -38,6 +38,7 @@ export interface SubscriptionSpec {
    * replays messages after `cursor.offset`. When omitted with recover=true,
    * the server resumes from its own recorded delivered position (or skips
    * when it has none) instead of flooding full history. There is no
+   * `fresh: true` implies `recover: true`（Go WithFresh 契约）：server 仅在 recover 通道内读 fresh 从头重放。
    * "offset 0 means from the start": use `fresh: true` for an explicit
    * from-the-start replay.
    */
