@@ -37,6 +37,12 @@ const clusterRedisIntegrationDB = 15
 // bus tests (DB 16).
 const clusterAtomicWriteTestDB = 14
 
+// clusterIntegrationNamespace is the namespace the authenticated test
+// fixtures resolve to: connect is fail-closed on namespace resolution, so
+// the integration auth proxy and directly-wired test sessions must both
+// carry one for user-index lookups and admin Disconnect to address them.
+const clusterIntegrationNamespace = "dev"
+
 // testClusterHMACKey is the 32-byte HMAC key shared by the buses of the
 // cluster integration tests.
 var testClusterHMACKey = []byte("integration-test-hmac-key-0123456789")
@@ -51,7 +57,7 @@ func (m *integrationAuthProxy) RPC(context.Context, *proxy.RPCProxyRequest) (*pr
 }
 
 func (m *integrationAuthProxy) Authenticate(context.Context, *proxy.AuthenticateProxyRequest) (*proxy.AuthenticateProxyResponse, error) {
-	return &proxy.AuthenticateProxyResponse{UserInfo: &proxy.UserInfo{ID: m.userID}}, nil
+	return &proxy.AuthenticateProxyResponse{UserInfo: &proxy.UserInfo{ID: m.userID, Namespace: clusterIntegrationNamespace}}, nil
 }
 
 func (m *integrationAuthProxy) SubscribeAcl(context.Context, *proxy.SubscribeAclProxyRequest) (*proxy.SubscribeAclProxyResponse, error) {
@@ -260,7 +266,9 @@ func TestClusterRedis_RemoteResumeTakeover(t *testing.T) {
 	require.NoError(t, oldClient.HandleMessage(ctx, connectMsg))
 	oldSessionID := oldClient.SessionID()
 
-	channel := "cluster-resume-" + uuid.NewString()
+	// The subscribe rides the client dispatch path, so the channel must live
+	// under the session's namespace (ns:topic) to pass the central precheck.
+	channel := clusterIntegrationNamespace + ":cluster-resume-" + uuid.NewString()
 	subscribeMsg := &clientpb.InboundMessage{
 		Id: "subscribe-old",
 		Envelope: &clientpb.InboundMessage_Subscribe{
@@ -903,12 +911,14 @@ func TestAPI_DisconnectUsersAcrossNodes(t *testing.T) {
 	clientA, _, err := runtime.NewClient(ctx, nodeA, transportA, shared.JSONMarshaler{})
 	require.NoError(t, err)
 	clientA.ForceTestIDs("sess-user-a", userID, "client-a")
+	clientA.ForceTestNamespace(clusterIntegrationNamespace)
 	require.NoError(t, nodeA.AddClient(clientA))
 
 	transportB := &integrationCapturingTransport{}
 	clientB, _, err := runtime.NewClient(ctx, nodeB, transportB, shared.JSONMarshaler{})
 	require.NoError(t, err)
 	clientB.ForceTestIDs("sess-user-b", userID, "client-b")
+	clientB.ForceTestNamespace(clusterIntegrationNamespace)
 	require.NoError(t, nodeB.AddClient(clientB))
 
 	// Both sessions must be visible in the Redis user index (written by the
@@ -916,7 +926,7 @@ func TestAPI_DisconnectUsersAcrossNodes(t *testing.T) {
 	directory := redisbroker.NewSessionDirectory(redisCfg)
 	defer func() { _ = directory.Shutdown(ctx) }()
 	require.Eventually(t, func() bool {
-		ids, err := directory.ListUserSessions(ctx, "", userID)
+		ids, err := directory.ListUserSessions(ctx, clusterIntegrationNamespace, userID)
 		if err != nil {
 			return false
 		}
@@ -935,7 +945,7 @@ func TestAPI_DisconnectUsersAcrossNodes(t *testing.T) {
 		Caps:       nodeA.APICapabilities(),
 	})
 	resp, err := handler.Disconnect(ctx, &serverv2.DisconnectRequest{
-		Namespace: "dev",
+		Namespace: clusterIntegrationNamespace,
 		Users:     []string{userID},
 		Code:      3009,
 		Reason:    "cross-node user disconnect",
@@ -951,7 +961,7 @@ func TestAPI_DisconnectUsersAcrossNodes(t *testing.T) {
 
 	// The user index is cleaned up by the lease delete on close.
 	require.Eventually(t, func() bool {
-		ids, err := directory.ListUserSessions(ctx, "", userID)
+		ids, err := directory.ListUserSessions(ctx, clusterIntegrationNamespace, userID)
 		if err != nil {
 			return false
 		}
@@ -993,7 +1003,7 @@ func TestClusterRedis_CrossUserResumeDeniedKeepsIndex(t *testing.T) {
 	directory := redisbroker.NewSessionDirectory(redisCfg)
 	defer func() { _ = directory.Shutdown(ctx) }()
 	require.Eventually(t, func() bool {
-		ids, err := directory.ListUserSessions(ctx, "", "user-old")
+		ids, err := directory.ListUserSessions(ctx, clusterIntegrationNamespace, "user-old")
 		return err == nil && len(ids) == 1
 	}, 5*time.Second, 50*time.Millisecond)
 
@@ -1021,10 +1031,10 @@ func TestClusterRedis_CrossUserResumeDeniedKeepsIndex(t *testing.T) {
 	require.Equal(t, "user-old", lease.UserID)
 	require.False(t, oldTransport.isClosed(), "the owner's session must stay attached")
 
-	ids, err := directory.ListUserSessions(ctx, "", "user-old")
+	ids, err := directory.ListUserSessions(ctx, clusterIntegrationNamespace, "user-old")
 	require.NoError(t, err)
 	require.Len(t, ids, 1)
-	ids, err = directory.ListUserSessions(ctx, "", "user-new")
+	ids, err = directory.ListUserSessions(ctx, clusterIntegrationNamespace, "user-new")
 	require.NoError(t, err)
 	require.Empty(t, ids)
 }
