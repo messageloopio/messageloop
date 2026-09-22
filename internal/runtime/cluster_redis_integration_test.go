@@ -18,6 +18,7 @@ import (
 	"github.com/messageloopio/messageloop/internal/authz"
 	clusterpkg "github.com/messageloopio/messageloop/internal/cluster"
 	"github.com/messageloopio/messageloop/internal/protocol"
+	"github.com/messageloopio/messageloop/internal/redistest"
 	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/internal/serverapi"
 	"github.com/messageloopio/messageloop/internal/session"
@@ -679,7 +680,7 @@ func requireClusterRedis(t *testing.T, db int) config.RedisConfig {
 	pingCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	if err := client.Ping(pingCtx).Err(); err != nil {
-		t.Skipf("redis unavailable for cluster integration tests: %v", err)
+		redistest.SkipOrFatal(t, "cluster integration tests", err)
 	}
 	require.NoError(t, client.FlushDB(pingCtx).Err())
 	t.Cleanup(func() {

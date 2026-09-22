@@ -119,6 +119,7 @@ import (
 - Use `testify/assert` for assertions: `assert.NoError(t, err)`
 - Helper functions in test files (e.g., `assertEqual`)
 - Include benchmarks: `BenchmarkXxx(b *testing.B)`
+- Redis-backed integration tests (`internal/runtime`, `pkg/redisbroker`, `sdks/go` e2e) probe 127.0.0.1:6379 and **silently skip when Redis is absent** — a local `go test ./...` green does not cover them. Run them with `docker run --rm -p 6379:6379 redis:7-alpine`. CI sets `MESSAGELOOP_TEST_REDIS_REQUIRED=1` so a missing Redis fails the build instead of faking green; helpers live in `internal/redistest` (root module).
 - Use table-driven tests for multiple test cases
 
 Example test pattern:

@@ -18,6 +18,7 @@ import (
 	"github.com/messageloopio/messageloop/internal/cluster"
 	clusterhmac "github.com/messageloopio/messageloop/internal/cluster/hmac"
 	"github.com/messageloopio/messageloop/internal/metrics"
+	"github.com/messageloopio/messageloop/internal/redistest"
 )
 
 // DB 12 keeps these FlushDB calls off the runtime atomic-write tests (DB 14)
@@ -234,7 +235,7 @@ func requireCommandBusRedis(t *testing.T) config.RedisConfig {
 	pingCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	if err := client.Ping(pingCtx).Err(); err != nil {
-		t.Skipf("redis not available for command bus integration tests: %v", err)
+		redistest.SkipOrFatal(t, "command bus integration tests", err)
 	}
 	require.NoError(t, client.FlushDB(context.Background()).Err())
 	t.Cleanup(func() {

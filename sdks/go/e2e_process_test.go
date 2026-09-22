@@ -418,6 +418,9 @@ func waitE2EMessage(t *testing.T, ch <-chan *Message, what string) *Message {
 // requireE2ERedis probes a real Redis (env MESSAGELOOP_TEST_REDIS_ADDR,
 // default 127.0.0.1:6379) and skips the test when none answers PING. Password
 // comes from MESSAGELOOP_TEST_REDIS_PASSWORD, falling back to REDIS_PASSWORD.
+// An unreachable or misbehaving Redis skips locally but fails hard when
+// MESSAGELOOP_TEST_REDIS_REQUIRED is set (CI does), so a dead Redis can never
+// silently degrade the suite to a fake green.
 func requireE2ERedis(t *testing.T) (addr, password string) {
 	t.Helper()
 
@@ -430,30 +433,39 @@ func requireE2ERedis(t *testing.T) (addr, password string) {
 		password = os.Getenv("REDIS_PASSWORD")
 	}
 
+	skipOrFatalRedis := func(format string, args ...any) {
+		t.Helper()
+		msg := fmt.Sprintf(format, args...)
+		if os.Getenv("MESSAGELOOP_TEST_REDIS_REQUIRED") != "" {
+			t.Fatalf("%s — MESSAGELOOP_TEST_REDIS_REQUIRED is set, failing instead of skipping", msg)
+		}
+		t.Skipf("%s (start one with `docker run --rm -p 6379:6379 redis:7-alpine`; set MESSAGELOOP_TEST_REDIS_REQUIRED=1 to make absence a failure)", msg)
+	}
+
 	conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
 	if err != nil {
-		t.Skipf("no Redis at %s: %v", addr, err)
+		skipOrFatalRedis("no Redis at %s: %v", addr, err)
 	}
 	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
 
 	if password != "" {
 		if _, err := fmt.Fprintf(conn, "AUTH %s\r\n", password); err != nil {
-			t.Skipf("Redis AUTH write failed: %v", err)
+			skipOrFatalRedis("Redis AUTH write failed: %v", err)
 		}
 		reply := make([]byte, 256)
 		n, err := conn.Read(reply)
 		if err != nil || !strings.HasPrefix(string(reply[:n]), "+OK") {
-			t.Skipf("Redis AUTH failed: err=%v reply=%q", err, reply[:max(n, 0)])
+			skipOrFatalRedis("Redis AUTH failed: err=%v reply=%q", err, reply[:max(n, 0)])
 		}
 	}
 	if _, err := conn.Write([]byte("PING\r\n")); err != nil {
-		t.Skipf("Redis PING write failed: %v", err)
+		skipOrFatalRedis("Redis PING write failed: %v", err)
 	}
 	reply := make([]byte, 256)
 	n, err := conn.Read(reply)
 	if err != nil || !strings.HasPrefix(string(reply[:n]), "+PONG") {
-		t.Skipf("Redis at %s did not answer PING: err=%v reply=%q", addr, err, reply[:max(n, 0)])
+		skipOrFatalRedis("Redis at %s did not answer PING: err=%v reply=%q", addr, err, reply[:max(n, 0)])
 	}
 	return addr, password
 }

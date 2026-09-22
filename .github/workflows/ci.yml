@@ -12,9 +12,14 @@ permissions:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    # Redis 缺失时集成测试必须红而不是静默 skip 假绿（requireClusterRedis
+    # 等三处 helper 经 MESSAGELOOP_TEST_REDIS_REQUIRED 把 skip 升级为失败）。
+    env:
+      MESSAGELOOP_TEST_REDIS_REQUIRED: "1"
     services:
-      # Integration tests (pkg/redisbroker, cluster redis) default to
-      # 127.0.0.1:6379 with no password and skip when Redis is absent.
+      # Integration tests (pkg/redisbroker, cluster redis, sdks/go e2e)
+      # default to 127.0.0.1:6379 with no password; locally they skip when
+      # Redis is absent, here the env above turns absence into a failure.
       redis:
         image: redis:7
         ports:
