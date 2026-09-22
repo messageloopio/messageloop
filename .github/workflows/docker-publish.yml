@@ -57,3 +57,19 @@ jobs:
             VERSION=${{ github.ref_name }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # 飞书通知（共用 .github/actions/feishu-notify）：失败必报；成功只在非 PR
+  # 事件（main/tag/手动）推送——PR 的 build-only 门禁成功是噪音。
+  notify:
+    name: Feishu notify
+    needs: [build-push]
+    if: ${{ !cancelled() && (failure() || github.event_name != 'pull_request') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/feishu-notify
+        with:
+          status: ${{ contains(needs.*.result, 'failure') && 'failure' || 'success' }}
+          detail: build-push=${{ needs.build-push.result }}
+        env:
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}

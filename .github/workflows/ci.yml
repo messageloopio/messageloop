@@ -116,3 +116,19 @@ jobs:
 
       - name: golangci-lint
         run: mise run lint
+
+  # 飞书通知（共用 .github/actions/feishu-notify）：CI 只在失败时推送——
+  # 成功是常态噪音；fork PR 拿不到 secrets，action 内部自动跳过。
+  notify:
+    name: Feishu notify
+    needs: [build-and-test, ts-sdk, lint]
+    if: ${{ !cancelled() && failure() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/feishu-notify
+        with:
+          status: failure
+          detail: build-and-test=${{ needs.build-and-test.result }} ts-sdk=${{ needs.ts-sdk.result }} lint=${{ needs.lint.result }}
+        env:
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
