@@ -1775,17 +1775,6 @@ func (c *Session) ForceTestIDs(sessionID, userID, clientID string) {
 	}
 }
 
-// ForceTestNamespace overrides the session namespace for testing purposes.
-// Sessions wired directly (bypassing Connect) carry an empty namespace, which
-// namespace-scoped cluster indexes and admin queries cannot address; this
-// hook lets such tests place their sessions in a namespace without going
-// through the connect path.
-func (c *Session) ForceTestNamespace(ns string) {
-	c.mu.Lock()
-	c.namespace = ns
-	c.mu.Unlock()
-}
-
 func (c *Session) hasSubscription(channel string) bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()

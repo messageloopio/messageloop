@@ -46,7 +46,7 @@ func (c *graceCloseConn) Close() error {
 // the 255-fragment-per-write cap of KCP's message mode and lets consecutive
 // frames pack efficiently. Both ends must enable it.
 func tuneSession(sess *kcpgo.UDPSession) {
-	sess.SetStreamMode(true)
+	sess.SetStreamMode(true) //nolint:staticcheck // SA1019: sole public API for stream mode in kcp-go v5, no replacement exists
 	// nodelay=1 (turn on the no-delay path), interval=10 (internal clock ms),
 	// resend=2 (fast retransmit on one duplicate ack), nc=1 (disable
 	// congestion control in favor of the window limits).

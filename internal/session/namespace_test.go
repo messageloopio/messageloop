@@ -119,7 +119,7 @@ func TestSession_PublishNamespaceGuard(t *testing.T) {
 	c.ForceTestIDs("sess-ns", "user-1", "client-1")
 	c.SetNamespaceForTest("acme")
 	c.MarkAuthenticated()
-	rt.hub.Add(c)
+	require.NoError(t, rt.hub.Add(c))
 
 	pub := &clientpb.Publish{Channel: "other:chat", Payload: &sharedv2.Payload{Data: &sharedv2.Payload_Text{Text: "x"}}}
 	in := &clientpb.InboundMessage{Id: "m1", Envelope: &clientpb.InboundMessage_Publish{Publish: pub}}

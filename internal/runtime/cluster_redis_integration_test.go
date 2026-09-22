@@ -911,14 +911,14 @@ func TestAPI_DisconnectUsersAcrossNodes(t *testing.T) {
 	clientA, _, err := runtime.NewClient(ctx, nodeA, transportA, shared.JSONMarshaler{})
 	require.NoError(t, err)
 	clientA.ForceTestIDs("sess-user-a", userID, "client-a")
-	clientA.ForceTestNamespace(clusterIntegrationNamespace)
+	clientA.SetNamespaceForTest(clusterIntegrationNamespace)
 	require.NoError(t, nodeA.AddClient(clientA))
 
 	transportB := &integrationCapturingTransport{}
 	clientB, _, err := runtime.NewClient(ctx, nodeB, transportB, shared.JSONMarshaler{})
 	require.NoError(t, err)
 	clientB.ForceTestIDs("sess-user-b", userID, "client-b")
-	clientB.ForceTestNamespace(clusterIntegrationNamespace)
+	clientB.SetNamespaceForTest(clusterIntegrationNamespace)
 	require.NoError(t, nodeB.AddClient(clientB))
 
 	// Both sessions must be visible in the Redis user index (written by the
