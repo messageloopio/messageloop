@@ -15,8 +15,9 @@ const envPrefix = "MESSAGELOOP"
 // envConfigKeys lists the deployment-relevant config paths that are
 // registered as environment-variable bindings. Keys on this list can be
 // overridden via MESSAGELOOP_-prefixed variables even when the loaded config
-// file omits them — viper's Unmarshal only decodes keys the config source
-// knows, so a binding (not AutomaticEnv alone) is what makes a key visible.
+// file omits them — lynx's struct-driven Unmarshal resolves env values only
+// for keys bound here (AutomaticEnv is deliberately not enabled, see
+// bindConfigWithEnv), so the table is the single source of env visibility.
 // Complex nested structures (server.authorizer rules, proxy backends) are
 // deliberately absent: they stay config-file-only; mount or bake a custom
 // YAML for those.
@@ -100,17 +101,18 @@ var envConfigKeys = []string{
 //
 // The mapping is prefix + dotted path with dots replaced by underscores:
 // broker.redis.addr -> MESSAGELOOP_BROKER_REDIS_ADDR (viper applies the
-// replacer when it looks up the variable). Besides the registered keys,
-// AutomaticEnv also overrides any scalar key present in the loaded config
-// file; string slices take comma-separated values. Environment values win
-// over the file.
+// replacer when it looks up the variable). Visibility is exactly the
+// BindEnv table: lynx's struct-driven Unmarshal consults Get per struct
+// leaf, and AutomaticEnv would match every leaf — env vars could then
+// conjure authorizer rules or other policy keys the config file never
+// defines, so it is deliberately not enabled. String slices take
+// comma-separated values. Environment values win over the file.
 func bindConfigWithEnv(f *pflag.FlagSet, c lynx.ConfigSource) error {
 	if err := lynx.DefaultBindConfigFunc(f, c); err != nil {
 		return err
 	}
 	c.SetEnvPrefix(envPrefix)
 	c.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-	c.AutomaticEnv()
 	for _, key := range envConfigKeys {
 		if err := c.BindEnv(key); err != nil {
 			return fmt.Errorf("bind env override for %s: %w", key, err)

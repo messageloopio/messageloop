@@ -35,7 +35,6 @@ var (
 
 func main() {
 	runner := lynx.NewRunner(func(app lynx.App) error {
-		app.SetLogger(zap.MustNewLogger(app))
 		cfg := &config.Config{}
 		if err := app.Config().Unmarshal(cfg); err != nil {
 			return err
@@ -139,6 +138,7 @@ func main() {
 		lynx.WithBindFlagsFunc(lynx.DefaultBindFlagsFunc),
 		lynx.WithBindConfigFunc(bindConfigWithEnv),
 		lynx.WithShutdownTimeout(30*time.Second),
+		lynx.WithLoggerProvider(zap.NewLogger),
 	)
 
 	runner.Run()
