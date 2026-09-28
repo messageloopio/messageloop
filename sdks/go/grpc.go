@@ -2,10 +2,12 @@ package messageloopgo
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"sync"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/proto"
 
@@ -58,14 +60,47 @@ type grpcTransport struct {
 	recvMu sync.Mutex
 }
 
-// newGRPCTransport creates a new gRPC transport.
+// grpcDialOptions returns the dial option carrying the client gRPC transport
+// credentials. It is the single derivation point shared by the first dial and
+// every reconnect, so a TLS-configured client can never fall back to
+// plaintext on a re-dial.
+func grpcDialOptions(opts *Options) grpc.DialOption {
+	return grpc.WithTransportCredentials(grpcTransportCredentials(opts))
+}
+
+// grpcTransportCredentials selects the transport credentials: TLS when the
+// client options carry a TLS configuration (WithTLS or WithTLSConfig),
+// plaintext insecure otherwise — the default local development path stays
+// unchanged.
+func grpcTransportCredentials(opts *Options) credentials.TransportCredentials {
+	if opts == nil || opts.TLSConfig == nil {
+		return insecure.NewCredentials()
+	}
+	return credentials.NewTLS(grpcTLSConfig(opts))
+}
+
+// grpcTLSConfig builds the TLS configuration for a gRPC dial. The caller's
+// configuration is cloned so applying InsecureSkipVerify never mutates it
+// (the same contract as quicTLSConfig). The server name is taken from the
+// dial address unless the configuration sets ServerName.
+func grpcTLSConfig(opts *Options) *tls.Config {
+	cfg := opts.TLSConfig.Clone()
+	if opts.InsecureSkipVerify {
+		cfg.InsecureSkipVerify = true
+	}
+	return cfg
+}
+
+// newGRPCTransport creates a new gRPC transport. The caller supplies the
+// transport credentials through opts (grpcDialOptions); requiring them at the
+// constructor keeps the first dial and every reconnect on the same
+// derivation and fails closed instead of silently dialing plaintext if a
+// future call site omits them.
 func newGRPCTransport(ctx context.Context, addr string, opts ...grpc.DialOption) (*grpcTransport, error) {
-	// Default options
+	// Force the raw codec per-connection instead of registering it globally
+	// in init(): a global "proto" registration would override the standard
+	// codec for every gRPC client in the process.
 	defaultOpts := []grpc.DialOption{
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		// Force the raw codec per-connection instead of registering it globally
-		// in init(): a global "proto" registration would override the standard
-		// codec for every gRPC client in the process.
 		grpc.WithDefaultCallOptions(grpc.ForceCodec(&RawCodec{})),
 	}
 	defaultOpts = append(defaultOpts, opts...)

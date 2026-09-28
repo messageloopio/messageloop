@@ -17,7 +17,7 @@ go get github.com/messageloopio/messageloop/sdks/go
 import messageloopgo "github.com/messageloopio/messageloop/sdks/go"
 
 client, err := messageloopgo.Dial("ws://localhost:9080/ws", messageloopgo.WithClientID("app-1"))
-// 或 messageloopgo.DialGRPC("localhost:9090", ...)
+// 或 messageloopgo.DialGRPC("localhost:9090", ...)（TLS：加 messageloopgo.WithTLS() 或 WithTLSConfig(...)）
 // 或 messageloopgo.DialQUIC("localhost:4433", messageloopgo.WithInsecureSkipVerify(), ...)
 if err != nil {
     panic(err)

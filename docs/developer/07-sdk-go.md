@@ -106,7 +106,7 @@ func main() {
 - 建议在 `Connect` 之前注册 `OnConnected` / `OnMessage` / `OnError` 等回调，避免错过连接成功事件。
 - `Subscribe` / `Publish` / `Unsubscribe` / `RPC` 等请求类方法在未连接时返回错误（`not connected`）。
 
-gRPC 客户端的用法与 WebSocket 完全一致，只是把 `Dial` 换成 `DialGRPC(addr, opts...)`（见 [example/basicgrpc](../../sdks/go/example/basicgrpc)）。QUIC 客户端同样共享 `Client` 接口，入口是 `DialQUIC(addr, opts...)`（见 [example/basicquic](../../sdks/go/example/basicquic)）。QUIC 强制 TLS 1.3：对接 `transport.quic.insecure` 的开发服务器时传 `WithInsecureSkipVerify()`。
+gRPC 客户端的用法与 WebSocket 完全一致，只是把 `Dial` 换成 `DialGRPC(addr, opts...)`（见 [example/basicgrpc](../../sdks/go/example/basicgrpc)）。gRPC 默认明文（本地开发与 SSH 隧道）；连接 TLS 监听或 TLS 终结的域名时传 `WithTLS()`（系统根）或 `WithTLSConfig(&tls.Config{...})`（自定 CA / 客户端证书 / `ServerName` 覆盖）。QUIC 客户端同样共享 `Client` 接口，入口是 `DialQUIC(addr, opts...)`（见 [example/basicquic](../../sdks/go/example/basicquic)）。QUIC 强制 TLS 1.3：对接 `transport.quic.insecure` 的开发服务器时传 `WithInsecureSkipVerify()`。
 
 KCP 客户端入口是 `DialKCP(addr, dataShards, parityShards, opts...)`：一条 TLS 加密的 KCP 会话，帧格式与 QUIC 传输一致。KCP 自身不加密，始终叠加 TLS，对接 `transport.kcp.insecure` 的开发服务器时同样传 `WithInsecureSkipVerify()`。`dataShards`/`parityShards` 是服务端 `transport.kcp` 的 FEC 分片配置，两端必须一致（服务端未配置 FEC 时传 `0, 0`）。
 
@@ -129,8 +129,9 @@ KCP 客户端入口是 `DialKCP(addr, dataShards, parityShards, opts...)`：一�
 | `WithAutoReconnect` | `bool` | 断线后自动重连并尝试会话恢复 | `false` |
 | `WithReconnectBackoff` | `initial, max time.Duration, factor float64` | 重连退避：初始延迟、最大延迟、指数因子 | `1s` / `30s` / `2.0` |
 | `WithReconnectMaxAttempts` | `int` | 最大重连次数，`0` 表示不限次 | `0` |
-| `WithTLSConfig` | `*tls.Config` | QUIC/KCP 拨号使用的 TLS 配置（会按 Encoding 补 `NextProtos`） | `nil` |
-| `WithInsecureSkipVerify` | （无） | QUIC/KCP 跳过服务端证书校验（仅开发） | 关 |
+| `WithTLS` | （无） | 为 `DialGRPC` 启用 TLS（系统根），等价 `WithTLSConfig(&tls.Config{})` | 关 |
+| `WithTLSConfig` | `*tls.Config` | TLS 配置：QUIC/KCP 拨号使用（会按 Encoding 补 `NextProtos`）；`DialGRPC` 非 `nil` 即启用 TLS（自定 CA / 客户端证书 / `ServerName`）；使用前 clone，不改写调用方 | `nil` |
+| `WithInsecureSkipVerify` | （无） | 启用 TLS 时跳过服务端证书校验（QUIC/KCP 恒有 TLS；`DialGRPC` 需配合 `WithTLS`/`WithTLSConfig`；仅开发） | 关 |
 
 订阅级选项（用于 `SubscribeWith`，见下文）：`WithRecover(cursor)`、`WithFresh()`、`WithEphemeral(bool)`（临时订阅，不登记 presence）、`WithSubscriptionToken(token)`（订阅级 token）。
 
@@ -242,7 +243,9 @@ client.OnMessage(func(msgs []*messageloopgo.Message) {
 
 ### gRPC 客户端
 
-`DialGRPC(addr string, opts ...Option) (Client, error)` 创建 gRPC 客户端，地址为 `host:port` 形式（如 `localhost:9090`），使用 `MessageLoopService/MessageLoop` 双向流传输协议消息。gRPC 传输固定使用 protobuf，无编码协商；连接使用 insecure 凭据，通过 `ForceCodec` 按连接注入名为 `messageloop-proto` 的原始编解码器，避免覆盖进程级全局 proto codec。
+`DialGRPC(addr string, opts ...Option) (Client, error)` 创建 gRPC 客户端，地址为 `host:port` 形式（如 `localhost:9090`），使用 `MessageLoopService/MessageLoop` 双向流传输协议消息。gRPC 传输固定使用 protobuf，无编码协商；通过 `ForceCodec` 按连接注入名为 `messageloop-proto` 的原始编解码器，避免覆盖进程级全局 proto codec。
+
+连接默认使用明文（insecure）凭据——本地开发与 SSH 隧道路径零配置。连接 TLS 监听或 TLS 终结的域名时传 `WithTLS()`（系统根；服务器名取拨号地址，除非配置了 `ServerName`）或 `WithTLSConfig(&tls.Config{...})`（自定 CA 池、客户端证书、`ServerName` 覆盖）；自签证书的开发服务器再加 `WithInsecureSkipVerify()`。配置在拨号前 clone，不改写调用方；TLS 启用后首次拨号与每次重连共用同一判定，不会回落明文。
 
 ### QUIC / KCP 客户端
 

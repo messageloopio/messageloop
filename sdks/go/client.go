@@ -264,6 +264,9 @@ func Dial(url string, opts ...Option) (Client, error) {
 }
 
 // DialGRPC creates a new gRPC client connecting to the specified address.
+// The dial is plaintext by default (local development and SSH tunnels); pass
+// WithTLS() to verify the server against the system roots, or WithTLSConfig
+// to supply a custom CA / client certificate / ServerName.
 func DialGRPC(addr string, opts ...Option) (Client, error) {
 	options := defaultOptions()
 	for _, opt := range opts {
@@ -272,7 +275,7 @@ func DialGRPC(addr string, opts ...Option) (Client, error) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	trans, err := newGRPCTransport(ctx, addr)
+	trans, err := newGRPCTransport(ctx, addr, grpcDialOptions(options))
 	if err != nil {
 		cancel()
 		return nil, err
@@ -361,7 +364,7 @@ func (c *client) dialTransport() (transport, error) {
 		return newKCPTransport(c.ctx, c.dialKCP, c.opts.Encoding, c.opts.DialTimeout, quicTLSConfig(c.opts), c.kcpDataShards, c.kcpParityShards)
 	}
 	if c.dialAddr != "" {
-		return newGRPCTransport(c.ctx, c.dialAddr)
+		return newGRPCTransport(c.ctx, c.dialAddr, grpcDialOptions(c.opts))
 	}
 	return nil, fmt.Errorf("no dial address configured")
 }

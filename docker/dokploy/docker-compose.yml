@@ -173,10 +173,10 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-    # 宿主端口只绑回环：公网 gRPC 走上方域名 TLS（标准 gRPC 客户端），
-    # 回环供 SSH 隧道明文直连兜底——仓库自带 Go SDK 的 DialGRPC 当前为
-    # 明文实现（insecure 硬编码），隧道 + DialGRPC("127.0.0.1:9090") 即
-    # 其接入路径。Server API gRPC(9091) 走 MESSAGELOOP_API_DOMAIN 域名
+    # 宿主端口只绑回环：公网 gRPC 走上方域名 TLS（标准 gRPC 客户端；
+    # 仓库自带 Go SDK 传 WithTLS()/WithTLSConfig(...) 即可直连域名），
+    # 回环供 SSH 隧道明文兜底——DialGRPC 不传 TLS 选项时保持明文。
+    # Server API gRPC(9091) 走 MESSAGELOOP_API_DOMAIN 域名
     # TLS 路由（租户后端直连），回环口仍作隧道兜底；mlbridge 经栈内网直连。
     # QUIC/KCP（UDP，可选）：Traefik 不路由 UDP，启用时在 Environment 设
     # MESSAGELOOP_TRANSPORT_QUIC_ADDR / MESSAGELOOP_TRANSPORT_KCP_ADDR

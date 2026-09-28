@@ -91,6 +91,13 @@ func TestE2EProcess(t *testing.T) {
 		// Stream/PubSub path.
 		runE2EWSFlow(t, srv, e2eNamespace()+".chat")
 	})
+
+	t.Run("GRPCTLSFront", func(t *testing.T) {
+		// The TLS scenarios never touch Redis; keep them on the memory
+		// broker so a missing Redis cannot skip the TLS path.
+		srv := startE2EServer(t, bin, "memory", "", "")
+		runE2EGRPCTLSScenarios(t, srv)
+	})
 }
 
 // runE2EScenarios runs scenarios 2-5 of the spec against one spawned server:

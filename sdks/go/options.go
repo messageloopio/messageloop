@@ -74,12 +74,18 @@ type Options struct {
 	// ReconnectMaxAttempts is the maximum number of reconnect attempts (0 = unlimited).
 	ReconnectMaxAttempts int
 
-	// TLSConfig is the TLS configuration used by DialQUIC. QUIC requires
-	// TLS 1.3; leave nil to use a default config (NextProtos filled from
-	// Encoding). Combine with InsecureSkipVerify for self-signed servers.
+	// TLSConfig is the TLS configuration used by DialQUIC, DialKCP and
+	// DialGRPC. QUIC requires TLS 1.3; leave nil to use a default config
+	// (NextProtos filled from Encoding). For DialGRPC a non-nil configuration
+	// enables TLS (nil keeps the plaintext local path); the NextProtos and
+	// MinVersion defaults above do not apply there. Combine with
+	// InsecureSkipVerify for self-signed servers.
 	TLSConfig *tls.Config
-	// InsecureSkipVerify skips server certificate verification on QUIC
-	// dials. Intended for local development against transport.quic.insecure.
+	// InsecureSkipVerify skips server certificate verification when TLS is
+	// enabled (QUIC/KCP always; DialGRPC when a TLS configuration is set,
+	// e.g. WithTLS). It does not enable TLS by itself, so the DialGRPC
+	// default stays plaintext. Intended for local development against
+	// self-signed servers.
 	InsecureSkipVerify bool
 }
 
@@ -201,14 +207,30 @@ func WithReconnectMaxAttempts(max int) Option {
 	}
 }
 
-// WithTLSConfig sets the TLS configuration used by DialQUIC.
+// WithTLS enables TLS on a DialGRPC connection using the system root
+// certificates. It is shorthand for WithTLSConfig(&tls.Config{}); the server
+// name is taken from the dial address unless the configuration sets
+// ServerName. QUIC/KCP already require a TLS configuration and ignore this.
+func WithTLS() Option {
+	return func(o *Options) {
+		o.TLSConfig = &tls.Config{}
+	}
+}
+
+// WithTLSConfig sets the TLS configuration used by DialQUIC, DialKCP and
+// DialGRPC (system roots, a custom CA pool, client certificates and a
+// ServerName override are all expressed here). For DialGRPC a non-nil
+// configuration enables TLS; the configuration is cloned before use, so the
+// caller's value is never mutated.
 func WithTLSConfig(cfg *tls.Config) Option {
 	return func(o *Options) {
 		o.TLSConfig = cfg
 	}
 }
 
-// WithInsecureSkipVerify skips TLS certificate verification on DialQUIC.
+// WithInsecureSkipVerify skips TLS certificate verification when TLS is
+// enabled (QUIC/KCP always; DialGRPC with WithTLS or WithTLSConfig). It does
+// not enable TLS by itself: the DialGRPC default stays plaintext.
 func WithInsecureSkipVerify() Option {
 	return func(o *Options) {
 		o.InsecureSkipVerify = true

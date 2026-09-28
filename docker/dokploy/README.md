@@ -106,10 +106,24 @@ Go SDK：`sdk.Dial("wss://ws.example.com/ws")`；TypeScript SDK 同理。
 
 ### 4.2 gRPC
 
-- **域名 TLS 通道**：`grpc.<域名>:443`，面向自带 TLS 凭据的标准 gRPC 客户端
-  （Traefik 终结 TLS，后端 h2c）。
-- **仓库 Go SDK 注意**：`sdk.DialGRPC` 当前为明文实现（`insecure` 硬编码），
-  走不了 TLS 域名。SDK 用户的接入路径是 **SSH 隧道 + 回环端口**：
+- **域名 TLS 通道**：`grpc.<域名>:443`，Traefik 终结 TLS、后端 h2c。
+- **Go SDK（TLS 域名）**：`DialGRPC` 传 TLS 选项即直连域名，系统根验证：
+
+  ```go
+  client, err := sdk.DialGRPC("grpc.example.com:443", sdk.WithTLS())
+  ```
+
+  自定 CA / 客户端证书 / SNI 覆盖走 `WithTLSConfig`（配置按调用 clone，
+  不改写调用方）；自签证书的开发终结层用 `sdk.WithTLS()` +
+  `sdk.WithInsecureSkipVerify()`：
+
+  ```go
+  client, err := sdk.DialGRPC("grpc.example.com:443",
+      sdk.WithTLSConfig(&tls.Config{RootCAs: pool}))
+  ```
+
+- **明文 / 隧道路径保留（零回归）**：不传 TLS 选项时 `DialGRPC` 仍走明文，
+  SSH 隧道 + 回环端口照旧可用：
 
   ```bash
   ssh -L 9090:127.0.0.1:9090 <服务器>     # 宿主 9090 已只绑回环
@@ -119,8 +133,7 @@ Go SDK：`sdk.Dial("wss://ws.example.com/ws")`；TypeScript SDK 同理。
   client, err := sdk.DialGRPC("127.0.0.1:9090")   // 隧道内明文
   ```
 
-  多数客户端场景用 WebSocket 即可（两者承载同一套信封协议）；SDK 的 TLS
-  支持跟进后，域名通道即插即用。
+  多数客户端场景用 WebSocket 即可（两者承载同一套信封协议）。
 
 ### 4.3 QUIC / KCP（UDP，可选）
 
