@@ -1,0 +1,31 @@
+# messageloop 的 mlbridge 接线配置（fleetly 部署形态）——值以平台明文
+# Config 资源 `mlbridge.yaml` 上传，容器内挂载到 /etc/messageloop/mlbridge.yaml
+# （见 docker/fleetly/docker-compose.yml 的 configs 段）。
+#
+# 上传：fleetly configs set messageloop mlbridge.yaml --from-file docker/fleetly/mlbridge.yaml
+# 内容变更 = 新 Config 对象 + 引用服务滚动，随下次部署生效（OT-3/IMPL-T1-4）。
+#
+# proxy 后端是 config-file-only 配置（MESSAGELOOP_* 环境变量表刻意不含它，
+# 见 cmd/server/envconfig.go）；require_auth 与它语义绑定（认证交给桥），
+# 一并在此声明。其余全部配置键由 compose 的 MESSAGELOOP_* 环境变量提供。
+#
+# 单条 "*"/"*" 路由覆盖桥的全部调用点：$authenticate（连接认证）、
+# subscribe/publish ACL 逐请求校验、生命周期钩子（计量与撤销索引），
+# 以及客户端 RPC send/history（写穿）。endpoint 是 compose 服务名（平台
+# 网络内别名 = 服务名）；栈内私网明文即可。
+#
+# 注意：docker/dokploy/mlbridge.yaml 是现役 dokploy 栈的 bind mount 源，
+# 割接验收前两份必须同步改动；dokploy 栈退役后本文件为唯一真源。
+server:
+  require_auth: true
+
+proxy:
+  - name: mlbridge
+    endpoint: "mlbridge:9070"
+    timeout: 30s
+    api_auth: true
+    grpc:
+      insecure: true
+    routes:
+      - channel: "*"
+        method: "*"

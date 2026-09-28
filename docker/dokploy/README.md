@@ -25,6 +25,10 @@ Torchwood 的公开 Server API 通信——部署时需提供 Torchwood 网关�
    （`ghcr.io/messageloopio/messageloop` 与 `ghcr.io/messageloopio/mlbridge`，
    GitHub Actions docker-publish workflow 随 main/v* 自动发布）。
 
+> **迁移中**：本栈的 fleetly（受控子集平台）部署形态已就绪（`docker/fleetly/`），
+> 割接验收前本 Dokploy 栈并行保留。差异、域名/env/Config 命令与割接 runbook
+> 见 [§10 fleetly 部署](#10-fleetly-部署割接目标形态)。
+
 ## 0. 前置条件
 
 - 一台装好 Docker 的服务器 + Dokploy（≥ v0.10）；
@@ -214,3 +218,30 @@ curl -I http://<WS域名>/            # 301 → https
 | `README.md` | 本指南 |
 | 仓库根 `Dockerfile` | 镜像构建（内置容器默认配置 `configs/docker.yaml`） |
 | `cmd/server/envconfig.go` | `MESSAGELOOP_*` 环境变量覆盖的完整键表 |
+
+## 10. fleetly 部署（割接目标形态）
+
+本栈的 **fleetly**（受控子集平台）部署形态见 **`docker/fleetly/`**：
+割接验收前本 Dokploy 栈并行保留（回滚 = 本栈未拆），验收通过后再决定退役。
+
+| 入口 | 内容 |
+|------|------|
+| `docker/fleetly/docker-compose.yml` | 受控子集 compose（redis + messageloop + mlbridge）；过 `fleetly validate` 零告警 |
+| `docker/fleetly/README.md` | 逐行改写清单（本文件 → 终态 → 平台承接面）、三域名声明、平台 env/Config 清单、镜像引用形态裁决 |
+| `docker/fleetly/cutover-runbook.md` | 割接 runbook：两阶段 bootstrap、DT-8 数据面（回灌/清零二选一 + 实证）、验收探针（含客户端 recover 探针）、回滚；真机段标注「待使用者执行窗口」 |
+| `docker/fleetly/mlbridge.yaml` | Config 资源上传源（`fleetly configs set messageloop mlbridge.yaml --from-file …`） |
+
+需要提前知道的行为差异（割接验收核对项）：
+
+1. **域名**：三域名经平台域名资源 API 声明（CLI `fleetly domains add`；WS 9080 `http` /
+   客户端 gRPC 9090 `h2c` / Server API 9091 `h2c`），不再有 Traefik label；
+2. **入口行为**：平台不做 80→443 重定向；证书 ACME HTTP-01 签发依赖 DNS 已切至
+   fleetly 边缘；宿主回环端口（SSH 隧道兜底）取消——gRPC 域名直连（SDK
+   `DialGRPC` TLS 随 IMPL-T1-6 落地）；
+3. **配置与密钥**：`mlbridge.yaml` bind mount → 平台 Config 资源；`MESSAGELOOP_*` /
+   `MLBRIDGE_*` 密钥与环境值 → 平台 env（`fleetly env set`，平台层覆盖 compose）；
+4. **编排**：`depends_on` 被受控子集拒绝，启动顺序归发布管线（秒级自愈窗口，
+   量化归 T2-0④）；`pull_policy: always` 的等价物 = 平台 Redeploy 重解析
+   tag→digest（compose 里钉 sha tag 而非 `latest`）；
+5. **mlbridge→Torchwood**：T1 临时走公网网关（单 env 改动）；T2 torchwood 落
+   fleetly 项目网后切内网别名 `http://torchwood-server:9080`。
