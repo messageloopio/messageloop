@@ -55,7 +55,11 @@ services:
     image: ghcr.io/messageloopio/messageloop:sha-b009c71
     # proxy 后端是 config-file-only 配置：以平台 Config 资源挂载（同目录
     # mlbridge.yaml 为上传源），指向栈内 mlbridge；其余全部 MESSAGELOOP_* 环境变量。
-    command: ["--config", "/etc/messageloop/mlbridge.yaml"]
+    # 平台 `command` = 覆盖镜像 ENTRYPOINT（非 CMD）：镜像 ENTRYPOINT 是
+    # /usr/local/bin/messageloop、CMD 才是 ["--config", …]，故必须写全命令
+    # （二进制 + 参数）——只写参数会以 `--config` 为 entrypoint 启动失败
+    # （IMPL-T2-4 复核发现并修正）。
+    command: ["/usr/local/bin/messageloop", "--config", "/etc/messageloop/mlbridge.yaml"]
     configs:
       - source: mlbridge.yaml
         target: /etc/messageloop/mlbridge.yaml

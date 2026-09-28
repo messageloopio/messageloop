@@ -49,7 +49,7 @@
 | 7 | redis `restart: unless-stopped` | **删除** | 平台重启策略缺省 `any`/delay 5s（服务级 `deploy.restart_policy` 可表达） |
 | 8 | messageloop `image: ${MESSAGELOOP_IMAGE:-…:latest}` | 字面 sha tag | 改镜像 = 改 compose 重新部署（平台 env 不参与 compose 插值） |
 | 9 | messageloop `pull_policy: always` | **删除** | DT-2：部署时 tag→digest 钉定 + Redeploy 重解析 = `always` 等价物（§5） |
-| 10 | messageloop `command: ["--config", "/etc/messageloop/mlbridge.yaml"]` | 保留（路径不变） | Config target 对齐原 bind 路径 |
+| 10 | messageloop `command: ["--config", "/etc/messageloop/mlbridge.yaml"]` | **改全命令形态** `["/usr/local/bin/messageloop", "--config", …]` | 平台 `command` = 覆盖镜像 ENTRYPOINT（镜像 CMD 才是 `--config …`）；只写参数会以 `--config` 为 entrypoint 启动失败（IMPL-T2-4 复核发现并修正） |
 | 11 | messageloop `volumes: ./mlbridge.yaml:…:ro`（bind） | **删挂载，改 Config 资源** | 顶层 `configs: {mlbridge.yaml: external: true}` + 服务级 `{source, target}`（OT-3/IMPL-T1-4） |
 | 12 | messageloop `networks: [default, dokploy-network]` | **全删** | 平台为 app 建专属 overlay；别名 = compose 服务名（external 网络在拒绝清单） |
 | 13 | Traefik label ×13（三 router/service + 80 跳转） | **全部删除** | 域名资源 API：三条 `fleetly domains add`（§3）；80→443 不做 |
