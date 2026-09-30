@@ -70,7 +70,7 @@ fleetly deploy docker/fleetly/docker-compose.yml
 # 预期：约 5 分钟（看门狗预算）后 deployment … failed  error=E_HEALTH_TIMEOUT；
 #       messageloop/mlbridge 崩溃重启属预期（缺必填 env）。检查方式：
 fleetly deployments list messageloop
-fleetly logs history messageloop --service messageloop --limit 50   # 可看到 auth_tokens 缺失的拒绝启动原因
+fleetly logs history --service messageloop --limit 50 messageloop   # 可看到 auth_tokens 缺失的拒绝启动原因
 # 若不想等满看门狗：观察到失败原因后提前收口（未切流可取消；首发取消同样 scale=0）：
 # fleetly deployments cancel <deployment-id>
 fleetly apps get messageloop        # app 已存在（derived_state=down）
@@ -84,7 +84,7 @@ fleetly env set messageloop MLBRIDGE_TORCHWOOD_PROJECTS '[{"project_id":"<proj>"
 fleetly env list messageloop        # 四项在场；status=pending（随下次部署生效）
 
 # Config 资源（内容源 = 仓库内 docker/fleetly/mlbridge.yaml）
-fleetly configs set messageloop mlbridge.yaml --from-file docker/fleetly/mlbridge.yaml
+fleetly configs set --from-file docker/fleetly/mlbridge.yaml messageloop mlbridge.yaml
 fleetly configs ls messageloop
 ```
 
@@ -166,7 +166,7 @@ docker run --rm \
 fleetly deploy docker/fleetly/docker-compose.yml
 # 预期：deployment … succeeded；redis 任务自 scale=0 起回，载入 §3.1 种子数据。
 fleetly apps get messageloop               # derived_state=running
-fleetly logs history messageloop --service mlbridge --limit 50   # 可选：确认无启动期报错
+fleetly logs history --service mlbridge --limit 50 messageloop   # 可选：确认无启动期报错
 ```
 
 ## 5. 域名声明与 DNS 切换

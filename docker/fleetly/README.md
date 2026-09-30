@@ -115,7 +115,7 @@ fleetly env set messageloop MLBRIDGE_TORCHWOOD_PROJECTS     '[{"project_id":"<pr
 fleetly env list messageloop
 
 # —— Config 资源（值明文可回读；内容变更 = 新对象 + 引用服务滚动）——
-fleetly configs set messageloop mlbridge.yaml --from-file docker/fleetly/mlbridge.yaml
+fleetly configs set --from-file docker/fleetly/mlbridge.yaml messageloop mlbridge.yaml
 fleetly configs ls messageloop
 ```
 
@@ -177,7 +177,7 @@ fleetly configs ls messageloop
 | 升级 | 改 `docker-compose.yml` 镜像 tag → `fleetly deploy docker/fleetly/docker-compose.yml` |
 | 回滚 | `fleetly rollback messageloop`（revision 级）或改回旧 tag 重部署；dokploy 栈未拆 = 终极回滚 |
 | 看状态 | `fleetly apps get messageloop` / `fleetly deployments list messageloop` / `fleetly placement show messageloop`（卷与节点） |
-| 看日志 | `fleetly logs history messageloop --limit 100`（服务归因；metrics 走平台观测面，8080 不发布） |
+| 看日志 | `fleetly logs history --limit 100 messageloop`（服务归因；metrics 走平台观测面，8080 不发布） |
 | 备份 | redis 数据卷 = 全部状态：`redis-cli BGREWRITEAOF` 后快照 `fleetly-<app>-redis_data-<appid8>` 卷（或 `BGSAVE` 取 RDB；注意 RDB-only 在 AOF 形态下不可直接启动，见 runbook 附录） |
 | 配置轮换 | `fleetly configs set …` 后对服务的下次部署生效（内容变 = 滚动） |
 | 密钥轮换 | `fleetly env set …` 后 Redeploy（pending → 生效） |
