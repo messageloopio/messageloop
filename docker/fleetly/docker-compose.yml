@@ -1,75 +1,51 @@
-# MessageLoop × mlbridge —— fleetly 受控子集栈（单 app 三服务：redis + messageloop + mlbridge）
+# MessageLoop × mlbridge —— fleetly 部署栈（2026-10-02 新平台形态，F1.15 dogfooding）
 #
-# 与 docker/dokploy/ 现役栈的差异（逐行改写清单/白名单核对表见同目录 README.md §2）：
-# - 删 ports（宿主回环 9090/9091）：公网入口全部经平台域名资源；客户端 gRPC
-#   直连域名（SDK DialGRPC TLS 已随 IMPL-T1-6 落地），SSH 隧道兜底退回 T3-1 opt-in；
-# - 删 depends_on：服务编排顺序归平台发布管线（受控子集显式拒绝该字段）；
-# - 删 dokploy-network（external 网络被拒）：平台为 app 建专属 overlay，服务别名
-#   = compose 服务名（redis / messageloop / mlbridge 按名互访，DNS 语义不变）；
-# - 删 ${VAR} 插值（平台禁用变量插值，`${VAR}` 会被当字面量）：改为字面量基线；
-#   密钥与环境相关值走平台 env（`fleetly env set`，平台层覆盖 compose 层——
-#   同键覆盖在 plan/deploy 输出 W_ENV_PLATFORM_OVERRIDE 警告，可见可查）；
-# - Traefik 三域名 label → 平台域名资源 API（`fleetly domains add`，见 README §3）；
-# - mlbridge.yaml bind mount → 平台 Config 资源（顶层 configs external + 服务级
-#   {source, target}；上传：`fleetly configs set messageloop mlbridge.yaml
-#   --from-file docker/fleetly/mlbridge.yaml`，见 README §4）；
-# - pull_policy: always 不在受控子集：等价物 = 部署时 tag→digest 解析 +
-#   Redeploy 重解析（DT-2）；镜像引用钉 sha tag（不用 latest），Redeploy 不静默换版；
-# - redis 的 command/卷/健康检查与现役一致（AOF 持久化是历史与 broker epoch 的载体）。
-#
-# MLBRIDGE_TORCHWOOD_BASE_URL 为临时公网形态：部署前用 `fleetly env set` 写入
-# 实际 Torchwood 网关地址（平台层覆盖下方占位）；T2 波次 torchwood 落 fleetly
-# 项目网后，改为项目内网别名形态（如 http://torchwood-server:9080），单 env 改动。
-
-name: messageloop
-
-# mlbridge.yaml 由平台明文配置资源提供（值不进 git 仓库是硬边界；
-# 上传与回读见 README §4）。内容 = messageloop 的 proxy 接线（config-file-only 键）。
-configs:
-  mlbridge.yaml:
-    external: true
+# 平台 = 新 fleetly（N0+F1.x，ADR-0033/0034 面）。与归档仓 v0.1 形态差异：
+# - 密钥 = Project Secret 文件注入（/run/secrets/<name>），env-from-secret 经
+#   sh -c 包装（v0.1 的 `fleetly env set` 不存在）；
+# - mlbridge.yaml（config-file-only 键）经 Secret 文件投递并 --config 指认：
+#   平台 Config 挂载面（config_refs）的运行期材料化未落地（挂账），Secret
+#   文件面是等价投递通道（值非敏感，走 Secret 是 interim 形态，README §5）；
+# - 服务互访 = compose 服务名（ADR-0034 网络别名=进程名）：redis/messageloop/
+#   mlbridge 按名互访；
+# - mlbridge → torchwood = 跨 Project 网络引用（F1.8 peer 声明/批准后挂靠）：
+#   __TW_PROJECT_ID__ 占位由部署脚本按实际项目 ID 渲染（渲染后文件不入库）；
+# - 域名 = 平台 Route（ml 9080 http / ml-grpc 9090 h2c / ml-api 9091 h2c），
+#   TLS 在平台边缘终结（LE staging CA，*.dev.fleetly.run 通配解析已在位）。
 
 volumes:
-  # redis 数据卷：平台按 app 注册为 fleetly-<app>-redis_data-<appid8>；
-  # 割接回灌/清点步骤见 cutover-runbook.md §3。
   redis_data:
 
 services:
+  # ==================== redis（AOF：streams 历史 + broker epoch） ====================
   redis:
     image: redis:7-alpine
-    # AOF 必开：streams 历史（客户端 recover 依赖）与 ml2:broker:epoch（broker
-    # 代际键）都在 Redis；无持久化重启 = 历史清零 + epoch 重建（旧客户端携带的
-    # 偏移在新代际下失去续读意义）。割接回灌必须连 AOF 目录与 epoch 一起搬运
-    # （cutover-runbook.md §3），不许只搬 dump.rdb。
+    # AOF 必开：无持久化重启 = 历史清零 + epoch 重建（旧客户端偏移失去续读意义）。
     command: ["redis-server", "--appendonly", "yes"]
+    networks: [default]
     volumes:
       - redis_data:/data
-    # 平台默认健康检查参数为 5s/3s/3/10s（受控子集固定四个子字段的缺省），
-    # 此处只声明探针本体；平台健康门据此判定发布。
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
 
+  # ==================== messageloop（WS 9080 / 客户端 gRPC 9090 / Server API 9091） ====================
   messageloop:
-    # GHCR 镜像（GitHub Actions docker-publish workflow 随 main/v* 发布）。
-    # 钉 sha tag 的理由与 tag/digest 取舍见 README §4 镜像引用形态裁决。
     image: ghcr.io/messageloopio/messageloop:sha-b009c71
-    # proxy 后端是 config-file-only 配置：以平台 Config 资源挂载（同目录
-    # mlbridge.yaml 为上传源），指向栈内 mlbridge；其余全部 MESSAGELOOP_* 环境变量。
-    # 平台 `command` = 覆盖镜像 ENTRYPOINT（非 CMD）：镜像 ENTRYPOINT 是
-    # /usr/local/bin/messageloop、CMD 才是 ["--config", …]，故必须写全命令
-    # （二进制 + 参数）——只写参数会以 `--config` 为 entrypoint 启动失败
-    # （IMPL-T2-4 复核发现并修正）。
-    command: ["/usr/local/bin/messageloop", "--config", "/etc/messageloop/mlbridge.yaml"]
-    configs:
-      - source: mlbridge.yaml
-        target: /etc/messageloop/mlbridge.yaml
-    # 三个后端端口声明（域名资源显式携带端口，expose 供人读与首部署种子语义）。
-    expose:
+    # 平台 command 覆盖 ENTRYPOINT → 写全命令；--config 指认 Secret 文件投递的
+    # mlbridge.yaml（proxy 接线是 config-file-only），鉴权 token 同源文件导出。
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        export MESSAGELOOP_SERVER_API_AUTH_TOKENS="$(cat /run/secrets/ml-api-tokens)"
+        exec /usr/local/bin/messageloop --config /run/secrets/mlbridge-yaml
+    networks: [default]
+    secrets: [ml-api-tokens, mlbridge-yaml]
+    ports:
       - "9080"
       - "9090"
       - "9091"
-    # 与镜像 HEALTHCHECK 同源（broker=redis ready 才报健康）；start_period 对齐
-    # 镜像基线 15s（interval/timeout/retries 走平台缺省 5s/3s/3）。
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health"]
       start_period: 15s
@@ -77,60 +53,56 @@ services:
       # —— 鉴权：经 mlbridge 代理认证（Torchwood 凭证），无本地命名空间 ——
       MESSAGELOOP_SERVER_REQUIRE_AUTH: "true"
       # —— 监听地址（--config 取代镜像默认配置基线，addr 类键必须给全）——
-      # 8080 绑回环：/health、/metrics 不对外，镜像 HEALTHCHECK 走容器内 127.0.0.1；
-      # 非回环绑定必须同时配 MESSAGELOOP_SERVER_HTTP_AUTH_TOKEN（G5 fail-closed）。
+      # 8080 绑回环：/health、/metrics 不对外；非回环绑定必须同时配
+      # MESSAGELOOP_SERVER_HTTP_AUTH_TOKEN（fail-closed）。
       MESSAGELOOP_SERVER_HTTP_ADDR: "127.0.0.1:8080"
       MESSAGELOOP_SERVER_API_ADDR: "0.0.0.0:9091"
       MESSAGELOOP_TRANSPORT_WEBSOCKET_ADDR: "0.0.0.0:9080"
       MESSAGELOOP_TRANSPORT_WEBSOCKET_PATH: "/ws"
       MESSAGELOOP_TRANSPORT_GRPC_ADDR: "0.0.0.0:9090"
-      # —— 传输行为（沿用镜像默认配置的基线值）——
+      # —— 传输行为（镜像默认配置基线值）——
       MESSAGELOOP_TRANSPORT_WEBSOCKET_COMPRESSION: "true"
       MESSAGELOOP_SERVER_HEARTBEAT_IDLE_TIMEOUT: "300s"
       MESSAGELOOP_SERVER_RPC_TIMEOUT: "30s"
-      # —— broker：栈内 redis（服务别名 = compose 服务名）——
+      # —— broker：栈内 redis（别名 = 服务名，ADR-0034）——
       MESSAGELOOP_BROKER_TYPE: "redis"
       MESSAGELOOP_BROKER_REDIS_ADDR: "redis:6379"
-      # 仅实现近似裁剪，Validate 强制显式 true
       MESSAGELOOP_BROKER_REDIS_STREAM_APPROXIMATE: "true"
       MESSAGELOOP_BROKER_REDIS_STREAM_MAX_LENGTH: "10000"
       # —— WebSocket 跨域（token 鉴权下 Origin 不是授权边界）——
       MESSAGELOOP_TRANSPORT_WEBSOCKET_ALLOW_ALL_ORIGINS: "true"
-      # —— 平台 env 提供的键（不落仓库；缺失时 messageloop fail-closed 拒绝启动）——
-      # MESSAGELOOP_SERVER_API_AUTH_TOKENS  Server API gRPC token 列表（逗号分隔，
-      #   openssl rand -hex 32）；mlbridge 复用同一值调 Server API。
-      # MESSAGELOOP_SERVER_HTTP_AUTH_TOKEN（可选：仅当 8080 改为非回环发布时必填）
-      # MESSAGELOOP_TRANSPORT_WEBSOCKET_ALLOWED_ORIGINS（可选收紧：逗号分隔白名单，
-      #   并同时把 ALLOW_ALL_ORIGINS 覆盖为 false）
 
+  # ==================== mlbridge（Torchwood ⇄ MessageLoop 桥，栈内私有） ====================
   mlbridge:
-    # Torchwood ⇄ MessageLoop 桥：身份校验、按租户频道策略、凭证撤销复验环、
-    # analytics 计量、send/history 写穿。仅栈内可达（无域名、无宿主端口）。
     image: ghcr.io/messageloopio/mlbridge:sha-39d254d
-    # TCP 存活探针（busybox nc）：镜像无自带 HEALTHCHECK，无 HTTP 端口；
-    # 探针覆盖「进程/监听存活」（配置校验失败 = 进程退出 = 探针失败，把
-    # 启动期故障拦在发布健康门内）；gRPC health 服务（grpc.health.v1，镜像
-    # 内建）在容器内无探针客户端，深度检查留验收探针（README §6）。
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        export MLBRIDGE_TORCHWOOD_PROJECTS="$(cat /run/secrets/ml-tw-projects)"
+        export MLBRIDGE_MESSAGELOOP_API_TOKEN="$(cat /run/secrets/ml-api-tokens)"
+        exec /usr/local/bin/mlbridge
+    networks:
+      - default
+      # 跨 Project 引用（F1.8 ADR-0013 附录 A.2）：目标 = torchwood 项目的
+      # default 网（peer declare/approve 后挂靠；__TW_PROJECT_ID__ 部署时渲染）。
+      # 挂靠侧别名不传播，目标侧 server 的别名（进程名）可解析。
+      - "project:__TW_PROJECT_ID__/default"
+    secrets: [ml-tw-projects, ml-api-tokens]
     healthcheck:
+      # TCP 存活（busybox nc）：无 HTTP 端口；配置类故障 = 进程退出 = 探针失败。
       test: ["CMD", "nc", "-z", "127.0.0.1", "9070"]
     environment:
       MLBRIDGE_LISTEN: "0.0.0.0:9070"
-      # Torchwood 网关地址（临时公网形态）：部署前必须改为实际地址——compose
-      # 层是占位，`fleetly env set messageloop MLBRIDGE_TORCHWOOD_BASE_URL <url>`
-      # 平台层覆盖。T2 后改项目内网别名（http://torchwood-server:9080）。
-      MLBRIDGE_TORCHWOOD_BASE_URL: "https://torchwood.example.com"
-      # admin 面：栈内 messageloop（别名 = compose 服务名）。
+      # torchwood 网关：跨 Project 挂靠后按目标项目网别名（进程名）回访。
+      MLBRIDGE_TORCHWOOD_BASE_URL: "http://server:9080"
+      # admin 面：栈内 messageloop（别名 = 服务名）。
       MLBRIDGE_MESSAGELOOP_API_ADDR: "messageloop:9091"
-      # 会话索引：与 broker 共用栈内 redis（键前缀 mlb:*，互不冲突）。
+      # 会话索引：与 broker 共用栈内 redis（键前缀 mlb:*）。
       MLBRIDGE_REDIS_ADDR: "redis:6379"
-      # 写穿：send RPC 先落 TW 文档再经 Server API 扇出；channels 是 JSON 数组，
-      # 通配语言与 ML 频道一致（不带命名空间前缀）。
+      # 写穿：send RPC 先落 TW 文档再经 Server API 扇出。
       MLBRIDGE_WRITE_THROUGH_ENABLED: "true"
       MLBRIDGE_WRITE_THROUGH_DATABASE: "messageloop"
       MLBRIDGE_WRITE_THROUGH_COLLECTION: "messages"
-      MLBRIDGE_WRITE_THROUGH_CHANNELS: '["**"]'
-      # —— 平台 env 提供的键（不落仓库；缺失时 mlbridge fail-closed 拒绝启动）——
-      # MLBRIDGE_TORCHWOOD_PROJECTS   JSON 数组 [{"project_id":"...","api_key":"..."}]
-      # MLBRIDGE_MESSAGELOOP_API_TOKEN  = MESSAGELOOP_SERVER_API_AUTH_TOKENS 同值
-      # 其余 MLBRIDGE_* 可调项（revalidate_interval=5m、metering.*、redis.db=0 等）
-      # 走平台 env 覆盖；完整键表见 mlbridge 仓库 internal/config/envconfig.go。
+      MLBRIDGE_WRITE_THROUGH_CHANNELS: "[\"**\"]"
