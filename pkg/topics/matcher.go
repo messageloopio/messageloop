@@ -50,13 +50,9 @@ var ErrBadSubscriber = errors.New("subscriber is not comparable")
 // ErrBadSubscriber. A nil Subscriber is allowed.
 type Subscriber interface{}
 
-// Subscription represents a topic subscription.
-//
-// ID is only meaningful for the bitmap implementations; the naive, trie and
-// cs-trie implementations leave it at its zero value. A Subscription is only
-// valid for the Matcher that created it.
+// Subscription represents a topic subscription. It is only valid for the
+// Matcher that created it.
 type Subscription struct {
-	ID         uint32
 	Topic      string
 	Subscriber Subscriber
 }
@@ -74,14 +70,12 @@ type Subscription struct {
 // and never match in Lookup. Segment count is significant for everything but
 // a trailing "**": "a" does not match "a.b".
 //
-// Duplicate subscription semantics differ between implementations:
-//   - The naive, trie and cs-trie matchers are idempotent per (topic,
-//     Subscriber): subscribing the same subscriber to the same topic twice is
-//     a no-op, and one Unsubscribe removes it.
-//   - The inverted and optimized inverted bitmap matchers are
-//     multi-subscription: every Subscribe call allocates a fresh position, so
-//     the same subscriber may subscribe to the same topic multiple times and
-//     each subscription must be removed with its own Unsubscribe.
+// Subscribe is idempotent per (topic, Subscriber): subscribing the same
+// subscriber to the same topic twice is a no-op, and one Unsubscribe removes
+// it. (This was once per-implementation behavior; the retired comparison
+// families — naive, trie, inverted bitmap, optimized inverted bitmap —
+// documented divergent multi-subscription semantics here. One adapter, one
+// contract.)
 //
 // Unsubscribe is idempotent: calling it twice with the same Subscription, or
 // with a nil Subscription, is a no-op.

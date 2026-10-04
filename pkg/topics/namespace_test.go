@@ -109,14 +109,11 @@ func TestMatch_Namespaced(t *testing.T) {
 	assert.False(Match("chat.*", "chat.general.extra"))
 }
 
-// TestMatcher_NamespacedMatchers pins the namespaced behavior across the
-// matcher implementations that split segments themselves.
+// TestMatcher_NamespacedMatchers pins the namespaced behavior of the
+// production matcher (the retired comparison families once ran here too).
 func TestMatcher_NamespacedMatchers(t *testing.T) {
 	matchers := map[string]Matcher{
-		"cstrie":  NewCSTrieMatcher(),
-		"trie":    NewTrieMatcher(),
-		"naive":   NewNaiveMatcher(),
-		"obitmap": NewOptimizedInvertedBitmapMatcher(16),
+		"cstrie": NewCSTrieMatcher(),
 	}
 	for name, m := range matchers {
 		t.Run(name, func(t *testing.T) {
