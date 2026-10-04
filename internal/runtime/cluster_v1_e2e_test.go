@@ -145,9 +145,8 @@ func TestSubscribe_RecoverRedisHistory(t *testing.T) {
 	third, err := node.Publish(channel, &stream.Publication{Payload: []byte("m3"), Kind: stream.PayloadKindText})
 	require.NoError(t, err)
 
-	epocher, ok := node.Broker().(interface{ Epoch() string })
-	require.True(t, ok, "the redis broker must expose the shared epoch")
-	require.NotEmpty(t, epocher.Epoch())
+	epoch := node.Broker().Epoch()
+	require.NotEmpty(t, epoch, "the redis broker must expose the shared epoch")
 
 	transport := &integrationCapturingTransport{}
 	client, _, err := runtime.NewClient(ctx, node, transport, shared.JSONMarshaler{})
@@ -161,7 +160,7 @@ func TestSubscribe_RecoverRedisHistory(t *testing.T) {
 			Subscribe: &clientpb.Subscribe{Subscriptions: []*clientpb.Subscription{{
 				Channel: channel,
 				Recover: true,
-				Cursor:  &sharedpb.Position{StreamEpoch: epocher.Epoch(), Offset: &first},
+				Cursor:  &sharedpb.Position{StreamEpoch: epoch, Offset: &first},
 			}}},
 		},
 	}))
@@ -191,7 +190,7 @@ func TestSubscribe_RecoverRedisHistory(t *testing.T) {
 	require.NotNil(t, pos)
 	require.NotNil(t, pos.Offset, "the authoritative position must carry the last delivered offset")
 	require.Equal(t, third, pos.GetOffset())
-	require.Equal(t, epocher.Epoch(), pos.GetStreamEpoch())
+	require.Equal(t, epoch, pos.GetStreamEpoch())
 }
 
 // TestClientSurvey_AggregatesAcrossRedisNodes proves the PR-07 client

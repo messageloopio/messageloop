@@ -7,6 +7,7 @@ import (
 
 	"github.com/lynx-go/x/log"
 
+	"github.com/messageloopio/messageloop/shared"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
@@ -68,18 +69,6 @@ type ChannelRecovery struct {
 	pubCount  int
 }
 
-// positionFrom builds the client-wire Position: the offset is only set when
-// set == true; otherwise it stays unset (transient / fresh / unknown), never
-// 0-means-unset (KD-K22).
-func positionFrom(epoch string, offset uint64, set bool) *sharedv2.Position {
-	p := &sharedv2.Position{StreamEpoch: epoch}
-	if set {
-		off := offset
-		p.Offset = &off
-	}
-	return p
-}
-
 // offsetFrom reads the client subscription cursor's optional offset.
 func offsetFrom(p *sharedv2.Position) (offset uint64, set bool) {
 	if p == nil || p.Offset == nil {
@@ -88,13 +77,62 @@ func offsetFrom(p *sharedv2.Position) (offset uint64, set bool) {
 	return p.GetOffset(), true
 }
 
-// streamEpoch returns the broker's StreamEpoch, or "" when the broker does
-// not expose one.
+// streamEpoch returns the broker's StreamEpoch ("" when the broker carries
+// no epoch or is not yet set).
 func (n *Node) streamEpoch() string {
-	if epocher, ok := n.broker.(interface{ Epoch() string }); ok {
-		return epocher.Epoch()
+	if n.broker == nil {
+		return ""
 	}
-	return ""
+	return n.broker.Epoch()
+}
+
+// StreamEpoch returns the broker's current history generation identity (""
+// when the broker has no epoch concept). Server API history reads compare
+// caller-recorded positions against it; the recover contract stamps it into
+// every Position and the cluster resume snapshot.
+func (n *Node) StreamEpoch() string {
+	return n.streamEpoch()
+}
+
+// SnapshotRecoverySubs classifies the resume entry for one Connect: the
+// channels the resume snapshot subscribed that the request did not already
+// list (requestChannels = the ACL-passed, deduplicated channels that entered
+// the recovery union) and whose hydrate did not fail (failedChannels) come
+// back as synthetic Recover=true subscriptions — the ordered-union tail of
+// PR-03 (request subscriptions first, snapshot-only channels after). The
+// recover module owns this entry contract end to end: the synthetic entries'
+// cursor is the server-recorded ChannelOffsets, and a channel missing an
+// offset is skipped by recoverySkip (never replayed from the beginning).
+// A nil snapshot classifies as non-resume and returns nil.
+func (n *Node) SnapshotRecoverySubs(snapshot *ClusterSessionSnapshot, requestChannels, failedChannels []string) []*clientpb.Subscription {
+	if snapshot == nil {
+		return nil
+	}
+	requested := make(map[string]struct{}, len(requestChannels))
+	for _, ch := range requestChannels {
+		requested[ch] = struct{}{}
+	}
+	failed := make(map[string]struct{}, len(failedChannels))
+	for _, ch := range failedChannels {
+		failed[ch] = struct{}{}
+	}
+	var subs []*clientpb.Subscription
+	for _, snap := range snapshot.Subscriptions {
+		if _, dup := requested[snap.Channel]; dup {
+			continue
+		}
+		if _, bad := failed[snap.Channel]; bad {
+			continue
+		}
+		// Snapshot entries are deduplicated among themselves too: a channel
+		// listed twice in the snapshot yields one synthetic subscription.
+		requested[snap.Channel] = struct{}{}
+		subs = append(subs, &clientpb.Subscription{
+			Channel: snap.Channel,
+			Recover: true,
+		})
+	}
+	return subs
 }
 
 // recoverQuota is the per-request MaxRecoveredPublications budget shared by
@@ -425,7 +463,7 @@ func (n *Node) finishRecovery(ctx context.Context, c *Session, in *clientpb.Inbo
 	if c != nil {
 		complete := &clientpb.RecoverComplete{
 			Channel:   res.Channel,
-			Position:  positionFrom(res.Epoch, res.Offset, res.OffsetSet),
+			Position:  shared.PositionFrom(res.Epoch, res.Offset, res.OffsetSet),
 			Truncated: res.Status == RecoverTruncated,
 			Gap:       res.gap,
 			GapReason: res.gapReason,
@@ -495,7 +533,7 @@ func publicationToClient(channel string, pub *Publication, replay bool) *clientp
 			{
 				Id:       publicationID(channel, pub.Offset),
 				Channel:  channel,
-				Position: positionFrom(pub.Epoch, pub.Offset, true),
+				Position: shared.PositionFrom(pub.Epoch, pub.Offset, true),
 				Payload:  pub.PayloadProtoV2(),
 				Metadata: func() *sharedv2.Metadata {
 					if len(pub.Metadata) == 0 {

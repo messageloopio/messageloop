@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/messageloopio/messageloop/config"
+	"github.com/messageloopio/messageloop/shared"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
@@ -760,7 +761,7 @@ func TestSession_OutboundFrameHonorsMaxMessageSize(t *testing.T) {
 		{
 			Id:       "big-1",
 			Channel:  "size.ch",
-			Position: positionFrom("", 1, true),
+			Position: shared.PositionFrom("", 1, true),
 			Payload: &sharedv2.Payload{
 				Data: &sharedv2.Payload_Binary{Binary: big},
 			},
@@ -778,3 +779,12 @@ func TestSession_OutboundFrameHonorsMaxMessageSize(t *testing.T) {
 		}
 	})), ErrOutboundTooLarge, "Connected must honor MaxMessageSize like every other frame")
 }
+
+// Epoch satisfies the Broker interface epoch capability (no epoch concept).
+func (b *countingRecoveryBroker) Epoch() string { return "" }
+
+// Epoch satisfies the Broker interface epoch capability (no epoch concept).
+func (b *gapHistoryBroker) Epoch() string { return "" }
+
+// Epoch satisfies the Broker interface epoch capability (no epoch concept).
+func (b *trimmedHistoryBroker) Epoch() string { return "" }

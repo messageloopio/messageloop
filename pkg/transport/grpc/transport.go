@@ -7,13 +7,14 @@ import (
 	"time"
 
 	googlegrpc "google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/messageloopio/messageloop/internal/protocol"
 	"github.com/messageloopio/messageloop/internal/session"
+	"github.com/messageloopio/messageloop/pkg/transport/framing"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
 // ErrTransportClosed is returned by WriteMany after the transport has been closed.
@@ -148,20 +149,10 @@ func (t *Transport) writeError(code int32, reason string) error {
 	// The numeric disconnect code (3500-3514) is encoded into the error
 	// envelope metadata because the gRPC stream has no close frame: the WS
 	// path carries the code in the close frame, and without this the gRPC
-	// client cannot tell the disconnect reasons apart.
-	metadata := &structpb.Struct{Fields: map[string]*structpb.Value{
-		"disconnect_code": structpb.NewNumberValue(float64(code)),
-	}}
-	msg := session.MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
-		out.Envelope = &clientpb.OutboundMessage_Error{
-			Error: &sharedpb.Error{
-				Code:     "DISCONNECT_ERROR",
-				Type:     "transport_error",
-				Message:  reason,
-				Metadata: metadata,
-			},
-		}
-	})
+	// client cannot tell the disconnect reasons apart. The envelope shape is
+	// the shared framing kit's DisconnectMessage (same wire form as the
+	// QUIC/KCP disconnect frames).
+	msg := framing.DisconnectMessage(code, reason)
 	frame, err := proto.Marshal(msg)
 	if err != nil {
 		return err
@@ -193,7 +184,7 @@ func newGRPCTransport(
 		for {
 			select {
 			case req := <-t.sendCh:
-				req.errCh <- t.stream.SendMsg(req.msg)
+				req.errCh <- wrapPeerGone(t.stream.SendMsg(req.msg))
 			case <-t.closeCh:
 				// The transport is closed; no new requests can be enqueued
 				// once writers observe the closed flag, but requests that
@@ -205,7 +196,7 @@ func newGRPCTransport(
 					select {
 					case req := <-t.sendCh:
 						if req.disconnect {
-							req.errCh <- t.stream.SendMsg(req.msg)
+							req.errCh <- wrapPeerGone(t.stream.SendMsg(req.msg))
 						} else {
 							req.errCh <- ErrTransportClosed
 						}
@@ -221,4 +212,19 @@ func newGRPCTransport(
 
 func (t *Transport) RemoteAddr() string {
 	return t.remoteAddr
+}
+
+// wrapPeerGone marks gRPC Canceled/Unavailable send results with
+// session.ErrPeerGone so the session's write-error classification sees
+// them without importing grpc status/codes. Other error shapes pass
+// through unchanged (status.Code of a non-status error is Unknown, which
+// stays a slow-consumer close, exactly as before).
+func wrapPeerGone(err error) error {
+	if err == nil {
+		return nil
+	}
+	if code := status.Code(err); code == codes.Canceled || code == codes.Unavailable {
+		return errors.Join(session.ErrPeerGone, err)
+	}
+	return err
 }

@@ -85,7 +85,7 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 
 	// Set read deadline based on heartbeat configuration
 	heartbeat := h.node.GetHeartbeatConfig()
-	readTimeout := heartbeatReadTimeout(heartbeat.IdleTimeout, heartbeat.PingInterval, h.opt.ReadTimeout)
+	readTimeout := heartbeat.ReadDeadline(h.opt.ReadTimeout)
 	_ = conn.SetReadDeadline(time.Now().Add(readTimeout))
 
 	for {
@@ -186,32 +186,3 @@ func logReadError(ctx context.Context, err error) {
 	}
 }
 
-// heartbeatReadTimeout computes the WebSocket read deadline from the
-// heartbeat configuration:
-//
-//   - idle == 0 && ping == 0: 60s, overridden by an explicit configured
-//     value — a heartbeat-disabled connection must not be hit with a 10s
-//     floor (that would disconnect silent-but-alive clients).
-//   - otherwise: a floor of max(2*idle, 3*ping, 10s) that guarantees the
-//     probing window (idle check plus ping deadline) can never be cut short
-//     by the read deadline; an explicit configured value may raise but never
-//     lower it.
-func heartbeatReadTimeout(idle, ping, configured time.Duration) time.Duration {
-	if idle == 0 && ping == 0 {
-		if configured > 0 {
-			return configured
-		}
-		return 60 * time.Second
-	}
-	floor := 10 * time.Second
-	if t := 2 * idle; t > floor {
-		floor = t
-	}
-	if t := 3 * ping; t > floor {
-		floor = t
-	}
-	if configured > floor {
-		return configured
-	}
-	return floor
-}

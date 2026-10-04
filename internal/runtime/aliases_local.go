@@ -55,6 +55,7 @@ type ChannelPolicy = channel.ChannelPolicy
 var (
 	DefaultChannelPolicy = channel.DefaultChannelPolicy
 	ErrHistoryDisabled   = channel.ErrHistoryDisabled
+	ErrAddHistoryDenied  = channel.ErrAddHistoryDenied
 )
 
 // --- internal/authz ---
@@ -94,8 +95,8 @@ const (
 )
 
 var (
-	ClosedCapabilityNames    = authz.ClosedCapabilityNames
 	DefaultCapabilityCeiling = authz.DefaultCapabilityCeiling
+	ParseCapabilityNames     = authz.ParseCapabilityNames
 	ErrInvalidRulePattern    = authz.ErrInvalidRulePattern
 	NewAuthorizer            = authz.NewAuthorizer
 )

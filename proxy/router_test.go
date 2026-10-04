@@ -364,3 +364,62 @@ func TestRouter_AddFromConfig_RollsBackOnFailure(t *testing.T) {
 	require.NoError(t, r.AddFromConfig(p, valid))
 	assert.Equal(t, "config-proxy", r.Match("user.profile", "get").Name())
 }
+
+// TestRouter_ByName resolves proxies by their registered name: unknown and
+// empty names return nil, and the first registration under a name wins.
+func TestRouter_ByName(t *testing.T) {
+	r := NewRouter()
+	p1 := &mockRPCProxy{name: "named"}
+	p2 := &mockRPCProxy{name: "other"}
+
+	require.NoError(t, r.Add(p1, "chat.*", "*"))
+	require.NoError(t, r.Add(p2, "user.*", "*"))
+
+	assert.Same(t, p1, r.ByName("named"))
+	assert.Same(t, p2, r.ByName("other"))
+	assert.Nil(t, r.ByName("missing"))
+	assert.Nil(t, r.ByName(""))
+}
+
+// TestRouter_ByName_RoutelessEntryStaysReachable pins the api_auth shape: an
+// explicitly assigned proxy that carries no channel routes cannot be reached
+// through Match, but ByName still resolves it — key verification does not
+// silently disappear just because the entry routes nothing.
+func TestRouter_ByName_RoutelessEntryStaysReachable(t *testing.T) {
+	r := NewRouter()
+	p := &mockRPCProxy{name: "key-verifier"}
+
+	require.NoError(t, r.AddFromConfig(p, &ProxyConfig{Name: "key-verifier"}))
+
+	assert.Nil(t, r.Match("chat.room1", "publish"), "no routes means no glob routing")
+	assert.Same(t, p, r.ByName("key-verifier"))
+}
+
+// TestRouter_ByName_NotShadowedByEarlierBroadPattern pins the reason
+// api_auth resolution uses ByName instead of re-probing its own route text
+// through Match: Match is first-match, so an earlier "*" route shadows any
+// later probe — the explicit assignment must not be hijackable that way.
+func TestRouter_ByName_NotShadowedByEarlierBroadPattern(t *testing.T) {
+	r := NewRouter()
+	broad := &mockRPCProxy{name: "broad-first"}
+	assigned := &mockRPCProxy{name: "assigned"}
+
+	require.NoError(t, r.Add(broad, "*", "*"))
+	require.NoError(t, r.Add(assigned, "acme.*", "$authenticate"))
+
+	// The glob probe would land on the earlier broad route...
+	assert.Equal(t, "broad-first", r.Match("acme.chat", "$authenticate").Name())
+	// ...while the by-name lookup returns the assigned entry itself.
+	assert.Same(t, assigned, r.ByName("assigned"))
+}
+
+// TestRouter_CloseClearsByName verifies the name index is torn down with the
+// routes: a closed router resolves nothing.
+func TestRouter_CloseClearsByName(t *testing.T) {
+	r := NewRouter()
+	p := &mockRPCProxy{name: "named"}
+	require.NoError(t, r.Add(p, "chat.*", "*"))
+
+	require.NoError(t, r.Close())
+	assert.Nil(t, r.ByName("named"))
+}

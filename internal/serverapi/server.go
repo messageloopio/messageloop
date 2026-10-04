@@ -49,11 +49,5 @@ func capabilityCeilingFromNames(names []string) authz.Capability {
 	if len(names) == 0 {
 		return authz.DefaultCapabilityCeiling
 	}
-	var caps authz.Capability
-	for _, name := range names {
-		if bit, ok := authz.ClosedCapabilityNames[name]; ok {
-			caps |= bit
-		}
-	}
-	return caps
+	return authz.ParseCapabilityNames(names)
 }

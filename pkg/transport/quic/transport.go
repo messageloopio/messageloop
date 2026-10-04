@@ -2,39 +2,29 @@ package quic
 
 import (
 	"errors"
-	"fmt"
-	"sync"
 	"time"
 
 	"github.com/quic-go/quic-go"
-	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/messageloopio/messageloop/internal/protocol"
 	"github.com/messageloopio/messageloop/internal/session"
+	"github.com/messageloopio/messageloop/pkg/transport/framing"
 	"github.com/messageloopio/messageloop/shared"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
 // ErrTransportClosed is returned by Write after the transport has been closed.
 var ErrTransportClosed = errors.New("quic transport is closed")
 
-const (
-	defaultWriteTimeout = 10 * time.Second
-	// disconnectFrameTimeout bounds the disconnect envelope write in Close so
-	// a backed-up stream cannot block the close path for a full write timeout.
-	disconnectFrameTimeout = 1 * time.Second
-)
-
-// Transport implements session.Transport over one QUIC bidirectional stream.
+// Transport implements session.Transport over one QUIC bidirectional
+// stream. The bounded framing discipline (serialized frames, write
+// deadlines, disconnect envelope) lives in the shared framing kit; this
+// adapter only contributes the QUIC stream and its close semantics.
 type Transport struct {
-	conn         *quic.Conn
-	stream       *quic.Stream
-	marshaler    shared.Marshaler
-	remoteAddr   string
-	writeMu      sync.Mutex
-	writeTimeout time.Duration
-	closed       bool
+	conn       *quic.Conn
+	stream     *quic.Stream
+	w          *framing.Writer
+	marshaler  shared.Marshaler
+	remoteAddr string
 }
 
 func newTransport(conn *quic.Conn, stream *quic.Stream, marshaler shared.Marshaler, writeTimeout time.Duration) *Transport {
@@ -46,11 +36,11 @@ func newTransport(conn *quic.Conn, stream *quic.Stream, marshaler shared.Marshal
 		marshaler = shared.ProtobufMarshaler{}
 	}
 	return &Transport{
-		conn:         conn,
-		stream:       stream,
-		marshaler:    marshaler,
-		remoteAddr:   remote,
-		writeTimeout: writeTimeout,
+		conn:       conn,
+		stream:     stream,
+		w:          framing.NewWriter(stream, stream.SetWriteDeadline, writeTimeout, ErrTransportClosed),
+		marshaler:  marshaler,
+		remoteAddr: remote,
 	}
 }
 
@@ -63,86 +53,23 @@ func (t *Transport) Write(msg []byte) error {
 }
 
 func (t *Transport) WriteMany(msgs ...[]byte) error {
-	t.writeMu.Lock()
-	defer t.writeMu.Unlock()
-	if t.closed {
-		return ErrTransportClosed
-	}
-	timeout := t.effectiveTimeout()
-	for _, msg := range msgs {
-		if timeout > 0 {
-			_ = t.stream.SetWriteDeadline(time.Now().Add(timeout))
-		}
-		if err := shared.WriteFrame(t.stream, msg); err != nil {
-			return err
-		}
-	}
-	if timeout > 0 {
-		_ = t.stream.SetWriteDeadline(time.Time{})
-	}
-	return nil
+	return t.w.WriteMany(msgs...)
 }
 
 func (t *Transport) Close(disconnect protocol.Disconnect) error {
-	t.writeMu.Lock()
-	if t.closed {
-		t.writeMu.Unlock()
+	if !t.w.MarkClosed() {
 		return nil
 	}
-	t.closed = true
-	t.writeMu.Unlock()
 
 	// Best-effort disconnect envelope so the client can decode the reason
-	// from the stream (same DISCONNECT_ERROR metadata as the gRPC path)
-	// before the connection is torn down.
-	_ = t.writeDisconnectFrame(disconnect)
+	// from the stream before the connection is torn down.
+	_ = t.w.WriteDisconnectFrame(t.marshaler, disconnect)
 
 	code := quic.ApplicationErrorCode(disconnect.Code)
 	if t.conn != nil {
 		return t.conn.CloseWithError(code, disconnect.Reason)
 	}
 	return nil
-}
-
-func (t *Transport) writeDisconnectFrame(disconnect protocol.Disconnect) error {
-	metadata := &structpb.Struct{Fields: map[string]*structpb.Value{
-		"disconnect_code": structpb.NewNumberValue(float64(disconnect.Code)),
-	}}
-	msg := session.MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
-		out.Envelope = &clientpb.OutboundMessage_Error{
-			Error: &sharedpb.Error{
-				Code:     "DISCONNECT_ERROR",
-				Type:     "transport_error",
-				Message:  disconnect.Reason,
-				Metadata: metadata,
-			},
-		}
-	})
-	frame, err := t.marshalDisconnect(msg)
-	if err != nil {
-		return err
-	}
-	t.writeMu.Lock()
-	defer t.writeMu.Unlock()
-	_ = t.stream.SetWriteDeadline(time.Now().Add(disconnectFrameTimeout))
-	err = shared.WriteFrame(t.stream, frame)
-	_ = t.stream.SetWriteDeadline(time.Time{})
-	return err
-}
-
-func (t *Transport) marshalDisconnect(msg *clientpb.OutboundMessage) ([]byte, error) {
-	data, err := t.marshaler.Marshal(msg)
-	if err != nil {
-		return nil, fmt.Errorf("marshal disconnect frame: %w", err)
-	}
-	return data, nil
-}
-
-func (t *Transport) effectiveTimeout() time.Duration {
-	if t.writeTimeout > 0 {
-		return t.writeTimeout
-	}
-	return defaultWriteTimeout
 }
 
 var _ session.Transport = (*Transport)(nil)

@@ -16,6 +16,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/messageloopio/messageloop/pkg/topics"
+	"github.com/messageloopio/messageloop/shared"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
@@ -421,7 +422,7 @@ func (h *Hub) BroadcastPublication(ch string, pub *Publication) error {
 	msg := &clientpb.Message{
 		Channel:  ch,
 		Id:       publicationMessageID(ch, pub.Offset),
-		Position: positionFrom(pub.Epoch, pub.Offset, true),
+		Position: shared.PositionFrom(pub.Epoch, pub.Offset, true),
 		Payload:  payload,
 		Metadata: func() *sharedv2.Metadata {
 			if len(pub.Metadata) == 0 {
@@ -458,7 +459,7 @@ func (h *Hub) BroadcastPublication(ch string, pub *Publication) error {
 		var b []byte
 		var err error
 		spliced := false
-		if jsonRaw != nil && isJSONWireMarshaler(m) {
+		if jsonRaw != nil && m.IsJSONWire() {
 			// Swap in the empty-Struct placeholder so protojson emits the
 			// splice point, then graft the raw payload bytes in. The loop is
 			// sequential: the swap is restored before the next encoding
@@ -605,15 +606,6 @@ func spliceRawJSONPayload(frame, raw []byte) ([]byte, bool) {
 	out = append(out, raw...)
 	out = append(out, frame[i+len(jsonPayloadSplicePoint):]...)
 	return out, true
-}
-
-// isJSONWireMarshaler reports whether m renders proto messages as protojson
-// text — the wire family for which splicing raw JSON payload bytes into the
-// frame is valid. JSONMarshaler delegates proto messages to the shared
-// ProtoJSONMarshaler, so both names produce byte-identical frames.
-func isJSONWireMarshaler(m Marshaler) bool {
-	name := m.Name()
-	return name == (JSONMarshaler{}).Name() || name == ProtoJSONMarshaler.Name()
 }
 
 // recordDeliveredOffsets updates the last successfully delivered offset for

@@ -183,6 +183,9 @@ func (f *fakeRuntime) RemoveLocalSubscriptionOnly(ch string, s *Session, _ bool)
 }
 
 func (f *fakeRuntime) StreamEpoch() string { return "" }
+func (f *fakeRuntime) SnapshotRecoverySubs(*cluster.ClusterSessionSnapshot, []string, []string) []*clientpb.Subscription {
+	return nil
+}
 func (f *fakeRuntime) RecoverState(*Session, []*clientpb.Subscription, *cluster.ClusterSessionSnapshot) clientpb.RecoverState {
 	return clientpb.RecoverState_RECOVER_STATE_UNSPECIFIED
 }

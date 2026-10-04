@@ -19,6 +19,7 @@ import (
 	"github.com/messageloopio/messageloop/internal/occupancy"
 	"github.com/messageloopio/messageloop/internal/session"
 	"github.com/messageloopio/messageloop/proxy"
+	"github.com/messageloopio/messageloop/shared"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
@@ -172,12 +173,7 @@ func NewNode(cfg *config.Server) *Node {
 	// and skipped here.
 	node.apiCaps = DefaultCapabilityCeiling
 	if cfg != nil && cfg.API.Capabilities != nil {
-		node.apiCaps = 0
-		for _, name := range cfg.API.Capabilities {
-			if cap, ok := ClosedCapabilityNames[name]; ok {
-				node.apiCaps |= cap
-			}
-		}
+		node.apiCaps = ParseCapabilityNames(cfg.API.Capabilities)
 	}
 
 	return node
@@ -355,11 +351,11 @@ func (n *Node) apiPrincipal() Principal {
 }
 
 // APIPrincipal returns the node's built-in superadmin principal (UserID
-// "admin", capability bits from server.api.capabilities). It is the exact
-// principal the Server API authorized with before per-call identities
-// existed; Server API callers pass it today, and S4 of the API key
-// design (§2.4) replaces those call sites with the per-request identity from
-// the auth context.
+// "admin", capability bits from server.api.capabilities). Production call
+// sites carry the per-request identity from the auth context since S4 of the
+// API key design (§2.4); this remains the constructor for tests that need the
+// static superadmin identity (e.g. cluster Redis integration tests driving
+// admin handlers from the external test package).
 func (n *Node) APIPrincipal() Principal {
 	return n.apiPrincipal()
 }
@@ -703,6 +699,24 @@ func (n *Node) PublishTransient(ch string, pub *Publication) error {
 	return err
 }
 
+// PublishForAPI publishes pub to ch on behalf of a Server API caller,
+// honoring add_history: with addHistory the publication goes through
+// Publish (per-policy history sizing applies); without it, through
+// PublishTransient. A channel whose policy disables history plus
+// addHistory=true yields ErrAddHistoryDenied and publishes nothing — the
+// caller must not assume the message was written (the client path differs
+// on purpose: it converts to transient transparently and acks offset 0).
+func (n *Node) PublishForAPI(ch string, pub *Publication, addHistory bool) error {
+	if addHistory {
+		if pol := n.ChannelPolicy(ch); pol.TransientOnly || !pol.History {
+			return ErrAddHistoryDenied
+		}
+		_, err := n.Publish(ch, pub)
+		return err
+	}
+	return n.PublishTransient(ch, pub)
+}
+
 // SetupProxy configures the proxy router with the given proxy configurations.
 func (n *Node) SetupProxy(cfgs []*proxy.ProxyConfig) error {
 	n.proxy = proxy.NewRouter()
@@ -740,6 +754,17 @@ func (n *Node) FindProxy(channel, method string) proxy.Proxy {
 	return n.proxy.Match(channel, method)
 }
 
+// FindProxyByName returns the proxy registered under its configuration name,
+// bypassing channel/method glob routing. Explicit assignments (api_auth)
+// resolve through this so an earlier broad pattern cannot shadow them and a
+// route-less entry stays reachable.
+func (n *Node) FindProxyByName(name string) proxy.Proxy {
+	if n.proxy == nil {
+		return nil
+	}
+	return n.proxy.ByName(name)
+}
+
 // AddProxy adds a proxy to the router.
 func (n *Node) AddProxy(p proxy.Proxy, channelPattern, methodPattern string) error {
 	if n.proxy == nil {
@@ -765,8 +790,8 @@ func (n *Node) GetRPCTimeout() time.Duration {
 	return proxy.DefaultRPCTimeout
 }
 
-// GetHeartbeatIdleTimeout returns the configured heartbeat idle timeout.
-func (n *Node) GetHeartbeatIdleTimeout() time.Duration {
+// heartbeatIdleTimeout returns the configured heartbeat idle timeout.
+func (n *Node) heartbeatIdleTimeout() time.Duration {
 	if n.heartbeatManager != nil {
 		return n.heartbeatManager.Config().IdleTimeout
 	}
@@ -1216,12 +1241,12 @@ func presenceChannel(ch string) string {
 	return ch + "/__presence"
 }
 
-// PublishPresenceJoin publishes a presence join event to the channel's presence sub-channel.
+// publishPresenceJoin publishes a presence join event to the channel's presence sub-channel.
 // Presence events are transient: they are delivered in real time but never
 // written to broker history, so they do not leak into the recovery stream.
 // Kept for the legacy companion path (legacy_presence_channel=true) and for
 // direct callers; first-class occupancy flows over the live bus instead.
-func (n *Node) PublishPresenceJoin(channel, clientID, userID string) {
+func (n *Node) publishPresenceJoin(channel, clientID, userID string) {
 	evt := occupancy.NewPresenceEvent("join", channel, clientID, userID)
 	data, err := occupancy.MarshalPresenceEvent(evt)
 	if err != nil {
@@ -1238,10 +1263,10 @@ func (n *Node) PublishPresenceJoin(channel, clientID, userID string) {
 	}
 }
 
-// PublishPresenceLeave publishes a presence leave event to the channel's presence sub-channel.
+// publishPresenceLeave publishes a presence leave event to the channel's presence sub-channel.
 // Presence events are transient: they are delivered in real time but never
 // written to broker history, so they do not leak into the recovery stream.
-func (n *Node) PublishPresenceLeave(channel, clientID, userID string) {
+func (n *Node) publishPresenceLeave(channel, clientID, userID string) {
 	evt := occupancy.NewPresenceEvent("leave", channel, clientID, userID)
 	data, err := occupancy.MarshalPresenceEvent(evt)
 	if err != nil {
@@ -1303,7 +1328,7 @@ func (n *Node) presenceJoin(ctx context.Context, ch string, c *Client) {
 		},
 	})
 	if n.ChannelPolicy(ch).LegacyPresenceChannel {
-		go n.PublishPresenceJoin(ch, c.SessionID(), c.UserID())
+		go n.publishPresenceJoin(ch, c.SessionID(), c.UserID())
 	}
 }
 
@@ -1338,7 +1363,7 @@ func (n *Node) presenceLeave(ctx context.Context, ch, sessionID, userID string, 
 		},
 	})
 	if n.ChannelPolicy(ch).LegacyPresenceChannel {
-		go n.PublishPresenceLeave(ch, sessionID, userID)
+		go n.publishPresenceLeave(ch, sessionID, userID)
 	}
 }
 
@@ -1552,7 +1577,7 @@ func (n *Node) onGap(gap CatchUpGap) {
 
 	notice := &clientpb.GapNotice{
 		Channel:   gap.Channel,
-		Position:  positionFrom(n.streamEpoch(), gap.LastGoodOffset, gap.LastGoodOffset > 0),
+		Position:  shared.PositionFrom(n.streamEpoch(), gap.LastGoodOffset, gap.LastGoodOffset > 0),
 		GapReason: gapNoticeReasonV2(gap.Reason),
 	}
 	out := MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
@@ -1574,16 +1599,25 @@ func (n *Node) onGap(gap CatchUpGap) {
 	}
 }
 
+// PresenceSnapshotLimit resolves the presence snapshot cap for ch: the
+// channel policy override (presence_snapshot_limit) when set, otherwise
+// MaxPresenceSnapshotClients. Both the client snapshot path
+// (presenceSnapshot) and the Server API GetPresence truncation resolve
+// their cap here so the two planes cannot drift.
+func (n *Node) PresenceSnapshotLimit(ch string) int {
+	if pol := n.ChannelPolicy(ch); pol.PresenceSnapshotLimit > 0 {
+		return pol.PresenceSnapshotLimit
+	}
+	return MaxPresenceSnapshotClients
+}
+
 // presenceSnapshot builds the current snapshot for ch under the channel
 // policy cap (MaxPresenceSnapshotClients unless presence_snapshot_limit
 // overrides it). occupancy counts every client, truncated reports that the
 // clients list was capped. A store failure yields an empty snapshot plus a
 // Warn and op=store — callers keep the subscription alive regardless.
 func (n *Node) presenceSnapshot(ctx context.Context, ch string) *clientpb.PresenceSnapshot {
-	limit := MaxPresenceSnapshotClients
-	if pol := n.ChannelPolicy(ch); pol.PresenceSnapshotLimit > 0 {
-		limit = pol.PresenceSnapshotLimit
-	}
+	limit := n.PresenceSnapshotLimit(ch)
 	clients, err := n.presence.Get(ctx, ch)
 	if err != nil {
 		log.WarnContext(ctx, "failed to read presence snapshot", err, "channel", ch)

@@ -20,7 +20,6 @@ import (
 	"github.com/messageloopio/messageloop/proxy"
 	"github.com/messageloopio/messageloop/shared"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
 
 // Local type aliases so the git-mv'd files keep using short names (body
@@ -148,6 +147,7 @@ type Runtime interface {
 
 	// recovery 编排
 	StreamEpoch() string
+	SnapshotRecoverySubs(snapshot *cluster.ClusterSessionSnapshot, requestChannels, failedChannels []string) []*clientpb.Subscription
 	RecoverState(c *Session, subs []*clientpb.Subscription, snapshot *cluster.ClusterSessionSnapshot) clientpb.RecoverState
 	StreamRecoveries(ctx context.Context, c *Session, in *clientpb.InboundMessage, subs []*clientpb.Subscription, snapshot *cluster.ClusterSessionSnapshot, path string)
 }
@@ -349,14 +349,3 @@ func (h *Hub) Sessions() []*Session {
 
 // newHub keeps the pre-export name for in-package tests (hub_test.go).
 var newHub = NewHub
-
-// positionFrom is a local copy of the root recover.go helper so this package
-// does not import the root (import cycle). Same bytes as recover.go.
-func positionFrom(epoch string, offset uint64, set bool) *sharedv2.Position {
-	p := &sharedv2.Position{StreamEpoch: epoch}
-	if set {
-		off := offset
-		p.Offset = &off
-	}
-	return p
-}

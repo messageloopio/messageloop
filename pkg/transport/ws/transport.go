@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"errors"
 	"sync"
 	"time"
 
@@ -46,7 +47,7 @@ func (t *Transport) WriteMany(msgs ...[]byte) error {
 			_ = t.conn.SetWriteDeadline(time.Now().Add(t.writeTimeout))
 		}
 		if err := t.conn.WriteMessage(t.msgType, msg); err != nil {
-			return err
+			return wrapPeerGone(err)
 		}
 	}
 	if t.writeTimeout > 0 {
@@ -86,4 +87,18 @@ func closeCode(disconnect protocol.Disconnect) int {
 		return websocket.CloseNormalClosure
 	}
 	return int(disconnect.Code)
+}
+
+// wrapPeerGone marks the WebSocket peer-gone error shapes (normal closure /
+// going away) with session.ErrPeerGone so the session's write-error
+// classification sees them without importing gorilla/websocket. Other error
+// shapes pass through unchanged.
+func wrapPeerGone(err error) error {
+	if err == nil {
+		return nil
+	}
+	if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+		return errors.Join(session.ErrPeerGone, err)
+	}
+	return err
 }

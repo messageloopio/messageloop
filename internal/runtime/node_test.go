@@ -41,11 +41,11 @@ func TestNewNode_HeartbeatDefaultIdleTimeout(t *testing.T) {
 	// applied so idle connections are still disconnected.
 	node := NewNode(nil)
 	require.NotNil(t, node.heartbeatManager, "heartbeat manager must be created with the default idle timeout")
-	assert.Equal(t, DefaultHeartbeatIdleTimeout, node.GetHeartbeatIdleTimeout())
+	assert.Equal(t, DefaultHeartbeatIdleTimeout, node.heartbeatIdleTimeout())
 
 	// An explicit configuration wins over the default.
 	explicit := NewNode(&config.Server{Heartbeat: config.Heartbeat{IdleTimeout: "45s"}})
-	assert.Equal(t, 45*time.Second, explicit.GetHeartbeatIdleTimeout())
+	assert.Equal(t, 45*time.Second, explicit.heartbeatIdleTimeout())
 }
 
 func TestNode_Hub(t *testing.T) {
@@ -197,8 +197,8 @@ func TestNode_PresenceEventsNotInHistory(t *testing.T) {
 	require.NoError(t, node.Run(context.Background()))
 
 	ch := presenceChannel("presence-hist.ch")
-	node.PublishPresenceJoin("presence-hist.ch", "client-1", "user-1")
-	node.PublishPresenceLeave("presence-hist.ch", "client-1", "user-1")
+	node.publishPresenceJoin("presence-hist.ch", "client-1", "user-1")
+	node.publishPresenceLeave("presence-hist.ch", "client-1", "user-1")
 
 	page, err := node.Broker().History(ch, 0, 0)
 	require.NoError(t, err)
@@ -211,11 +211,11 @@ func TestNode_PresenceEventsNotInHistory(t *testing.T) {
 	require.Len(t, page.Pubs(), 1, "a regular publish on the same channel must still be recorded")
 }
 
-// TestNode_PublishPresenceJoin_DistinctMessageIDs verifies the final-review
+// TestNode_LegacyPresenceJoin_DistinctMessageIDs verifies the final-review
 // fix for the presence message ID collision: transient presence events
 // (offset 0) must not all share the "channel-0" ID — every event delivered
 // on the presence channel gets a unique message ID.
-func TestNode_PublishPresenceJoin_DistinctMessageIDs(t *testing.T) {
+func TestNode_LegacyPresenceJoin_DistinctMessageIDs(t *testing.T) {
 	node := NewNode(nil)
 	require.NoError(t, node.Run(context.Background()))
 	transport := &capturingTransport{}
@@ -243,8 +243,8 @@ func TestNode_PublishPresenceJoin_DistinctMessageIDs(t *testing.T) {
 	require.NoError(t, client.HandleMessage(ctx, subMsg))
 	transport.messages = nil
 
-	node.PublishPresenceJoin("presence-id.ch", "client-1", "user-1")
-	node.PublishPresenceJoin("presence-id.ch", "client-2", "user-2")
+	node.publishPresenceJoin("presence-id.ch", "client-1", "user-1")
+	node.publishPresenceJoin("presence-id.ch", "client-2", "user-2")
 
 	waitMessageCount(t, transport, 2)
 	msgs := transport.snapshotMessages()
@@ -925,8 +925,8 @@ func TestNode_PublishPresenceFailure_IncrementsMetric(t *testing.T) {
 	node.SetMetrics(metrics)
 	node.SetBroker(failTransientBroker{})
 
-	node.PublishPresenceJoin("chat", "c1", "u1")
-	node.PublishPresenceLeave("chat", "c1", "u1")
+	node.publishPresenceJoin("chat", "c1", "u1")
+	node.publishPresenceLeave("chat", "c1", "u1")
 	require.Equal(t, float64(2), testutil.ToFloat64(metrics.PresencePublishFailures),
 		"failed presence publishes must be counted")
 
@@ -935,7 +935,10 @@ func TestNode_PublishPresenceFailure_IncrementsMetric(t *testing.T) {
 	okMetrics := NewMetrics(okReg)
 	okNode := NewNode(nil)
 	okNode.SetMetrics(okMetrics)
-	okNode.PublishPresenceJoin("chat", "c2", "u2")
-	okNode.PublishPresenceLeave("chat", "c2", "u2")
+	okNode.publishPresenceJoin("chat", "c2", "u2")
+	okNode.publishPresenceLeave("chat", "c2", "u2")
 	require.Equal(t, float64(0), testutil.ToFloat64(okMetrics.PresencePublishFailures))
 }
+
+// Epoch satisfies the Broker interface epoch capability (no epoch concept).
+func (failTransientBroker) Epoch() string { return "" }

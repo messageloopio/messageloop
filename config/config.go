@@ -18,7 +18,8 @@ import (
 // CapabilityNames is the closed set of Server API capability names accepted
 // under server.api.capabilities. It mirrors internal/authz's
 // ClosedCapabilityNames (internal/authz cannot import config, so the two
-// lists are kept in sync manually).
+// lists cannot be merged; TestCapabilityNameCensus in internal/authz pins
+// their key sets together).
 var CapabilityNames = map[string]struct{}{
 	"presence.large_snapshot": {},
 	"survey.bypass_gate":      {},

@@ -13,6 +13,12 @@ import (
 // PublishTransient and acks offset 0 instead.
 var ErrHistoryDisabled = errors.New("channel policy: history disabled for channel")
 
+// ErrAddHistoryDenied is returned by Node.PublishForAPI when a Server API
+// caller asked for add_history but the channel policy disables history
+// (transient_only or history=false): nothing was published — the caller
+// must not assume the message was written.
+var ErrAddHistoryDenied = errors.New("channel policy: add_history denied (history disabled)")
+
 // ChannelPolicy is the effective per-channel behavior. Effects are resolved
 // by the Authorizer (server.authorizer table), no longer by a separate
 // first-match policy engine (PR-KA-A4 §5.5). Zero HistorySize and HistoryTTL

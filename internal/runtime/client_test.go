@@ -1592,3 +1592,6 @@ func BenchmarkClientSession_Marshal_Protobuf(b *testing.B) {
 		_, _ = client.Marshal(msg)
 	}
 }
+
+// Epoch satisfies the Broker interface epoch capability (no epoch concept).
+func (b *fakeHistoryBroker) Epoch() string { return "" }
