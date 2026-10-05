@@ -533,40 +533,11 @@ func (c *Session) handleConnect(ctx context.Context, in *clientpb.InboundMessage
 			}
 			existing.mu.Unlock()
 
-			// Local takeover: tear off the old attachment, bind the new one.
-			// Nothing is left, nothing is unbound, subscriptions are not
-			// touched — the same Session object keeps serving.
-			existing.Detach(Disconnect{})
-
-			c.mu.RLock()
-			tempAtt := c.attachment
-			c.mu.RUnlock()
-			if tempAtt == nil {
-				return c.disconnectOnConnectError(ctx, errors.New("attach: session closed during connect"))
-			}
-			newAtt := &Attachment{
-				Transport: tempAtt.Transport,
-				Marshaler: tempAtt.Marshaler,
-				Protocol:  tempAtt.Protocol,
-			}
-			if err := existing.Attach(newAtt); err != nil {
-				// §5: an Attach failure after Detach is a real close — the
-				// directory must not be held by a session with no attachment.
-				_ = existing.Close(DisconnectInternal)
+			// Local takeover: the execution block lives in the Takeover
+			// module (takeover.go) — identity rules and handoff in one place.
+			if err := c.takeoverBy(existing); err != nil {
 				return c.disconnectOnConnectError(ctx, err)
 			}
-
-			// The temporary Authenticating session never enters the hub: it
-			// becomes a read-loop shell delegating to the resumed session.
-			c.mu.Lock()
-			c.delegate = existing
-			c.attachment = nil
-			c.stopHeartbeatLocked()
-			if c.pingDeadline != nil {
-				c.pingDeadline.Stop()
-				c.pingDeadline = nil
-			}
-			c.mu.Unlock()
 
 			return existing.finishConnect(ctx, in, connect, resumed, resumedLocal, nil, p, authUser, authNamespace)
 		} else {

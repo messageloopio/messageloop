@@ -57,11 +57,16 @@ func handoffAttachment(att *Attachment) *Attachment {
 }
 
 // takeoverBy hands this (shell) connection's transport over to the resumed
-// session and turns this object into a delegating read loop. The caller has
-// already detached the resumed session's previous attachment; per §5 of the
-// connect flow, an Attach failure after Detach is a real close — the
-// directory must not be held by a session with no attachment.
+// session and turns this object into a delegating read loop: it tears off the
+// resumed session's previous attachment, binds a fresh attachment riding this
+// connection's transport, then demotes this object to a shell. Nothing is
+// left, nothing is unbound, subscriptions are not touched — the same Session
+// object keeps serving. Per §5 of the connect flow, an Attach failure after
+// Detach is a real close — the directory must not be held by a session with
+// no attachment.
 func (c *Session) takeoverBy(existing *Session) error {
+	existing.Detach(Disconnect{})
+
 	c.mu.RLock()
 	tempAtt := c.attachment
 	c.mu.RUnlock()
