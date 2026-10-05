@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"hash/fnv"
-	"strings"
 	"time"
 
 	"github.com/messageloopio/messageloop/config"
@@ -177,10 +176,6 @@ func index(s string, numBuckets int) int {
 	hash := fnv.New64a()
 	_, _ = hash.Write([]byte(s))
 	return int(hash.Sum64() % uint64(numBuckets))
-}
-
-func isWildcard(ch string) bool {
-	return strings.Contains(ch, "*")
 }
 
 func publicationID(channel string, offset uint64) string {

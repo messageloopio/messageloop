@@ -32,6 +32,14 @@ func SplitSegments(s string) []string {
 	return append(segs, s[start:])
 }
 
+// IsWildcard reports whether the channel pattern contains a wildcard
+// character. It is the routing predicate callers use to send a subscription
+// to the matcher instead of the exact-channel path; full pattern validity
+// is ValidateTopic's job.
+func IsWildcard(ch string) bool {
+	return strings.Contains(ch, wildcard)
+}
+
 // ErrBadTopic is returned when a topic is rejected: it is empty, contains
 // explicit empty segments (e.g. "a.", ".a", "a..b"), contains "**" outside of
 // the final segment (e.g. "a.**.b", "a**b"), or does not fit within the

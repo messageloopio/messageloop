@@ -14,6 +14,7 @@ import (
 	"github.com/messageloopio/messageloop/internal/occupancy"
 	"github.com/messageloopio/messageloop/internal/stream"
 	"github.com/messageloopio/messageloop/internal/survey"
+	"github.com/messageloopio/messageloop/pkg/topics"
 	"github.com/messageloopio/messageloop/proxy"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 )
@@ -102,7 +103,7 @@ func (f *fakeRuntime) UserPrincipal(userID string) authz.Principal {
 }
 
 func (f *fakeRuntime) ShouldTrackPresence(ch string, ephemeral bool) bool {
-	return !ephemeral && !isWildcard(ch) && f.ChannelPolicy(ch).Presence
+	return !ephemeral && !topics.IsWildcard(ch) && f.ChannelPolicy(ch).Presence
 }
 
 func (f *fakeRuntime) PresenceJoin(ctx context.Context, ch string, c *Session) {

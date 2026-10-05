@@ -18,6 +18,7 @@ import (
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/internal/occupancy"
 	"github.com/messageloopio/messageloop/internal/session"
+	"github.com/messageloopio/messageloop/pkg/topics"
 	"github.com/messageloopio/messageloop/proxy"
 	"github.com/messageloopio/messageloop/shared"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
@@ -1289,7 +1290,7 @@ func (n *Node) publishPresenceLeave(channel, clientID, userID string) {
 // policy disables presence never touch the store, never join/leave and never
 // take a snapshot.
 func (n *Node) shouldTrackPresence(ch string, ephemeral bool) bool {
-	return !ephemeral && !isWildcard(ch) && n.ChannelPolicy(ch).Presence
+	return !ephemeral && !topics.IsWildcard(ch) && n.ChannelPolicy(ch).Presence
 }
 
 // presenceJoin records a session's presence in ch and emits the join event

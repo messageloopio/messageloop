@@ -199,7 +199,7 @@ func (c *Session) precheckChannel(channel string) *sharedv2.Error {
 // (publish, survey request, presence query): the precheck must not reject
 // those channels first, or it would reorder the client-visible errors.
 func (c *Session) precheckExactChannel(channel string) *sharedv2.Error {
-	if channel == "" || isWildcard(channel) {
+	if channel == "" || topics.IsWildcard(channel) {
 		return nil
 	}
 	return c.checkNamespace(channel)

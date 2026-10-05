@@ -2,7 +2,6 @@ package session
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -102,13 +101,6 @@ func jsonLog(msg proto.Message) string {
 	// encode is logged as an empty string, never propagated to the send path.
 	data, _ := ProtoJSONMarshaler.Marshal(msg)
 	return string(data)
-}
-
-// MarshalJSONStruct marshals a structpb.Struct into JSON bytes.
-// The structpb protobuf text format (fields:{...}) is not valid JSON, so
-// payloads must go through AsMap before json.Marshal.
-func MarshalJSONStruct(s *structpb.Struct) ([]byte, error) {
-	return json.Marshal(s.AsMap())
 }
 
 func (c *Session) marshal(msg any) ([]byte, error) {
@@ -1127,7 +1119,7 @@ func (c *Session) handlePublish(ctx context.Context, in *clientpb.InboundMessage
 	if channel == "" {
 		return c.sendRequestError(ctx, in, "missing channel in publish message")
 	}
-	if isWildcard(channel) {
+	if topics.IsWildcard(channel) {
 		// The publish subject is an exact channel (KD-K21): a literal
 		// wildcard pattern would fan out to wildcard subscribers while never
 		// being an addressable channel itself.
@@ -1527,7 +1519,7 @@ func (c *Session) handleSubRefresh(ctx context.Context, in *clientpb.InboundMess
 // on the same connection, so waiting here would deadlock the read loop).
 func (c *Session) handleSurvey(ctx context.Context, in *clientpb.InboundMessage, req *clientpb.SurveyRequest) error {
 	ch := req.GetChannel()
-	if ch == "" || isWildcard(ch) {
+	if ch == "" || topics.IsWildcard(ch) {
 		return c.sendSurveyError(ctx, in, "BAD_REQUEST", "request_error", "survey channel must be an exact channel")
 	}
 	if nsErr := c.checkNamespace(ch); nsErr != nil {
@@ -1754,7 +1746,7 @@ func (c *Session) sessionCoversChannel(ch string) bool {
 		return true
 	}
 	for _, pattern := range c.subscriptionList() {
-		if isWildcard(pattern.Channel) && topics.Match(pattern.Channel, ch) {
+		if topics.IsWildcard(pattern.Channel) && topics.Match(pattern.Channel, ch) {
 			return true
 		}
 	}
@@ -1766,7 +1758,7 @@ func (c *Session) sessionCoversChannel(ch string) bool {
 // disconnecting: the subscription state is untouched.
 func (c *Session) handlePresenceQuery(ctx context.Context, in *clientpb.InboundMessage, query *clientpb.PresenceQuery) error {
 	ch := query.GetChannel()
-	if ch == "" || isWildcard(ch) {
+	if ch == "" || topics.IsWildcard(ch) {
 		return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 			out.Envelope = &clientpb.OutboundMessage_Error{
 				Error: &sharedv2.Error{

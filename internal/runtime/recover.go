@@ -7,6 +7,7 @@ import (
 
 	"github.com/lynx-go/x/log"
 
+	"github.com/messageloopio/messageloop/pkg/topics"
 	"github.com/messageloopio/messageloop/shared"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
@@ -379,7 +380,7 @@ func (n *Node) recoverySkip(currentEpoch string, sub *clientpb.Subscription, sna
 	if !sub.Recover {
 		return "recover not requested"
 	}
-	if isWildcard(sub.Channel) {
+	if topics.IsWildcard(sub.Channel) {
 		return "wildcard channels have no history"
 	}
 	pol := n.ChannelPolicy(sub.Channel)

@@ -180,7 +180,7 @@ func (b *memoryBroker) Subscribe(ch string) error {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if isWildcard(ch) {
+	if topics.IsWildcard(ch) {
 		b.wcCounts[ch]++
 		if b.wcCounts[ch] == 1 {
 			sub, err := b.matcher.Subscribe(ch, ch)
@@ -212,7 +212,7 @@ func (b *memoryBroker) Subscribe(ch string) error {
 func (b *memoryBroker) Unsubscribe(ch string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if isWildcard(ch) {
+	if topics.IsWildcard(ch) {
 		if b.wcCounts[ch] > 0 {
 			b.wcCounts[ch]--
 			if b.wcCounts[ch] == 0 {

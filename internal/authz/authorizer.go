@@ -346,7 +346,7 @@ func (a *Authorizer) decideLocked(p Principal, action Action, channel string) De
 		}
 		return Decision{Allow: true, Reason: "default", Effects: effects}
 	case ActionRecover:
-		if isWildcard(channel) {
+		if topics.IsWildcard(channel) {
 			return Decision{Allow: false, Reason: "default", Effects: effects}
 		}
 		for _, rule := range a.rules {
@@ -359,7 +359,7 @@ func (a *Authorizer) decideLocked(p Principal, action Action, channel string) De
 		}
 		return Decision{Allow: true, Reason: "default", Effects: effects}
 	case ActionPresence:
-		if isWildcard(channel) {
+		if topics.IsWildcard(channel) {
 			return Decision{Allow: false, Reason: "default", Effects: effects}
 		}
 		for _, rule := range a.rules {

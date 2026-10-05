@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -212,12 +211,6 @@ func (b *redisBroker) initEpoch(ctx context.Context) error {
 	return nil
 }
 
-// isWildcardChannel reports whether ch is a wildcard pattern, consistent
-// with the hub's isWildcard (strings.Contains(ch, "*")).
-func isWildcardChannel(ch string) bool {
-	return strings.Contains(ch, "*")
-}
-
 // Subscribe registers interest in ch on this node. Wildcard patterns are
 // matched against incoming pub/sub channels via the topic matcher; both
 // exact channels and patterns are reference counted so the underlying
@@ -234,7 +227,7 @@ func (b *redisBroker) Subscribe(ch string) error {
 	var ops []liveOp
 	b.subMu.Lock()
 	first := false
-	if isWildcardChannel(ch) {
+	if topics.IsWildcard(ch) {
 		b.wcCounts[ch]++
 		if b.wcCounts[ch] == 1 {
 			sub, err := b.matcher.Subscribe(ch, ch)
@@ -266,7 +259,7 @@ func (b *redisBroker) Unsubscribe(ch string) error {
 	var ops []liveOp
 	b.subMu.Lock()
 	last := false
-	if isWildcardChannel(ch) {
+	if topics.IsWildcard(ch) {
 		if b.wcCounts[ch] > 0 {
 			b.wcCounts[ch]--
 			if b.wcCounts[ch] == 0 {

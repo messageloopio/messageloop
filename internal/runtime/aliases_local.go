@@ -261,7 +261,6 @@ var (
 	NewHeartbeatManager   = session.NewHeartbeatManager
 	WithProtocol          = session.WithProtocol
 	MakeOutboundMessage   = session.MakeOutboundMessage
-	MarshalJSONStruct     = session.MarshalJSONStruct
 	ErrSendQueueFull      = session.ErrSendQueueFull
 	ErrSessionNotAttached = session.ErrSessionNotAttached
 	ErrOutboundTooLarge   = session.ErrOutboundTooLarge
