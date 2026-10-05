@@ -178,6 +178,8 @@
 - **D15 已落地**：`GLOSSARY.md` 创建——Session / Attachment / delegate（shell）/ Takeover / Position 五词条 + 既有高频词登记。
 - **D14 偏差记录**：裁决原文预期"`cluster_sim.go`（仅测试再导出）随之消失"**不成立**——该文件再导出的是 Node 侧 resume/fencing 内部入口（`SimSyncClusterSessionState`/`SimResumeRemoteSession`/`SimMembershipOnce`），供外部 sim 测试包驱动确定性 fencing 场景，与 session 身份仲裁无关，保留原样。
 - **事故记录（透明起见）**：批内一次脚本失误将 session.go 截断为空；因本会话此前对 session.go 零改动，`git checkout --` 从 HEAD 无损恢复后以 Edit 工具重做，无净损失。
+- **D14 接线缺口（2026-10-04 走查复核补充）**：`takeoverBy` / `handoffAttachment` 落地后未接线——全仓零调用，`handleConnect` 仍持逐行等价的内联交接副本（client.go:536-565；行为无差，内联份即原件）。上文「takeoverBy（client.go 的 takeover 执行块收拢）」的表述据此修正为「执行块已复制入 takeover.go，client.go 改调 takeoverBy 的接线待收尾」；收尾前动交接逻辑必须两处同步。发现于 CONTEXT.md 首次分层走查（ADR-0004 同步记载）。
+- **D14 接线缺口已闭合（2026-10-05）**：`existing.Detach` 按裁决原文的收拢范围（Detach→Attach 新对象→壳置 delegate）并入 `takeoverBy`，`handleConnect` 改调之并删除内联副本（client.go 净 -34 行，takeover.go +7 行）；错误路径逐一等价（tempAtt nil 错误文案、Attach 失败 `Close(DisconnectInternal)`）。验证：`go build`/`go vet` + `MESSAGELOOP_TEST_REDIS_REQUIRED=1` root 全量（runtime Redis 集成 73.8s 真实执行）+ `internal/session` `-count=1` 强制重跑 + sdks/go（4.5s 真实执行）/shared 模块，全绿。ADR-0004 与 CONTEXT.md §五 同步更新。
 - **验证**：root build/vet/全量测试绿；session/runtime/transport 相关包全绿；sdks/go、shared 模块绿。
 
 ### 批 5 · C4 ServerAPIRuntime 接口（2026-10-04 落地）
@@ -194,3 +196,9 @@
 ### 补验 · Redis 集成项（2026-10-04，容器启动后）
 
 - **D21 注记更新**：Redis 容器就绪后以 `MESSAGELOOP_TEST_REDIS_REQUIRED=1` 严格模式补跑此前显式跳过的全部集成项——`pkg/redisbroker` 60.8s、`internal/runtime`（含 cluster_redis_integration / cluster_v1_e2e）73.5s、`internal/session`、`internal/stream`、`sdks/go` 全量 4.3s（`TestE2EProcess/RedisBroker` 真实执行非跳过，0.16s）——**全部通过**。至此本裁决全部改动在 Redis 在场条件下验证完毕，热身批 D21 的"缺环境跳过"注记就此关闭。
+
+### 后续修订 · ErrPeerGone 对称化（2026-10-05，独立于 D1-D21 批次）
+
+- **quic 补包装**（grilling 五问裁决，批 3/批 4 的 D11 原文「quic/kcp 不包装（零行为变化）」就此修订）：对端 CONNECTION_CLOSE 落在写侧的形状（`*quic.ApplicationError` 且 `Remote=true`）经 `wrapPeerGone` 以 `errors.Join(session.ErrPeerGone, err)` 包装，quic `WriteMany` 收口——修复对端正常关闭被 `handleWriteError` 误判 3512 SlowConsumer（§7 表应为 3000）。排除项：`Remote=false`（本端关闭，非对端事件）、空闲超时（装配设 `MaxIdleTimeout=max(2×idle,5min)` 让应用层 3511 先触发，死端检测归心跳域）、`quic.StreamError`（单流协议不产生 reset，维持 3512 可见性）。
+- **kcp 维持不包装，理由升格**：写路径不存在对端关闭形状（UDP 往消失对端写不会失败，TLS 截断记录只在读侧且读循环已优雅退出），死端检测归读超时（handler 既有注释明示为心跳域补偿）——是所有权清晰，不是缺失。
+- **分类纪律钉入测试**：ws / grpc / quic 三份 `wrapPeerGone` 各落表驱动单测（此前 ws/grpc 两份也零单测，一次立齐）；kcp 无形状无表。验证：三包单测全绿 + root 全量 `MESSAGELOOP_TEST_REDIS_REQUIRED=1`。ADR-0001 同步修订（决策 2/4），CONTEXT.md §四/§五 同步。
