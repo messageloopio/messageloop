@@ -53,7 +53,7 @@ func (t *Transport) Write(msg []byte) error {
 }
 
 func (t *Transport) WriteMany(msgs ...[]byte) error {
-	return t.w.WriteMany(msgs...)
+	return wrapPeerGone(t.w.WriteMany(msgs...))
 }
 
 func (t *Transport) Close(disconnect protocol.Disconnect) error {
@@ -70,6 +70,24 @@ func (t *Transport) Close(disconnect protocol.Disconnect) error {
 		return t.conn.CloseWithError(code, disconnect.Reason)
 	}
 	return nil
+}
+
+// wrapPeerGone marks the QUIC peer-gone error shape with session.ErrPeerGone
+// so the session's write-error classification sees it without importing
+// quic-go: a CONNECTION_CLOSE the peer sent, surfacing on our writes as
+// *quic.ApplicationError with Remote=true. Local closes (Remote=false), idle
+// timeouts (dead-peer detection is owned by the application heartbeat by
+// design — MaxIdleTimeout is set so 3511 fires first), stream resets and
+// every other shape pass through unchanged.
+func wrapPeerGone(err error) error {
+	if err == nil {
+		return nil
+	}
+	var appErr *quic.ApplicationError
+	if errors.As(err, &appErr) && appErr.Remote {
+		return errors.Join(session.ErrPeerGone, err)
+	}
+	return err
 }
 
 var _ session.Transport = (*Transport)(nil)
