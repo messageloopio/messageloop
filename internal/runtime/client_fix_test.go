@@ -1362,8 +1362,7 @@ func TestClient_Recovery_PreservesPayloadType(t *testing.T) {
 	require.NoError(t, err)
 	_, err = node.Publish("recovery.types", &Publication{Payload: []byte("m2"), Kind: PayloadKindText})
 	require.NoError(t, err)
-	epocher, ok := node.Broker().(interface{ Epoch() string })
-	require.True(t, ok)
+	epoch := node.Broker().Epoch()
 
 	msg := &clientpb.InboundMessage{
 		Id: "msg-1",
@@ -1372,7 +1371,7 @@ func TestClient_Recovery_PreservesPayloadType(t *testing.T) {
 				Version:  testProtocolVersion,
 				ClientId: "client-1",
 				Subscriptions: []*clientpb.Subscription{
-					{Channel: "recovery.types", Recover: true, Cursor: cursorOf(epocher.Epoch(), first)},
+					{Channel: "recovery.types", Recover: true, Cursor: cursorOf(epoch, first)},
 				},
 			},
 		},
@@ -2276,3 +2275,6 @@ func TestClient_ConnectWithUnroutableSubscription_SoftFail(t *testing.T) {
 	require.NotNil(t, presence, "third envelope must be the presence snapshot for the routable channel")
 	require.Equal(t, "good.ch", presence.GetChannel())
 }
+
+// Epoch satisfies the Broker interface epoch capability (no epoch concept).
+func (b *failStartBroker) Epoch() string { return "" }

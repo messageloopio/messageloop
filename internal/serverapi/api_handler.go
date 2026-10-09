@@ -2,18 +2,18 @@ package serverapi
 
 import (
 	"context"
+	"errors"
 	"sort"
-	"time"
 
 	"github.com/lynx-go/x/log"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/messageloopio/messageloop/internal/authz"
-	"github.com/messageloopio/messageloop/internal/occupancy"
 	"github.com/messageloopio/messageloop/internal/protocol"
 	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/internal/stream"
+	"github.com/messageloopio/messageloop/internal/survey"
 	"github.com/messageloopio/messageloop/pkg/topics"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
@@ -22,10 +22,10 @@ import (
 
 type apiServiceHandler struct {
 	serverv2.UnimplementedAPIServiceServer
-	node *runtime.Node
+	node runtime.ServerAPIRuntime
 }
 
-func NewAPIServiceHandler(node *runtime.Node) serverv2.APIServiceServer {
+func NewAPIServiceHandler(node runtime.ServerAPIRuntime) serverv2.APIServiceServer {
 	return &apiServiceHandler{node: node}
 }
 
@@ -108,7 +108,13 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverv2.PublishRe
 			}
 		}
 
-		// Channel-based publication
+		// Channel-based publication. add_history/policy routing is the
+		// Node contract (PublishForAPI): history-enabled channels write
+		// history, the rest go transient, and add_history onto a
+		// history-disabled channel is ErrAddHistoryDenied — nothing is
+		// published and the attempt counts as failed.
+		opts := pub.GetOptions()
+		addHistory := opts != nil && opts.AddHistory
 		for _, channel := range dest.Channels {
 			attempted++
 			if !h.node.APICanPublish(principal, channel) {
@@ -116,34 +122,13 @@ func (h *apiServiceHandler) Publish(ctx context.Context, req *serverv2.PublishRe
 				failed++
 				continue
 			}
-			opts := pub.GetOptions()
-			pol := h.node.ChannelPolicy(channel)
-			if pol.TransientOnly || !pol.History {
-				// Channel policy disables history: add_history cannot be
-				// honored. Count the failure and do not publish at all so
-				// the caller does not assume the message was written.
-				// Transient delivery is still allowed.
-				if opts != nil && opts.AddHistory {
+			if err := h.node.PublishForAPI(channel, brokerPub, addHistory); err != nil {
+				if errors.Is(err, runtime.ErrAddHistoryDenied) {
 					log.WarnContext(ctx, "server API add_history denied by channel policy", "channel", channel)
-					failed++
-					continue
-				}
-				if err := h.node.PublishTransient(channel, brokerPub); err != nil {
-					log.ErrorContext(ctx, "failed to publish transient to channel", err, "channel", channel)
-					failed++
-				}
-				continue
-			}
-			if opts != nil && opts.AddHistory {
-				if _, err := h.node.Publish(channel, brokerPub); err != nil {
+				} else {
 					log.ErrorContext(ctx, "failed to publish to channel", err, "channel", channel)
-					failed++
 				}
-			} else {
-				if err := h.node.PublishTransient(channel, brokerPub); err != nil {
-					log.ErrorContext(ctx, "failed to publish transient to channel", err, "channel", channel)
-					failed++
-				}
+				failed++
 			}
 		}
 	}
@@ -184,23 +169,7 @@ func (h *apiServiceHandler) Survey(ctx context.Context, req *serverv2.SurveyRequ
 	// (client.go: policy cap with a 5s default, a 10s hard ceiling, and a
 	// 100ms floor) so a Server API request cannot pin survey slots for an
 	// unbounded time.
-	timeout := h.node.ChannelPolicy(req.Channel).MaxSurveyTimeout
-	if timeout <= 0 {
-		timeout = 5 * time.Second
-	}
-	if timeout > 10*time.Second {
-		timeout = 10 * time.Second
-	}
-	if req.TimeoutMs > 0 {
-		requested := time.Duration(req.TimeoutMs) * time.Millisecond
-		if requested > timeout {
-			requested = timeout
-		}
-		if requested < 100*time.Millisecond {
-			requested = 100 * time.Millisecond
-		}
-		timeout = requested
-	}
+	timeout := survey.ClampTimeout(h.node.ChannelPolicy(req.Channel).MaxSurveyTimeout, int64(req.TimeoutMs))
 	payload, err := payloadBytes(req.Payload)
 	if err != nil {
 		return nil, err
@@ -450,10 +419,7 @@ func (h *apiServiceHandler) GetPresence(ctx context.Context, req *serverv2.GetPr
 	// channel policy cap like the client path; with the bit it stays full
 	// (PR-KA-A4 §7). The bit follows the caller's identity.
 	if id.Caps&authz.CapPresenceLargeSnapshot == 0 {
-		limit := occupancy.MaxPresenceSnapshotClients
-		if pol := h.node.ChannelPolicy(req.Channel); pol.PresenceSnapshotLimit > 0 {
-			limit = pol.PresenceSnapshotLimit
-		}
+		limit := h.node.PresenceSnapshotLimit(req.Channel)
 		if len(clients) > limit {
 			keys := make([]string, 0, len(clients))
 			for id := range clients {
@@ -499,11 +465,7 @@ func (h *apiServiceHandler) GetHistory(ctx context.Context, req *serverv2.GetHis
 	var sinceOffset uint64
 	if since := req.Since; since != nil {
 		if epoch := since.GetStreamEpoch(); epoch != "" {
-			current := ""
-			if epocher, ok := h.node.Broker().(interface{ Epoch() string }); ok {
-				current = epocher.Epoch()
-			}
-			if current != epoch {
+			if current := h.node.StreamEpoch(); current != epoch {
 				return nil, status.Error(codes.FailedPrecondition, "stream epoch mismatch: history belongs to a previous log generation")
 			}
 		}

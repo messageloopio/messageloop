@@ -15,6 +15,37 @@ type HeartbeatConfig struct {
 	PingTimeout  time.Duration
 }
 
+// ReadDeadline computes the transport read deadline derived from this
+// heartbeat configuration. The probing window (idle check plus ping
+// deadline) must never be cut short by the read deadline, so the floor is
+// max(2*idle, 3*ping, 10s); an explicit configured value may raise but
+// never lower it. With heartbeat fully disabled (idle == 0 && ping == 0)
+// the deadline is the configured value or 60s.
+//
+// This is the single implementation of the formula: the WS, QUIC and KCP
+// read loops all resolve their deadline here (previously three hand copies
+// whose only coupling was "the rules match the WebSocket handler").
+func (c HeartbeatConfig) ReadDeadline(configured time.Duration) time.Duration {
+	idle, ping := c.IdleTimeout, c.PingInterval
+	if idle == 0 && ping == 0 {
+		if configured > 0 {
+			return configured
+		}
+		return 60 * time.Second
+	}
+	floor := 10 * time.Second
+	if t := 2 * idle; t > floor {
+		floor = t
+	}
+	if t := 3 * ping; t > floor {
+		floor = t
+	}
+	if configured > floor {
+		return configured
+	}
+	return floor
+}
+
 // HeartbeatManager manages client heartbeat monitoring.
 type HeartbeatManager struct {
 	config HeartbeatConfig

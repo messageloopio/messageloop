@@ -800,7 +800,7 @@ func TestAPI_GetHistorySincePosition(t *testing.T) {
 		_, err := node.Publish("dev:pos.ch", &stream.Publication{Payload: []byte(text), Kind: stream.PayloadKindText})
 		require.NoError(t, err)
 	}
-	epoch := node.Broker().(interface{ Epoch() string }).Epoch()
+	epoch := node.Broker().Epoch()
 	require.NotEmpty(t, epoch)
 
 	// since == nil: from the head within the limit.
@@ -1278,3 +1278,9 @@ func TestAPI_PublishSessionRequiresCapability(t *testing.T) {
 	})
 	require.Equal(t, codes.PermissionDenied, status.Code(err), "user fanout still delivers per-session")
 }
+
+// Epoch satisfies the Broker interface epoch capability (no epoch concept).
+func (b *probeBroker) Epoch() string { return "" }
+
+// Epoch satisfies the Broker interface epoch capability (no epoch concept).
+func (b *failPublishBroker) Epoch() string { return "" }

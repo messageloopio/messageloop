@@ -399,8 +399,8 @@ func (n *Node) clusterSessionSnapshot(client *Client) *ClusterSessionSnapshot {
 	if id.Namespace != "" {
 		snapshot.AuthContext["namespace"] = id.Namespace
 	}
-	if epochBroker, ok := n.broker.(interface{ Epoch() string }); ok {
-		snapshot.BrokerEpoch = epochBroker.Epoch()
+	if n.broker != nil {
+		snapshot.BrokerEpoch = n.broker.Epoch()
 	}
 	return snapshot
 }

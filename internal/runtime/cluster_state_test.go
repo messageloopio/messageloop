@@ -141,9 +141,7 @@ func TestNode_ClusterSessionSnapshot_IncludesBrokerEpoch(t *testing.T) {
 
 	snapshot := node.clusterSessionSnapshot(client)
 	require.NotEmpty(t, snapshot.BrokerEpoch, "snapshot must carry the broker epoch")
-	epochBroker, ok := node.broker.(interface{ Epoch() string })
-	require.True(t, ok)
-	require.Equal(t, epochBroker.Epoch(), snapshot.BrokerEpoch)
+	require.Equal(t, node.broker.Epoch(), snapshot.BrokerEpoch)
 }
 
 // --- PR-KA-A1: lease refresh via same-fence CAS (no blind Put) ---

@@ -18,6 +18,11 @@ type Marshaler interface {
 	Unmarshal(data []byte, msg any) error
 	// Name returns the marshaler name.
 	Name() string
+	// IsJSONWire reports whether this marshaler renders proto messages as
+	// protojson text — the wire family for which splicing raw JSON payload
+	// bytes into a broadcast frame is valid. Callers must branch on this
+	// capability, never on Name() strings.
+	IsJSONWire() bool
 }
 
 // JSONMarshaler implements JSON marshaling for protocol messages.
@@ -53,6 +58,10 @@ func (JSONMarshaler) Name() string {
 	return "json"
 }
 
+// IsJSONWire is true: JSONMarshaler delegates proto messages to the shared
+// ProtoJSONMarshaler, so its frames are protojson text.
+func (JSONMarshaler) IsJSONWire() bool { return true }
+
 // ProtobufMarshaler implements protobuf marshaling for protocol messages.
 type ProtobufMarshaler struct{}
 
@@ -83,6 +92,9 @@ func (ProtobufMarshaler) Unmarshal(data []byte, msg any) error {
 func (ProtobufMarshaler) Name() string {
 	return "proto"
 }
+
+// IsJSONWire is false: binary protobuf frames cannot splice raw JSON.
+func (ProtobufMarshaler) IsJSONWire() bool { return false }
 
 // ProtoJSONMarshaler is a JSON marshaler that uses protobuf JSON encoding.
 var ProtoJSONMarshaler = &protoJSONMarshaler{
@@ -127,6 +139,8 @@ func (p *protoJSONMarshaler) Unmarshal(data []byte, msg any) error {
 func (p *protoJSONMarshaler) Name() string {
 	return "protojson"
 }
+
+func (p *protoJSONMarshaler) IsJSONWire() bool { return true }
 
 // Marshalers is a list of available marshalers.
 var Marshalers = []Marshaler{

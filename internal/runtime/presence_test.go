@@ -825,3 +825,6 @@ func TestPresence_OccupancyReconnectDoesNotRejoin(t *testing.T) {
 	require.Len(t, broker.occupancyEmits(), 1,
 		"a store refresh must not emit a second join")
 }
+
+// Epoch satisfies the Broker interface epoch capability (no epoch concept).
+func (b *countingBroker) Epoch() string { return "" }

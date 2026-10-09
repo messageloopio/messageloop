@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"crypto/sha1"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/messageloopio/messageloop/internal/protocol"
+	"github.com/messageloopio/messageloop/internal/session"
 )
 
 // TestTransport_CloseClosesFDWhenPeerRST is the regression test for P1-B6: a
@@ -230,5 +232,36 @@ func TestTransport_WriteTimesOutWhenPeerStopsReading(t *testing.T) {
 		require.Error(t, err, "Write must fail after the write deadline")
 	case <-time.After(3 * time.Second):
 		t.Fatal("write timeout did not fire: Write kept blocking")
+	}
+}
+
+// TestWrapPeerGone pins the write-error classification contract of ADR-0001:
+// normal-closure and going-away close frames are marked session.ErrPeerGone;
+// other close codes, non-close errors — and, notably, wrapped close errors
+// (gorilla's IsCloseError is a direct type assert and does not unwrap) —
+// pass through so they keep their slow-consumer visibility.
+func TestWrapPeerGone(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"normal closure", &websocket.CloseError{Code: websocket.CloseNormalClosure}, true},
+		{"going away", &websocket.CloseError{Code: websocket.CloseGoingAway}, true},
+		{"other close code", &websocket.CloseError{Code: websocket.CloseProtocolError}, false},
+		{"wrapped close error", fmt.Errorf("write: %w", &websocket.CloseError{Code: websocket.CloseNormalClosure}), false},
+		{"non-close error", errors.New("boom"), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			wrapped := wrapPeerGone(tc.err)
+			if tc.err == nil {
+				require.NoError(t, wrapped)
+				return
+			}
+			require.ErrorIs(t, wrapped, tc.err, "original shape must survive the join")
+			require.Equal(t, tc.want, errors.Is(wrapped, session.ErrPeerGone))
+		})
 	}
 }

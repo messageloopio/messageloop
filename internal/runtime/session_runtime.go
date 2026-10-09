@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"hash/fnv"
-	"strings"
 	"time"
 
 	"github.com/messageloopio/messageloop/config"
@@ -148,6 +147,10 @@ func (r nodeRuntime) RemoveLocalSubscriptionOnly(ch string, s *session.Session, 
 
 func (r nodeRuntime) StreamEpoch() string { return r.n.streamEpoch() }
 
+func (r nodeRuntime) SnapshotRecoverySubs(snapshot *cluster.ClusterSessionSnapshot, requestChannels, failedChannels []string) []*clientpb.Subscription {
+	return r.n.SnapshotRecoverySubs(snapshot, requestChannels, failedChannels)
+}
+
 func (r nodeRuntime) RecoverState(c *session.Session, subs []*clientpb.Subscription, snapshot *cluster.ClusterSessionSnapshot) clientpb.RecoverState {
 	return r.n.recoverState(c, subs, snapshot)
 }
@@ -173,10 +176,6 @@ func index(s string, numBuckets int) int {
 	hash := fnv.New64a()
 	_, _ = hash.Write([]byte(s))
 	return int(hash.Sum64() % uint64(numBuckets))
-}
-
-func isWildcard(ch string) bool {
-	return strings.Contains(ch, "*")
 }
 
 func publicationID(channel string, offset uint64) string {

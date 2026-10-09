@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"hash/fnv"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -16,6 +15,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/messageloopio/messageloop/pkg/topics"
+	"github.com/messageloopio/messageloop/shared"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
@@ -92,16 +92,11 @@ func NewHub(maxTimeLagMilli int64, maxConnsPerUser int) *Hub {
 	return h
 }
 
-// isWildcard returns true if the channel pattern contains a wildcard character.
-func isWildcard(ch string) bool {
-	return strings.Contains(ch, "*")
-}
-
 // AddSub registers a subscriber on a channel. Wildcard patterns go to the
 // topic matcher; exact channels are validated and stored in a sub shard.
 // It reports whether the subscriber is new to the channel.
 func (h *Hub) AddSub(ch string, sub Subscriber) (bool, error) {
-	if isWildcard(ch) {
+	if topics.IsWildcard(ch) {
 		return h.addWildcardSub(ch, sub)
 	}
 	// Exact channels never reach the matcher, so their validity is checked
@@ -132,7 +127,7 @@ func (h *Hub) addWildcardSub(ch string, sub Subscriber) (bool, error) {
 
 // removeSub removes connection from clientHub subscriptions registry.
 func (h *Hub) RemoveSub(ch string, c *Session) (bool, bool) {
-	if isWildcard(ch) {
+	if topics.IsWildcard(ch) {
 		return h.removeWildcardSub(ch, c)
 	}
 	return h.subShards[index(ch, numHubShards)].removeSub(ch, c)
@@ -366,20 +361,7 @@ func (h *Hub) NumSubscribers(ch string) int {
 }
 
 func (h *Hub) BroadcastPublication(ch string, pub *Publication) error {
-	// Merge exact and wildcard subscribers by session ID: a client subscribed
-	// to the channel exactly and via a wildcard pattern must receive the
-	// publication only once, with a single message ID.
-	subscribers := make(map[string]*Session)
-	for _, client := range h.GetSubscribers(ch) {
-		subscribers[client.SessionID()] = client
-	}
-	for _, candidate := range h.matcher.Lookup(ch) {
-		sub, ok := candidate.(Subscriber)
-		if !ok || sub.Session == nil {
-			continue
-		}
-		subscribers[sub.Session.SessionID()] = sub.Session
-	}
+	subscribers := h.mergeMatchingSubscribers(ch)
 	if len(subscribers) == 0 {
 		return nil
 	}
@@ -421,7 +403,7 @@ func (h *Hub) BroadcastPublication(ch string, pub *Publication) error {
 	msg := &clientpb.Message{
 		Channel:  ch,
 		Id:       publicationMessageID(ch, pub.Offset),
-		Position: positionFrom(pub.Epoch, pub.Offset, true),
+		Position: shared.PositionFrom(pub.Epoch, pub.Offset, true),
 		Payload:  payload,
 		Metadata: func() *sharedv2.Metadata {
 			if len(pub.Metadata) == 0 {
@@ -458,7 +440,7 @@ func (h *Hub) BroadcastPublication(ch string, pub *Publication) error {
 		var b []byte
 		var err error
 		spliced := false
-		if jsonRaw != nil && isJSONWireMarshaler(m) {
+		if jsonRaw != nil && m.IsJSONWire() {
 			// Swap in the empty-Struct placeholder so protojson emits the
 			// splice point, then graft the raw payload bytes in. The loop is
 			// sequential: the swap is restored before the next encoding
@@ -607,15 +589,6 @@ func spliceRawJSONPayload(frame, raw []byte) ([]byte, bool) {
 	return out, true
 }
 
-// isJSONWireMarshaler reports whether m renders proto messages as protojson
-// text — the wire family for which splicing raw JSON payload bytes into the
-// frame is valid. JSONMarshaler delegates proto messages to the shared
-// ProtoJSONMarshaler, so both names produce byte-identical frames.
-func isJSONWireMarshaler(m Marshaler) bool {
-	name := m.Name()
-	return name == (JSONMarshaler{}).Name() || name == ProtoJSONMarshaler.Name()
-}
-
 // recordDeliveredOffsets updates the last successfully delivered offset for
 // every exact subscription of ch that received the publication. The update
 // runs in a single pass under one subShard write lock per publication, so the
@@ -624,7 +597,7 @@ func isJSONWireMarshaler(m Marshaler) bool {
 // never receive offset tracking (their deliveries are not resumable
 // per-channel); the guard keeps their records untouched.
 func (h *Hub) recordDeliveredOffsets(ch string, offset uint64, clients []*Session, delivered []bool) {
-	if isWildcard(ch) || len(delivered) == 0 {
+	if topics.IsWildcard(ch) || len(delivered) == 0 {
 		return
 	}
 	shard := h.subShards[index(ch, numHubShards)]
@@ -702,13 +675,15 @@ func (h *Hub) GetSubscribers(ch string) []*Session {
 	return result
 }
 
-// GetMatchingSubscribers returns exact and wildcard subscribers that match the given channel.
-func (h *Hub) GetMatchingSubscribers(ch string) []*Session {
+// mergeMatchingSubscribers collects the sessions covered by ch — subscribed
+// exactly (the channel's subShard) or via a matching wildcard pattern
+// (matcher lookup) — deduplicated by session ID: a client subscribed both
+// ways must receive the publication only once, with a single message ID.
+func (h *Hub) mergeMatchingSubscribers(ch string) map[string]*Session {
 	matched := make(map[string]*Session)
 	for _, client := range h.GetSubscribers(ch) {
 		matched[client.SessionID()] = client
 	}
-
 	for _, candidate := range h.matcher.Lookup(ch) {
 		sub, ok := candidate.(Subscriber)
 		if !ok || sub.Session == nil {
@@ -716,7 +691,12 @@ func (h *Hub) GetMatchingSubscribers(ch string) []*Session {
 		}
 		matched[sub.Session.SessionID()] = sub.Session
 	}
+	return matched
+}
 
+// GetMatchingSubscribers returns exact and wildcard subscribers that match the given channel.
+func (h *Hub) GetMatchingSubscribers(ch string) []*Session {
+	matched := h.mergeMatchingSubscribers(ch)
 	result := make([]*Session, 0, len(matched))
 	for _, client := range matched {
 		result = append(result, client)
@@ -738,7 +718,10 @@ type PresenceRecipient struct {
 // presenceRecipients returns the clients covered by ch — subscribed exactly
 // (read from the channel's subShard) or via a matching wildcard pattern
 // (matcher lookup) — deduplicated by session ID, together with each
-// subscription's ephemeral flag.
+// subscription's ephemeral flag. It deliberately does not use
+// mergeMatchingSubscribers: the ephemeral flag must survive the merge (an
+// ephemeral exact sub must not hide a tracked wildcard, or the reverse), so
+// the accumulation keeps a per-subscription value instead of a session.
 func (h *Hub) PresenceRecipients(ch string) []PresenceRecipient {
 	recipients := make(map[string]PresenceRecipient)
 	add := func(client *Session, ephemeral bool) {
@@ -787,7 +770,7 @@ func (h *Hub) PresenceRecipients(ch string) []PresenceRecipient {
 
 // LookupSubscriber returns the current subscriber record for a client/channel pair.
 func (h *Hub) LookupSubscriber(ch string, c *Session) (Subscriber, bool) {
-	if isWildcard(ch) {
+	if topics.IsWildcard(ch) {
 		h.wcSubsMu.Lock()
 		defer h.wcSubsMu.Unlock()
 		topicSub, ok := h.wcSubs[c.SessionID()+":"+ch]

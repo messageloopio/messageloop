@@ -54,11 +54,7 @@ func (s *Server) handleConn(conn *quic.Conn) {
 
 	ctx = log.Context(ctx, log.FromContext(ctx), "client_id", client.SessionID())
 	maxSize := s.node.MaxMessageSize()
-	readTimeout := heartbeatReadTimeout(
-		s.node.GetHeartbeatConfig().IdleTimeout,
-		s.node.GetHeartbeatConfig().PingInterval,
-		s.opts.ReadTimeout,
-	)
+	readTimeout := s.node.GetHeartbeatConfig().ReadDeadline(s.opts.ReadTimeout)
 
 	for {
 		if readTimeout > 0 {
@@ -112,30 +108,4 @@ func (s *Server) handleConn(conn *quic.Conn) {
 			continue
 		}
 	}
-}
-
-// heartbeatReadTimeout computes the stream read deadline from the heartbeat
-// configuration. The rules match the WebSocket handler:
-//
-//   - idle == 0 && ping == 0: 60s, overridden by an explicit configured value
-//   - otherwise: a floor of max(2*idle, 3*ping, 10s); an explicit configured
-//     value may raise but never lower it
-func heartbeatReadTimeout(idle, ping, configured time.Duration) time.Duration {
-	if idle == 0 && ping == 0 {
-		if configured > 0 {
-			return configured
-		}
-		return 60 * time.Second
-	}
-	floor := 10 * time.Second
-	if t := 2 * idle; t > floor {
-		floor = t
-	}
-	if t := 3 * ping; t > floor {
-		floor = t
-	}
-	if configured > floor {
-		return configured
-	}
-	return floor
 }

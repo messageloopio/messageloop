@@ -88,7 +88,7 @@ const (
 
 // ClosedCapabilityNames is the closed set. Unknown YAML names are a Validate
 // error (config.Validate keeps its own copy of the names to avoid an import
-// cycle; keep the two lists in sync).
+// cycle; TestCapabilityNameCensus pins the two lists' key sets together).
 var ClosedCapabilityNames = map[string]Capability{
 	"presence.large_snapshot": CapPresenceLargeSnapshot,
 	"survey.bypass_gate":      CapSurveyBypassGate,
@@ -99,6 +99,20 @@ var ClosedCapabilityNames = map[string]Capability{
 	"user.fanout":             CapUserFanout,
 	"subscribe.any":           CapSubscribeAny,
 	"pattern.global":          CapPatternGlobal,
+}
+
+// ParseCapabilityNames folds a list of closed-set names into their bits.
+// Unknown names are skipped toward safety (config.Validate rejects them for
+// user-authored lists; proxy-granted lists tolerate version skew at the
+// caller). An empty or all-unknown list yields the zero Capability.
+func ParseCapabilityNames(names []string) Capability {
+	var caps Capability
+	for _, name := range names {
+		if bit, ok := ClosedCapabilityNames[name]; ok {
+			caps |= bit
+		}
+	}
+	return caps
 }
 
 // DefaultCapabilityCeiling is used when server.api.capabilities is
@@ -332,7 +346,7 @@ func (a *Authorizer) decideLocked(p Principal, action Action, channel string) De
 		}
 		return Decision{Allow: true, Reason: "default", Effects: effects}
 	case ActionRecover:
-		if isWildcard(channel) {
+		if topics.IsWildcard(channel) {
 			return Decision{Allow: false, Reason: "default", Effects: effects}
 		}
 		for _, rule := range a.rules {
@@ -345,7 +359,7 @@ func (a *Authorizer) decideLocked(p Principal, action Action, channel string) De
 		}
 		return Decision{Allow: true, Reason: "default", Effects: effects}
 	case ActionPresence:
-		if isWildcard(channel) {
+		if topics.IsWildcard(channel) {
 			return Decision{Allow: false, Reason: "default", Effects: effects}
 		}
 		for _, rule := range a.rules {

@@ -2,7 +2,6 @@ package session
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -18,8 +17,10 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/messageloopio/messageloop/internal/protocol"
+	"github.com/messageloopio/messageloop/internal/survey"
 	"github.com/messageloopio/messageloop/pkg/topics"
 	"github.com/messageloopio/messageloop/proxy"
+	"github.com/messageloopio/messageloop/shared"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
@@ -100,13 +101,6 @@ func jsonLog(msg proto.Message) string {
 	// encode is logged as an empty string, never propagated to the send path.
 	data, _ := ProtoJSONMarshaler.Marshal(msg)
 	return string(data)
-}
-
-// MarshalJSONStruct marshals a structpb.Struct into JSON bytes.
-// The structpb protobuf text format (fields:{...}) is not valid JSON, so
-// payloads must go through AsMap before json.Marshal.
-func MarshalJSONStruct(s *structpb.Struct) ([]byte, error) {
-	return json.Marshal(s.AsMap())
 }
 
 func (c *Session) marshal(msg any) ([]byte, error) {
@@ -531,40 +525,11 @@ func (c *Session) handleConnect(ctx context.Context, in *clientpb.InboundMessage
 			}
 			existing.mu.Unlock()
 
-			// Local takeover: tear off the old attachment, bind the new one.
-			// Nothing is left, nothing is unbound, subscriptions are not
-			// touched — the same Session object keeps serving.
-			existing.Detach(Disconnect{})
-
-			c.mu.RLock()
-			tempAtt := c.attachment
-			c.mu.RUnlock()
-			if tempAtt == nil {
-				return c.disconnectOnConnectError(ctx, errors.New("attach: session closed during connect"))
-			}
-			newAtt := &Attachment{
-				Transport: tempAtt.Transport,
-				Marshaler: tempAtt.Marshaler,
-				Protocol:  tempAtt.Protocol,
-			}
-			if err := existing.Attach(newAtt); err != nil {
-				// §5: an Attach failure after Detach is a real close — the
-				// directory must not be held by a session with no attachment.
-				_ = existing.Close(DisconnectInternal)
+			// Local takeover: the execution block lives in the Takeover
+			// module (takeover.go) — identity rules and handoff in one place.
+			if err := c.takeoverBy(existing); err != nil {
 				return c.disconnectOnConnectError(ctx, err)
 			}
-
-			// The temporary Authenticating session never enters the hub: it
-			// becomes a read-loop shell delegating to the resumed session.
-			c.mu.Lock()
-			c.delegate = existing
-			c.attachment = nil
-			c.stopHeartbeatLocked()
-			if c.pingDeadline != nil {
-				c.pingDeadline.Stop()
-				c.pingDeadline = nil
-			}
-			c.mu.Unlock()
 
 			return existing.finishConnect(ctx, in, connect, resumed, resumedLocal, nil, p, authUser, authNamespace)
 		} else {
@@ -744,29 +709,21 @@ func (c *Session) finishConnect(ctx context.Context, in *clientpb.InboundMessage
 	}
 
 	// Cross-node resume: channels the snapshot subscribed but this Connect
-	// request did not list are recovered too. They resume from the
-	// server-recorded ChannelOffsets; a channel missing an offset is skipped
-	// (never replayed from the beginning). Channels whose hydrate failed are
-	// excluded: they were not restored, and the client is told to
-	// re-subscribe via the RECOVER_FAILED envelope sent below.
-	if resumeSnapshot != nil {
-		failed := make(map[string]struct{}, len(restoreFailures))
+	// request did not list are recovered too, as synthetic Recover=true
+	// entries. The entry classification (ordered union, hydrate-failure
+	// exclusion, server-recorded ChannelOffsets as the cursor, missing
+	// offset → skip) is the recover module's contract — see
+	// SnapshotRecoverySubs in internal/runtime/recover.go.
+	if len(seenRecovery) > 0 || resumeSnapshot != nil {
+		requested := make([]string, 0, len(seenRecovery))
+		for ch := range seenRecovery {
+			requested = append(requested, ch)
+		}
+		failed := make([]string, 0, len(restoreFailures))
 		for _, failure := range restoreFailures {
-			failed[failure.Channel] = struct{}{}
+			failed = append(failed, failure.Channel)
 		}
-		for _, snap := range resumeSnapshot.Subscriptions {
-			if _, dup := seenRecovery[snap.Channel]; dup {
-				continue
-			}
-			if _, bad := failed[snap.Channel]; bad {
-				continue
-			}
-			seenRecovery[snap.Channel] = struct{}{}
-			recoverySubs = append(recoverySubs, &clientpb.Subscription{
-				Channel: snap.Channel,
-				Recover: true,
-			})
-		}
+		recoverySubs = append(recoverySubs, c.rt.SnapshotRecoverySubs(resumeSnapshot, requested, failed)...)
 	}
 
 	// Send the bare Connected first (no publications, no recover results),
@@ -1162,7 +1119,7 @@ func (c *Session) handlePublish(ctx context.Context, in *clientpb.InboundMessage
 	if channel == "" {
 		return c.sendRequestError(ctx, in, "missing channel in publish message")
 	}
-	if isWildcard(channel) {
+	if topics.IsWildcard(channel) {
 		// The publish subject is an exact channel (KD-K21): a literal
 		// wildcard pattern would fan out to wildcard subscribers while never
 		// being an addressable channel itself.
@@ -1257,7 +1214,7 @@ func (c *Session) handlePublish(ctx context.Context, in *clientpb.InboundMessage
 					Id: in.Id,
 					// Transient / no-history: the position offset stays unset
 					// (KD-K11), never 0-means-offset.
-					Position: positionFrom(c.rt.StreamEpoch(), 0, false),
+					Position: shared.PositionFrom(c.rt.StreamEpoch(), 0, false),
 				},
 			}
 		}))
@@ -1271,7 +1228,7 @@ func (c *Session) handlePublish(ctx context.Context, in *clientpb.InboundMessage
 		out.Envelope = &clientpb.OutboundMessage_PublishAck{
 			PublishAck: &clientpb.PublishAck{
 				Id:       in.Id,
-				Position: positionFrom(c.rt.StreamEpoch(), offset, true),
+				Position: shared.PositionFrom(c.rt.StreamEpoch(), offset, true),
 			},
 		}
 	}))
@@ -1562,7 +1519,7 @@ func (c *Session) handleSubRefresh(ctx context.Context, in *clientpb.InboundMess
 // on the same connection, so waiting here would deadlock the read loop).
 func (c *Session) handleSurvey(ctx context.Context, in *clientpb.InboundMessage, req *clientpb.SurveyRequest) error {
 	ch := req.GetChannel()
-	if ch == "" || isWildcard(ch) {
+	if ch == "" || topics.IsWildcard(ch) {
 		return c.sendSurveyError(ctx, in, "BAD_REQUEST", "request_error", "survey channel must be an exact channel")
 	}
 	if nsErr := c.checkNamespace(ch); nsErr != nil {
@@ -1600,24 +1557,9 @@ func (c *Session) handleSurvey(ctx context.Context, in *clientpb.InboundMessage,
 	}
 
 	// timeout = clamp(req.TimeoutMs, 100ms, min(policy.MaxSurveyTimeout||5s, 10s)).
-	// TimeoutMs <= 0 uses the policy cap (5s default).
-	timeout := pol.MaxSurveyTimeout
-	if timeout <= 0 {
-		timeout = 5 * time.Second
-	}
-	if timeout > 10*time.Second {
-		timeout = 10 * time.Second
-	}
-	if req.TimeoutMs > 0 {
-		requested := time.Duration(req.TimeoutMs) * time.Millisecond
-		if requested > timeout {
-			requested = timeout
-		}
-		if requested < 100*time.Millisecond {
-			requested = 100 * time.Millisecond
-		}
-		timeout = requested
-	}
+	// TimeoutMs <= 0 uses the policy cap (5s default). The clamp is the
+	// survey module's contract, shared with the Server API path.
+	timeout := survey.ClampTimeout(pol.MaxSurveyTimeout, int64(req.TimeoutMs))
 
 	// Fast path: the local subscriber set already exceeds the cap, so the
 	// survey can never run — reject synchronously with zero outbound
@@ -1804,7 +1746,7 @@ func (c *Session) sessionCoversChannel(ch string) bool {
 		return true
 	}
 	for _, pattern := range c.subscriptionList() {
-		if isWildcard(pattern.Channel) && topics.Match(pattern.Channel, ch) {
+		if topics.IsWildcard(pattern.Channel) && topics.Match(pattern.Channel, ch) {
 			return true
 		}
 	}
@@ -1816,7 +1758,7 @@ func (c *Session) sessionCoversChannel(ch string) bool {
 // disconnecting: the subscription state is untouched.
 func (c *Session) handlePresenceQuery(ctx context.Context, in *clientpb.InboundMessage, query *clientpb.PresenceQuery) error {
 	ch := query.GetChannel()
-	if ch == "" || isWildcard(ch) {
+	if ch == "" || topics.IsWildcard(ch) {
 		return c.Send(ctx, MakeOutboundMessage(in, func(out *clientpb.OutboundMessage) {
 			out.Envelope = &clientpb.OutboundMessage_Error{
 				Error: &sharedv2.Error{

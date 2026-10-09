@@ -247,4 +247,15 @@ type Broker interface {
 	// not consecutive reports HistoryGapMiddle (C4); entries without a dense
 	// seq (legacy) never trigger it.
 	History(ch string, sinceOffset uint64, limit int) (*HistoryPage, error)
+
+	// Epoch returns the broker's current history generation identity (the
+	// StreamEpoch stamped into Positions and the BrokerEpoch recorded in
+	// cluster resume snapshots), or "" when this broker has no epoch
+	// concept. The recover contract and Server API history reads compare it
+	// against recorded positions: a position from a different generation
+	// cannot be resumed, and a position whose epoch is "" must be treated
+	// as unvalidated rather than matching (KD-K11/KD-K22). This is a
+	// first-class interface capability — brokers may not leave it to
+	// callers' type assertions.
+	Epoch() string
 }

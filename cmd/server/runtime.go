@@ -86,10 +86,10 @@ func apiAuthCacheTTL(cfg *config.Config) time.Duration {
 
 // apiAuthFindProxy returns the proxy assigned with api_auth: true (at
 // most one — config.Validate enforces the uniqueness), or nil when nothing
-// is assigned. The instance is resolved by probing the node's proxy router
-// with the assigned entry's own route patterns: AddFromConfig compiles each
-// pattern into a glob, and a glob always matches its own pattern text, so
-// the probe is guaranteed to hit at least the assigned entry's routes.
+// is assigned. The instance is resolved by configuration name via
+// Router.ByName: the assignment is explicit (design G3), so no glob
+// semantics are involved — an earlier broad pattern cannot shadow the
+// assigned proxy and a route-less entry stays reachable.
 func apiAuthFindProxy(cfg *config.Config, node *runtime.Node) func() proxyproxy.Proxy {
 	var assigned *config.ProxyConfig
 	for i := range cfg.Proxy {
@@ -102,14 +102,7 @@ func apiAuthFindProxy(cfg *config.Config, node *runtime.Node) func() proxyproxy.
 		return nil
 	}
 	return func() proxyproxy.Proxy {
-		for _, route := range assigned.Routes {
-			if p := node.FindProxy(route.Channel, route.Method); p != nil {
-				return p
-			}
-		}
-		// An assigned entry without routes is unreachable via the router;
-		// key verification is effectively absent (fail-closed).
-		return nil
+		return node.FindProxyByName(assigned.Name)
 	}
 }
 

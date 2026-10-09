@@ -11,11 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/gorilla/websocket"
 	"github.com/lynx-go/x/log"
 	"golang.org/x/time/rate"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/messageloopio/messageloop/proxy"
@@ -152,16 +149,8 @@ type Session struct {
 // rename settles.
 type Client = Session
 
-// canonical returns the session object that actually owns the state: a
-// delegated shell (local-resume read loop) routes to the resumed session.
-func (s *Session) canonical() *Session {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.delegate != nil {
-		return s.delegate
-	}
-	return s
-}
+// canonical lives in the Takeover module (takeover.go) with the rest of the
+// local-resume identity algebra.
 
 // State returns the session lifecycle state.
 func (s *Session) State() SessionState {
@@ -636,17 +625,12 @@ func (s *Session) handleWriteError(att *Attachment, err error) {
 }
 
 // isPeerClosedError reports whether a write error means the peer went away
-// (io.EOF, closed network connection, WebSocket close 1000/1001, gRPC
-// Canceled/Unavailable) — mapped to Disconnect 3000, never 3512 (§7).
+// — mapped to Disconnect 3000, never 3512 (§7). Transport-specific shapes
+// (WebSocket close 1000/1001, gRPC Canceled/Unavailable) are wrapped into
+// ErrPeerGone by the adapters that produce them, at the seam (transport.go);
+// stdlib io.EOF / net.ErrClosed are classified here.
 func isPeerClosedError(err error) bool {
-	if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
-		return true
-	}
-	if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-		return true
-	}
-	code := status.Code(err)
-	return code == codes.Canceled || code == codes.Unavailable
+	return errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) || errors.Is(err, ErrPeerGone)
 }
 
 // isConnectedEnvelope was the pre-B3 recovery batch carrier exemption
@@ -779,76 +763,6 @@ func (s *Session) attachmentMarshalerLocked() Marshaler {
 		return s.attachment.Marshaler
 	}
 	return ProtoJSONMarshaler
-}
-
-// closeFromAttachment closes the session only when att is still the current
-// attachment. It backs the per-connection close func from NewClient: the
-// read loop of a superseded attachment (replaced by a local resume) must not
-// tear down the session now served by a newer attachment.
-func (s *Session) closeFromAttachment(att *Attachment) error {
-	s.mu.RLock()
-	delegate := s.delegate
-	current := s.attachment
-	s.mu.RUnlock()
-	if delegate != nil {
-		// This connection handed its transport to the resumed session, so it
-		// may only close that session while the session is still served by
-		// the handed-over transport — a chained resume rebinds the session to
-		// a newer connection, and this superseded shell's death must not kill
-		// it (see closeIfServingHandoff).
-		return delegate.closeIfServingHandoff(att, Disconnect{})
-	}
-	if current != att {
-		return nil
-	}
-	return s.Close(Disconnect{})
-}
-
-// closeFromLoop closes the session from a read-loop error path (a handler
-// returned a Disconnect). Same identity rule as closeFromAttachment: a
-// detached connection's stale frames must not close the resumed session.
-func (s *Session) closeFromLoop(dis Disconnect) {
-	s.mu.RLock()
-	delegate := s.delegate
-	current := s.attachment
-	loopAtt := s.loopAtt
-	s.mu.RUnlock()
-	if delegate != nil {
-		// This connection handed its transport to the resumed session: the
-		// close lands on the resumed session only while it is still served
-		// by the handed-over transport (a chained resume rebinds it to a
-		// newer connection, see closeIfServingHandoff).
-		_ = delegate.closeIfServingHandoff(loopAtt, dis)
-		return
-	}
-	if current != loopAtt {
-		return
-	}
-	_ = s.Close(dis)
-}
-
-// closeIfServingHandoff closes the resumed session only when its current
-// attachment still rides the transport the dying shell handed over during
-// the resume takeover. The session's attachment is a fresh object wrapping
-// that transport, so the comparison must be on the transport, not on the
-// attachment pointer. While it matches, this shell is the session's current
-// connection and its death closes the session normally; a chained resume
-// rebinds the session to the newer connection's transport, so a superseded
-// shell's read-loop exit must leave the session alone. A nil attachment
-// (Detach window of an in-flight chained resume, or an already closed
-// session) is not serving the handoff either: the in-flight resume either
-// completes and owns the session or fails into an explicit Close.
-func (s *Session) closeIfServingHandoff(handoff *Attachment, reason Disconnect) error {
-	if handoff == nil {
-		return nil
-	}
-	s.mu.RLock()
-	current := s.attachment
-	s.mu.RUnlock()
-	if current == nil || current.Transport != handoff.Transport {
-		return nil
-	}
-	return s.Close(reason)
 }
 
 // TransportLabel returns the transport label value ("ws", "grpc", "quic", or

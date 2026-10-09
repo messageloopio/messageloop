@@ -1090,3 +1090,15 @@ func TestResumeRemoteSession_CrossUserDenied(t *testing.T) {
 	assert.True(t, resumed)
 	assert.NotNil(t, snapshot)
 }
+
+// Epoch satisfies the Broker interface epoch capability (no epoch concept).
+func (b *evictTestBroker) Epoch() string { return "" }
+
+// Epoch satisfies the Broker interface epoch capability (no epoch concept).
+func (b *failChannelSubscribeBroker) Epoch() string { return "" }
+
+// Epoch satisfies the Broker interface epoch capability (no epoch concept).
+func (b *failSubscribeBroker) Epoch() string { return "" }
+
+// Epoch satisfies the Broker interface epoch capability (no epoch concept).
+func (b *failSecondSubscribeBroker) Epoch() string { return "" }

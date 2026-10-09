@@ -11,9 +11,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 	googlegrpc "google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/messageloopio/messageloop/internal/protocol"
+	"github.com/messageloopio/messageloop/internal/session"
 	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
 	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
 )
@@ -381,4 +384,35 @@ func TestTransport_CloseCarriesDisconnectCode(t *testing.T) {
 	code, ok := errMsg.GetMetadata().GetFields()["disconnect_code"]
 	require.True(t, ok, "metadata missing disconnect_code")
 	require.Equal(t, float64(3512), code.GetNumberValue())
+}
+
+// TestWrapPeerGone pins the write-error classification contract of ADR-0001:
+// Canceled/Unavailable status errors — including wrapped ones
+// (status.FromError unwraps) — are marked session.ErrPeerGone; other codes
+// and plain errors (status.Code yields Unknown) pass through so they keep
+// their slow-consumer visibility.
+func TestWrapPeerGone(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"canceled", status.Error(codes.Canceled, "client stopped the stream"), true},
+		{"unavailable", status.Error(codes.Unavailable, "connection reset"), true},
+		{"wrapped unavailable", fmt.Errorf("send: %w", status.Error(codes.Unavailable, "io")), true},
+		{"internal", status.Error(codes.Internal, "boom"), false},
+		{"plain error", errors.New("boom"), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			wrapped := wrapPeerGone(tc.err)
+			if tc.err == nil {
+				require.NoError(t, wrapped)
+				return
+			}
+			require.ErrorIs(t, wrapped, tc.err, "original shape must survive the join")
+			require.Equal(t, tc.want, errors.Is(wrapped, session.ErrPeerGone))
+		})
+	}
 }

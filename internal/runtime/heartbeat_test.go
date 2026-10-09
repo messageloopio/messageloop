@@ -174,7 +174,7 @@ func TestHeartbeat_DefaultNoServerPing(t *testing.T) {
 // starts no heartbeat goroutine at all and keeps a silent connection open.
 func TestHeartbeat_IdleAndPingDisabledKeepsConnection(t *testing.T) {
 	node := newHeartbeatNode(t, config.Heartbeat{IdleTimeout: "0s", PingInterval: "0s"})
-	assert.Zero(t, node.GetHeartbeatIdleTimeout())
+	assert.Zero(t, node.heartbeatIdleTimeout())
 	cfg := node.GetHeartbeatConfig()
 	assert.Zero(t, cfg.IdleTimeout)
 	assert.Zero(t, cfg.PingInterval)

@@ -141,3 +141,6 @@ func TestHealthHandler_ClusterEnabled_NoHealthCheck_Returns200(t *testing.T) {
 	assert.Equal(t, "ok", hs.Status)
 	assert.Equal(t, "not applicable", hs.Redis)
 }
+
+// Epoch satisfies the Broker interface epoch capability (no epoch concept).
+func (fakeBrokerNoReady) Epoch() string { return "" }
