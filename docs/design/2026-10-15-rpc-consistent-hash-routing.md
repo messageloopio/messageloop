@@ -69,7 +69,7 @@ flowchart LR
 | 层 | 位置 | 改动 |
 | --- | --- | --- |
 | proxy 包 | `proxy/service.go`(新) | `ServiceProxy`:实现 `Proxy` 全接口,聚合 Resolver + KeyedPicker + conn 池 |
-| proxy 包 | `proxy/picker.go`(新,过渡) | 内部 Rendezvous 实现(接口形状与上游规格一致,§3) |
+| 测试 | `proxy/` 冻结向量(双持) | 与上游 v1.19.0 `frozenKeyedVector` 同一份向量,防上游 hash 编码漂移 |
 | config | `config/config.go` | `RegistryConfig` 段;`ProxyConfig` 增 `Service`/`Routing` |
 | 装配 | `cmd/server/main.go`、`internal/runtime/node.go:734 createProxy` | registry backend + Resolver 构建;`createProxy` 增 service 分支(数行) |
 | 上游 | lynx `contrib/registry` | `KeyedPicker` + `RendezvousPicker`(协同 PR,§3) |
@@ -77,7 +77,7 @@ flowchart LR
 
 ## 3. 上游协同:lynx `contrib/registry` KeyedPicker 规格
 
-> 本节是给 lynx-go/lynx 上游 PR 的规格;上游 tag 出来前,本仓 `proxy/picker.go` 按同一规格先行实现,tag 后换薄包装(§7 PR-D)。
+> 本节原为 lynx-go/lynx 上游 PR 的规格;**该 PR 已合并并随 v1.19.0 发布**([lynx-go/lynx#3](https://github.com/lynx-go/lynx/pull/3),tag `contrib/registry/v1.19.0`,2026-10-15,模块代理已可解析)。本仓直接 require 上游消费,无需过渡实现;冻结向量双持(messageloop 侧测试持同一份向量,防上游漂移)仍执行。
 
 ```go
 // picker.go — 新增(不改既有 Picker 接口)
@@ -105,7 +105,7 @@ func RendezvousPicker() KeyedPicker
 
 **非键策略零上游依赖**:`round_robin` / `random` 直接复用 lynx 既有 `RoundRobinPicker()` / `RandomPicker()`——只用非键策略的部署不依赖上游 KeyedPicker tag,PR-D 的换接对它们是纯空操作。
 
-**版本路径**:上游 PR → 合并 → `contrib/registry` 出新 tag → 本仓 require 升级。上游节奏不阻塞 v1.1(PR-B 用内部实现先行,PR-D 换接)。
+**版本路径**:~~上游 PR → 合并 → `contrib/registry` 出新 tag → 本仓 require 升级。上游节奏不阻塞 v1.1~~ → **已完成**:PR #3 合并,v1.19.0 已发布,本仓 PR-A 直接升级到 v1.19.0 并消费 `registry.RendezvousPicker()`。
 
 ## 4. 组件设计
 
@@ -270,12 +270,13 @@ app.Register(reg) // 心跳/readiness/排水注销由 lynx 生命周期托管
 
 | PR | 内容 | 依赖 | 估(人周) |
 | --- | --- | --- | --- |
-| **PR-0(上游)** | lynx `contrib/registry`:`KeyedPicker` + `RendezvousPicker` + 冻结向量(已提交:[lynx-go/lynx#3](https://github.com/lynx-go/lynx/pull/3),分支 `feat/registry-keyed-picker`;合并后出 tag) | — | 0.3(并行) |
-| **PR-A** | lynx 升级 v1.17.0→v1.18.0(含 contrib/zap)+ `registry` 配置段 + redis backend/Resolver 装配(**无路由行为变化**) | — | 0.5 |
-| **PR-B** | `ServiceProxy` + 策略分派(`consistent_hash` 内部 Rendezvous(上游形状)/ `round_robin` / `random`)+ conn 管理 + `channel` 路由键:hash 定向纵切可用 | PR-A | 1.5 |
+| PR-0(上游) | ✅ 已完成:lynx `contrib/registry` `KeyedPicker` + `RendezvousPicker` + 冻结向量,[PR #3](https://github.com/lynx-go/lynx/pull/3) 已合并,随 **v1.19.0** 发布 | — | — |
+| **PR-A** | lynx 升级 v1.17.0→**v1.19.0**(含 contrib/zap 对齐;require `contrib/registry`、`contrib/registry-redis` v1.19.0)+ `registry` 配置段 + redis backend/Resolver 装配(**无路由行为变化**) | — | 0.5 |
+| **PR-B** | `ServiceProxy` + 策略分派(`consistent_hash` 直接用上游 `registry.RendezvousPicker()` / `round_robin` / `random`)+ conn 管理 + `channel` 路由键:hash 定向纵切可用 | PR-A | 1.5 |
 | **PR-C** | `metadata:<name>` 键 + 指标 + 集成/双节点 e2e + 文档(03-server-api、04-cluster、deployment) | PR-B | 1.0 |
-| **PR-D(换接)** | 上游 tag 后改薄包装调 `registry.RendezvousPicker()`,删内部实现(向量测试保留防上游漂移) | PR-0 出 tag | 0.2 |
 | PR-E(紧随,不阻塞 v1.1 可用性) | consul 后端 + HTTP 型 keyed 路由 | PR-C | 后续排 |
+
+> 原计划的 PR-D(上游 tag 后换接、删内部过渡实现)已无必要——上游在开发启动前落地,PR-B 从第一天直接消费 `registry.RendezvousPicker()`。
 
 ## 8. 排期(v1.1)
 
@@ -285,13 +286,13 @@ app.Register(reg) // 心跳/readiness/排水注销由 lynx 生命周期托管
 | --- | --- | --- | --- |
 | W47 | 11-16 ~ 11-20 | PR-A;PR-0 上游 PR 提出 | **M1** 依赖与装配落地 |
 | W48 | 11-23 ~ 11-27 | PR-B(hash 定向单节点可用) | **M2** 纵切可用 |
-| W49 | 11-30 ~ 12-04 | PR-C(集群 e2e + 文档;上游 tag 出则 PR-D) | **M3** 集群验收 |
+| W49 | 11-30 ~ 12-04 | PR-C(集群 e2e + 文档) | **M3** 集群验收 |
 | W50 | 12-07 ~ 12-11 | buffer:hardening、评审遗留、上游换接兜底 | **v1.1 RPC 路由可用(2026-12-11)** |
 
 **发版门禁(v1.1 本特性)**:
 
 - `go test ./...` + 相关包 `-race`;redis 集成测试在 CI REQUIRED 模式跑过;
-- 冻结向量双持(本仓 + 上游)一致;上游未出 tag 前 PR-D 不合并亦可发(v1.1 以内部实现为准,PR-D 为纯替换);
+- 冻结向量双持:本仓测试与上游 v1.19.0 `frozenKeyedVector` 为同一份向量,两侧一致;
 - 静态 endpoint 代理、`api_auth`、既有错误码路径零回归;
 - `docs/developer/03-server-api.md`、`04-cluster.md`、`docs/deployment.md` 与实现一致(注册方契约、TLS 多实例限制、无被动探针取舍均成文)。
 
