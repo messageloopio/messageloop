@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| 状态 | **待评审**(提案已 Accepted,开发启动以本文档评审通过为准) |
+| 状态 | **已实现**(2026-10-15,PR-A `4426675` / PR-B `a6812bf` / PR-C `6b3f895`;上游 KeyedPicker 已随 lynx v1.19.0 发布;遗留:双进程 e2e、`02-configuration.md` 字段参考、consul/HTTP 后端与 sticky 二期) |
 | 日期 | 2026-10-15 |
 | 提案 | [docs/proposals/2026-10-15-rpc-consistent-hash-routing.md](../proposals/2026-10-15-rpc-consistent-hash-routing.md)(§10 拍板记录) |
 | 排期 | v1.1:2026-11-16 启动(v1.0 发版 2026-11-14 之后),见 §8 |

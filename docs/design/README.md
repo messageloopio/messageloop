@@ -8,7 +8,7 @@
 | [v1.0 功能缺口设计](v1.0-platform-gaps.md) | Approved | Subscribe 恢复、Presence、按 user、心跳、客户端 Survey、通配 presence、频道策略；含 Key Decisions、排期、PR Plan |
 | [Admin API Key 鉴权与按 Namespace 权限控制](2026-09-16-admin-api-key-authz.md) | 已实现（dogfooding） | proxy 托管 Key 校验（mlbridge→Torchwood 复用 TW Key 体系 + `messageloop.*` 服务前缀标签）；scope 层 + census 双测试补机制缺口；三仓协同；dogfooding 免兼容 |
 | [架构评审与深化裁决](2026-10-04-architecture-review-decisions.md) | 已裁决（分批实施中） | 六个 deepening 候选（Takeover / Transport seam / Recover 契约 / Node 切片 / 钳制下沉 / 浅 seam 三修）+ D1-D21 裁决与批次门槛；对 KD-\* 与 authz D\*/G\* 只引用不重裁 |
-| [RPC 一致性 hash 路由与服务注册发现](2026-10-15-rpc-consistent-hash-routing.md) | 待评审 | v1.1：proxy 服务发现型后端 + 按键 Rendezvous 定向（战斗服场景）；lynx contrib/registry + 上游 KeyedPicker 协同；含 PR Plan 与排期；[提案](../proposals/2026-10-15-rpc-consistent-hash-routing.md)已 Accepted |
+| [RPC 一致性 hash 路由与服务注册发现](2026-10-15-rpc-consistent-hash-routing.md) | 已实现 | v1.1：proxy 服务发现型后端 + 按键 Rendezvous 定向（战斗服场景）；lynx v1.19.0 `KeyedPicker`/`RendezvousPicker`；PR-A/B/C 已实现（2026-10-15）；[提案](../proposals/2026-10-15-rpc-consistent-hash-routing.md)已 Accepted |
 | [产品 ROADMAP](../../ROADMAP.md) | Approved | v0.2 → v1.0 → v1.x 能力地图与排期摘要 |
 | [PR-01 实现规格](tasks/pr-01-protocol.md) | Accepted | 冻结 v1.0 proto 字段号；[第三方 prompt](tasks/pr-01-prompt.md) |
 | [PR-02 实现规格](tasks/pr-02-channel-policy.md) | Accepted | 频道前缀策略引擎；[第三方 prompt](tasks/pr-02-prompt.md) |

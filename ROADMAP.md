@@ -8,7 +8,7 @@ MessageLoop 是双向实时 Messaging Platform，主场景是 **IM、Chat Room�
 | --- | --- | --- |
 | **v0.2 preview** | 当前主干 | 内核可用：双传输、通配、Connect 恢复、session takeover、Admin Survey |
 | **v1.0** | 设计已批准，待实现 | 四场景产品闭环（见下表七缺口） |
-| **v1.1** | 提案已确认，设计待评审 | RPC 一致性 hash 路由 + 服务注册发现（游戏战斗服按场景 key 定向到后端实例；[提案](docs/proposals/2026-10-15-rpc-consistent-hash-routing.md) · [设计](docs/design/2026-10-15-rpc-consistent-hash-routing.md)，2026-11-16 启动） |
+| **v1.1** | RPC 路由已实现（2026-10-15，较排期提前） | RPC 一致性 hash 路由 + 服务注册发现（游戏战斗服按场景 key 定向到后端实例；lynx v1.19.0 KeyedPicker；[提案](docs/proposals/2026-10-15-rpc-consistent-hash-routing.md) · [设计](docs/design/2026-10-15-rpc-consistent-hash-routing.md)；consul/HTTP 后端与 sticky 二期） |
 | **v1.x** | 预留 | PresenceStats、last will、发布幂等键、更多 SDK、JWT、Admin UI |
 
 细化设计（协议字段、时序、备选、验收、安全）：[docs/design/v1.0-platform-gaps.md](docs/design/v1.0-platform-gaps.md)。
