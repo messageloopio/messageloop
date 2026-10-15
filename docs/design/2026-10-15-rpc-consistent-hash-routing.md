@@ -270,7 +270,7 @@ app.Register(reg) // 心跳/readiness/排水注销由 lynx 生命周期托管
 
 | PR | 内容 | 依赖 | 估(人周) |
 | --- | --- | --- | --- |
-| **PR-0(上游)** | lynx `contrib/registry`:`KeyedPicker` + `RendezvousPicker` + 冻结向量(协同仓库,合并后出 tag) | — | 0.3(并行) |
+| **PR-0(上游)** | lynx `contrib/registry`:`KeyedPicker` + `RendezvousPicker` + 冻结向量(已提交:[lynx-go/lynx#3](https://github.com/lynx-go/lynx/pull/3),分支 `feat/registry-keyed-picker`;合并后出 tag) | — | 0.3(并行) |
 | **PR-A** | lynx 升级 v1.17.0→v1.18.0(含 contrib/zap)+ `registry` 配置段 + redis backend/Resolver 装配(**无路由行为变化**) | — | 0.5 |
 | **PR-B** | `ServiceProxy` + 策略分派(`consistent_hash` 内部 Rendezvous(上游形状)/ `round_robin` / `random`)+ conn 管理 + `channel` 路由键:hash 定向纵切可用 | PR-A | 1.5 |
 | **PR-C** | `metadata:<name>` 键 + 指标 + 集成/双节点 e2e + 文档(03-server-api、04-cluster、deployment) | PR-B | 1.0 |
