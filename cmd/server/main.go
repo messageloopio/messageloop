@@ -91,14 +91,15 @@ func main() {
 		}
 
 		// Service registry discovery stack (v1.1 PR-A, design §4.7). The
-		// Resolver is held by main and closed on shutdown; PR-B hands it to
-		// the service proxies (SetupProxy wiring), so nothing consumes it yet.
+		// Resolver is held by main and closed on shutdown; the proxies hand
+		// it to ServiceProxy instances via SetupProxy, which reject a
+		// service-type config when it is nil (registry disabled).
 		registryResolver, registryDisc, registryRedisClient, err := newRegistryResolver(cfg)
 		if err != nil {
 			return err
 		}
 
-		if err = setupProxy(cfg, node); err != nil {
+		if err = setupProxy(cfg, node, registryResolver); err != nil {
 			return err
 		}
 
@@ -317,8 +318,11 @@ func newRegistryResolver(cfg *config.Config) (*registry.Resolver, *registryredis
 	return registry.NewResolver(disc), disc, client, nil
 }
 
-// setupProxy configures and registers backend proxy routes on node from the given config.
-func setupProxy(cfg *config.Config, node *runtime.Node) error {
+// setupProxy configures and registers backend proxy routes on node from the
+// given config. The registry resolver (nil when the registry is disabled) is
+// passed through for service-type proxies; SetupProxy rejects a service-type
+// config without one.
+func setupProxy(cfg *config.Config, node *runtime.Node, resolver *registry.Resolver) error {
 	if len(cfg.Proxy) == 0 {
 		return nil
 	}
@@ -330,7 +334,7 @@ func setupProxy(cfg *config.Config, node *runtime.Node) error {
 		}
 		proxyConfigs = append(proxyConfigs, pc)
 	}
-	if err := node.SetupProxy(proxyConfigs); err != nil {
+	if err := node.SetupProxy(proxyConfigs, resolver); err != nil {
 		return fmt.Errorf("failed to setup proxies: %w", err)
 	}
 	return nil

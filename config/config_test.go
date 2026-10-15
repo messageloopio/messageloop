@@ -9,6 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
+
+	"github.com/messageloopio/messageloop/proxy"
 )
 
 func validTransport() Transport {
@@ -617,6 +619,49 @@ func TestValidate_Registry(t *testing.T) {
 	assert.Equal(t, "250ms", explicit.Registry.Redis.ReadTimeout)
 	assert.Equal(t, "250ms", explicit.Registry.Redis.WriteTimeout)
 	assert.Equal(t, "custom:prefix/", explicit.Registry.Redis.KeyPrefix)
+}
+
+// TestValidate_ServiceProxyRequiresRegistry pins the PR-B coupling
+// (design §4.4 rule 2): a service-type proxy has no discovery stack to
+// resolve instances from when the registry is disabled, so the combination
+// fails Validate at startup. Static endpoint proxies stay unaffected, and a
+// service proxy over an enabled registry is accepted.
+func TestValidate_ServiceProxyRequiresRegistry(t *testing.T) {
+	base := func(proxyCfgs ...ProxyConfig) *Config {
+		return &Config{
+			Transport: validTransport(),
+			Server:    validServer(),
+			Broker:    BrokerConfig{Type: "redis", Redis: brokerRedisFixture()},
+			Proxy:     proxyCfgs,
+		}
+	}
+
+	// Service proxy with the registry disabled: rejected, entry identified.
+	disabled := base(ProxyConfig{Name: "battle", Service: "acme-battle"})
+	assert.ErrorContains(t, disabled.Validate(), "proxy[0] (battle) uses service discovery; registry must be enabled")
+
+	// Static endpoints never trigger the coupling, enabled or not.
+	static := base(ProxyConfig{Name: "static", Endpoint: "127.0.0.1:9001"})
+	assert.NoError(t, static.Validate())
+
+	// Service proxy over an enabled registry: accepted.
+	enabled := base(
+		ProxyConfig{
+			Name:    "battle",
+			Service: "acme-battle",
+			Routing: proxy.RoutingConfig{Strategy: proxy.RoutingStrategyConsistentHash, Key: "metadata:scene"},
+			GRPC:    &proxy.GRPCProxyConfig{Insecure: true},
+		},
+	)
+	enabled.Registry = RegistryConfig{Enabled: true, Backend: "redis"}
+	assert.NoError(t, enabled.Validate())
+
+	// The service and routing fields pass through ToProxyConfig untouched.
+	pc, err := enabled.Proxy[0].ToProxyConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "acme-battle", pc.Service)
+	assert.Equal(t, proxy.RoutingStrategyConsistentHash, pc.Routing.Strategy)
+	assert.Equal(t, "metadata:scene", pc.Routing.Key)
 }
 
 // TestValidate_AuthorizerHistoryTTL verifies PR-KA-A4: an unparsable

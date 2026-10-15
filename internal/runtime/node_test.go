@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lynx-go/lynx/contrib/registry"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
@@ -574,6 +575,56 @@ func TestNode_SetupProxy(t *testing.T) {
 
 func TestNode_SetupProxy_HTTP(t *testing.T) {
 	t.Skip("Skipping TestNode_SetupProxy_HTTP - requires actual server for HTTP connection")
+}
+
+// TestNode_SetupProxy_Service pins the PR-B resolver contract (v1.1 design
+// §4.7): a service-type config with a nil resolver (registry disabled) fails
+// SetupProxy, one with a resolver wires a ServiceProxy resolvable by name,
+// and a static endpoint proxy still works alongside.
+func TestNode_SetupProxy_Service(t *testing.T) {
+	node := NewNode(nil)
+
+	// Nil resolver + service-type config: refused, never silently wired.
+	err := node.SetupProxy([]*proxy.ProxyConfig{
+		{Name: "battle", Service: "acme-battle"},
+	}, nil)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "no registry resolver")
+
+	// Invalid routing fails validation before any backend is constructed.
+	err = node.SetupProxy([]*proxy.ProxyConfig{
+		{Name: "battle", Service: "acme-battle", Routing: proxy.RoutingConfig{Strategy: proxy.RoutingStrategySticky}},
+	}, nil)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "reserved for a future release")
+
+	// With a resolver the service proxy is created and reachable by name;
+	// the static proxy is untouched.
+	mem := registry.NewMemory()
+	resolver := registry.NewResolver(mem)
+	t.Cleanup(func() { _ = resolver.Close() })
+
+	node = NewNode(nil)
+	require.NoError(t, node.SetupProxy([]*proxy.ProxyConfig{
+		{Name: "static", Endpoint: "127.0.0.1:9001"},
+		{
+			Name:    "battle",
+			Service: "acme-battle",
+			Routing: proxy.RoutingConfig{Strategy: proxy.RoutingStrategyRoundRobin},
+			Routes:  []proxy.RouteConfig{{Channel: "acme:battle.*", Method: "*"}},
+		},
+	}, resolver))
+
+	assert.Equal(t, "battle", node.FindProxyByName("battle").Name())
+	assert.Equal(t, "static", node.FindProxyByName("static").Name())
+	assert.Nil(t, node.FindProxyByName("missing"))
+
+	// An empty-snapshot service backend surfaces the sentinel through the
+	// generic Node.ProxyRPC path.
+	_, err = node.ProxyRPC(context.Background(), "acme:battle.scene-42", "echo", &proxy.RPCProxyRequest{
+		ID: "req", Channel: "acme:battle.scene-42", Method: "echo",
+	})
+	require.ErrorIs(t, err, proxy.ErrNoHealthyInstance)
 }
 
 func TestNode_BrokerEventHandler(t *testing.T) {

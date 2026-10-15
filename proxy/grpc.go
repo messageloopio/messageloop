@@ -24,6 +24,32 @@ type GRPCProxy struct {
 	timeout  time.Duration
 }
 
+// grpcDialOptions builds the gRPC client dial options shared by the static
+// GRPCProxy and the discovery-based ServiceProxy: the receive-message size
+// cap plus TLS / insecure transport credentials from the gRPC proxy config.
+// Keeping one implementation stops the two transports from drifting.
+func grpcDialOptions(cfg *GRPCProxyConfig) []grpc.DialOption {
+	dialOpts := []grpc.DialOption{
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(4 * 1024 * 1024)),
+	}
+
+	if cfg.Insecure {
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	} else {
+		// For secure connections, use TLS with system CA pool and the
+		// optional overrides from the config.
+		tlsConfig := &tls.Config{}
+		if cfg.ServerName != "" {
+			tlsConfig.ServerName = cfg.ServerName
+		}
+		if cfg.InsecureSkipVerify {
+			tlsConfig.InsecureSkipVerify = true
+		}
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
+	}
+	return dialOpts
+}
+
 // NewGRPCProxy creates a new gRPC proxy instance.
 func NewGRPCProxy(cfg *ProxyConfig) (*GRPCProxy, error) {
 	if cfg.GRPC == nil {
@@ -35,26 +61,7 @@ func NewGRPCProxy(cfg *ProxyConfig) (*GRPCProxy, error) {
 		timeout = DefaultRPCTimeout
 	}
 
-	dialOpts := []grpc.DialOption{
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(4 * 1024 * 1024)),
-	}
-
-	if cfg.GRPC.Insecure {
-		dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	} else {
-		// For secure connections, use TLS with system CA pool and the
-		// optional overrides from the config.
-		tlsConfig := &tls.Config{}
-		if cfg.GRPC.ServerName != "" {
-			tlsConfig.ServerName = cfg.GRPC.ServerName
-		}
-		if cfg.GRPC.InsecureSkipVerify {
-			tlsConfig.InsecureSkipVerify = true
-		}
-		dialOpts = append(dialOpts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
-	}
-
-	conn, err := grpc.NewClient(cfg.Endpoint, dialOpts...)
+	conn, err := grpc.NewClient(cfg.Endpoint, grpcDialOptions(cfg.GRPC)...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to gRPC server: %w", err)
 	}

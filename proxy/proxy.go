@@ -2,6 +2,8 @@ package proxy
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v2"
@@ -107,6 +109,16 @@ type ProxyConfig struct {
 	// For gRPC: "localhost:9001" or "service.example.com:9001"
 	Endpoint string `yaml:"endpoint" json:"endpoint" mapstructure:"endpoint"`
 
+	// Service selects a discovery-based backend (v1.1 PR-B): the registry
+	// service name whose healthy instances are resolved at request time.
+	// Mutually exclusive with Endpoint — exactly one of the two must be set
+	// (Validate enforces it when the proxies are wired).
+	Service string `yaml:"service" json:"service" mapstructure:"service"`
+
+	// Routing configures instance selection for a service backend. It is
+	// ignored for static Endpoint backends.
+	Routing RoutingConfig `yaml:"routing" json:"routing" mapstructure:"routing"`
+
 	// Timeout is the request timeout for this proxy.
 	// If zero, the default timeout is used.
 	Timeout time.Duration `yaml:"timeout" json:"timeout" mapstructure:"timeout"`
@@ -119,6 +131,105 @@ type ProxyConfig struct {
 
 	// Routes defines which requests should be routed to this proxy.
 	Routes []RouteConfig `yaml:"routes" json:"routes" mapstructure:"routes"`
+}
+
+// Routing strategy names for service-type proxy backends (v1.1 design §4.3).
+const (
+	// RoutingStrategyConsistentHash routes each RPC by a routing key through
+	// the Rendezvous (HRW) hash: the same key lands on the same instance on
+	// every node, with zero coordination. It is the default when
+	// routing.strategy is omitted.
+	RoutingStrategyConsistentHash = "consistent_hash"
+	// RoutingStrategyRoundRobin rotates across the healthy instance snapshot
+	// per node; counters are independent per messageloop node.
+	RoutingStrategyRoundRobin = "round_robin"
+	// RoutingStrategyRandom picks a uniformly random healthy instance per
+	// request.
+	RoutingStrategyRandom = "random"
+	// RoutingStrategySticky is reserved for the phase-2 key lease directory;
+	// configuring it is a Validate error in this phase.
+	RoutingStrategySticky = "sticky"
+)
+
+// DefaultRoutingStrategy is applied when RoutingConfig.Strategy is empty.
+const DefaultRoutingStrategy = RoutingStrategyConsistentHash
+
+// Routing key syntax for keyed strategies (v1.1 design §4.3).
+const (
+	// RoutingKeyChannel routes by the raw channel string, namespace prefix
+	// included.
+	RoutingKeyChannel = "channel"
+	// RoutingKeyMetadataPrefix prefixes a request metadata entry name: the
+	// routing key is read from that entry, falling back to the channel when
+	// it is missing or empty.
+	RoutingKeyMetadataPrefix = "metadata:"
+)
+
+// DefaultRoutingKey is applied when RoutingConfig.Key is empty.
+const DefaultRoutingKey = RoutingKeyChannel
+
+// RoutingConfig selects how requests to a service-type proxy pick an
+// instance (v1.1 design §4.3/§4.4). The zero value routes RPCs by channel
+// through the consistent hash.
+type RoutingConfig struct {
+	// Strategy is one of "consistent_hash" (default), "round_robin",
+	// "random", or "sticky" (reserved for phase 2 and rejected by Validate).
+	Strategy string `yaml:"strategy" json:"strategy" mapstructure:"strategy"`
+
+	// Key is the routing key source used by keyed strategies: "channel"
+	// (default) or "metadata:<name>". It is only valid under a keyed
+	// strategy (consistent_hash); configuring it under round_robin or
+	// random is a Validate error, so a mistyped strategy fails at startup
+	// instead of silently ignoring the key.
+	Key string `yaml:"key" json:"key" mapstructure:"key"`
+}
+
+// Validate checks the proxy configuration for errors that would otherwise
+// surface only at request time (v1.1 design §4.4): exactly one of
+// endpoint/service must be set, and the routing block must be coherent. It
+// runs when the proxies are wired (Node.SetupProxy), before any backend is
+// constructed.
+func (c *ProxyConfig) Validate() error {
+	switch {
+	case c.Endpoint != "" && c.Service != "":
+		return fmt.Errorf("proxy %s: endpoint and service are mutually exclusive; configure exactly one", c.Name)
+	case c.Endpoint == "" && c.Service == "":
+		return fmt.Errorf("proxy %s: either endpoint or service is required", c.Name)
+	}
+	return c.Routing.validate(c.Name)
+}
+
+// validate checks the routing block semantics (v1.1 design §4.4 rule 3):
+// the strategy value domain, the sticky reservation, and the rule that a
+// routing key only appears under a keyed strategy.
+func (r RoutingConfig) validate(name string) error {
+	keyed := false
+	switch r.Strategy {
+	case "", RoutingStrategyConsistentHash:
+		keyed = true
+	case RoutingStrategyRoundRobin, RoutingStrategyRandom:
+		// Unkeyed strategies: key extraction is skipped entirely.
+	case RoutingStrategySticky:
+		return fmt.Errorf("proxy %s: routing.strategy %q is reserved for a future release; use consistent_hash, round_robin or random", name, r.Strategy)
+	default:
+		return fmt.Errorf("proxy %s: unknown routing.strategy %q (expected %q, %q or %q)", name, r.Strategy, RoutingStrategyConsistentHash, RoutingStrategyRoundRobin, RoutingStrategyRandom)
+	}
+	if r.Key == "" {
+		return nil
+	}
+	if !keyed {
+		return fmt.Errorf("proxy %s: routing.key is only valid with the %q strategy (round_robin/random are keyless by design)", name, RoutingStrategyConsistentHash)
+	}
+	if r.Key == RoutingKeyChannel {
+		return nil
+	}
+	if meta, ok := strings.CutPrefix(r.Key, RoutingKeyMetadataPrefix); ok {
+		if meta == "" {
+			return fmt.Errorf("proxy %s: routing.key %q requires a non-empty metadata field name", name, r.Key)
+		}
+		return nil
+	}
+	return fmt.Errorf("proxy %s: unknown routing.key %q (expected %q or %q<name>)", name, r.Key, RoutingKeyChannel, RoutingKeyMetadataPrefix)
 }
 
 // HTTPProxyConfig contains HTTP-specific proxy settings.

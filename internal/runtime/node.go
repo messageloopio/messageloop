@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lynx-go/lynx/contrib/registry"
 	"github.com/lynx-go/x/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/protobuf/proto"
@@ -719,10 +720,18 @@ func (n *Node) PublishForAPI(ch string, pub *Publication, addHistory bool) error
 }
 
 // SetupProxy configures the proxy router with the given proxy configurations.
-func (n *Node) SetupProxy(cfgs []*proxy.ProxyConfig) error {
+// resolver is the node-level registry resolver handed to service-type
+// proxies (v1.1 PR-B); it may be nil only when no configuration uses service
+// discovery — a service-type config with a nil resolver fails here. Each
+// config is validated (endpoint/service exclusivity, routing semantics)
+// before any backend is constructed.
+func (n *Node) SetupProxy(cfgs []*proxy.ProxyConfig, resolver *registry.Resolver) error {
 	n.proxy = proxy.NewRouter()
 	for _, cfg := range cfgs {
-		p, err := n.createProxy(cfg)
+		if err := cfg.Validate(); err != nil {
+			return fmt.Errorf("invalid proxy config %s: %w", cfg.Name, err)
+		}
+		p, err := n.createProxy(cfg, resolver)
 		if err != nil {
 			return fmt.Errorf("failed to create proxy %s: %w", cfg.Name, err)
 		}
@@ -733,7 +742,11 @@ func (n *Node) SetupProxy(cfgs []*proxy.ProxyConfig) error {
 	return nil
 }
 
-func (n *Node) createProxy(cfg *proxy.ProxyConfig) (proxy.Proxy, error) {
+func (n *Node) createProxy(cfg *proxy.ProxyConfig, resolver *registry.Resolver) (proxy.Proxy, error) {
+	if cfg.Service != "" {
+		// Discovery-based backend: NewServiceProxy rejects a nil resolver.
+		return proxy.NewServiceProxy(cfg, resolver)
+	}
 	if cfg.GRPC != nil {
 		return proxy.NewGRPCProxy(cfg)
 	}

@@ -324,6 +324,14 @@ type KCPTransport struct {
 type ProxyConfig struct {
 	Name     string `yaml:"name" json:"name" mapstructure:"name"`
 	Endpoint string `yaml:"endpoint" json:"endpoint" mapstructure:"endpoint"`
+	// Service selects a discovery-based backend (v1.1 PR-B): the registry
+	// service name whose healthy instances are resolved at request time.
+	// Mutually exclusive with endpoint — exactly one of the two must be set
+	// (proxy.ProxyConfig.Validate enforces it when the proxies are wired).
+	Service string `yaml:"service" json:"service" mapstructure:"service"`
+	// Routing configures instance selection for a service backend
+	// (proxy.RoutingConfig semantics); it is ignored for static endpoints.
+	Routing proxy.RoutingConfig `yaml:"routing" json:"routing" mapstructure:"routing"`
 	// APIAuth assigns this proxy as the Server API key verifier (design
 	// G3/D18′): explicit activation instead of glob routing, and exactly one
 	// entry may claim it — a second assignment is a Validate error. It stays
@@ -343,6 +351,8 @@ func (c *ProxyConfig) ToProxyConfig() (*proxy.ProxyConfig, error) {
 	pc := &proxy.ProxyConfig{
 		Name:     c.Name,
 		Endpoint: c.Endpoint,
+		Service:  c.Service,
+		Routing:  c.Routing,
 		HTTP:     c.HTTP,
 		GRPC:     c.GRPC,
 		Routes:   c.Routes,
@@ -676,17 +686,23 @@ func (c *Config) Validate() error {
 }
 
 // validateRegistry validates the registry block (v1.1 PR-A, design §4.4).
-// When registry is disabled every check is skipped. When enabled with the
-// redis backend it also normalizes the redis section in place — Validate
-// otherwise never mutates the config, but the inheritance contract (unset
-// registry.redis fields adopt broker.redis values, key_prefix defaults to
-// ml2:registry/) is defined to happen exactly at this stage so the assembly
-// in cmd/server can consume the resolved values directly. The "a service-type
-// proxy requires registry.enabled" coupling belongs to PR-B and is
-// deliberately not enforced here yet.
+// When registry is disabled every check is skipped, except the PR-B coupling
+// (design §4.4 rule 2): a service-type proxy has no discovery stack to
+// resolve instances from without the registry, so that combination is
+// rejected at startup. When enabled with the redis backend it also
+// normalizes the redis section in place — Validate otherwise never mutates
+// the config, but the inheritance contract (unset registry.redis fields
+// adopt broker.redis values, key_prefix defaults to ml2:registry/) is
+// defined to happen exactly at this stage so the assembly in cmd/server can
+// consume the resolved values directly.
 func (c *Config) validateRegistry() error {
 	reg := &c.Registry
 	if !reg.Enabled {
+		for i := range c.Proxy {
+			if c.Proxy[i].Service != "" {
+				return fmt.Errorf("proxy[%d] (%s) uses service discovery; registry must be enabled (set registry.enabled=true)", i, c.Proxy[i].Name)
+			}
+		}
 		return nil
 	}
 	switch reg.Backend {
