@@ -44,11 +44,12 @@ const minAPIAuthTokenChars = 20
 const DefaultAuthCacheTTL = "30s"
 
 type Config struct {
-	Server    Server        `yaml:"server" json:"server" mapstructure:"server"`
-	Transport Transport     `yaml:"transport" json:"transport" mapstructure:"transport"`
-	Broker    BrokerConfig  `yaml:"broker" json:"broker" mapstructure:"broker"`
-	Cluster   ClusterConfig `yaml:"cluster" json:"cluster" mapstructure:"cluster"`
-	Proxy     []ProxyConfig `yaml:"proxy" json:"proxy" mapstructure:"proxy"`
+	Server    Server         `yaml:"server" json:"server" mapstructure:"server"`
+	Transport Transport      `yaml:"transport" json:"transport" mapstructure:"transport"`
+	Broker    BrokerConfig   `yaml:"broker" json:"broker" mapstructure:"broker"`
+	Cluster   ClusterConfig  `yaml:"cluster" json:"cluster" mapstructure:"cluster"`
+	Registry  RegistryConfig `yaml:"registry" json:"registry" mapstructure:"registry"`
+	Proxy     []ProxyConfig  `yaml:"proxy" json:"proxy" mapstructure:"proxy"`
 }
 
 // ClusterConfig configures distributed control-plane wiring.
@@ -377,6 +378,41 @@ type RedisConfig struct {
 	ConsumerGroup     string `yaml:"consumer_group" json:"consumer_group" mapstructure:"consumer_group"`
 }
 
+// DefaultRegistryKeyPrefix is the key/channel prefix used by the registry
+// redis backend when registry.redis.key_prefix is omitted (design v1.1 §4.4).
+const DefaultRegistryKeyPrefix = "ml2:registry/"
+
+// RegistryConfig configures the service registry used to discover service-type
+// (registry-based) proxy backends (v1.1 PR-A, design §4.4). Enabling it only
+// builds the discovery stack at startup; routing behavior arrives with
+// service-type proxies and is decoupled from cluster.enabled.
+type RegistryConfig struct {
+	Enabled bool `yaml:"enabled" json:"enabled" mapstructure:"enabled"`
+	// Backend selects the registry implementation: "redis" today; "consul"
+	// is planned but rejected by Validate in this phase.
+	Backend string              `yaml:"backend" json:"backend" mapstructure:"backend"`
+	Redis   RegistryRedisConfig `yaml:"redis" json:"redis" mapstructure:"redis"`
+}
+
+// RegistryRedisConfig is the registry.redis block. Unset connection fields
+// inherit the corresponding broker.redis values at Validate time (design
+// §4.4 rule 4: explicit values win, unset means inherit). The registry always
+// uses an independent *redis.Client, so its pool does not compete with the
+// data-plane broker.
+type RegistryRedisConfig struct {
+	Addr         string `yaml:"addr" json:"addr" mapstructure:"addr"`
+	Password     string `yaml:"password" json:"password" mapstructure:"password"`
+	DB           int    `yaml:"db" json:"db" mapstructure:"db"`
+	PoolSize     int    `yaml:"pool_size" json:"pool_size" mapstructure:"pool_size"`
+	MinIdleConns int    `yaml:"min_idle_conns" json:"min_idle_conns" mapstructure:"min_idle_conns"`
+	DialTimeout  string `yaml:"dial_timeout" json:"dial_timeout" mapstructure:"dial_timeout"`    // duration string
+	ReadTimeout  string `yaml:"read_timeout" json:"read_timeout" mapstructure:"read_timeout"`    // duration string
+	WriteTimeout string `yaml:"write_timeout" json:"write_timeout" mapstructure:"write_timeout"` // duration string
+	// KeyPrefix is the prefix for registry keys and event channels. Empty →
+	// DefaultRegistryKeyPrefix (filled in by Validate).
+	KeyPrefix string `yaml:"key_prefix" json:"key_prefix" mapstructure:"key_prefix"`
+}
+
 // Validate checks the configuration for common errors and returns a descriptive error if any are found.
 func (c *Config) Validate() error {
 	// The startup wiring always constructs the WebSocket listener
@@ -551,6 +587,13 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("unknown broker.type: %q (expected \"memory\" or \"redis\")", c.Broker.Type)
 	}
 
+	// Validate the registry config (v1.1 PR-A, design §4.4). Runs after the
+	// broker block because registry.redis inherits unset fields from
+	// broker.redis.
+	if err := c.validateRegistry(); err != nil {
+		return err
+	}
+
 	// Validate cluster requires redis broker.
 	if c.Cluster.Enabled && c.Broker.Type != "redis" {
 		return fmt.Errorf("cluster requires broker.type=redis")
@@ -628,6 +671,90 @@ func (c *Config) Validate() error {
 	// specific field errors above are reported first.
 	if c.Server.API.Addr == "" {
 		return fmt.Errorf("server.api.addr is required")
+	}
+	return nil
+}
+
+// validateRegistry validates the registry block (v1.1 PR-A, design §4.4).
+// When registry is disabled every check is skipped. When enabled with the
+// redis backend it also normalizes the redis section in place — Validate
+// otherwise never mutates the config, but the inheritance contract (unset
+// registry.redis fields adopt broker.redis values, key_prefix defaults to
+// ml2:registry/) is defined to happen exactly at this stage so the assembly
+// in cmd/server can consume the resolved values directly. The "a service-type
+// proxy requires registry.enabled" coupling belongs to PR-B and is
+// deliberately not enforced here yet.
+func (c *Config) validateRegistry() error {
+	reg := &c.Registry
+	if !reg.Enabled {
+		return nil
+	}
+	switch reg.Backend {
+	case "":
+		return fmt.Errorf("registry.backend is required when registry is enabled")
+	case "redis":
+		// ok; inherit broker.redis below
+	case "consul":
+		return fmt.Errorf("registry.backend=consul is not supported in this phase (planned for the next release); use redis")
+	default:
+		return fmt.Errorf("unknown registry.backend: %q (expected \"redis\")", reg.Backend)
+	}
+
+	// Inherit unset connection fields from broker.redis field-by-field;
+	// explicit registry values win. Zero means unset for scalar fields
+	// (the same convention the broker config itself uses).
+	r := &reg.Redis
+	b := &c.Broker.Redis
+	if r.Addr == "" {
+		r.Addr = b.Addr
+	}
+	if r.Password == "" {
+		r.Password = b.Password
+	}
+	if r.DB == 0 {
+		r.DB = b.DB
+	}
+	if r.PoolSize == 0 {
+		r.PoolSize = b.PoolSize
+	}
+	if r.MinIdleConns == 0 {
+		r.MinIdleConns = b.MinIdleConns
+	}
+	if r.DialTimeout == "" {
+		r.DialTimeout = b.DialTimeout
+	}
+	if r.ReadTimeout == "" {
+		r.ReadTimeout = b.ReadTimeout
+	}
+	if r.WriteTimeout == "" {
+		r.WriteTimeout = b.WriteTimeout
+	}
+
+	// The effective addr must be non-empty: the registry needs somewhere to
+	// talk to, whether inherited from broker.redis or set directly.
+	if r.Addr == "" {
+		return fmt.Errorf("registry.redis.addr is required when registry.backend is redis (set registry.redis.addr or broker.redis.addr)")
+	}
+
+	// Duration fields must parse (the assembly parses them into the redis
+	// client options; reject garbage here instead of silently defaulting).
+	for _, entry := range []struct {
+		name  string
+		value string
+	}{
+		{"registry.redis.dial_timeout", r.DialTimeout},
+		{"registry.redis.read_timeout", r.ReadTimeout},
+		{"registry.redis.write_timeout", r.WriteTimeout},
+	} {
+		if entry.value != "" {
+			if _, err := time.ParseDuration(entry.value); err != nil {
+				return fmt.Errorf("invalid duration for %s: %w", entry.name, err)
+			}
+		}
+	}
+
+	if r.KeyPrefix == "" {
+		r.KeyPrefix = DefaultRegistryKeyPrefix
 	}
 	return nil
 }

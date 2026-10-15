@@ -11,11 +11,14 @@ import (
 	"time"
 
 	"github.com/lynx-go/lynx"
+	"github.com/lynx-go/lynx/contrib/registry"
+	"github.com/lynx-go/lynx/contrib/registry-redis"
 	"github.com/lynx-go/lynx/contrib/zap"
 	lynxhttp "github.com/lynx-go/lynx/server/http"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/internal/cluster"
@@ -87,6 +90,14 @@ func main() {
 			node.SetHealthCheck(pinger.Ping)
 		}
 
+		// Service registry discovery stack (v1.1 PR-A, design §4.7). The
+		// Resolver is held by main and closed on shutdown; PR-B hands it to
+		// the service proxies (SetupProxy wiring), so nothing consumes it yet.
+		registryResolver, registryDisc, registryRedisClient, err := newRegistryResolver(cfg)
+		if err != nil {
+			return err
+		}
+
 		if err = setupProxy(cfg, node); err != nil {
 			return err
 		}
@@ -127,6 +138,20 @@ func main() {
 			}
 			if kcpServer != nil {
 				_ = kcpServer.Close()
+			}
+			// Stop the registry last: resolver watch goroutines, then the
+			// backend's Pub/Sub watchers, then the dedicated client pool.
+			// registryredis.New received a caller-built client, so its Close
+			// does not close it — each layer is torn down explicitly (design
+			// §4.7).
+			if registryResolver != nil {
+				_ = registryResolver.Close()
+			}
+			if registryDisc != nil {
+				_ = registryDisc.Close()
+			}
+			if registryRedisClient != nil {
+				_ = registryRedisClient.Close()
 			}
 			return nil
 		})
@@ -250,6 +275,46 @@ func newBroker(cfg *config.Config) (stream.Broker, error) {
 	default:
 		return nil, fmt.Errorf("unknown broker type: %s", brokerType)
 	}
+}
+
+// newRegistryResolver builds the service-registry discovery stack (v1.1 PR-A,
+// design §4.7): an independent *redis.Client (connection-pool isolation from
+// the data-plane broker, design §4.4 rule 4), the registry-redis backend on
+// top of it, and the node-level registry.Resolver. It returns nils when
+// registry is disabled. The redis parameters are the ones config.Validate
+// resolved (unset fields already inherited from broker.redis); the durations
+// are known to parse, so a parse failure here falls back to the go-redis
+// default rather than erroring. Ownership follows the "whoever builds it
+// closes it" convention: registryredis.New does not close a caller-provided
+// client, so the caller must close the Resolver, the backend, and the client.
+func newRegistryResolver(cfg *config.Config) (*registry.Resolver, *registryredis.Client, *redis.Client, error) {
+	if !cfg.Registry.Enabled {
+		return nil, nil, nil, nil
+	}
+	if cfg.Registry.Backend != "redis" {
+		// Defensive: config.Validate already rejects any other backend.
+		return nil, nil, nil, fmt.Errorf("unsupported registry.backend: %q", cfg.Registry.Backend)
+	}
+	rcfg := cfg.Registry.Redis
+	opts := &redis.Options{
+		Addr:         rcfg.Addr,
+		Password:     rcfg.Password,
+		DB:           rcfg.DB,
+		PoolSize:     rcfg.PoolSize,
+		MinIdleConns: rcfg.MinIdleConns,
+	}
+	if d, err := time.ParseDuration(rcfg.DialTimeout); err == nil {
+		opts.DialTimeout = d
+	}
+	if d, err := time.ParseDuration(rcfg.ReadTimeout); err == nil {
+		opts.ReadTimeout = d
+	}
+	if d, err := time.ParseDuration(rcfg.WriteTimeout); err == nil {
+		opts.WriteTimeout = d
+	}
+	client := redis.NewClient(opts)
+	disc := registryredis.New(client, registryredis.WithKeyPrefix(rcfg.KeyPrefix))
+	return registry.NewResolver(disc), disc, client, nil
 }
 
 // setupProxy configures and registers backend proxy routes on node from the given config.

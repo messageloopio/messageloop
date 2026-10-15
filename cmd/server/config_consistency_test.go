@@ -76,6 +76,39 @@ func TestNewQUICServer_PrebindsInsecure(t *testing.T) {
 	require.NoError(t, server.Close())
 }
 
+// TestNewRegistryResolver pins the registry assembly contract (v1.1 PR-A,
+// design §4.7): disabled yields nils (no redis client is built), enabled
+// yields the node-level Resolver plus the backend and the independent client,
+// and all three expose Close. Nothing dials Redis here: redis.NewClient and
+// registry.NewResolver are lazy, so no server is needed.
+func TestNewRegistryResolver(t *testing.T) {
+	disabled := &config.Config{}
+	resolver, disc, client, err := newRegistryResolver(disabled)
+	require.NoError(t, err)
+	require.Nil(t, resolver)
+	require.Nil(t, disc)
+	require.Nil(t, client)
+
+	enabled := &config.Config{
+		Registry: config.RegistryConfig{
+			Enabled: true,
+			Backend: "redis",
+			Redis: config.RegistryRedisConfig{
+				Addr:      "127.0.0.1:6379",
+				KeyPrefix: config.DefaultRegistryKeyPrefix,
+			},
+		},
+	}
+	resolver, disc, client, err = newRegistryResolver(enabled)
+	require.NoError(t, err)
+	require.NotNil(t, resolver)
+	require.NotNil(t, disc)
+	require.NotNil(t, client)
+	require.NoError(t, resolver.Close())
+	require.NoError(t, disc.Close())
+	require.NoError(t, client.Close())
+}
+
 func TestBuildWebSocketOptions_ReadTimeoutApplied(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	cfg := &config.Config{

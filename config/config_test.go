@@ -482,6 +482,143 @@ func TestProxyConfig_ToProxyConfig_InvalidTimeout(t *testing.T) {
 func boolPtr(v bool) *bool { return &v }
 func intPtr(v int) *int    { return &v }
 
+// brokerRedisFixture is a fully-populated broker.redis used as the
+// inheritance source in the registry validation tests. StreamApproximate is
+// true because the broker validation (which runs before the registry block)
+// requires it explicitly.
+func brokerRedisFixture() RedisConfig {
+	return RedisConfig{
+		Addr:              "broker-redis:6379",
+		Password:          "broker-secret",
+		DB:                10,
+		PoolSize:          20,
+		MinIdleConns:      4,
+		DialTimeout:       "2s",
+		ReadTimeout:       "1s",
+		WriteTimeout:      "900ms",
+		StreamApproximate: true,
+	}
+}
+
+// TestValidate_Registry pins the registry block validation and the
+// broker.redis inheritance (v1.1 PR-A, design §4.4). Validate normalizes the
+// redis section in place — unset fields adopt broker.redis values and
+// key_prefix falls back to DefaultRegistryKeyPrefix — so the success cases
+// assert on cfg.Registry.Redis after Validate.
+func TestValidate_Registry(t *testing.T) {
+	base := func(reg RegistryConfig) *Config {
+		return &Config{
+			Transport: validTransport(),
+			Server:    validServer(),
+			Broker:    BrokerConfig{Type: "redis", Redis: brokerRedisFixture()},
+			Registry:  reg,
+		}
+	}
+
+	// Error cases: one row per rejected configuration.
+	errorCases := []struct {
+		name    string
+		mutate  func(cfg *Config)
+		wantErr string
+	}{
+		{
+			name:    "backend required when enabled",
+			mutate:  func(cfg *Config) { cfg.Registry.Backend = "" },
+			wantErr: "registry.backend is required when registry is enabled",
+		},
+		{
+			name:    "unknown backend rejected",
+			mutate:  func(cfg *Config) { cfg.Registry.Backend = "etcd" },
+			wantErr: `unknown registry.backend: "etcd"`,
+		},
+		{
+			name:    "consul rejected in this phase",
+			mutate:  func(cfg *Config) { cfg.Registry.Backend = "consul" },
+			wantErr: "registry.backend=consul is not supported in this phase",
+		},
+		{
+			name: "addr required after inheritance",
+			mutate: func(cfg *Config) {
+				// Registry is decoupled from the broker (design §4.4 rule 5):
+				// a memory broker (no redis section at all) with a redis
+				// registry that forgot its addr.
+				cfg.Broker = BrokerConfig{Type: "memory"}
+				cfg.Registry.Redis = RegistryRedisConfig{Password: "explicit"}
+			},
+			wantErr: "registry.redis.addr is required when registry.backend is redis",
+		},
+		{
+			name:    "invalid dial_timeout rejected",
+			mutate:  func(cfg *Config) { cfg.Registry.Redis.DialTimeout = "soon" },
+			wantErr: "invalid duration for registry.redis.dial_timeout",
+		},
+		{
+			name:    "invalid read_timeout rejected",
+			mutate:  func(cfg *Config) { cfg.Registry.Redis.ReadTimeout = "soon" },
+			wantErr: "invalid duration for registry.redis.read_timeout",
+		},
+		{
+			name:    "invalid write_timeout rejected",
+			mutate:  func(cfg *Config) { cfg.Registry.Redis.WriteTimeout = "soon" },
+			wantErr: "invalid duration for registry.redis.write_timeout",
+		},
+	}
+	for _, tc := range errorCases {
+		cfg := base(RegistryConfig{Enabled: true, Backend: "redis"})
+		tc.mutate(cfg)
+		assert.ErrorContains(t, cfg.Validate(), tc.wantErr, "case %s", tc.name)
+	}
+
+	// enabled=false skips every check — even a nonsensical block — and must
+	// not normalize anything.
+	disabled := base(RegistryConfig{Backend: "etcd", Redis: RegistryRedisConfig{DialTimeout: "garbage"}})
+	assert.NoError(t, disabled.Validate(), "enabled=false must skip all registry validation")
+	assert.Empty(t, disabled.Registry.Redis.Addr, "disabled registry must not inherit broker.redis")
+	assert.Equal(t, "garbage", disabled.Registry.Redis.DialTimeout, "disabled registry must not be normalized")
+
+	// Unset registry.redis fields inherit broker.redis field-by-field, and
+	// key_prefix falls back to the default.
+	inherited := base(RegistryConfig{Enabled: true, Backend: "redis"})
+	assert.NoError(t, inherited.Validate())
+	want := brokerRedisFixture()
+	assert.Equal(t, want.Addr, inherited.Registry.Redis.Addr)
+	assert.Equal(t, want.Password, inherited.Registry.Redis.Password)
+	assert.Equal(t, want.DB, inherited.Registry.Redis.DB)
+	assert.Equal(t, want.PoolSize, inherited.Registry.Redis.PoolSize)
+	assert.Equal(t, want.MinIdleConns, inherited.Registry.Redis.MinIdleConns)
+	assert.Equal(t, want.DialTimeout, inherited.Registry.Redis.DialTimeout)
+	assert.Equal(t, want.ReadTimeout, inherited.Registry.Redis.ReadTimeout)
+	assert.Equal(t, want.WriteTimeout, inherited.Registry.Redis.WriteTimeout)
+	assert.Equal(t, DefaultRegistryKeyPrefix, inherited.Registry.Redis.KeyPrefix, "key_prefix must default to ml2:registry/")
+
+	// Explicit registry values win over broker.redis, key_prefix included.
+	explicit := base(RegistryConfig{
+		Enabled: true,
+		Backend: "redis",
+		Redis: RegistryRedisConfig{
+			Addr:         "registry-redis:6380",
+			Password:     "registry-secret",
+			DB:           3,
+			PoolSize:     7,
+			MinIdleConns: 2,
+			DialTimeout:  "4s",
+			ReadTimeout:  "250ms",
+			WriteTimeout: "250ms",
+			KeyPrefix:    "custom:prefix/",
+		},
+	})
+	assert.NoError(t, explicit.Validate())
+	assert.Equal(t, "registry-redis:6380", explicit.Registry.Redis.Addr)
+	assert.Equal(t, "registry-secret", explicit.Registry.Redis.Password)
+	assert.Equal(t, 3, explicit.Registry.Redis.DB)
+	assert.Equal(t, 7, explicit.Registry.Redis.PoolSize)
+	assert.Equal(t, 2, explicit.Registry.Redis.MinIdleConns)
+	assert.Equal(t, "4s", explicit.Registry.Redis.DialTimeout)
+	assert.Equal(t, "250ms", explicit.Registry.Redis.ReadTimeout)
+	assert.Equal(t, "250ms", explicit.Registry.Redis.WriteTimeout)
+	assert.Equal(t, "custom:prefix/", explicit.Registry.Redis.KeyPrefix)
+}
+
 // TestValidate_AuthorizerHistoryTTL verifies PR-KA-A4: an unparsable
 // history_ttl on an authorizer rule fails Validate().
 func TestValidate_AuthorizerHistoryTTL(t *testing.T) {

@@ -138,6 +138,24 @@ broker:
     stream_approximate: true  # Only approximate trimming is implemented; false is rejected by Validate
     # history_ttl: "24h"
 
+# registry:                        # Service registry / discovery for service-type proxies (v1.1 PR-A).
+#   enabled: true                  # Builds the registry Resolver at startup; routing itself stays
+#                                  # inert until a service-type proxy consumes it. Decoupled from cluster.
+#   backend: redis                 # "redis" today. "consul" is planned but rejected by Validate
+#                                  # in this phase ("not supported in this phase").
+#   redis:                         # UNSET fields inherit broker.redis field-by-field (explicit
+#                                  # values win); the registry always uses an INDEPENDENT redis
+#                                  # connection pool, never the broker's.
+#     # addr: 127.0.0.1:6379       # default: broker.redis.addr (required after inheritance)
+#     # password: ""               # default: broker.redis.password
+#     # db: 0                      # default: broker.redis.db
+#     # pool_size: 10              # default: broker.redis.pool_size
+#     # min_idle_conns: 5          # default: broker.redis.min_idle_conns
+#     # dial_timeout: "5s"         # default: broker.redis.dial_timeout
+#     # read_timeout: "3s"         # default: broker.redis.read_timeout
+#     # write_timeout: "3s"        # default: broker.redis.write_timeout
+#     key_prefix: "ml2:registry/"  # Key/channel prefix (default "ml2:registry/").
+
 cluster:
   enabled: false       # Set to true to enable the Redis-backed distributed control plane.
   node_id: node-a      # Must be unique per logical node in the cluster.
