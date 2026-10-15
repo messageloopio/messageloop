@@ -193,3 +193,22 @@ proxy:
   #   routes:
   #     - channel: "rpc.*"
   #       method: "*"
+  # - name: example-service          # Discovery-based backend (v1.1): instances are
+  #                                  # resolved from the registry (requires registry.enabled
+  #                                  # above; endpoint and service are mutually exclusive).
+  #   service: acme-battle           # Registry service name; instances register under it
+  #                                  # (see docs/developer/03-server-api.md for the contract).
+  #   timeout: 30s
+  #   routing:
+  #     strategy: consistent_hash    # Default. round_robin / random for stateless fleets
+  #                                  # (they skip key extraction entirely); sticky is phase 2.
+  #     key: channel                 # Keyed strategies only: "channel" (default, raw channel
+  #                                  # incl. namespace) or "metadata:<name>" (falls back to the
+  #                                  # channel when the entry is missing/empty).
+  #   grpc:
+  #     insecure: true               # TLS settings are shared by EVERY instance of the service:
+  #                                  # server_name must match a cert all instances hold (or a
+  #                                  # shared DNS name); per-instance certs are not supported.
+  #   routes:
+  #     - channel: "acme:battle.*"
+  #       method: "*"

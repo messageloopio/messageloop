@@ -599,12 +599,16 @@ func TestNode_SetupProxy_Service(t *testing.T) {
 	assert.ErrorContains(t, err, "reserved for a future release")
 
 	// With a resolver the service proxy is created and reachable by name;
-	// the static proxy is untouched.
+	// the static proxy is untouched. Metrics are set on the node first, so
+	// the optional-interface propagation must reach the ServiceProxy (v1.1
+	// design §4.6).
 	mem := registry.NewMemory()
 	resolver := registry.NewResolver(mem)
 	t.Cleanup(func() { _ = resolver.Close() })
 
 	node = NewNode(nil)
+	metrics := NewMetrics(prometheus.NewRegistry())
+	node.SetMetrics(metrics)
 	require.NoError(t, node.SetupProxy([]*proxy.ProxyConfig{
 		{Name: "static", Endpoint: "127.0.0.1:9001"},
 		{
@@ -620,11 +624,14 @@ func TestNode_SetupProxy_Service(t *testing.T) {
 	assert.Nil(t, node.FindProxyByName("missing"))
 
 	// An empty-snapshot service backend surfaces the sentinel through the
-	// generic Node.ProxyRPC path.
+	// generic Node.ProxyRPC path — and lands in the node-wired metrics,
+	// proving the Node → ServiceProxy injection.
 	_, err = node.ProxyRPC(context.Background(), "acme:battle.scene-42", "echo", &proxy.RPCProxyRequest{
 		ID: "req", Channel: "acme:battle.scene-42", Method: "echo",
 	})
 	require.ErrorIs(t, err, proxy.ErrNoHealthyInstance)
+	assert.Equal(t, 1.0, testutil.ToFloat64(
+		metrics.ProxyServiceNoInstanceTotal.WithLabelValues("acme-battle")))
 }
 
 func TestNode_BrokerEventHandler(t *testing.T) {

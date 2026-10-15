@@ -72,6 +72,27 @@ type Metrics struct {
 	OccupancyGenDiscards         prometheus.Counter
 	LiveDropTotal                prometheus.Counter
 	LiveDegradedChannels         prometheus.Gauge
+	// Proxy service discovery (v1.1 design §4.6). All four are labeled by the
+	// registry service name ("service"); the membership counter adds the
+	// event label. They are wired into ServiceProxy through the same
+	// optional-interface SetMetrics pattern the broker and the command bus
+	// use; an unwired proxy simply counts nothing.
+	// ProxyServiceInstances gauges the healthy instance count of the last
+	// resolver snapshot the proxy observed, including 0 while the service has
+	// no instances at all.
+	ProxyServiceInstances *prometheus.GaugeVec
+	// ProxyServiceNoInstanceTotal counts requests rejected because the
+	// service snapshot was empty (client-visible PROXY_ERROR, design §4.5).
+	ProxyServiceNoInstanceTotal *prometheus.CounterVec
+	// ProxyServiceKeyFallbackTotal counts RPCs whose routing key fell back to
+	// the channel because the configured metadata entry was missing or empty
+	// (keyed strategies only, design §4.3).
+	ProxyServiceKeyFallbackTotal *prometheus.CounterVec
+	// ProxyServiceMembershipEventsTotal counts instance join/leave
+	// observations at the connection-pool boundary: join = first connection
+	// dialed to an instance, leave = pooled connection pruned because the
+	// instance left the snapshot.
+	ProxyServiceMembershipEventsTotal *prometheus.CounterVec
 }
 
 // NewMetrics creates and registers all Prometheus metrics.
@@ -262,6 +283,26 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name:      "live_degraded_channels",
 			Help:      "Current number of channels marked degraded by live delivery pressure: an occupancy event dropped on a full delivery queue, or a publication dense-seq jump. Cleared on the channel's next successful enqueue and reset on reconnect.",
 		}),
+		ProxyServiceInstances: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Namespace: "messageloop",
+			Name:      "proxy_service_instances",
+			Help:      "Healthy instance count of the last resolver snapshot for a service-discovery proxy backend, including 0 while the service has no instances.",
+		}, []string{"service"}),
+		ProxyServiceNoInstanceTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "messageloop",
+			Name:      "proxy_service_no_instance_total",
+			Help:      "Total requests rejected because a service-discovery proxy backend had no healthy instance (client-visible PROXY_ERROR).",
+		}, []string{"service"}),
+		ProxyServiceKeyFallbackTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "messageloop",
+			Name:      "proxy_service_key_fallback_total",
+			Help:      "Total RPCs whose routing key fell back to the channel because the configured metadata entry was missing or empty (keyed routing strategies only).",
+		}, []string{"service"}),
+		ProxyServiceMembershipEventsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "messageloop",
+			Name:      "proxy_service_membership_events_total",
+			Help:      "Total instance membership events observed at a service-discovery proxy's connection pool: join = first connection dialed to the instance, leave = pooled connection pruned because the instance left the snapshot.",
+		}, []string{"service", "event"}),
 	}
 	reg.MustRegister(
 		m.ConnectionsTotal,
@@ -299,6 +340,10 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.OccupancyGenDiscards,
 		m.LiveDropTotal,
 		m.LiveDegradedChannels,
+		m.ProxyServiceInstances,
+		m.ProxyServiceNoInstanceTotal,
+		m.ProxyServiceKeyFallbackTotal,
+		m.ProxyServiceMembershipEventsTotal,
 	)
 	return m
 }

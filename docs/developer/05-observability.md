@@ -134,6 +134,17 @@ curl -s http://127.0.0.1:8080/metrics | grep '^messageloop_'
 | `messageloop_presence_failures_total` | counter | `op`（`deliver`/`store`/`companion`/`emit`/`gen`） | presence 按操作分类的失败次数：`deliver` 事件投递失败、`store` presence 存储读写失败、`companion` 伴生发布失败、`emit` LiveBus occupancy 事件发布失败、`gen` occupancy generation 签发失败 |
 | `messageloop_occupancy_gen_discard_total` | counter | 无 | 迟到 occupancy 事件丢弃次数：该 (channel, session) 已应用过同等或更新的 generation |
 
+### 3.6 服务发现 proxy 指标
+
+仅在配置了 service 型 proxy 后端（v1.1，registry 服务发现）时更新，全部按 registry 服务名 `service` 标注（internal/metrics/metrics.go，注入走 Node → ServiceProxy 的 SetMetrics 可选接口；运维语义见[《部署指南》](../deployment.md#service-discovery-registry-backed-proxies)）：
+
+| 指标名 | 类型 | 标签 | 含义 |
+| --- | --- | --- | --- |
+| `messageloop_proxy_service_instances` | gauge | `service` | 最近一次 resolver 快照中的健康实例数，含 0（服务无实例时显式落 0，不是缺指标） |
+| `messageloop_proxy_service_no_instance_total` | counter | `service` | 因服务无健康实例而被拒的请求数（客户端可见 `PROXY_ERROR`）；伴随一条 WARN 日志。持续增长且 gauge 为 0 即后端全灭 |
+| `messageloop_proxy_service_key_fallback_total` | counter | `service` | `metadata:<name>` 路由 key 取不到（缺失或空串）而回退到 channel 的 RPC 次数（仅键策略）；持续增长通常意味着上游没有写入该 metadata 字段 |
+| `messageloop_proxy_service_membership_events_total` | counter | `service`、`event`（`join`/`leave`） | 连接池边界的实例进出事件：`join` = 首次向该实例建连，`leave` = 实例离开快照后连接池剪除；每次事件伴随一条 Info 日志（实例 ID + endpoint） |
+
 ## 4. 日志
 
 ### 4.1 日志框架与级别
@@ -168,6 +179,8 @@ curl -s http://127.0.0.1:8080/metrics | grep '^messageloop_'
 | 集群：修复循环失败 | `cluster repair failed`（Warn） | internal/runtime/cluster_repair.go |
 | 关停排空超时 | `shutdown: timed out draining client connections`（Warn） | internal/runtime/node.go |
 | Server API 调用 | `server side API Publish/Disconnect/Subscribe/...`（Info） | internal/serverapi/api_handler.go |
+| 服务发现 proxy：实例进出 | `service proxy membership event`（Info，含 `service`、`event`、`instance`、`endpoint`） | proxy/service.go |
+| 服务发现 proxy：无健康实例 | `service proxy has no healthy instance`（Warn，含 `service`） | proxy/service.go |
 
 观察建议：以 Debug 级别运行可获得完整的消息收发轨迹，但消息体全文会进入日志（含 payload），生产环境仅在排查时临时开启。
 

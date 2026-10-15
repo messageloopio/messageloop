@@ -157,6 +157,88 @@ grpcurl \
 - 启用 TLS 时去掉 `-plaintext`，并按需传入 `-cacert <ca.pem>`（使用自签证书时也可用 `-insecure`）；
 - 请求体使用 proto3 JSON 映射，字段名为 lowerCamelCase（例如 `request_id` → `requestId`、`timeout_ms` → `timeoutMs`）。
 
+## Proxy 后端(服务发现)
+
+客户端 RPC 的代理后端有两种形态:静态 `endpoint`(单实例,直连地址)与 **`service`(服务发现,多实例)**。service 型后端(v1.1,见[设计](../design/2026-10-15-rpc-consistent-hash-routing.md))让 messageloop 从 registry 动态发现后端实例,并把同一路由 key 的 RPC 确定性地定向到同一实例——战斗服等有状态多实例后端的接入通道。二者互斥,配置校验强制恰有其一:
+
+```yaml
+registry:                        # 服务发现总开关(与 cluster 完全解耦,可单节点使用)
+  enabled: true
+  backend: redis
+proxy:
+  - name: battle
+    service: acme-battle         # registry 服务名;与 endpoint 互斥
+    timeout: 30s
+    routing:
+      strategy: consistent_hash  # 默认;round_robin / random 为无状态后端提供
+      key: channel               # 仅键策略使用:channel(默认)或 metadata:<name>
+    grpc:
+      insecure: true
+    routes:
+      - channel: "acme:battle.*"
+        method: "*"
+```
+
+### 注册方契约(战斗服)
+
+注册方通过 lynx `contrib/registry` 契约向 registry 写入实例记录;messageloop 只消费 `StatusPassing` 且带 `grpc` Endpoint 的实例:
+
+| 项 | 契约 |
+| --- | --- |
+| `Instance.Name` | 服务名,必须与 `proxy[].service` 配置一致 |
+| `Instance.ID` | **稳定实例标识**(pod 名 / 启动时生成的 UUID)。ID 参与 hash,变更即换属主,**运行期不得变更** |
+| `Instance.Endpoints` | `[{Protocol: "grpc", Address: "host:port"}]`;Address 禁止裸 `":8080"`(registry 契约),必须携带主机名或 IP |
+| `Instance.Version` / `Tags` | 版本灰度与环境隔离(`Filter.Tags` 全匹配);本期 messageloop 不按 Version 分流 |
+| 心跳 | lynx Registrar 默认每 10s 心跳,TTL 30s;心跳经 `PEXPIRE` 续命实例键 |
+| 排水注销 | graceful shutdown 先摘流量排干再 `Deregister`(目录删除);SIGKILL 兜底 = TTL 过期,实例最迟 30s 后被摘除 |
+| 健康语义 | redis 后端**无被动探针**:崩溃即 TTL 摘除;「活而不健」(进程在但卡死)不会被摘除,由 `proxy[].timeout` 的 RPC 超时兜底——该取舍已在提案中明确接受 |
+
+### 接入示例(Go / lynx)
+
+lynx 应用三行级接入,心跳、readiness 与排水注销由 lynx 生命周期托管:
+
+```go
+import (
+    "github.com/lynx-go/lynx/contrib/registry"
+    registryredis "github.com/lynx-go/lynx/contrib/registry-redis"
+)
+
+reg := registry.NewRegistrar(registryredis.New(rdb, registryredis.WithKeyPrefix("ml2/registry/")),
+    registry.WithServiceName("acme-battle"),
+    registry.WithAdvertisers(registry.GRPC(grpcServer)),
+)
+app.Register(reg)
+```
+
+`sdks/go` 按 Q5 决策**不内置 Registrar**(保持 SDK 依赖最小);非 lynx 的 Go 服务引 lynx 为库即可。
+
+### 非 Go 注册方:直写 Redis 键布局
+
+非 Go / 非 lynx 注册方可按 registry-redis 的键布局直写(全部键带 `registry.redis.key_prefix` 前缀,messageloop 缺省 `ml2:registry/`):
+
+| 键 / 频道 | 内容 |
+| --- | --- |
+| `instance/{service}/{id}` | `registry.Instance` 的 JSON,`SET ... EX <ttl>`(TTL 即租约;键过期即下线,崩溃实例无需人工清理) |
+| `service/{service}` | 实例 ID 的 SET 索引;过期成员由读路径惰性清理,注册时 `SADD` |
+| `events/{service}` | Pub/Sub 频道;Register / Deregister 后 `PUBLISH` 一条 `register:<id>` / `deregister:<id>`——messageloop 的 Resolver 收到即重拉快照,不解析载荷 |
+
+Instance JSON 形态(`registry.Instance` 字段名,小写):`{"name":"acme-battle","id":"battle-abc123","version":"v1","endpoints":[{"protocol":"grpc","address":"10.0.0.7:9001"}],"status":1,"tags":[],"meta":{},"weight":100}`(`status: 1` 即 `passing`)。同一 `id` 重复注册是 last-write-wins upsert。
+
+### 路由与失败语义
+
+- **按键定向(`consistent_hash`,默认)**:Rendezvous(HRW)hash 对 `(routing key, instance ID)` 打分取最大者——同 key 在**全部 messageloop 节点上收敛到同一实例**,零协调、零节点间流量;实例集合变化时约 1/N 的 key 换属主(最小扰动)。路由 key 取 `channel` 原串(含 namespace 前缀)或 `metadata:<name>`(取不到时 fallback 到 channel 并计数 `proxy_service_key_fallback_total`)。
+- **无状态策略(`round_robin` / `random`)**:全部方法族(含 RPC)在快照内轮转/随机,不提取 key——同一 service 型后端同时覆盖有状态与无状态两类负载。
+- **失败语义 fail-fast 不漂移**:无健康实例时请求以 `PROXY_ERROR` 立即失败(复用既有错误码,不新增),**不排队、不重试、不迁移**——场景状态不漂移到别的实例;实例被摘除时其在途 RPC 被 cancel,同样以 `PROXY_ERROR` 呈现。配置缺路由才是 `NO_PROXY`,两者排障语义不同。
+- **api_auth 组合**:`api_auth: true` 可指派给 service 型 proxy——`AuthenticateAPIKey` 属无状态族,在快照内轮转,语义成立。
+
+### TLS 注意事项
+
+`proxy[].grpc` 的 TLS 配置(`server_name` / `insecure_skip_verify`)由该 service 的**全部实例共享**:证书校验按 `server_name`(缺省取 endpoint authority)对每个实例执行。多实例部署时要么全部实例持有同一域名证书(SAN 覆盖各实例地址),要么显式配置 `server_name` 指向共享域名——逐实例异构证书本期不支持。
+
+### 可观测性
+
+service 型后端的专属指标(`messageloop_proxy_service_*`,按 `service` 标签)与 membership Info 日志见[《部署指南》](../deployment.md#service-discovery-registry-backed-proxies)与[《可观测性指南》](05-observability.md);RPC 时长沿用既有 `messageloop_rpc_duration_seconds`(`proxy` 维度即配置 name)。
+
 ## RPC 参考
 
 以下各节按 `protocol/server/v2/api.proto` 中的声明顺序逐一说明。请求/响应消息的字段名一律采用 proto 中的原始名称。

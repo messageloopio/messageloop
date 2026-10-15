@@ -222,6 +222,84 @@ Proxy hooks (in order of client lifecycle):
 6. `on_unsubscribed` — Notification after unsubscribe.
 7. `on_disconnected` — Notification after disconnect.
 
+## Service Discovery (Registry-Backed Proxies)
+
+For multi-instance backends (e.g. stateful battle servers), a proxy entry can
+point at a registry service name instead of a static endpoint. Messageloop
+discovers the healthy instances through the service registry and routes each
+RPC deterministically (v1.1; see the [design](design/2026-10-15-rpc-consistent-hash-routing.md)
+and the [developer guide](developer/03-server-api.md#proxy-后端服务发现) for the
+publisher contract):
+
+```yaml
+registry:
+  enabled: true
+  backend: redis            # "redis" today; consul planned
+  redis:                    # UNSET fields inherit broker.redis field-by-field
+                            # (explicit values win). The registry ALWAYS uses an
+                            # independent connection pool, never the broker's.
+    # addr: 127.0.0.1:6379  # default: broker.redis.addr (required after inheritance)
+    # db: 0                 # default: broker.redis.db
+    key_prefix: "ml2:registry/"
+
+proxy:
+  - name: battle
+    service: acme-battle      # mutually exclusive with endpoint
+    timeout: 30s
+    routing:
+      strategy: consistent_hash  # default; round_robin / random for stateless fleets
+      key: channel               # keyed strategies only: "channel" (default) or "metadata:<name>"
+    grpc:
+      insecure: true
+    routes:
+      - channel: "acme:battle.*"
+        method: "*"
+```
+
+Notes:
+
+- The registry is **decoupled from the cluster**: it is proxy-backend
+  discovery, not a cluster component. It works on a single node, with or
+  without `cluster.enabled`, and each messageloop node holds its own resolver
+  (independent Redis connection pool; key prefix differs from the cluster's).
+- Backends register their instances with the lynx Registrar (heartbeat every
+  10s, instance TTL 30s, deregister on graceful drain) or write the
+  `instance/{service}/{id}` JSON keys directly (layout in the developer
+  guide). A SIGKILLed instance disappears when its TTL lapses (≤ 30s).
+
+### Scaling Semantics
+
+- With `consistent_hash` (default), the mapping is a pure function of
+  `(service, key, instance set)` — Rendezvous hashing. Scaling the fleet from
+  N to N+1 instances moves only ~1/N of the keys (to the newcomer); draining
+  an instance moves exactly its keys to deterministic new owners. Every
+  messageloop node computes the same mapping from the same snapshot, so
+  routes converge cluster-wide with zero coordination.
+- **State recovery is the backend's responsibility**: messageloop does not
+  migrate or checkpoint scenario state when a key changes owner. Instances
+  must persist or reconstruct their own state (or accept the loss — the
+  proposal explicitly accepts "instance death loses in-memory state").
+- There is **no passive health probing** on the redis registry backend: a
+  crashed instance is reaped by TTL (≤ 30s); a live-but-stuck instance stays
+  in the snapshot and is absorbed by the proxy `timeout` (fail-fast
+  `PROXY_ERROR`, no queueing, no drift).
+
+### Metrics
+
+Service-discovery proxies expose four dedicated metrics, all labeled by the
+registry service name (`service`):
+
+| Metric | Type | Description |
+| --- | --- | --- |
+| `messageloop_proxy_service_instances` | Gauge | Healthy instance count of the last resolver snapshot, including `0` while the service has no instances. |
+| `messageloop_proxy_service_no_instance_total` | Counter | Requests rejected because the service had no healthy instance (client-visible `PROXY_ERROR`). A rising rate with `instances == 0` means the backend fleet is gone. |
+| `messageloop_proxy_service_key_fallback_total` | Counter | RPCs whose `metadata:<name>` routing key was missing or empty and fell back to the channel (keyed strategies only). Sustained growth usually means producers are not setting the metadata field. |
+| `messageloop_proxy_service_membership_events_total` | Counter | Instance joins/leaves observed at the proxy's connection pool (`event` = `join`/`leave`): `join` = first connection dialed to an instance, `leave` = pooled connection pruned because the instance left the snapshot. Each event also logs an Info line with the instance ID and endpoint. |
+
+RPC latency keeps flowing through the existing
+`messageloop_rpc_duration_seconds` histogram (see
+[Health And Metrics](#health-and-metrics)).
+
 ## Graceful Shutdown
 
 The server handles `SIGINT` and `SIGTERM` signals:

@@ -404,3 +404,19 @@ go test ./internal/cluster/sim
 ```
 
 均不访问 Redis。
+
+## 13. 与服务注册(registry)的解耦
+
+v1.1 引入的 registry(`registry.enabled`,[设计](../design/2026-10-15-rpc-consistent-hash-routing.md))**不是集群组件**:它是 proxy 后端(战斗服等服务)的服务发现通道,服务于客户端 RPC 的多实例定向,与节点间的会话租约、命令总线、频道投影无关——因此它不进 `Cluster` facade,`registry.enabled` 与 `cluster.enabled`、`broker.type` 全部解耦:
+
+- **单节点 + 多后端实例**完全成立:一个 messageloop 进程 + registry,把 RPC 定向到 N 个战斗服实例,不需要任何集群控制面;
+- **集群 + 多后端实例**同样成立:每个 messageloop 节点各自持有一个 registry Resolver(进程内单例),独立从 registry 拉取/订阅快照;
+- registry 与 cluster 虽然都可能用 Redis,但使用**独立连接池**(registry.redis 段缺省继承 broker.redis 连接参数但独立建连),键前缀也不同(`ml2:registry/` vs `ml2:cluster:*`),互不干扰。
+
+### 按键路由语义与集群的关系
+
+service 型 proxy 的 `consistent_hash` 策略下,路由决策是纯函数 `f(service, key, snapshot) → instance`:Rendezvous hash 对 `(路由 key, 实例 ID)` 打分取最大者,同一 key 在**所有 messageloop 节点上收敛到同一后端实例**——零协调、零节点间流量, messageloop 节点之间不需要任何通信来对齐路由。这与集群控制面的协调机制(命令总线、会话租约)是两个正交层面:
+
+- **场景状态的所有权在后端实例**,不在 messageloop 节点:客户端连到哪个 messageloop 节点不影响其 RPC 落到哪个战斗服实例;会话跨节点接管(resume/takeover)只迁移客户端连接,场景粘性由路由函数自行保证;
+- **实例集合变化的最小扰动**由 Rendezvous 保证:扩容时只有新实例「抢走」的 key(约 1/N)换属主,其余不动;实例下线时其属主 key 漂移到确定性新属主。被换属主的场景状态如何转移是战斗服自己的责任(messageloop 不迁移、不通知,见失败语义);
+- **无状态策略**(`round_robin` / `random`)下各节点独立轮转/随机,不跨节点对齐——语义上本就无需一致。

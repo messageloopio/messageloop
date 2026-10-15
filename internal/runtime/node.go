@@ -735,6 +735,16 @@ func (n *Node) SetupProxy(cfgs []*proxy.ProxyConfig, resolver *registry.Resolver
 		if err != nil {
 			return fmt.Errorf("failed to create proxy %s: %w", cfg.Name, err)
 		}
+		// Wire the shared metrics into proxies that accept them — the same
+		// optional-interface injection the broker and the command bus use
+		// (v1.1 design §4.6; only ServiceProxy implements SetMetrics today).
+		// Assembly calls Node.SetMetrics before SetupProxy; a proxy wired
+		// without metrics simply counts nothing (nil-tolerant).
+		if n.metrics != nil {
+			if metricsAware, ok := p.(interface{ SetMetrics(*Metrics) }); ok {
+				metricsAware.SetMetrics(n.metrics)
+			}
+		}
 		if err := n.proxy.AddFromConfig(p, cfg); err != nil {
 			return fmt.Errorf("failed to add routes for proxy %s: %w", cfg.Name, err)
 		}

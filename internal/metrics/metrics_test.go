@@ -295,3 +295,57 @@ func TestMetrics_ContractObservabilityRegistered(t *testing.T) {
 		require.Equal(t, uint64(1), metric.GetHistogram().GetSampleCount(), "%s sample count", name)
 	}
 }
+
+// TestMetrics_ProxyServiceRegistered pins the v1.1 service-discovery proxy
+// metrics (design §4.6): the four vectors are registered under their exposed
+// names with the documented label sets, and the gauge reports absolute
+// snapshot sizes including 0.
+func TestMetrics_ProxyServiceRegistered(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	metrics := NewMetrics(reg)
+
+	metrics.ProxyServiceInstances.WithLabelValues("acme-battle").Set(3)
+	metrics.ProxyServiceInstances.WithLabelValues("acme-battle").Set(0)
+	metrics.ProxyServiceNoInstanceTotal.WithLabelValues("acme-battle").Inc()
+	metrics.ProxyServiceKeyFallbackTotal.WithLabelValues("acme-battle").Add(2)
+	metrics.ProxyServiceMembershipEventsTotal.WithLabelValues("acme-battle", "join").Inc()
+	metrics.ProxyServiceMembershipEventsTotal.WithLabelValues("acme-battle", "leave").Add(3)
+
+	require.Equal(t, float64(0), testutil.ToFloat64(metrics.ProxyServiceInstances.WithLabelValues("acme-battle")))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.ProxyServiceNoInstanceTotal.WithLabelValues("acme-battle")))
+	require.Equal(t, float64(2), testutil.ToFloat64(metrics.ProxyServiceKeyFallbackTotal.WithLabelValues("acme-battle")))
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.ProxyServiceMembershipEventsTotal.WithLabelValues("acme-battle", "join")))
+	require.Equal(t, float64(3), testutil.ToFloat64(metrics.ProxyServiceMembershipEventsTotal.WithLabelValues("acme-battle", "leave")))
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	byName := make(map[string]*dto.MetricFamily, len(families))
+	for _, family := range families {
+		byName[family.GetName()] = family
+	}
+	for _, name := range []string{
+		"messageloop_proxy_service_instances",
+		"messageloop_proxy_service_no_instance_total",
+		"messageloop_proxy_service_key_fallback_total",
+		"messageloop_proxy_service_membership_events_total",
+	} {
+		require.NotNil(t, byName[name], "%s must be registered", name)
+	}
+
+	// The membership vector carries exactly the service × event label set.
+	// Label pairs are gathered sorted by name, so key on label names rather
+	// than positions.
+	events := make(map[string]string)
+	for _, metric := range byName["messageloop_proxy_service_membership_events_total"].GetMetric() {
+		pairs := metric.GetLabel()
+		require.Len(t, pairs, 2)
+		values := make(map[string]string, len(pairs))
+		for _, pair := range pairs {
+			values[pair.GetName()] = pair.GetValue()
+		}
+		require.Contains(t, values, "service")
+		require.Contains(t, values, "event")
+		events[values["event"]] = values["service"]
+	}
+	require.Equal(t, map[string]string{"join": "acme-battle", "leave": "acme-battle"}, events)
+}

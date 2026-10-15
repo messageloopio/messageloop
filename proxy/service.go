@@ -12,6 +12,7 @@ import (
 	"github.com/lynx-go/x/log"
 	"google.golang.org/grpc"
 
+	mlmetrics "github.com/messageloopio/messageloop/internal/metrics"
 	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v2"
 )
 
@@ -53,6 +54,11 @@ type ServiceProxy struct {
 	// grpcCfg carries the TLS / insecure settings shared by every instance
 	// of the service.
 	grpcCfg *GRPCProxyConfig
+	// metrics is the shared Prometheus collector wired by SetMetrics (the
+	// same optional-interface injection the broker and command bus use).
+	// Nil is tolerated and disables counting, so an unwired proxy never
+	// panics.
+	metrics *mlmetrics.Metrics
 
 	mu    sync.RWMutex
 	conns map[string]*grpc.ClientConn // key = instance ID
@@ -250,6 +256,15 @@ func (p *ServiceProxy) AuthenticateAPIKey(ctx context.Context, req *Authenticate
 	return FromProtoAuthenticateAPIKeyResponse(resp), nil
 }
 
+// SetMetrics wires the shared Prometheus metrics object (v1.1 design §4.6).
+// Nil is tolerated and disables counting, so an unwired proxy never panics.
+// Assembly propagates it through the same optional-interface pattern the
+// broker and the cluster command bus use (Node.SetupProxy), and always before
+// the router serves its first request.
+func (p *ServiceProxy) SetMetrics(m *mlmetrics.Metrics) {
+	p.metrics = m
+}
+
 // Name implements Proxy.Name. It returns the configured proxy name so
 // ByName resolution (the api_auth assignment) keeps working; an api_auth ×
 // service combination rotates the stateless family across the snapshot.
@@ -280,22 +295,27 @@ func (p *ServiceProxy) Close() error {
 // with the proxy timeout applied (the caller defers the returned cancel).
 // keyOf supplies the routing key for keyed strategies; it is only invoked
 // when the proxy actually runs a keyed strategy, so unkeyed strategies never
-// touch it.
+// touch it. Membership events (design §4.6) are inferred at the two
+// snapshot boundaries: a leave when pruneConns closes a pooled connection,
+// a join when connFor dials one for the first time.
 func (p *ServiceProxy) clientFor(ctx context.Context, keyOf func() string) (proxypb.ProxyServiceClient, context.Context, context.CancelFunc, error) {
 	snapshot, err := p.snapshot(ctx)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	p.pruneConns(snapshot)
+	p.pruneConns(ctx, snapshot)
 
 	inst, err := p.selectInstance(snapshot, keyOf)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("pick instance for service %s: %w", p.service, err)
 	}
 
-	conn, err := p.connFor(inst)
+	conn, created, err := p.connFor(inst)
 	if err != nil {
 		return nil, nil, nil, err
+	}
+	if created {
+		p.observeMembership(ctx, "join", inst.ID, conn.Target())
 	}
 
 	log.DebugContext(ctx, "proxying service gRPC request",
@@ -311,18 +331,24 @@ func (p *ServiceProxy) clientFor(ctx context.Context, keyOf func() string) (prox
 
 // snapshot returns the current healthy instances of the service that carry
 // a grpc endpoint. An empty result is surfaced as the ErrNoHealthyInstance
-// sentinel (v1.1 design §4.5).
+// sentinel (v1.1 design §4.5). Every snapshot obtained — empty included —
+// refreshes the proxy_service_instances gauge; the empty case additionally
+// counts proxy_service_no_instance_total and logs a Warn (the design's ops
+// signal pair for a backend fleet that is entirely gone).
 func (p *ServiceProxy) snapshot(ctx context.Context) ([]registry.Instance, error) {
 	insts, err := p.resolver.GetAll(ctx, p.service, registry.Filter{Protocol: registry.ProtocolGRPC})
 	if err != nil {
 		// A resolver whose stale snapshot aged out reports ErrNoInstance —
 		// semantically "no healthy instance right now".
 		if errors.Is(err, registry.ErrNoInstance) {
+			p.observeNoInstance(ctx)
 			return nil, fmt.Errorf("%w: service %s", ErrNoHealthyInstance, p.service)
 		}
 		return nil, fmt.Errorf("resolve service %s: %w", p.service, err)
 	}
+	p.observeInstances(len(insts))
 	if len(insts) == 0 {
+		p.observeNoInstance(ctx)
 		return nil, fmt.Errorf("%w: service %s", ErrNoHealthyInstance, p.service)
 	}
 	return insts, nil
@@ -344,73 +370,136 @@ func (p *ServiceProxy) selectInstance(snapshot []registry.Instance, keyOf func()
 // namespace prefix — stripping it would map the same scene segment of
 // different namespaces onto one instance, while keeping it isolates them for
 // free. "metadata:<name>" reads the named request metadata entry, falling
-// back to the channel when it is missing or empty (the fallback counter
-// metric lands with the PR-C observability batch). The channel is a required
-// field, so the key is always non-empty.
+// back to the channel when it is missing or empty; the fallback counts
+// proxy_service_key_fallback_total. The channel is a required field, so the
+// key is always non-empty.
 func (p *ServiceProxy) extractKey(req *RPCProxyRequest) string {
-	if name, ok := strings.CutPrefix(p.routing.Key, RoutingKeyMetadataPrefix); ok && req.Meta != nil {
-		if v := req.Meta[name]; v != "" {
-			return v
+	if name, ok := strings.CutPrefix(p.routing.Key, RoutingKeyMetadataPrefix); ok {
+		if req.Meta != nil {
+			if v := req.Meta[name]; v != "" {
+				return v
+			}
 		}
+		p.observeKeyFallback()
 	}
 	return req.Channel
 }
 
 // connFor returns the pooled connection for an instance, dialing it lazily
 // on first use. grpc.NewClient defers the actual connect to the first RPC,
-// so no warm-up is needed.
-func (p *ServiceProxy) connFor(inst registry.Instance) (*grpc.ClientConn, error) {
+// so no warm-up is needed. The created flag reports a first dial — the
+// join point of the membership inference.
+func (p *ServiceProxy) connFor(inst registry.Instance) (*grpc.ClientConn, bool, error) {
 	p.mu.RLock()
 	conn, ok := p.conns[inst.ID]
 	p.mu.RUnlock()
 	if ok {
-		return conn, nil
+		return conn, false, nil
 	}
 
 	ep, err := registry.EndpointOf(inst, registry.ProtocolGRPC)
 	if err != nil {
-		return nil, fmt.Errorf("instance %s of service %s: %w", inst.ID, p.service, err)
+		return nil, false, fmt.Errorf("instance %s of service %s: %w", inst.ID, p.service, err)
 	}
 	conn, err = grpc.NewClient(ep.Address, grpcDialOptions(p.grpcCfg)...)
 	if err != nil {
-		return nil, fmt.Errorf("dial instance %s (%s): %w", inst.ID, ep.Address, err)
+		return nil, false, fmt.Errorf("dial instance %s (%s): %w", inst.ID, ep.Address, err)
 	}
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if existing, ok := p.conns[inst.ID]; ok {
-		// Another goroutine won the race; drop ours and reuse theirs.
+		// Another goroutine won the race; drop ours and reuse theirs. The
+		// winner's join already covers the instance.
 		_ = conn.Close()
-		return existing, nil
+		return existing, false, nil
 	}
 	p.conns[inst.ID] = conn
-	return conn, nil
+	return conn, true, nil
 }
 
 // pruneConns closes and drops connections to instances that are no longer in
 // the current snapshot. It runs before every proxied call, so a removed
 // instance stops receiving traffic as soon as the resolver snapshot turns
 // over; in-flight RPCs on the closed conn fail and surface as PROXY_ERROR,
-// matching the fail-fast semantics (v1.1 design §4.2).
-func (p *ServiceProxy) pruneConns(current []registry.Instance) {
+// matching the fail-fast semantics (v1.1 design §4.2). Every pruned
+// connection is a leave membership event.
+func (p *ServiceProxy) pruneConns(ctx context.Context, current []registry.Instance) {
 	live := make(map[string]struct{}, len(current))
 	for _, inst := range current {
 		live[inst.ID] = struct{}{}
 	}
 
 	p.mu.Lock()
-	var stale []*grpc.ClientConn
+	var stale []pooledConn
 	for id, conn := range p.conns {
 		if _, ok := live[id]; !ok {
-			stale = append(stale, conn)
+			stale = append(stale, pooledConn{id: id, conn: conn})
 			delete(p.conns, id)
 		}
 	}
 	p.mu.Unlock()
 
-	for _, conn := range stale {
-		_ = conn.Close()
+	for _, pc := range stale {
+		p.observeMembership(ctx, "leave", pc.id, pc.conn.Target())
+		_ = pc.conn.Close()
 	}
+}
+
+// pooledConn pairs a pooled connection with its instance ID so a leave event
+// can log both.
+type pooledConn struct {
+	id   string
+	conn *grpc.ClientConn
+}
+
+// observeInstances refreshes the proxy_service_instances gauge with the
+// snapshot size (0 included).
+func (p *ServiceProxy) observeInstances(n int) {
+	if p.metrics == nil {
+		return
+	}
+	p.metrics.ProxyServiceInstances.WithLabelValues(p.service).Set(float64(n))
+}
+
+// observeNoInstance counts a request rejected for a missing backend fleet and
+// logs the Warn side of the design §4.5 ops signal.
+func (p *ServiceProxy) observeNoInstance(ctx context.Context) {
+	log.WarnContext(ctx, "service proxy has no healthy instance",
+		"proxy", p.name,
+		"service", p.service,
+	)
+	if p.metrics == nil {
+		return
+	}
+	p.metrics.ProxyServiceNoInstanceTotal.WithLabelValues(p.service).Inc()
+}
+
+// observeKeyFallback counts an RPC whose metadata routing key was missing or
+// empty and fell back to the channel (keyed strategies only — extractKey is
+// never invoked otherwise).
+func (p *ServiceProxy) observeKeyFallback() {
+	if p.metrics == nil {
+		return
+	}
+	p.metrics.ProxyServiceKeyFallbackTotal.WithLabelValues(p.service).Inc()
+}
+
+// observeMembership records one join/leave event at the connection-pool
+// boundary: the Info log carries the instance ID and endpoint, the counter
+// the (service, event) labels.
+func (p *ServiceProxy) observeMembership(ctx context.Context, event, instanceID, endpoint string) {
+	log.InfoContext(ctx, "service proxy membership event",
+		"proxy", p.name,
+		"service", p.service,
+		"event", event,
+		"instance", instanceID,
+		"endpoint", endpoint,
+	)
+	if p.metrics == nil {
+		return
+	}
+	p.metrics.ProxyServiceMembershipEventsTotal.WithLabelValues(p.service, event).Inc()
 }
 
 // withTimeout applies the proxy timeout if not already set in context.
