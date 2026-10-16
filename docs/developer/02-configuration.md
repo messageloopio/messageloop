@@ -17,7 +17,7 @@
 - **注册白名单**（`envConfigKeys`）：部署相关的标量键——`server.http.*`、`server.api.*`、`server.heartbeat.*`、`server.rpc_timeout`、`server.require_auth`、`server.namespace`、`server.limits.*`、四个传输的 addr/timeout/tls、`broker.*`、`cluster.*`。文件里省略这些键时，仅白名单键能凭环境变量出现。
 - **文件内已有键**：`AutomaticEnv` 还会覆盖文件中已出现的任意标量键；字符串数组接受逗号分隔值。
 
-复杂嵌套结构（`server.authorizer.rules`、`proxy` 后端数组）不支持环境变量，只能写配置文件。
+复杂嵌套结构（`server.authorizer.rules`、`proxy` 后端数组）不支持环境变量，只能写配置文件；`registry.*` 整段不在白名单，同样只能写配置文件。
 
 ### 改名迁移：Admin API → Server API
 
@@ -45,14 +45,15 @@
 5. **TLS 证书/密钥成对**：以下五处的 `cert_file` 与 `key_file` 必须同时设置或同时为空：`server.api.tls`、`transport.websocket.tls`、`transport.grpc.tls`、`transport.quic.tls`、`transport.kcp.tls`。
 6. **Server API 鉴权**（`validateAPIAuth`）：`server.api.addr` 非空时必须至少配置一种凭证路径——`auth_tokens`、`proxy[].api_auth: true` 指派或 `allow_insecure: true`，否则 Validate 失败；每把 `auth_tokens` ≥ 20 字符；`auth_cache_ttl` 非空时必须是合法且为正的 Go duration；`proxy[].api_auth` 至多一个条目可指派且该条目必须带 `name`（G3）；`allow_insecure` 只允许搭配回环 `server.api.addr`（G5，非 loopback 即 Validate 错误）；`server.http.addr` 非 loopback 时必须配置 `server.http.auth_token`（admin HTTP 同规则对齐）。
 7. **broker 校验**：`broker.type` 必须为 `memory` 或 `redis`（空等价于 `memory`）；为 `redis` 时 `broker.redis.addr` 必填；`broker.redis.consumer_group` 非空直接拒绝（字段声明但未实现）；`broker.redis.stream_approximate` 非 true（含显式 false 与省略）直接拒绝（只实现了近似截断，必须显式确认）。
-8. **cluster 前置条件与 HMAC**：`cluster.enabled: true` 要求 `broker.type: redis`（`cluster requires broker.type=redis`）。启用集群时 HMAC 密钥源校验也在 `Validate()` 内执行：`hmac_key` 与 `hmac_key_file` 二选一（两源同设或均未设置即拒绝），内联 `hmac_key` 长度不足 32 字节即拒绝。
-9. **Server API 能力位闭集**：`server.api.capabilities` 的每个名字都必须在闭集内（见 [server 节](#server-节)）。
-10. **已删除键拒绝**：`server.acl`、`server.channels`、`server.presence.cluster_emit` 任一出现即失败（无兼容期）。
-11. **授权表**：`server.authorizer` 的规则 `pattern` 非空且是订阅 key 语言（`*` 单段、`**` 仅末尾、字面前缀非空）；`history_size` 设置时 ≥ 0；`history_ttl` / `max_survey_timeout` 非空时必须是合法 Go duration。
-12. **namespace**：`server.namespace` 非空时按 `topics.ValidateNamespace` 校验标识符（`[a-z0-9-]`、1-32 字符、以 `[a-z0-9]` 开头结尾）；为空且 `require_auth` 为 false 时必须提供（没有代理可以提供 namespace，fail-closed）。
-13. **Server API 地址必填**：`server.api.addr` 必填（`prepareGRPCServers` 无条件预绑定该监听器）。
+8. **registry 校验**（`validateRegistry`）：`registry.enabled` 为 false（含省略）时唯一检查是 service 耦合——任一 proxy 条目写了 `service` 即拒绝（提示 `set registry.enabled=true`）。启用时 `registry.backend` 必填且当前仅接受 `redis`（`consul` 显式拒绝，计划下一发布；其他值报 `unknown registry.backend`）；`registry.redis` 的未设置项逐字段继承 `broker.redis`（显式值优先，继承在 `Validate()` 内就地回填，见 [registry 节](#registry-节)）；继承后 `addr` 仍为空即拒绝；`dial_timeout` / `read_timeout` / `write_timeout` 必须是合法 Go duration（在继承之后校验，继承来的非法值同样拒绝）；`key_prefix` 为空时回填 `ml2:registry/`。
+9. **cluster 前置条件与 HMAC**：`cluster.enabled: true` 要求 `broker.type: redis`（`cluster requires broker.type=redis`）。启用集群时 HMAC 密钥源校验也在 `Validate()` 内执行：`hmac_key` 与 `hmac_key_file` 二选一（两源同设或均未设置即拒绝），内联 `hmac_key` 长度不足 32 字节即拒绝。
+10. **Server API 能力位闭集**：`server.api.capabilities` 的每个名字都必须在闭集内（见 [server 节](#server-节)）。
+11. **已删除键拒绝**：`server.acl`、`server.channels`、`server.presence.cluster_emit` 任一出现即失败（无兼容期）。
+12. **授权表**：`server.authorizer` 的规则 `pattern` 非空且是订阅 key 语言（`*` 单段、`**` 仅末尾、字面前缀非空）；`history_size` 设置时 ≥ 0；`history_ttl` / `max_survey_timeout` 非空时必须是合法 Go duration。
+13. **namespace**：`server.namespace` 非空时按 `topics.ValidateNamespace` 校验标识符（`[a-z0-9-]`、1-32 字符、以 `[a-z0-9]` 开头结尾）；为空且 `require_auth` 为 false 时必须提供（没有代理可以提供 namespace，fail-closed）。
+14. **Server API 地址必填**：`server.api.addr` 必填（`prepareGRPCServers` 无条件预绑定该监听器）。
 
-不在 `Validate()` 内的校验：`cluster.node_id` 必填在 `ClusterOptions.Normalize()`（internal/cluster/contracts.go）与启动接线（cmd/server/main.go 的 `normalizeClusterOptions`）两处检查；`hmac_key_file` 的文件读取与密钥长度在启动接线 `ClusterConfig.ResolveHMACKey()`（config/config.go）执行，失败即拒绝启动。
+不在 `Validate()` 内的校验：`cluster.node_id` 必填在 `ClusterOptions.Normalize()`（internal/cluster/contracts.go）与启动接线（cmd/server/main.go 的 `normalizeClusterOptions`）两处检查；`hmac_key_file` 的文件读取与密钥长度在启动接线 `ClusterConfig.ResolveHMACKey()`（config/config.go）执行，失败即拒绝启动；proxy 条目的 `endpoint` / `service` 互斥与 `routing` 语义在启动接线 `Node.SetupProxy`（internal/runtime/node.go）内逐条 `proxy.ProxyConfig.Validate`（proxy/proxy.go）检查，先于任何代理后端构造——同样启动即失败，但报错时机在 `Validate()` 之后（见 [proxy 节](#proxy-节)）。
 
 ### 常量与默认值分布
 
@@ -78,6 +79,7 @@ server:      # 服务端行为：管理 HTTP（运维）、Server API、心跳�
 transport:   # 客户端监听器：WebSocket、gRPC 与可选 QUIC/KCP
 broker:      # 发布/订阅后端：memory 或 redis
 cluster:     # 分布式控制面（可选）
+registry:    # 服务注册发现（可选；service 型 proxy 后端的前置，v1.1）
 proxy:       # 后端代理数组（可选）
 ```
 
@@ -399,7 +401,7 @@ cluster:
 
 | 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `cluster.enabled` | bool | `false` | 启用 Redis 支撑的分布式控制面。启用时要求 `broker.type: redis`（校验规则 8） |
+| `cluster.enabled` | bool | `false` | 启用 Redis 支撑的分布式控制面。启用时要求 `broker.type: redis`（校验规则 9） |
 | `cluster.node_id` | string | 未设置 | 逻辑节点标识，集群内必须唯一；启用时必填（`ClusterOptions.Normalize` 检查） |
 | `cluster.backend` | string | `redis` | 控制面后端。为空时默认 `redis`；接受 `redis` / `memory` / `noop`，其他值报错。仅 `redis` 在二进制中接入实际组件（会话目录、命令总线、查询投影、节点租约、投影修复） |
 | `cluster.hmac_key` | string | 未设置 | 内联 HMAC-SHA256 命令总线密钥，至少 32 字节；与 `hmac_key_file` 二选一 |
@@ -407,7 +409,7 @@ cluster:
 
 **HMAC 密钥校验分两层**：
 
-1. `Validate()`（校验规则 8）：两源同设、均未设置、内联 `hmac_key` 长度不足 32 字节（报错文案 `cluster.hmac_key must be at least 32 bytes`）都在配置校验期拒绝。
+1. `Validate()`（校验规则 9）：两源同设、均未设置、内联 `hmac_key` 长度不足 32 字节（报错文案 `cluster.hmac_key must be at least 32 bytes`）都在配置校验期拒绝。
 2. 启动接线 `ClusterConfig.ResolveHMACKey()`：读取 `hmac_key_file`（读失败报 `read cluster.hmac_key_file: ...`）并再次检查长度（报错文案 `cluster hmac key must be at least 32 bytes`），失败即拒绝启动。
 
 集群内所有节点必须共用同一密钥；密钥不会写入任何 Redis 键、日志或 metrics 标签。
@@ -416,15 +418,62 @@ cluster:
 
 拓扑、会话迁移与故障转移语义见[《分布式集群指南》](04-cluster.md)。
 
+## registry 节
+
+`registry` 配置服务注册发现（v1.1 PR-A），是 service 型 proxy 后端（`proxy[].service`）的前置：后端实例从 Redis 解析，经事件订阅与轮询保持新鲜。`enabled: false`（含省略）时本段不做任何校验，唯一例外是耦合检查——任一 proxy 条目写了 `service` 即被 `Validate()` 拒绝（校验规则 8）。启用只意味着启动时构建发现栈（独立 Redis 客户端 + Resolver 节点单例），没有任何 service 型 proxy 消费它时是纯惰性开销；registry 与 `cluster.enabled` 完全解耦，单节点部署照常可用。
+
+```yaml
+registry:
+  enabled: true                  # 启动即构建 Resolver；无 service 型 proxy 时保持惰性
+  backend: redis                 # 本期仅 redis；consul 计划中，显式配置即被拒绝
+  redis:                         # 未设置字段逐项继承 broker.redis（显式值优先）；
+                                 # registry 恒用独立连接池，不与 broker 数据面共享
+    # addr: 127.0.0.1:6379       # 缺省 = broker.redis.addr；继承后仍为空 = Validate 错误
+    # password: ""               # 缺省 = broker.redis.password
+    # db: 0                      # 缺省 = broker.redis.db
+    # pool_size: 10              # 缺省 = broker.redis.pool_size 的配置值
+    # min_idle_conns: 5          # 缺省 = broker.redis.min_idle_conns 的配置值
+    # dial_timeout: "5s"         # 缺省 = broker.redis.dial_timeout
+    # read_timeout: "3s"         # 缺省 = broker.redis.read_timeout
+    # write_timeout: "3s"        # 缺省 = broker.redis.write_timeout
+    key_prefix: "ml2:registry/"  # 实例键与事件频道前缀；空 = 该默认值
+```
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `registry.enabled` | bool | `false` | 启用服务注册发现。启动接线构建 Resolver（节点单例，全部 service 型 proxy 共享）与独立 Redis 客户端；关闭时整段免校验。启用本身不改变任何路由行为——只有 service 型 proxy 消费它（见 [proxy 节](#proxy-节)） |
+| `registry.backend` | string | 无（启用时必填） | 注册后端实现，本期闭集仅 `redis`。`consul` 计划下一发布，显式配置即被拒绝（`not supported in this phase`）；其他值报 `unknown registry.backend: %q (expected "redis")`；启用时省略即 Validate 错误 |
+| `registry.redis.addr` | string | 继承 `broker.redis.addr` | registry 的 Redis 地址。继承后仍为空即 Validate 错误（报错同时提示可设 `broker.redis.addr`）。registry 与 broker 允许指向不同实例，但注册方（写实例键的后端服务）必须与 registry 同源同前缀 |
+| `registry.redis.password` | string | 继承 `broker.redis.password` | Redis 认证密码 |
+| `registry.redis.db` | int | 继承 `broker.redis.db` | 逻辑数据库编号 |
+| `registry.redis.pool_size` | int | 继承 `broker.redis.pool_size` 的配置值 | 连接池大小。两边都未设置时为 0，由 go-redis 内置默认兜底——broker 侧文档中的默认 10 是 redisbroker options 的生效值，**不会**流经继承 |
+| `registry.redis.min_idle_conns` | int | 继承 `broker.redis.min_idle_conns` 的配置值 | 连接池保持的最小空闲连接数；同上，两边都未设置时为 0 |
+| `registry.redis.dial_timeout` | string | 继承 `broker.redis.dial_timeout` | 建立连接超时。非空必须是合法 Go duration——**与 `broker.redis` 自身不同，这里校验而非静默忽略**，且校验发生在继承之后（从 `broker.redis` 继承来的非法值同样拒绝启动） |
+| `registry.redis.read_timeout` | string | 继承 `broker.redis.read_timeout` | 读操作超时。校验规则同上 |
+| `registry.redis.write_timeout` | string | 继承 `broker.redis.write_timeout` | 写操作超时。校验规则同上 |
+| `registry.redis.key_prefix` | string | `ml2:registry/`（`DefaultRegistryKeyPrefix`） | 实例键（`instance/{service}/{id}`）、服务索引（`service/{service}`）与事件频道（`events/{service}`）的前缀；空值由 `Validate()` 回填默认。注册方必须使用相同前缀（lynx Registrar 的 `WithKeyPrefix` 或直写键布局，见[《Server API 参考》](03-server-api.md)「Proxy 后端(服务发现)」） |
+
+补充事实：
+
+- **继承的精确语义**：`validateRegistry`（config/config.go，位于 broker 校验之后、cluster 校验之前）逐字段比较，标量零值（`""` / `0`）视为「未设置」并取 `broker.redis` 对应字段的**配置值**——是 YAML 里写了什么，不是 broker 的生效默认。继承结果就地回填进配置，cmd/server 装配（`newRegistryResolver`）直接消费解析后的值。
+- `registry.redis` 的字段集比 `broker.redis` 小：没有 `max_retries` / `stream_max_length` / `stream_approximate` / `history_ttl` / `consumer_group`（发现栈不写 Stream、不参与历史）。
+- registry 恒使用独立 `*redis.Client`：注册轮询与事件订阅不与 broker 数据面抢连接池。
+- `registry.*` 各键不在环境变量白名单（见[环境变量覆盖](#环境变量覆盖cmdserverenvconfiggo)），只能写配置文件。
+- 实例注册契约（心跳 TTL、健康语义）与 `messageloop_proxy_service_*` 指标见[《Server API 参考》](03-server-api.md)与[《可观测性指南》](05-observability.md)。
+
 ## proxy 节
 
 ```yaml
 proxy:
   - name: example-grpc          # 唯一标识
     endpoint: "127.0.0.1:10091" # gRPC: host:port；HTTP: 完整 URL
+    # service: acme-battle      # 发现式后端（v1.1）：registry 服务名；与 endpoint 互斥，恰有其一
+    # routing:                  # service 型后端的实例选择（endpoint 型不生效，取值仍被校验）
+    #   strategy: consistent_hash  # 默认；round_robin / random；sticky 本期拒绝
+    #   key: channel            # 仅 consistent_hash 允许：channel（默认）或 metadata:<name>
     timeout: "30s"              # 代理级超时，默认 30s
     # api_auth: true          # 指派为 Server API Key 校验器（全配置唯一，G3）
-    grpc:                       # gRPC 后端配置（二选一）
+    grpc:                       # gRPC 后端配置（与 http 二选一；service 型后端复用本段 TLS 设置）
       insecure: true
       # tls:
       #   server_name: backend.example.com
@@ -445,7 +494,9 @@ proxy:
 | 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `name` | string | 未设置 | 代理标识，用于日志与排障；`api_auth: true` 时必填（按名解析校验器实例） |
-| `endpoint` | string | 未设置 | 后端地址。gRPC 后端为 `host:port`；HTTP 后端为完整 URL（`http://` / `https://` 前缀） |
+| `endpoint` | string | 未设置 | 后端地址。gRPC 后端为 `host:port`；HTTP 后端为完整 URL（`http://` / `https://` 前缀）。与 `service` 互斥，二者必须恰有其一 |
+| `service` | string | 未设置 | 发现式后端（v1.1）：registry 服务名，每次请求从 registry 解析该服务的健康实例（仅消费 `StatusPassing` 且带 gRPC endpoint 的实例；实例注册契约见[《Server API 参考》](03-server-api.md)）。与 `endpoint` **互斥，恰有其一**——校验时机见下节。`registry.enabled` 未开启时配置任何 `service` 直接被 `Config.Validate()` 拒绝（校验规则 8）。仅支持 gRPC 实例；`grpc` 段的连接/TLS 设置由该服务全部实例共享 |
+| `routing` | 对象 | 零值 = `consistent_hash` + `channel` | service 型后端的实例选择，`strategy` 与 `key` 两个字段，语义与校验见 [service 型后端与实例路由](#service-型后端与实例路由)。对静态 `endpoint` 后端**不生效，但取值仍会被校验** |
 | `api_auth` | bool | `false` | 将该代理指派为**管理 API 的 API Key 校验器**（proxy 契约的 `AuthenticateAPIKey` RPC）。全配置至多一个条目可指派，两处指派即 Validate 错误（G3：显式布尔指派，不用方法名路由——**不存在 `$authenticate_admin`** 之类的管理面方法名）。指派与 `routes` 解耦：admin 认证不走 channel/method glob 匹配，客户端面 `$authenticate` 等钩子不受影响。指派语义与校验链详见[《Server API 参考》](03-server-api.md) |
 | `timeout` | string | `30s` | 代理级请求超时。0 或未设置取默认 30s；解析失败在启动时报错。与 `server.rpc_timeout` 的关系见 [三层超时](#三层超时) |
 | `http` | 对象 | 未设置 | HTTP 代理配置；`headers`（map[string]string）为附加请求头（默认注入 `Content-Type: application/json`）；`tls.insecure_skip_verify` 关闭证书校验；`tls.server_name` 设置 SNI。响应体上限 4 MiB |
@@ -461,7 +512,39 @@ proxy:
 - **按配置顺序求值，首个匹配的代理生效**；
 - 无任何路由匹配时 `ProxyRPC` 返回 `ErrNoProxyFound`，客户端收到软失败 `NO_PROXY` 错误信封（`type=request_error`，不回显请求体）；代理调用本身失败则返回 `PROXY_ERROR` 错误信封。
 
-除路由外，代理类型选择规则：显式配置 `grpc` 段 → gRPC 代理；显式配置 `http` 段 → HTTP 代理；两者皆无时按 `endpoint` 前缀判断（`http://` / `https://` → HTTP，否则 gRPC）。
+除路由外，代理类型选择规则（`createProxy` 分支顺序）：`service` 非空 → service 型代理（发现式，见下节，优先于其他分支）；否则显式配置 `grpc` 段 → gRPC 代理；显式配置 `http` 段 → HTTP 代理；两者皆无时按 `endpoint` 前缀判断（`http://` / `https://` → HTTP，否则 gRPC）。
+
+### service 型后端与实例路由
+
+`service` 型代理（`proxy.NewServiceProxy`）实现完整的 Proxy 接口，对 Router 与会话而言只是另一种 Proxy——静态 endpoint 路由、客户端线协议与错误映射均不变，差异只在实例来源（registry 解析）与实例选择（`routing`）。
+
+**`routing.strategy` 值域**（`RoutingConfig.Strategy`，空 = `consistent_hash`）：
+
+| 策略 | 语义 | 适用 |
+| --- | --- | --- |
+| `consistent_hash`（默认） | 仅 RPC 参与键路由：Rendezvous（HRW）hash 对 `(routing key, instance ID)` 打分取最大者，同一 key 在**所有 messageloop 节点收敛到同一实例**（零协调）；实例集合变化约 1/N 的 key 换属主。无状态方法族（`Authenticate` / `SubscribeAcl` / `PublishAcl` / `On*` / `AuthenticateAPIKey`）在该策略下仍走轮转 | 有状态后端（如战斗服）：同场景同实例 |
+| `round_robin` | **全部方法（含 RPC）**在健康实例快照内轮转，不提取 key；计数各 messageloop 节点独立，不跨节点对齐 | 无状态后端，请求均摊 |
+| `random` | 每请求均匀随机，同样不提取 key | 同上 |
+| `sticky` | 二期预留（键租约目录），**本期配置即 Validate 错误** | — |
+
+**`routing.key` 值域**（`RoutingConfig.Key`，空 = `channel`，仅键策略使用）：
+
+- `channel`：路由 key 取原始频道串，**含 namespace 前缀**（如 `acme:battle.scene-42`）——不剥前缀，跨 namespace 天然分散；
+- `metadata:<name>`：从 RPC 请求 Metadata 的对应条目取 key；条目缺失或空串时**回退到 channel** 并计数 `messageloop_proxy_service_key_fallback_total`；
+- `metadata:` 后名字为空、或其他任何值都是校验错误；key 提取仅在键策略（`consistent_hash`）执行，`round_robin` / `random` 整体跳过（不读 metadata、无 fallback 计数）。
+
+**校验时机（全部启动即失败，不留运行期惊喜）**，分三层：
+
+1. `Config.Validate()`（校验规则 8）：`registry.enabled` 未开启时出现任何 `service` 条目即拒绝；
+2. `Node.SetupProxy`（internal/runtime/node.go，启动接线）：逐条 `proxy.ProxyConfig.Validate`（proxy/proxy.go）——`endpoint` 与 `service` 必须恰有其一；`routing` 值域检查（**对 endpoint 型后端也执行**，只是其取值不生效）；service 型配置遇 nil resolver（registry 未构建）拒绝。先于任何后端构造，失败即启动中止；
+3. `ToProxyConfig`（config/config.go）：`timeout` duration 解析失败同样启动中止。
+
+**其他行为事实**：
+
+- service 型后端仅 gRPC：实例地址取实例 `Endpoints` 中 `protocol=grpc` 的 `address`（registry 契约禁止裸 `:8080` 形态）；`grpc` 段（`insecure` / `tls.server_name` / `tls.insecure_skip_verify`）由该服务**全部实例共享**——`server_name` 必须匹配所有实例持有的证书（或共享 DNS 名），不支持每实例证书；`http` 段对 service 型后端无意义。
+- service 无健康实例时返回 `ErrNoHealthyInstance`，客户端收到既有 `PROXY_ERROR` 信封（不新增错误码）；配合 `messageloop_proxy_service_no_instance_total` 与 `messageloop_proxy_service_instances` 指标区分「配置缺路由」（`NO_PROXY`）与「后端全灭」（见[《可观测性指南》](05-observability.md)）。
+- `api_auth: true` 与 `service` 可以组合：`AuthenticateAPIKey` 属无状态方法族，轮转语义成立。
+- 生命周期：实例连接按实例 ID 缓存，离开快照的实例其连接被关闭（在途 RPC 按 `PROXY_ERROR` 返回）；进程关闭时 `Router.Close` 链路关闭全部实例连接，Resolver 由 main 的 defer 关闭。
 
 ### 代理钩子
 
@@ -572,6 +655,16 @@ broker:
 Redis broker 连接本机 6379，选择数据库 10。`stream_approximate: true` 是必须显式写出的确认项（省略或 false 都会被 Validate 拒绝）。注释掉的字段（`pool_size` 等）展示的即默认值，无需显式写出。
 
 ```yaml
+# registry:
+#   enabled: true
+#   backend: redis
+#   redis:
+#     key_prefix: "ml2:registry/"
+```
+
+注释掉的 `registry:` 段是 v1.1 的服务注册发现，仅为 service 型代理后端（下文注释掉的 `example-service`）服务：启用时 `backend: redis` 必填；`registry.redis` 未设置字段逐项继承上面的 `broker.redis`（本例即 `127.0.0.1:6379` 与 db 10），并始终使用独立连接池；`key_prefix` 留空即默认 `ml2:registry/`。只用 endpoint 型代理时保持注释即可——启用 registry 不改变任何路由行为，且与 `cluster.enabled` 无关。
+
+```yaml
 cluster:
   enabled: false
   node_id: node-a
@@ -592,7 +685,7 @@ proxy:
         method: "*"
 ```
 
-注册名为 `example-grpc` 的 gRPC 代理，明文连接 `127.0.0.1:10091`，`channel: "*"` + `method: "*"` 匹配所有频道的所有方法。该代理同时承担 `$authenticate` 鉴权（`method: "*"` 覆盖了固定方法名）、`"subscribe"` / `"publish"` 的 ACL 裁决（作为静态 Authorizer 之外的额外门），以及 RPC 转发与四个连接生命周期通知。`timeout: 30s` 与默认一致。该代理未设 `api_auth: true`，因此不承担管理 API 的 API Key 校验——需要时显式加上（全配置唯一指派，见 [proxy 节](#proxy-节) 字段表）。注释掉的 `example-http` 段展示了 HTTP 代理形态（完整 URL 端点、附加头、TLS 选项）。
+注册名为 `example-grpc` 的 gRPC 代理，明文连接 `127.0.0.1:10091`，`channel: "*"` + `method: "*"` 匹配所有频道的所有方法。该代理同时承担 `$authenticate` 鉴权（`method: "*"` 覆盖了固定方法名）、`"subscribe"` / `"publish"` 的 ACL 裁决（作为静态 Authorizer 之外的额外门），以及 RPC 转发与四个连接生命周期通知。`timeout: 30s` 与默认一致。该代理未设 `api_auth: true`，因此不承担管理 API 的 API Key 校验——需要时显式加上（全配置唯一指派，见 [proxy 节](#proxy-节) 字段表）。注释掉的 `example-http` 段展示了 HTTP 代理形态（完整 URL 端点、附加头、TLS 选项）；注释掉的 `example-service` 段展示了发现式后端形态（v1.1）：`service` 指定 registry 服务名（与 `endpoint` 互斥，要求上文 `registry.enabled: true`），`routing.strategy` / `routing.key` 控制实例选择——默认 `consistent_hash` + `channel`，同一频道的 RPC 在所有节点落到同一实例；`grpc` 段的连接设置由该服务全部实例共享（见 [service 型后端与实例路由](#service-型后端与实例路由)）。
 
 ## 多节点注意
 

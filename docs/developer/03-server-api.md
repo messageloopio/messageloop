@@ -203,12 +203,14 @@ import (
     registryredis "github.com/lynx-go/lynx/contrib/registry-redis"
 )
 
-reg := registry.NewRegistrar(registryredis.New(rdb, registryredis.WithKeyPrefix("ml2/registry/")),
+reg := registry.NewRegistrar(registryredis.New(rdb, registryredis.WithKeyPrefix("ml2:registry/")),
     registry.WithServiceName("acme-battle"),
     registry.WithAdvertisers(registry.GRPC(grpcServer)),
 )
 app.Register(reg)
 ```
+
+前缀必须与 messageloop 侧 `registry.redis.key_prefix`(缺省 `ml2:registry/`)**完全一致**,否则服务端发现不到实例。
 
 `sdks/go` 按 Q5 决策**不内置 Registrar**(保持 SDK 依赖最小);非 lynx 的 Go 服务引 lynx 为库即可。
 
