@@ -9,9 +9,9 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/messageloopio/messageloop/internal/config"
+	"github.com/messageloopio/messageloop/internal/proxy"
 	clientpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/client/v2"
 	sharedv2 "github.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2"
-	"github.com/messageloopio/messageloop/internal/proxy"
 )
 
 // MockSlowProxy simulates a slow RPC backend

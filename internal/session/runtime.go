@@ -8,18 +8,18 @@ import (
 	"context"
 	"time"
 
-	"github.com/messageloopio/messageloop/internal/config"
 	"github.com/messageloopio/messageloop/internal/authz"
 	"github.com/messageloopio/messageloop/internal/channel"
 	"github.com/messageloopio/messageloop/internal/cluster"
+	"github.com/messageloopio/messageloop/internal/config"
 	"github.com/messageloopio/messageloop/internal/metrics"
 	"github.com/messageloopio/messageloop/internal/occupancy"
+	"github.com/messageloopio/messageloop/internal/proxy"
 	"github.com/messageloopio/messageloop/internal/stream"
 	"github.com/messageloopio/messageloop/internal/survey"
 	"github.com/messageloopio/messageloop/internal/wire"
 	"github.com/messageloopio/messageloop/protocol"
 	clientpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/client/v2"
-	"github.com/messageloopio/messageloop/internal/proxy"
 )
 
 // Local type aliases so the git-mv'd files keep using short names (body

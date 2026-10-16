@@ -14,12 +14,12 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/messageloopio/messageloop/internal/config"
+	"github.com/messageloopio/messageloop/internal/proxy"
 	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/pkg/transport/grpc"
 	"github.com/messageloopio/messageloop/protocol"
 	serverv2 "github.com/messageloopio/messageloop/protocol/genproto/messageloop/server/v2"
 	sharedv2 "github.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2"
-	"github.com/messageloopio/messageloop/internal/proxy"
 )
 
 // The Server API key rejection semantics matrix (design §2.4), driven end to

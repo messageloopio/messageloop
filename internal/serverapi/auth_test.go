@@ -18,8 +18,8 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/messageloopio/messageloop/internal/authz"
-	sharedv2 "github.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2"
 	"github.com/messageloopio/messageloop/internal/proxy"
+	sharedv2 "github.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2"
 )
 
 // fakeAPIAuthProxy is a controllable proxy.Proxy for resolver tests: it

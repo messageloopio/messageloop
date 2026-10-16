@@ -19,8 +19,8 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/messageloopio/messageloop/internal/authz"
-	"github.com/messageloopio/messageloop/pkg/topics"
 	"github.com/messageloopio/messageloop/internal/proxy"
+	"github.com/messageloopio/messageloop/pkg/topics"
 )
 
 // The Server API key authentication chain (design §2.3): a unary interceptor
