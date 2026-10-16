@@ -241,6 +241,34 @@ Instance JSON 形态(`registry.Instance` 字段名,小写):`{"name":"acme-battle
 
 service 型后端的专属指标(`messageloop_proxy_service_*`,按 `service` 标签)与 membership Info 日志见[《部署指南》](../deployment.md#service-discovery-registry-backed-proxies)与[《可观测性指南》](05-observability.md);RPC 时长沿用既有 `messageloop_rpc_duration_seconds`(`proxy` 维度即配置 name)。
 
+## 实现 Proxy 后端（shared/proxyserver）
+
+Go 后端不必从零实现 `messageloop.proxy.v2.ProxyService` 的 9 个方法:`shared` 模块（依赖 `go get github.com/messageloopio/messageloop/shared`）提供 `shared/proxyserver` 基础框架——按能力实现接口，装配进 `proxyserver.New`，剩下的载荷转换、错误映射、id 回显、panic 兜底和未配置能力的 `Unimplemented` 应答都由框架承担：
+
+```go
+mux := proxyserver.NewRPCMux()
+mux.Use(recovery)                                   // 中间件（先注册在外层）
+mux.Handle("chat.*", "send", handleSend)            // (channel, method) 双 glob 路由
+mux.HandleMethod("chat.getHistory", handleHistory)  // 跨全部 channel 的便捷形态
+
+srv := grpc.NewServer()
+proxyserver.New(proxyserver.Options{
+    RPC:       mux,      // 未配置的能力以 Unimplemented 应答
+    Auth:      myAuth,   // Authenticate → (*UserInfo, error)
+    ACL:       myACL,    // CheckSubscribeACL / CheckPublishACL → error(拒绝)
+    Lifecycle: myHooks,  // OnConnected/OnSubscribed/OnUnsubscribed/OnDisconnected
+    APIKey:    myKeys,   // AuthenticateAPIKey → (*APIKeyInfo, error)
+}).RegisterGRPC(srv)
+```
+
+语义要点（与服务端消费方式严格对齐）：
+
+- **RPC 路由**：`RPCMux` 按 `(channel, method)` gobwas/glob 模式路由，先注册先匹配——与服务端 `proxy.Router` 的匹配语义一致；无匹配路由回内带错误 `NO_ROUTE`（`request_error`），经服务端 `FromProtoReply` 原样送达调用方。handler 返回普通 error → 内带 `INTERNAL_ERROR`/`server_error`；包成 `proxyserver.NewError(&sharedv2.Error{...})` 可携带自定义错误码。
+- **错误双通道**：RPC/鉴权/ACL/API Key 的响应带内带 `error` 字段（业务语义，直达调用方）；生命周期钩子响应无该字段，handler 失败映射为 gRPC `Internal` status（服务端按 proxy 错误处理）。ACL 拒绝即 handler 返回非 nil error（默认码 `PERMISSION_DENIED`/`acl_error`）。
+- **载荷**：`PayloadText`/`PayloadBinary`/`PayloadJSON`/`NewTextPayload`/`NewBinaryPayload`/`NewJSONPayload` 覆盖 `sharedv2.Payload` 的三态 oneof（json 变体即 `google.protobuf.Struct`）；`content_type` 取 `text/plain`/`application/octet-stream`/`application/json`，与 SDK 的 MIME 前缀判别兼容。
+
+完整可运行示例见 `sdks/go/example/proxyserver`（基于 Go SDK 的同构封装；`sdks/go` 的 `RPCMux`/handler 接口与 shared 框架语义一致）。
+
 ## RPC 参考
 
 以下各节按 `proto/messageloop/server/v2/api.proto` 中的声明顺序逐一说明。请求/响应消息的字段名一律采用 proto 中的原始名称。
