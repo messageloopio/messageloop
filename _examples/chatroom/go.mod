@@ -4,7 +4,7 @@ go 1.26.5
 
 require (
 	github.com/messageloopio/messageloop/sdks/go v0.0.0
-	github.com/messageloopio/messageloop/shared v0.2.0
+	github.com/messageloopio/messageloop/shared v1.0.0-rc.1
 	google.golang.org/grpc v1.83.2
 	google.golang.org/protobuf v1.36.12
 )
