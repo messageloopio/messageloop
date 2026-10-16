@@ -2,10 +2,15 @@
 // with the proxyserver framework from the protocol module: implement only the
 // capabilities you need, route RPC by (channel, method) patterns, and let the
 // framework handle payload conversion, error mapping and gRPC wiring.
+//
+// Pass -registry-url to additionally self-register with a MessageLoop server
+// that has registry discovery enabled (proxy[].service), so RPC traffic is
+// routed to this instance without any manual endpoint configuration.
 package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"net"
@@ -19,9 +24,20 @@ import (
 	proxy "github.com/messageloopio/messageloop/protocol/genproto/messageloop/proxy/v2"
 	sharedv2 "github.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2"
 	"github.com/messageloopio/messageloop/protocol/proxyserver"
+	"github.com/messageloopio/messageloop/protocol/registrant"
 )
 
 func main() {
+	var (
+		listenAddr       = flag.String("addr", ":9001", "gRPC listen address")
+		registryURL      = flag.String("registry-url", "", "MessageLoop admin base URL (e.g. http://127.0.0.1:8080); empty disables registration")
+		registryToken    = flag.String("registry-token", "", "admin listener bearer token (server.http.auth_token)")
+		registryService  = flag.String("registry-service", "example-backend", "registry service name; must equal proxy[].service")
+		registryID       = flag.String("registry-id", "", "instance ID (stable per process); defaults to hostname")
+		advertiseAddress = flag.String("advertise-address", "", "host:port advertised in the registry; defaults to <hostname>:<listen port>")
+	)
+	flag.Parse()
+
 	mux := proxyserver.NewRPCMux()
 
 	// Middleware runs in registration order. Panic recovery is built into
@@ -51,7 +67,7 @@ func main() {
 		},
 	}).RegisterGRPC(grpcServer)
 
-	addr := ":9001"
+	addr := *listenAddr
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		log.Fatalf("Failed to listen on %s: %v", addr, err)
@@ -64,11 +80,50 @@ func main() {
 		}
 	}()
 
+	// Self-register with the MessageLoop registry once the listener is
+	// accepting connections. The advertised address must be dialable from
+	// the MessageLoop server — a bare ":9001" is rejected by the API.
+	var reg *registrant.Registration
+	if *registryURL != "" {
+		id := *registryID
+		if id == "" {
+			id, _ = os.Hostname()
+		}
+		address := *advertiseAddress
+		if address == "" {
+			host, _ := os.Hostname()
+			_, port, _ := net.SplitHostPort(*listenAddr)
+			if port == "" {
+				port = "9001"
+			}
+			address = net.JoinHostPort(host, port)
+		}
+		var err error
+		reg, err = registrant.Register(context.Background(), registrant.Options{
+			ServerURL: *registryURL,
+			Service:   *registryService,
+			ID:        id,
+			Address:   address,
+			Token:     *registryToken,
+		})
+		if err != nil {
+			log.Fatalf("Registry registration failed: %v", err)
+		}
+		log.Printf("Registered with registry: service=%s id=%s address=%s", *registryService, id, address)
+	}
+
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 	log.Println("Shutting down proxy server...")
 	grpcServer.GracefulStop()
+	if reg != nil {
+		// Leave the routing view before the process exits so MessageLoop
+		// stops dialing this instance immediately.
+		if err := reg.Close(); err != nil {
+			log.Printf("Deregister failed: %v", err)
+		}
+	}
 	log.Println("Server stopped")
 }
 

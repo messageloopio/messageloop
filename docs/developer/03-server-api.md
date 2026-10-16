@@ -181,50 +181,63 @@ proxy:
 
 ### 注册方契约(战斗服)
 
-注册方通过 lynx `contrib/registry` 契约向 registry 写入实例记录;messageloop 只消费 `StatusPassing` 且带 `grpc` Endpoint 的实例:
+registry.enabled 时,messageloop 在 admin HTTP listener(`server.http.addr`)上内建目录 API `/registry/v1/`——**注册方与 messageloop 对话即可**,不需要访问 Redis、不需要依赖 lynx。鉴权沿用 admin listener 的 `server.http.auth_token`(G5 门保证非 loopback 绑定必带 token)。messageloop 只消费 `StatusPassing` 且带 `grpc` Endpoint 的实例:
+
+| 方法与路径 | 语义 |
+| --- | --- |
+| `POST /registry/v1/services/{service}/instances` | 注册(last-write-wins upsert);body `{"id","address","version","tags","meta"}` → 204 |
+| `PUT /registry/v1/services/{service}/instances/{id}/heartbeat` | 续期 → 204;键过期 → 404(注册方应重注册) |
+| `DELETE /registry/v1/services/{service}/instances/{id}` | 注销(幂等) → 204 |
+| `GET /registry/v1/services/{service}` | 实例列表(观测) → `{"instances":[{"id","address","version","tags","meta"}]}` |
 
 | 项 | 契约 |
 | --- | --- |
-| `Instance.Name` | 服务名,必须与 `proxy[].service` 配置一致 |
-| `Instance.ID` | **稳定实例标识**(pod 名 / 启动时生成的 UUID)。ID 参与 hash,变更即换属主,**运行期不得变更** |
-| `Instance.Endpoints` | `[{Protocol: "grpc", Address: "host:port"}]`;Address 禁止裸 `":8080"`(registry 契约),必须携带主机名或 IP |
-| `Instance.Version` / `Tags` | 版本灰度与环境隔离(`Filter.Tags` 全匹配);本期 messageloop 不按 Version 分流 |
-| 心跳 | lynx Registrar 默认每 10s 心跳,TTL 30s;心跳经 `PEXPIRE` 续命实例键 |
-| 排水注销 | graceful shutdown 先摘流量排干再 `Deregister`(目录删除);SIGKILL 兜底 = TTL 过期,实例最迟 30s 后被摘除 |
+| `service` | 必须与 `proxy[].service` 配置一致;建议单段 DNS 标签(1-63 字符,不强制) |
+| `id` | **稳定实例标识**(pod 名 / 启动时生成的 UUID)。ID 参与 hash,变更即换属主,**运行期不得变更** |
+| `address` | `host:port`,禁止裸 `":8080"`,必须携带主机名或 IP——即 messageloop 拨号的 grpc 地址 |
+| `version` / `tags` / `meta` | 版本灰度与环境隔离等自由属性,进实例列表;本期路由不消费 |
+| 心跳 | 注册方缺省每 10s 心跳;服务端 TTL 30s,心跳经 `PEXPIRE` 续期 |
+| 过期重注册 | 心跳遇 404(键过期)自动同 id 重注册——`protocol/registrant` 缺省行为,可关闭 |
+| 排水注销 | graceful shutdown 先摘流量排干再 `DELETE`(目录删除);SIGKILL 兜底 = TTL 过期,实例最迟 30s 后被摘除 |
 | 健康语义 | redis 后端**无被动探针**:崩溃即 TTL 摘除;「活而不健」(进程在但卡死)不会被摘除,由 `proxy[].timeout` 的 RPC 超时兜底——该取舍已在提案中明确接受 |
 
-### 接入示例(Go / lynx)
+### 注册示例(Go:protocol/registrant)
 
-lynx 应用三行级接入,心跳、readiness 与排水注销由 lynx 生命周期托管:
+`protocol` 模块的 `registrant` 包是注册目录 API 的官方 Go 客户端——**纯标准库**,后端服务为 proxyserver 已依赖 protocol,注册这半边零新增依赖:
 
 ```go
-import (
-    "github.com/lynx-go/lynx/contrib/registry"
-    registryredis "github.com/lynx-go/lynx/contrib/registry-redis"
-)
+import "github.com/messageloopio/messageloop/protocol/registrant"
 
-reg := registry.NewRegistrar(registryredis.New(rdb, registryredis.WithKeyPrefix("ml2:registry/")),
-    registry.WithServiceName("acme-battle"),
-    registry.WithAdvertisers(registry.GRPC(grpcServer)),
-)
-app.Register(reg)
+reg, err := registrant.Register(ctx, registrant.Options{
+    ServerURL: "http://messageloop-admin:8080", // server.http.addr(admin listener)
+    Service:   "acme-battle",                   // = proxy[].service
+    ID:        os.Getenv("POD_NAME"),           // 进程生命周期内稳定且集群唯一
+    Address:   "10.0.0.7:9001",                 // 本实例 grpc 地址(host:port)
+    Token:     adminToken,                      // server.http.auth_token,如设置
+})
+if err != nil {
+    log.Fatal(err) // 首次注册 fail-fast,由调用方决定进程去留
+}
+defer reg.Close() // 停心跳 + 注销,幂等
 ```
 
-前缀必须与 messageloop 侧 `registry.redis.key_prefix`(缺省 `ml2:registry/`)**完全一致**,否则服务端发现不到实例。
+心跳循环、404 过期重注册由客户端托管;`reg.Healthy()` 在连续 3 次心跳失败后返回最近错误,可接入 readiness 探针。完整可运行示例见 `sdks/go/example/proxyserver`(`-registry-url` 起)。
 
-`sdks/go` 按 Q5 决策**不内置 Registrar**(保持 SDK 依赖最小);非 lynx 的 Go 服务引 lynx 为库即可。
+### 非 Go 注册方:同一组 HTTP 调用
 
-### 非 Go 注册方:直写 Redis 键布局
+目录 API 是普通 HTTP,任何语言照上表四条调用即可:
 
-非 Go / 非 lynx 注册方可按 registry-redis 的键布局直写(全部键带 `registry.redis.key_prefix` 前缀,messageloop 缺省 `ml2:registry/`):
+```bash
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"id":"battle-1","address":"10.0.0.7:9001"}' \
+  http://messageloop-admin:8080/registry/v1/services/acme-battle/instances
+```
 
-| 键 / 频道 | 内容 |
-| --- | --- |
-| `instance/{service}/{id}` | `registry.Instance` 的 JSON,`SET ... EX <ttl>`(TTL 即租约;键过期即下线,崩溃实例无需人工清理) |
-| `service/{service}` | 实例 ID 的 SET 索引;过期成员由读路径惰性清理,注册时 `SADD` |
-| `events/{service}` | Pub/Sub 频道;Register / Deregister 后 `PUBLISH` 一条 `register:<id>` / `deregister:<id>`——messageloop 的 Resolver 收到即重拉快照,不解析载荷 |
+lynx 原生应用仍可直接用 lynx `contrib/registry` 的 Registrar + `app.Register(reg)`(写同一目录);键前缀须与 `registry.redis.key_prefix` 一致。
 
-Instance JSON 形态(`registry.Instance` 字段名,小写):`{"name":"acme-battle","id":"battle-abc123","version":"v1","endpoints":[{"protocol":"grpc","address":"10.0.0.7:9001"}],"status":1,"tags":[],"meta":{},"weight":100}`(`status: 1` 即 `passing`)。同一 `id` 重复注册是 last-write-wins upsert。
+### 运维注记:目录存储(排查用)
+
+目录落在 Redis,前缀 `registry.redis.key_prefix`(缺省 `ml2:registry/`):`instance/{service}/{id}` 为 Instance JSON + `SET EX 30s` 租约(键过期即下线,崩溃实例无需人工清理),`service/{service}` 为实例 ID 的 SET 索引,`events/{service}` 为 Pub/Sub 频道(注册/注销各推一条,Resolver 收到即重拉快照)。HTTP 注册写入的正是这些键——排查时直接观察即可;绕过 API 手写虽也会被 Resolver 的兜底轮询(15s)看到,但失去地址校验,不建议。
 
 ### 路由与失败语义
 
@@ -241,7 +254,7 @@ Instance JSON 形态(`registry.Instance` 字段名,小写):`{"name":"acme-battle
 
 service 型后端的专属指标(`messageloop_proxy_service_*`,按 `service` 标签)与 membership Info 日志见[《部署指南》](../deployment.md#service-discovery-registry-backed-proxies)与[《可观测性指南》](05-observability.md);RPC 时长沿用既有 `messageloop_rpc_duration_seconds`(`proxy` 维度即配置 name)。
 
-## 实现 Proxy 后端（shared/proxyserver）
+## 实现 Proxy 后端（protocol/proxyserver）
 
 Go 后端不必从零实现 `messageloop.proxy.v2.ProxyService` 的 9 个方法:`protocol` 模块（依赖 `go get github.com/messageloopio/messageloop/protocol`）提供 `protocol/proxyserver` 基础框架——按能力实现接口，装配进 `proxyserver.New`，剩下的载荷转换、错误映射、id 回显、panic 兜底和未配置能力的 `Unimplemented` 应答都由框架承担：
 

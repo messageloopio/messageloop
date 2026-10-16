@@ -262,10 +262,15 @@ Notes:
   discovery, not a cluster component. It works on a single node, with or
   without `cluster.enabled`, and each messageloop node holds its own resolver
   (independent Redis connection pool; key prefix differs from the cluster's).
-- Backends register their instances with the lynx Registrar (heartbeat every
-  10s, instance TTL 30s, deregister on graceful drain) or write the
-  `instance/{service}/{id}` JSON keys directly (layout in the developer
-  guide). A SIGKILLed instance disappears when its TTL lapses (≤ 30s).
+- Backends self-register through the **built-in directory API**: when
+  `registry.enabled`, the admin HTTP listener serves `/registry/v1/`
+  (register / heartbeat / deregister / list; guarded by
+  `server.http.auth_token` like the rest of the listener). Go backends use
+  the stdlib-only `protocol/registrant` client (heartbeat every 10s, entry
+  TTL 30s, re-register on expiry, deregister on graceful drain); other
+  languages call the same four endpoints — see the
+  [developer guide](developer/03-server-api.md#注册方契约战斗服). A SIGKILLed
+  instance disappears when its TTL lapses (≤ 30s).
 
 ### Scaling Semantics
 

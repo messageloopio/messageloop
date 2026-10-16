@@ -24,6 +24,7 @@ import (
 	"github.com/messageloopio/messageloop/internal/config"
 	mlmetrics "github.com/messageloopio/messageloop/internal/metrics"
 	proxyproxy "github.com/messageloopio/messageloop/internal/proxy"
+	"github.com/messageloopio/messageloop/internal/registryhttp"
 	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/internal/stream"
 	"github.com/messageloopio/messageloop/pkg/redisbroker"
@@ -109,7 +110,7 @@ func main() {
 		}
 
 		wsServer := newWebSocketServer(cfg, node, app.Logger())
-		adminServer := newAdminServer(cfg, node, reg)
+		adminServer := newAdminServer(cfg, node, reg, registryDisc)
 		quicServer, err := newQUICServer(cfg, node)
 		if err != nil {
 			return err
@@ -450,12 +451,13 @@ func newKCPServer(cfg *config.Config, node *runtime.Node) (*kcp.Server, error) {
 	return kcp.NewServer(opts, node)
 }
 
-// newAdminServer builds the HTTP admin server component (health + metrics).
-// When server.http.auth_token is set, every endpoint requires a matching
-// Bearer token. A non-loopback bind without a token is a config.Validate
-// error (G5 fail-closed startup gate), so no unauthenticated non-loopback
-// bind can reach runtime.
-func newAdminServer(cfg *config.Config, node *runtime.Node, reg *prometheus.Registry) *lynxhttp.Server {
+// newAdminServer builds the HTTP admin server component (health + metrics,
+// plus the registry directory API when registry discovery is enabled). When
+// server.http.auth_token is set, every endpoint requires a matching Bearer
+// token. A non-loopback bind without a token is a config.Validate error (G5
+// fail-closed startup gate), so no unauthenticated non-loopback bind can
+// reach runtime — the registry mutation endpoints lean on that same guard.
+func newAdminServer(cfg *config.Config, node *runtime.Node, reg *prometheus.Registry, registryDisc *registryredis.Client) *lynxhttp.Server {
 	adminAddr := cfg.Server.Http.Addr
 	if adminAddr == "" {
 		adminAddr = "127.0.0.1:8080"
@@ -464,6 +466,12 @@ func newAdminServer(cfg *config.Config, node *runtime.Node, reg *prometheus.Regi
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 	mux.HandleFunc("/health", node.HealthHandler())
+	if registryDisc != nil {
+		// The registry-redis client is both the write side (Registry) and
+		// the read side (Discovery) of the same directory the Resolver
+		// consumes.
+		mux.Handle("/registry/", registryhttp.New(registryDisc, registryDisc))
+	}
 	handler = mux
 	if token := cfg.Server.Http.AuthToken; token != "" {
 		handler = bearerAuthHandler(token, handler)

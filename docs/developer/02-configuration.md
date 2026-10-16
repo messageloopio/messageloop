@@ -420,7 +420,7 @@ cluster:
 
 ## registry 节
 
-`registry` 配置服务注册发现（v1.1 PR-A），是 service 型 proxy 后端（`proxy[].service`）的前置：后端实例从 Redis 解析，经事件订阅与轮询保持新鲜。`enabled: false`（含省略）时本段不做任何校验，唯一例外是耦合检查——任一 proxy 条目写了 `service` 即被 `Validate()` 拒绝（校验规则 8）。启用只意味着启动时构建发现栈（独立 Redis 客户端 + Resolver 节点单例），没有任何 service 型 proxy 消费它时是纯惰性开销；registry 与 `cluster.enabled` 完全解耦，单节点部署照常可用。
+`registry` 配置服务注册发现（v1.1 PR-A），是 service 型 proxy 后端（`proxy[].service`）的前置：后端实例从 Redis 解析，经事件订阅与轮询保持新鲜。`enabled: false`（含省略）时本段不做任何校验，唯一例外是耦合检查——任一 proxy 条目写了 `service` 即被 `Validate()` 拒绝（校验规则 8）。启用只意味着启动时构建发现栈（独立 Redis 客户端 + Resolver 节点单例），没有任何 service 型 proxy 消费它时是纯惰性开销；registry 与 `cluster.enabled` 完全解耦，单节点部署照常可用。启用还会在 admin HTTP listener（`server.http.addr`）上暴露目录 API `/registry/v1/`（注册/心跳/注销/列表，后端服务由此自注册，见[《Server API 指南》](03-server-api.md#注册方契约战斗服)）——鉴权沿用 `server.http.auth_token`，本段无新增字段。
 
 ```yaml
 registry:
