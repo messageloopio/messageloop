@@ -13,7 +13,7 @@ require (
 	github.com/lynx-go/lynx/contrib/registry-redis v1.19.0
 	github.com/lynx-go/lynx/contrib/zap v1.19.0
 	github.com/lynx-go/x v0.1.0
-	github.com/messageloopio/messageloop/shared v0.2.0
+	github.com/messageloopio/messageloop/shared v1.0.0-rc.1
 	github.com/prometheus/client_golang v1.24.1
 	github.com/prometheus/client_model v0.6.3
 	github.com/quic-go/quic-go v0.62.0
