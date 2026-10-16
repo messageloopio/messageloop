@@ -4,7 +4,7 @@
 
 Server API（服务端 API，曾称 Admin API / 管理 API）是 MessageLoop 服务端对外提供的服务端 gRPC 接口，用于以服务端身份执行发布、断连、订阅管理、在线状态查询、历史消息查询等操作。它与客户端协议（见 [../protocol.md](../protocol.md)）面向不同的使用方：客户端协议是客户端通过 WebSocket 或 gRPC 流式通道与服务器通信的协议；Server API 则是运维工具、内部服务与 SDK 后端集成使用的独立 gRPC 服务。
 
-Server API 定义于 `protocol/server/v2/api.proto`，服务名为 `APIService`，完整限定名（fully-qualified name）为：
+Server API 定义于 `proto/messageloop/server/v2/api.proto`，服务名为 `APIService`，完整限定名（fully-qualified name）为：
 
 ```
 messageloop.server.v2.APIService
@@ -131,8 +131,8 @@ proxy:
 
 ```bash
 grpcurl \
-  -import-path ./protocol \
-  -proto server/v2/api.proto \
+  -import-path ./proto \
+  -proto messageloop/server/v2/api.proto \
   -H "authorization: Bearer <token>" \
   -plaintext \
   -d '{"channel": "dev:chat.general"}' \
@@ -144,8 +144,8 @@ API Key 凭证也可用 `x-api-key` 头携带（`authorization: Bearer` 优先�
 
 ```bash
 grpcurl \
-  -import-path ./protocol \
-  -proto server/v2/api.proto \
+  -import-path ./proto \
+  -proto messageloop/server/v2/api.proto \
   -H "x-api-key: <api-key>" \
   -plaintext \
   -d '{"channel": "dev:chat.general"}' \
@@ -153,7 +153,7 @@ grpcurl \
   messageloop.server.v2.APIService/GetPresence
 ```
 
-- `-import-path ./protocol` 指向 `protocol/` 目录，使 `server/v2/api.proto` 中的 `shared/v2/errors.proto`、`shared/v2/types.proto` 等 import 可以解析；
+- `-import-path ./proto` 指向 buf 模块根 `proto/` 目录，使 `messageloop/server/v2/api.proto` 中的 `messageloop/shared/v2/errors.proto`、`messageloop/shared/v2/types.proto` 等 import 可以解析；
 - 启用 TLS 时去掉 `-plaintext`，并按需传入 `-cacert <ca.pem>`（使用自签证书时也可用 `-insecure`）；
 - 请求体使用 proto3 JSON 映射，字段名为 lowerCamelCase（例如 `request_id` → `requestId`、`timeout_ms` → `timeoutMs`）。
 
@@ -243,7 +243,7 @@ service 型后端的专属指标(`messageloop_proxy_service_*`,按 `service` 标
 
 ## RPC 参考
 
-以下各节按 `protocol/server/v2/api.proto` 中的声明顺序逐一说明。请求/响应消息的字段名一律采用 proto 中的原始名称。
+以下各节按 `proto/messageloop/server/v2/api.proto` 中的声明顺序逐一说明。请求/响应消息的字段名一律采用 proto 中的原始名称。
 
 ### Publish
 
@@ -545,7 +545,7 @@ Server API 的错误分两层：协议层错误消息与 gRPC 状态码。
 
 ### 错误消息（`messageloop.shared.v2.Error`）
 
-`protocol/shared/v2/errors.proto` 中只声明了一个消息类型：
+`proto/messageloop/shared/v2/errors.proto` 中只声明了一个消息类型：
 
 ```protobuf
 message Error {
@@ -578,7 +578,7 @@ Server API 不定义自定义状态码（自定义 code 仅存在于 `shared.v2.
 
 ## 示例
 
-以下示例假设Server API 端口监听在 `127.0.0.1:9091`，且已配置 `auth_tokens`（示例中用 `<token>` 占位）。服务器未注册 gRPC 反射，所有命令都必须携带 `-import-path ./protocol -proto server/v2/api.proto`。JSON 载荷使用 proto3 JSON 映射的 lowerCamelCase 字段名；`binary` 载荷在 JSON 中以 base64 表示。频道名示例均带命名空间前缀（`dev:`）。
+以下示例假设Server API 端口监听在 `127.0.0.1:9091`，且已配置 `auth_tokens`（示例中用 `<token>` 占位）。服务器未注册 gRPC 反射，所有命令都必须携带 `-import-path ./proto -proto messageloop/server/v2/api.proto`。JSON 载荷使用 proto3 JSON 映射的 lowerCamelCase 字段名；`binary` 载荷在 JSON 中以 base64 表示。频道名示例均带命名空间前缀（`dev:`）。
 
 ### Publish
 
@@ -586,8 +586,8 @@ Server API 不定义自定义状态码（自定义 code 仅存在于 `shared.v2.
 
 ```bash
 grpcurl \
-  -import-path ./protocol \
-  -proto server/v2/api.proto \
+  -import-path ./proto \
+  -proto messageloop/server/v2/api.proto \
   -H "authorization: Bearer <token>" \
   -plaintext \
   -d '{
@@ -606,8 +606,8 @@ grpcurl \
 
 ```bash
 grpcurl \
-  -import-path ./protocol \
-  -proto server/v2/api.proto \
+  -import-path ./proto \
+  -proto messageloop/server/v2/api.proto \
   -plaintext \
   -H "authorization: Bearer <token>" \
   -d '{
@@ -625,8 +625,8 @@ grpcurl \
 
 ```bash
 grpcurl \
-  -import-path ./protocol \
-  -proto server/v2/api.proto \
+  -import-path ./proto \
+  -proto messageloop/server/v2/api.proto \
   -H "authorization: Bearer <token>" \
   -plaintext \
   -d '{
@@ -644,8 +644,8 @@ grpcurl \
 
 ```bash
 grpcurl \
-  -import-path ./protocol \
-  -proto server/v2/api.proto \
+  -import-path ./proto \
+  -proto messageloop/server/v2/api.proto \
   -H "authorization: Bearer <token>" \
   -plaintext \
   -d '{
@@ -664,8 +664,8 @@ grpcurl \
 
 ```bash
 grpcurl \
-  -import-path ./protocol \
-  -proto server/v2/api.proto \
+  -import-path ./proto \
+  -proto messageloop/server/v2/api.proto \
   -H "authorization: Bearer <token>" \
   -plaintext \
   -d '{
@@ -691,8 +691,8 @@ grpcurl \
 
 ```bash
 grpcurl \
-  -import-path ./protocol \
-  -proto server/v2/api.proto \
+  -import-path ./proto \
+  -proto messageloop/server/v2/api.proto \
   -H "authorization: Bearer <token>" \
   -plaintext \
   -d '{
@@ -707,8 +707,8 @@ grpcurl \
 
 ```bash
 grpcurl \
-  -import-path ./protocol \
-  -proto server/v2/api.proto \
+  -import-path ./proto \
+  -proto messageloop/server/v2/api.proto \
   -H "authorization: Bearer <token>" \
   -plaintext \
   -d '{
@@ -723,8 +723,8 @@ grpcurl \
 
 ```bash
 grpcurl \
-  -import-path ./protocol \
-  -proto server/v2/api.proto \
+  -import-path ./proto \
+  -proto messageloop/server/v2/api.proto \
   -H "authorization: Bearer <token>" \
   -plaintext \
   -d '{"channel": "dev:chat.general"}' \
@@ -736,8 +736,8 @@ grpcurl \
 
 ```bash
 grpcurl \
-  -import-path ./protocol \
-  -proto server/v2/api.proto \
+  -import-path ./proto \
+  -proto messageloop/server/v2/api.proto \
   -H "authorization: Bearer <token>" \
   -plaintext \
   -d '{"channel": "dev:chat.general", "since": {"offset": 42}, "limit": 100}' \
@@ -751,8 +751,8 @@ grpcurl \
 
 ```bash
 grpcurl \
-  -import-path ./protocol \
-  -proto server/v2/api.proto \
+  -import-path ./proto \
+  -proto messageloop/server/v2/api.proto \
   -H "authorization: Bearer <token>" \
   -plaintext \
   -d '{}' \

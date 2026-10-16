@@ -14,8 +14,8 @@ import (
 
 	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/pkg/transport/grpc"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
+	serverv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/server/v2"
 )
 
 func startPreparedServer(t *testing.T, server *grpc.Server) {

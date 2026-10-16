@@ -26,7 +26,7 @@
 | `internal/serverapi/` | Server API（`server.go`、`api_handler.go`） |
 | `cmd/server/` | 服务端入口 `main.go`、gRPC 启动预检 `runtime.go`、环境变量覆盖 `envconfig.go`，基于 `lynx` 框架 |
 | `config/` | 配置结构体定义与校验（`config.go`） |
-| `protocol/` | Protobuf 源文件（单一 buf module），下分 `shared/v2/`、`client/v2/`、`server/v2/`、`proxy/v2/` |
+| `proto/messageloop/` | Protobuf 源文件（单一 buf module），下分 `shared/v2/`、`client/v2/`、`server/v2/`、`proxy/v2/` |
 | `shared/` | 独立 Go 模块 `github.com/messageloopio/messageloop/shared`；`genproto/` 为生成代码，`marshaler.go` 为 JSON/Protobuf 序列化器，`streamframe.go` 为 QUIC/KCP 的流帧与 ALPN 常量 |
 | `pkg/transport/ws/` | WebSocket 传输实现（含集成测试） |
 | `pkg/transport/grpc/` | gRPC 流式传输（客户端流 `client_server.go`、公共准备逻辑 `server.go`） |
@@ -116,7 +116,7 @@ CI 会以钉版 buf 执行 `buf generate` 并校验零 diff；协议代码变更
 
 ## Protobuf 工作流
 
-协议源文件位于 `protocol/`，该目录是 buf v2 配置（`buf.yaml`）的模块根：
+协议源文件位于 `proto/messageloop/<domain>/<version>/`，目录结构镜像 `messageloop.*` proto 包命名空间；buf v2 配置（`buf.yaml`）的模块根是其上层 `proto/`：
 
 ```yaml
 version: v2
@@ -124,7 +124,7 @@ deps:
   - buf.build/googleapis/googleapis
   - buf.build/bufbuild/protovalidate
 modules:
-  - path: protocol
+  - path: proto
 lint:
   use: [STANDARD]
 breaking:
@@ -143,12 +143,12 @@ breaking:
 
 执行 `task generate-protocol`（即 `buf generate`）后：
 
-- **Go 代码**生成在 `shared/genproto/<pkg>/<version>/`（`.pb.go`、`*_grpc.pb.go`、`.swagger.json`），如 `client/v2`、`proxy/v2`、`server/v2`、`shared/v2`。Go 侧导入路径为 `github.com/messageloopio/messageloop/shared/genproto/<pkg>/<version>`，包别名见[代码风格与约定](#代码风格与约定)。
-- **TypeScript 代码**生成在 `sdks/ts/src/proto/<pkg>/<version>/`，使用 bufbuild/es 远程插件（仓库未安装 `@bufbuild/protoc-gen-es`）。
+- **Go 代码**生成在 `shared/genproto/messageloop/<pkg>/<version>/`（`.pb.go`、`*_grpc.pb.go`、`.swagger.json`），如 `messageloop/client/v2`、`messageloop/proxy/v2`、`messageloop/server/v2`、`messageloop/shared/v2`。Go 侧导入路径为 `github.com/messageloopio/messageloop/shared/genproto/messageloop/<pkg>/<version>`，包别名见[代码风格与约定](#代码风格与约定)。
+- **TypeScript 代码**生成在 `sdks/ts/src/proto/messageloop/<pkg>/<version>/`，使用 bufbuild/es 远程插件（仓库未安装 `@bufbuild/protoc-gen-es`）。
 
 ### 新增协议消息或字段的流程
 
-1. 编辑 `protocol/<domain>/<version>/xxx.proto`，保持字段编号向后兼容（`buf breaking` 按 `FILE` 级别检查）。
+1. 编辑 `proto/messageloop/<domain>/<version>/xxx.proto`，保持字段编号向后兼容（`buf breaking` 按 `FILE` 级别检查）。
 2. 运行 `task generate-protocol`。
 3. 检查 `shared/genproto` 下 Git diff，确认 Go 生成代码与 Swagger 文件符合预期。
 4. 检查 `sdks/ts/src/proto` 下 TS 生成代码 diff；若 SDK 需暴露新类型，更新 `sdks/ts/src/` 中的手写封装并补充测试。
@@ -162,10 +162,10 @@ breaking:
 
 导入按三组排列，组间空行分隔：标准库、第三方依赖、本地（本项目）导入。Protobuf 包统一使用短别名，与各 proto 文件 `go_package` 选项的包短名一致：
 
-- `clientpb`：`github.com/messageloopio/messageloop/shared/genproto/client/v2`
-- `serverv2`：`github.com/messageloopio/messageloop/shared/genproto/server/v2`
-- `sharedv2`：`github.com/messageloopio/messageloop/shared/genproto/shared/v2`
-- `proxypb`：`github.com/messageloopio/messageloop/shared/genproto/proxy/v2`
+- `clientpb`：`github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2`
+- `serverv2`：`github.com/messageloopio/messageloop/shared/genproto/messageloop/server/v2`
+- `sharedv2`：`github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2`
+- `proxypb`：`github.com/messageloopio/messageloop/shared/genproto/messageloop/proxy/v2`
 
 ### 命名
 

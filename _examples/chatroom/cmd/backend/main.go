@@ -24,7 +24,7 @@ import (
 
 	"github.com/messageloopio/messageloop/_examples/chatroom/internal/chatroom"
 	messageloopgo "github.com/messageloopio/messageloop/sdks/go"
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
 )
 
 // apiAddr points at the demo server's api gRPC API; align with config.yaml.

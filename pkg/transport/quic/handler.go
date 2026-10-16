@@ -14,8 +14,8 @@ import (
 	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/internal/session"
 	"github.com/messageloopio/messageloop/shared"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
 )
 
 // streamAcceptTimeout bounds how long the server waits for the client to

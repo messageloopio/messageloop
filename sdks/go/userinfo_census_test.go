@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v2"
+	proxypb "github.com/messageloopio/messageloop/shared/genproto/messageloop/proxy/v2"
 )
 
 // normalizeFieldName collapses a field name to a comparison key that is

@@ -17,8 +17,8 @@ import (
 
 	"github.com/messageloopio/messageloop/internal/protocol"
 	"github.com/messageloopio/messageloop/internal/session"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
 )
 
 // fakeBidiStream is an in-memory gRPC bidi stream that records concurrent

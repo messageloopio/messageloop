@@ -5,7 +5,7 @@ deps:
   - buf.build/googleapis/googleapis
   - buf.build/bufbuild/protovalidate
 modules:
-  - path: protocol
+  - path: proto
 lint:
   use:
     - STANDARD

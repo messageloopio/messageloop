@@ -1,5 +1,5 @@
 import { fromJson, toJson } from "@bufbuild/protobuf";
-import { InboundMessage, InboundMessageSchema, OutboundMessage, OutboundMessageSchema } from "../../proto/client/v2/service_pb";
+import { InboundMessage, InboundMessageSchema, OutboundMessage, OutboundMessageSchema } from "../../proto/messageloop/client/v2/service_pb";
 import type { Codec } from "./codec";
 
 /**

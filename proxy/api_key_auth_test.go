@@ -12,8 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
-	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v2"
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
+	proxypb "github.com/messageloopio/messageloop/shared/genproto/messageloop/proxy/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
 )
 
 // Compile-time interface completeness: both transports must keep implementing

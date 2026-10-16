@@ -19,7 +19,7 @@ import (
 
 	"github.com/messageloopio/messageloop/internal/authz"
 	"github.com/messageloopio/messageloop/proxy"
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
 )
 
 // fakeAPIAuthProxy is a controllable proxy.Proxy for resolver tests: it

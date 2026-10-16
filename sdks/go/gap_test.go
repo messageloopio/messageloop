@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
 )
 
 // TestSDK_GapNoticeDispatchesWithoutTouchingCursor verifies C6: an inbound

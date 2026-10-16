@@ -1,6 +1,6 @@
 # Client Protocol Reference
 
-This document describes the client protocol of the current standalone version (KD-K31); envelope definitions live in `protocol/client/v2`. The server-side Server API (gRPC) is likewise `server.v2` (switched in PR-KA-D6; the earlier B3 keep-v1 decision is reversed).
+This document describes the client protocol of the current standalone version (KD-K31); envelope definitions live in `proto/messageloop/client/v2`. The server-side Server API (gRPC) is likewise `server.v2` (switched in PR-KA-D6; the earlier B3 keep-v1 decision is reversed).
 
 MessageLoop uses a bidirectional message protocol over WebSocket, gRPC streaming, or QUIC. All messages are wrapped in `InboundMessage` (client → server) and `OutboundMessage` (server → client) envelopes.
 
@@ -499,7 +499,7 @@ Errors are returned as `Error` messages:
 }
 ```
 
-Common error codes (this table mirrors the `Error.code` comment in `protocol/shared/v2/errors.proto`; keep both in sync):
+Common error codes (this table mirrors the `Error.code` comment in `proto/messageloop/shared/v2/errors.proto`; keep both in sync):
 
 | Code | Type | Description |
 | --- | --- | --- |

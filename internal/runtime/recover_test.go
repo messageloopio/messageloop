@@ -14,8 +14,8 @@ import (
 
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/shared"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
 )
 
 // countingRecoveryBroker wraps fakeEpochHistoryBroker with a History call

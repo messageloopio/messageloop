@@ -19,7 +19,7 @@ import (
 	"github.com/messageloopio/messageloop/internal/survey"
 	"github.com/messageloopio/messageloop/proxy"
 	"github.com/messageloopio/messageloop/shared"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
 )
 
 // Local type aliases so the git-mv'd files keep using short names (body

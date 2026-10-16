@@ -1,5 +1,5 @@
 import { create } from "@bufbuild/protobuf";
-import { InboundMessageSchema } from "../src/proto/client/v2/service_pb";
+import { InboundMessageSchema } from "../src/proto/messageloop/client/v2/service_pb";
 import { JSONCodec, jsonCodec, ProtobufCodec, protobufCodec } from "../src/transport/codec";
 
 describe("Codec", () => {

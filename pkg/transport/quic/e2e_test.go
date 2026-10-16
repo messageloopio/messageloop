@@ -14,8 +14,8 @@ import (
 	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/pkg/transport/quic"
 	"github.com/messageloopio/messageloop/shared"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
 )
 
 func startTestQUICServer(t *testing.T, node *runtime.Node) *quic.Server {

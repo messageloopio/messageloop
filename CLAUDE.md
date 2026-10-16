@@ -162,7 +162,7 @@ The system abstracts connection handling via the **Transport** interface (`inter
 
 ### Protocol
 
-Client protocol messages defined in `shared/genproto/client/v2/`:
+Client protocol messages defined in `shared/genproto/messageloop/client/v2/`:
 - `InboundMessage` - Client-to-server with oneof envelope: Connect, Subscribe, Publish, RpcRequest, Survey, Ping, etc.
 - `OutboundMessage` - Server-to-client with oneof envelope: Connected, SubscribeAck, PublishAck, Publication, RpcReply, SurveyResult, etc.
 - `Message` - Wrapper containing Channel, Id, Offset, and Payload
@@ -201,7 +201,7 @@ Typed `Disconnect` errors (`internal/protocol/disconnect.go`) signal intentional
 - `cmd/server/` - Server entry point using `lynx` framework
 - `config/` - Configuration structures
 - `shared/` - Separate Go module (`github.com/messageloopio/messageloop/shared`) with shared marshalers and generated protobuf Go code
-- `protocol/` - Protobuf definitions (source)
+- `proto/messageloop/` - Protobuf definitions (source)
 - `genproto/` - Generated protobuf (local replace to shared/)
 - `pkg/transport/ws/` - WebSocket transport implementation
 - `pkg/transport/grpc/` - gRPC streaming transport implementation

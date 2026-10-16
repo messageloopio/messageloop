@@ -108,7 +108,7 @@ export interface GapNotice {
   /** The exact channel the gap was detected on. */
   channel: string;
   /** Why the gap exists (e.g. GAP_REASON_MIDDLE / GAP_REASON_REPLAY_TRUNCATED). */
-  gapReason: import("../proto/shared/v2/types_pb").GapReason;
+  gapReason: import("../proto/messageloop/shared/v2/types_pb").GapReason;
   /** Broker epoch of the last known safe position. */
   streamEpoch: string;
   /** Last known safe offset; undefined when the server did not know one. */

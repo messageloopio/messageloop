@@ -14,7 +14,7 @@ import (
 // envelope (see docs/v2/tasks/pr-ka-d7-error-codes.md §3.1/§3.2 for the
 // emission-site census). When you add, rename or remove an emission-site
 // code, update this list, the Error.code comment in
-// protocol/shared/v2/errors.proto and docs/protocol.md#Error-Codes in the
+// proto/messageloop/shared/v2/errors.proto and docs/protocol.md#Error-Codes in the
 // same change. Cluster command-bus codes and SDK-side codes are internal
 // protocols and stay out of this table.
 var productionErrorCodes = []string{
@@ -50,10 +50,10 @@ var errorCodeToken = regexp.MustCompile(`[A-Z][A-Z0-9_]{3,}`)
 
 // TestWellKnownErrorCodeTable guards the single error-code table: every
 // production Error.code must be listed in the well-known table carried by the
-// Error.code comment in protocol/shared/v2/errors.proto, and the table must
+// Error.code comment in proto/messageloop/shared/v2/errors.proto, and the table must
 // not list codes nothing emits.
 func TestWellKnownErrorCodeTable(t *testing.T) {
-	raw, err := os.ReadFile("protocol/shared/v2/errors.proto")
+	raw, err := os.ReadFile("proto/messageloop/shared/v2/errors.proto")
 	require.NoError(t, err)
 	content := string(raw)
 

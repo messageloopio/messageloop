@@ -16,7 +16,7 @@ import (
 	"github.com/messageloopio/messageloop/internal/stream"
 	"github.com/messageloopio/messageloop/internal/survey"
 	"github.com/messageloopio/messageloop/proxy"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
 )
 
 // nodeRuntime adapts *Node onto session.Runtime without exporting Node methods

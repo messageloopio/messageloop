@@ -12,7 +12,7 @@ import (
 
 	"github.com/lynx-go/x/log"
 
-	proxypb "github.com/messageloopio/messageloop/shared/genproto/proxy/v2"
+	proxypb "github.com/messageloopio/messageloop/shared/genproto/messageloop/proxy/v2"
 )
 
 // GRPCProxy implements Proxy using gRPC transport.

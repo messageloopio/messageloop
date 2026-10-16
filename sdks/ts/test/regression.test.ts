@@ -1,5 +1,5 @@
 import { create, toBinary } from "@bufbuild/protobuf";
-import { OutboundMessageSchema } from "../src/proto/client/v2/service_pb";
+import { OutboundMessageSchema } from "../src/proto/messageloop/client/v2/service_pb";
 import { MessageLoopClient } from "../src/client/client";
 import { buildClientOptions } from "../src/client/options";
 import { WebSocketTransport } from "../src/transport/websocket";

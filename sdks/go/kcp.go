@@ -13,7 +13,7 @@ import (
 	kcpgo "github.com/xtaci/kcp-go/v5"
 
 	"github.com/messageloopio/messageloop/shared"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
 )
 
 const (

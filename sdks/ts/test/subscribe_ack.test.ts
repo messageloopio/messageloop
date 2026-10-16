@@ -4,7 +4,7 @@
 // semantics. Mirrors the Go SDK tests in sdks/go/subscribe_ack_test.go.
 
 import { create } from "@bufbuild/protobuf";
-import { OutboundMessageSchema } from "../src/proto/client/v2/service_pb";
+import { OutboundMessageSchema } from "../src/proto/messageloop/client/v2/service_pb";
 import { MessageLoopClient } from "../src/client/client";
 import { buildClientOptions, setRPCTimeout } from "../src/client/options";
 

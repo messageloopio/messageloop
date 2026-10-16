@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
 )
 
 // ServerAPIRuntime is the Node slice the Server API handlers depend on

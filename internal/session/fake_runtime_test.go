@@ -16,7 +16,7 @@ import (
 	"github.com/messageloopio/messageloop/internal/survey"
 	"github.com/messageloopio/messageloop/pkg/topics"
 	"github.com/messageloopio/messageloop/proxy"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
 )
 
 // fakeRuntime is the in-package Runtime stub (PR-KA-D14 §3.6). Default

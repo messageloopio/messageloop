@@ -14,7 +14,7 @@ import (
 	"github.com/messageloopio/messageloop/internal/authz"
 	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/pkg/transport/grpc"
-	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
+	serverv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/server/v2"
 )
 
 // PrepareServer pre-binds a listener and registers the Server API behind

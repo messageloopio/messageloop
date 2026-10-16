@@ -1,6 +1,6 @@
 import { create } from "@bufbuild/protobuf";
-import { PayloadSchema } from "../proto/shared/v2/types_pb";
-import type { Payload } from "../proto/shared/v2/types_pb";
+import { PayloadSchema } from "../proto/messageloop/shared/v2/types_pb";
+import type { Payload } from "../proto/messageloop/shared/v2/types_pb";
 
 /**
  * Data type discriminator

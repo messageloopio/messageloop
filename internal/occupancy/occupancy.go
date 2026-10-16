@@ -8,7 +8,7 @@ import (
 	"context"
 	"errors"
 
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
 )
 
 // OccupancyEvent is the LiveBus payload for join/leave. Gen is node-to-node

@@ -9,8 +9,8 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 
-	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
+	serverv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/server/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
 )
 
 // DefaultAPIAddr is where the demo server exposes its Server API (server.api.addr).

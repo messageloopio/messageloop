@@ -1,5 +1,5 @@
-import type { OutboundMessage } from "../proto/client/v2/service_pb";
-import type { SurveyRequest } from "../proto/client/v2/service_pb";
+import type { OutboundMessage } from "../proto/messageloop/client/v2/service_pb";
+import type { SurveyRequest } from "../proto/messageloop/client/v2/service_pb";
 import type { ReceivedMessage, Message } from "../message";
 import type { ChannelOrSpec } from "../message";
 import type { Transport } from "../transport/transport";

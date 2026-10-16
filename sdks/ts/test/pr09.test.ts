@@ -16,7 +16,7 @@
 // | user_id        | metadata.entries["user_id"]                 | 同                                                             |
 
 import { create } from "@bufbuild/protobuf";
-import { OutboundMessageSchema } from "../src/proto/client/v2/service_pb";
+import { OutboundMessageSchema } from "../src/proto/messageloop/client/v2/service_pb";
 import { MessageLoopClient } from "../src/client/client";
 import { buildClientOptions } from "../src/client/options";
 import { createTextMessage } from "../src/message";

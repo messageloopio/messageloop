@@ -5,7 +5,7 @@ import (
 
 	"google.golang.org/protobuf/types/known/structpb"
 
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
 )
 
 // DisconnectError is a typed disconnect error signaled by the server. The

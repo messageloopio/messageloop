@@ -13,8 +13,8 @@ import (
 	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/internal/session"
 	"github.com/messageloopio/messageloop/shared"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
 )
 
 // Handler upgrades HTTP requests to WebSocket connections and binds each

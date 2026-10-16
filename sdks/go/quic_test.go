@@ -12,7 +12,7 @@ import (
 	"github.com/quic-go/quic-go"
 
 	"github.com/messageloopio/messageloop/shared"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
 )
 
 func TestQUICTLSConfig_InsecureSkipVerify(t *testing.T) {

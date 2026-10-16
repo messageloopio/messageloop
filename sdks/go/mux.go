@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
 )
 
 // RPCHandlerFunc is the function signature for RPC handlers.

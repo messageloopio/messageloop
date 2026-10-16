@@ -10,8 +10,8 @@ import (
 
 	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/pkg/transport/grpc"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
 )
 
 // TestGRPC_ClientStream_PubSub verifies the full gRPC client-streaming pub/sub

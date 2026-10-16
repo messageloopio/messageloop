@@ -14,8 +14,8 @@ import (
 	"github.com/messageloopio/messageloop/internal/stream"
 	"github.com/messageloopio/messageloop/pkg/redisbroker"
 	"github.com/messageloopio/messageloop/shared"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
 )
 
 // cluster_v1_e2e_test.go covers the four PR-10 cluster paths: admin

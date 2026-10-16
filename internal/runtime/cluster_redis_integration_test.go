@@ -26,9 +26,9 @@ import (
 	"github.com/messageloopio/messageloop/pkg/redisbroker"
 	"github.com/messageloopio/messageloop/proxy"
 	"github.com/messageloopio/messageloop/shared"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
+	serverv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/server/v2"
+	sharedpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
 )
 
 const clusterRedisIntegrationDB = 15

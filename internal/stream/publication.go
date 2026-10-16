@@ -1,7 +1,7 @@
 package stream
 
 import (
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
 )
 
 // PublicationFromPayloadV2 converts a shared.v2 payload envelope into a

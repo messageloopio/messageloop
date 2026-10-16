@@ -1,7 +1,7 @@
 package messageloopgo
 
 import (
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
 )
 
 // PresenceInfo describes a single presence entry on a channel.

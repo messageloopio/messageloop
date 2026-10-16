@@ -7,8 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
 )
 
 // precheckClass tells the census test whether an InboundMessage envelope
@@ -28,7 +28,7 @@ type precheckEntry struct {
 
 // precheckEnvelopeRegistry is the G1 census table: every InboundMessage
 // envelope oneof variant (proto field name) must be registered here, covered
-// or exempt. When you add a variant to protocol/client/v2/service.proto,
+// or exempt. When you add a variant to proto/messageloop/client/v2/service.proto,
 // register it in this table in the same change — the census test fails on an
 // unregistered variant, so a new channel-carrying message cannot silently
 // skip the namespace precheck (same idiom as error_codes_test.go).

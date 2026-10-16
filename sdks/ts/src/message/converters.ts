@@ -15,10 +15,10 @@ import {
   SurveyReplySchema,
   SurveyRequestSchema,
   PresenceQuerySchema,
-} from "../proto/client/v2/service_pb";
+} from "../proto/messageloop/client/v2/service_pb";
 
-import { PayloadSchema, MetadataSchema } from "../proto/shared/v2/types_pb";
-import { ErrorSchema } from "../proto/shared/v2/errors_pb";
+import { PayloadSchema, MetadataSchema } from "../proto/messageloop/shared/v2/types_pb";
+import { ErrorSchema } from "../proto/messageloop/shared/v2/errors_pb";
 
 import type {
   InboundMessage,
@@ -34,8 +34,8 @@ import type {
   SurveyAnswer as SurveyAnswerPB,
   GapNotice as GapNoticePB,
   Subscription,
-} from "../proto/client/v2/service_pb";
-import type { Payload, Metadata } from "../proto/shared/v2/types_pb";
+} from "../proto/messageloop/client/v2/service_pb";
+import type { Payload, Metadata } from "../proto/messageloop/shared/v2/types_pb";
 
 import type {
   SubscriptionSpec,
@@ -540,5 +540,5 @@ export function extractRpcReply(reply: RpcReply): {
 
 // Re-export types that might be needed
 export { create };
-export type { InboundMessage, OutboundMessage, Message as ProtoMessage, Publication, Publish, RpcRequest, RpcReply, Subscription } from "../proto/client/v2/service_pb";
-export type { Payload, Metadata } from "../proto/shared/v2/types_pb";
+export type { InboundMessage, OutboundMessage, Message as ProtoMessage, Publication, Publish, RpcRequest, RpcReply, Subscription } from "../proto/messageloop/client/v2/service_pb";
+export type { Payload, Metadata } from "../proto/messageloop/shared/v2/types_pb";

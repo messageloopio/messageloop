@@ -20,8 +20,8 @@ import (
 	"github.com/messageloopio/messageloop/internal/session"
 	"github.com/messageloopio/messageloop/internal/stream"
 	"github.com/messageloopio/messageloop/shared"
-	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
+	serverv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/server/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
 )
 
 const bufSize = 1024 * 1024

@@ -15,7 +15,7 @@ import (
 	"github.com/messageloopio/messageloop/internal/runtime"
 	ws "github.com/messageloopio/messageloop/pkg/transport/ws"
 	"github.com/messageloopio/messageloop/shared"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
 )
 
 func startTestWSServer(t *testing.T, node *runtime.Node) *httptest.Server {

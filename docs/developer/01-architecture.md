@@ -543,7 +543,7 @@ Occupancy 事件不是 Publication（走 broker 的实时 `occupancy` 消息类�
 | cmd/server/ | 可执行入口：`main.go`（装配与监听器）、`runtime.go`（gRPC 预绑定与启动顺序）、`envconfig.go`（`MESSAGELOOP_*` 环境变量覆盖） |
 | config/ | 配置结构（`config.go`）与校验 |
 | shared/ | 独立 Go 模块：marshaler 实现（`marshaler.go`）、流帧与 ALPN 常量（`streamframe.go`）与生成的 protobuf 代码（`shared/genproto/`） |
-| protocol/ | protobuf 源定义（client/、server/、shared/、proxy/ 四域，单一 buf module） |
+| proto/ | buf module 根；protobuf 源定义在 `proto/messageloop/`（client/、server/、shared/、proxy/ 四域，目录镜像 `messageloop.*` 包命名空间） |
 | pkg/transport/ws/ | WebSocket 传输：`server.go`、`handler.go`、`transport.go` |
 | pkg/transport/grpc/ | gRPC 流传输：`client_server.go`、`server.go`、`handler.go`、`transport.go`、`codec.go` |
 | pkg/transport/quic/ | 可选 QUIC 传输：`server.go`、`handler.go`、`tls.go`、`transport.go` |

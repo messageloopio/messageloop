@@ -21,7 +21,7 @@ import (
 	"github.com/messageloopio/messageloop/internal/occupancy"
 	"github.com/messageloopio/messageloop/internal/stream"
 	"github.com/messageloopio/messageloop/pkg/topics"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
 )
 
 // newTestRedisBroker builds a redisBroker without any Redis connection; only

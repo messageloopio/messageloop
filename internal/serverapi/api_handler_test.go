@@ -22,9 +22,9 @@ import (
 	"github.com/messageloopio/messageloop/internal/session"
 	"github.com/messageloopio/messageloop/internal/stream"
 	"github.com/messageloopio/messageloop/shared"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
+	serverv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/server/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
 )
 
 // captureTransport 捕获客户端写出的所有消息（会话组合用例用）。

@@ -15,9 +15,9 @@ import (
 	"github.com/messageloopio/messageloop/internal/stream"
 	"github.com/messageloopio/messageloop/internal/survey"
 	"github.com/messageloopio/messageloop/pkg/topics"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/client/v2"
-	serverv2 "github.com/messageloopio/messageloop/shared/genproto/server/v2"
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/shared/v2"
+	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
+	serverv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/server/v2"
+	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
 )
 
 type apiServiceHandler struct {

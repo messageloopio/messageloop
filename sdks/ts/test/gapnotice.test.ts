@@ -3,8 +3,8 @@
 // "Unknown message type" error path nor the channel cursor.
 
 import { create } from "@bufbuild/protobuf";
-import { OutboundMessageSchema } from "../src/proto/client/v2/service_pb";
-import { GapReason } from "../src/proto/shared/v2/types_pb";
+import { OutboundMessageSchema } from "../src/proto/messageloop/client/v2/service_pb";
+import { GapReason } from "../src/proto/messageloop/shared/v2/types_pb";
 import { MessageLoopClient } from "../src/client/client";
 import { buildClientOptions } from "../src/client/options";
 import {
