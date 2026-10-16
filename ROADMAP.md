@@ -7,7 +7,7 @@ MessageLoop 是双向实时 Messaging Platform，主场景是 **IM、Chat Room�
 | 里程碑 | 状态 | 目标 |
 | --- | --- | --- |
 | **v0.2 preview** | 当前主干 | 内核可用：双传输、通配、Connect 恢复、session takeover、Admin Survey |
-| **v1.0** | 设计已批准，待实现 | 四场景产品闭环（见下表七缺口） |
+| **v1.0** | 七缺口已实现（PR-01–PR-10 全部合并，2026-08 终验；发版门禁 2026-10-15 复核全绿） | 四场景产品闭环（见下表七缺口） |
 | **v1.1** | RPC 路由已实现（2026-10-15，较排期提前） | RPC 一致性 hash 路由 + 服务注册发现（游戏战斗服按场景 key 定向到后端实例；lynx v1.19.0 KeyedPicker；[提案](docs/proposals/2026-10-15-rpc-consistent-hash-routing.md) · [设计](docs/design/2026-10-15-rpc-consistent-hash-routing.md)；consul/HTTP 后端与 sticky 二期） |
 | **v1.x** | 预留 | PresenceStats、last will、发布幂等键、更多 SDK、JWT、Admin UI |
 
@@ -85,6 +85,8 @@ flowchart LR
 ---
 
 ## 排期（1 名熟手）
+
+> **进度注记（2026-10-15）**：下表为 2026-08-13 制定时的原计划。实际执行大幅超前——PR-01–PR-10 已于 2026-08-15 全部实现并通过主 agent 终验（各 PR 规格 §12 有实现备注），发版门禁于 2026-10-15 本地复核全绿（root / shared / sdks/go / _examples 测试通过，Redis 集成测试经 CI REQUIRED 模式覆盖）。剩余动作为正式发版决策。
 
 基准日 **2026-08-13**。人周是投入，日历是 W1–W14。目标 **v1.0 = 2026-11-14**。
 
