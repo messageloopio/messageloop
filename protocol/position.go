@@ -1,7 +1,7 @@
 package shared
 
 import (
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
+	sharedv2 "github.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2"
 )
 
 // PositionFrom builds the client-wire Position for the recover/delivery

@@ -21,13 +21,13 @@
 | `internal/runtime/` | 编排层：`Node` 协调器、Cluster 门面、recover、health、subscription saga、Sim 钩子、`session_runtime.go` |
 | `internal/session/` | Session Plane：`Session`/`Hub`/`Transport`/`Heartbeat`、命名空间守卫 `namespace.go` 与 `Runtime` 缝 |
 | `internal/stream/` | Broker 契约与内存实现 |
-| `internal/channel/`、`internal/occupancy/`、`internal/survey/`、`internal/protocol/`、`internal/authz/`、`internal/metrics/` | 叶子契约：频道策略与 Interest 编译、在线状态、Survey、断连码/版本门、授权器、指标 |
+| `internal/channel/`、`internal/occupancy/`、`internal/survey/`、`internal/wire/`、`internal/authz/`、`internal/metrics/` | 叶子契约：频道策略与 Interest 编译、在线状态、Survey、断连码/版本门、授权器、指标 |
 | `internal/cluster/` | 集群控制面契约（`contracts.go`、`epoch.go`、`user_index.go`）与 `hmac/`、`sim/` |
 | `internal/serverapi/` | Server API（`server.go`、`api_handler.go`） |
 | `cmd/server/` | 服务端入口 `main.go`、gRPC 启动预检 `runtime.go`、环境变量覆盖 `envconfig.go`，基于 `lynx` 框架 |
 | `config/` | 配置结构体定义与校验（`config.go`） |
 | `proto/messageloop/` | Protobuf 源文件（单一 buf module），下分 `shared/v2/`、`client/v2/`、`server/v2/`、`proxy/v2/` |
-| `shared/` | 独立 Go 模块 `github.com/messageloopio/messageloop/shared`；`genproto/` 为生成代码，`marshaler.go` 为 JSON/Protobuf 序列化器，`streamframe.go` 为 QUIC/KCP 的流帧与 ALPN 常量 |
+| `protocol/` | 独立 Go 模块 `github.com/messageloopio/messageloop/protocol`；`genproto/` 为生成代码，`marshaler.go` 为 JSON/Protobuf 序列化器，`streamframe.go` 为 QUIC/KCP 的流帧与 ALPN 常量，`proxyserver/` 为 Proxy 后端实现框架 |
 | `pkg/transport/ws/` | WebSocket 传输实现（含集成测试） |
 | `pkg/transport/grpc/` | gRPC 流式传输（客户端流 `client_server.go`、公共准备逻辑 `server.go`） |
 | `pkg/transport/quic/` | 可选 QUIC 客户端传输（一条双向流 + 长度前缀帧，TLS 1.3 / ALPN 协商编码） |
@@ -45,9 +45,9 @@
 
 模块边界（`go.mod` 与 `replace` 指令）：
 
-- **根模块** `github.com/messageloopio/messageloop`，`go 1.26.5`，通过 `replace github.com/messageloopio/messageloop/shared => ./shared` 在本地解析 shared 模块。
-- **shared 模块** `github.com/messageloopio/messageloop/shared`，`go 1.25.5`，仅依赖 `grpc` 与 `protobuf`。
-- **sdks/go 模块** `github.com/messageloopio/messageloop/sdks/go`，`go 1.25.5`，通过 `replace github.com/messageloopio/messageloop/shared => ./../../shared` 引用 shared 模块。
+- **根模块** `github.com/messageloopio/messageloop`，`go 1.26.5`，通过 `replace github.com/messageloopio/messageloop/protocol => ./protocol` 在本地解析 protocol 模块。
+- **protocol 模块** `github.com/messageloopio/messageloop/protocol`，`go 1.25.5`，依赖 `grpc`、`protobuf` 与 `gobwas/glob`（proxyserver 路由）。
+- **sdks/go 模块** `github.com/messageloopio/messageloop/sdks/go`，`go 1.25.5`，通过 `replace github.com/messageloopio/messageloop/protocol => ./../../protocol` 引用 protocol 模块。
 
 因此根目录执行 `go build ./...` 只会覆盖根模块；shared 与 sdks/go 需要在各自目录内单独构建与测试。根模块的 `require` 中同时保留了 shared 的远程版本（`v0.2.0`），本地开发依赖 `replace` 覆盖。
 
@@ -143,7 +143,7 @@ breaking:
 
 执行 `task generate-protocol`（即 `buf generate`）后：
 
-- **Go 代码**生成在 `shared/genproto/messageloop/<pkg>/<version>/`（`.pb.go`、`*_grpc.pb.go`、`.swagger.json`），如 `messageloop/client/v2`、`messageloop/proxy/v2`、`messageloop/server/v2`、`messageloop/shared/v2`。Go 侧导入路径为 `github.com/messageloopio/messageloop/shared/genproto/messageloop/<pkg>/<version>`，包别名见[代码风格与约定](#代码风格与约定)。
+- **Go 代码**生成在 `protocol/genproto/messageloop/<pkg>/<version>/`（`.pb.go`、`*_grpc.pb.go`、`.swagger.json`），如 `messageloop/client/v2`、`messageloop/proxy/v2`、`messageloop/server/v2`、`messageloop/shared/v2`。Go 侧导入路径为 `github.com/messageloopio/messageloop/protocol/genproto/messageloop/<pkg>/<version>`，包别名见[代码风格与约定](#代码风格与约定)。
 - **TypeScript 代码**生成在 `sdks/ts/src/proto/messageloop/<pkg>/<version>/`，使用 bufbuild/es 远程插件（仓库未安装 `@bufbuild/protoc-gen-es`）。
 
 ### 新增协议消息或字段的流程
@@ -162,10 +162,10 @@ breaking:
 
 导入按三组排列，组间空行分隔：标准库、第三方依赖、本地（本项目）导入。Protobuf 包统一使用短别名，与各 proto 文件 `go_package` 选项的包短名一致：
 
-- `clientpb`：`github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2`
-- `serverv2`：`github.com/messageloopio/messageloop/shared/genproto/messageloop/server/v2`
-- `sharedv2`：`github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2`
-- `proxypb`：`github.com/messageloopio/messageloop/shared/genproto/messageloop/proxy/v2`
+- `clientpb`：`github.com/messageloopio/messageloop/protocol/genproto/messageloop/client/v2`
+- `serverv2`：`github.com/messageloopio/messageloop/protocol/genproto/messageloop/server/v2`
+- `sharedv2`：`github.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2`
+- `proxypb`：`github.com/messageloopio/messageloop/protocol/genproto/messageloop/proxy/v2`
 
 ### 命名
 
@@ -176,7 +176,7 @@ breaking:
 
 ### 错误处理
 
-- 主动断连使用类型化 `Disconnect` 错误（internal/protocol/disconnect.go），带编号代码：`3000` 正常关闭，`3500–3509` 各类终端错误（`DisconnectBadRequest`、`DisconnectStale` 等），`3511` 空闲超时，`3512` 慢消费者，`3513` 内部错误，`3514` 协议版本过旧。
+- 主动断连使用类型化 `Disconnect` 错误（internal/wire/disconnect.go），带编号代码：`3000` 正常关闭，`3500–3509` 各类终端错误（`DisconnectBadRequest`、`DisconnectStale` 等），`3511` 空闲超时，`3512` 慢消费者，`3513` 内部错误，`3514` 协议版本过旧。
 - 用 `fmt.Errorf("context: %w", err)` 包装错误保留链，用 `errors.As` / `errors.Is` 判断类型或哨兵值。
 - 返回前在适当级别记录日志，不要无理由吞掉错误。
 

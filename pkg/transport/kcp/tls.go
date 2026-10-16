@@ -13,7 +13,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/messageloopio/messageloop/shared"
+	"github.com/messageloopio/messageloop/protocol"
 )
 
 // loadTLSConfig builds the server TLS config layered over the KCP session.

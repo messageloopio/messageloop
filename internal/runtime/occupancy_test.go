@@ -9,7 +9,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
+	clientpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/client/v2"
 )
 
 // TestOccupancy_GenZeroOrNilEventDropped pins B2 §4/§5.2: gen==0 and nil

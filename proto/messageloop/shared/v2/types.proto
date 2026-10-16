@@ -4,7 +4,7 @@ package messageloop.shared.v2;
 
 import "google/protobuf/struct.proto";
 
-option go_package = "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2;sharedv2";
+option go_package = "github.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2;sharedv2";
 
 // 流内位置：epoch + 偏移。offset 缺省 = unset（无历史 / transient）；
 // 禁止用 0 表示 unset 或「从头」。

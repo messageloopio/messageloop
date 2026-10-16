@@ -10,14 +10,14 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/messageloopio/messageloop/internal/authz"
-	"github.com/messageloopio/messageloop/internal/protocol"
 	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/internal/stream"
 	"github.com/messageloopio/messageloop/internal/survey"
+	"github.com/messageloopio/messageloop/internal/wire"
 	"github.com/messageloopio/messageloop/pkg/topics"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
-	serverv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/server/v2"
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
+	clientpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/client/v2"
+	serverv2 "github.com/messageloopio/messageloop/protocol/genproto/messageloop/server/v2"
+	sharedv2 "github.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2"
 )
 
 type apiServiceHandler struct {

@@ -3,7 +3,7 @@ package proxyserver
 import (
 	"errors"
 
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
+	sharedv2 "github.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2"
 )
 
 // ErrNoRoute is returned by RPCMux when no registered (channel, method)

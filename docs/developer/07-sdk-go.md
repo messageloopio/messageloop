@@ -1,6 +1,6 @@
 # Go SDK 指南
 
-本文介绍官方 Go 客户端 SDK 的安装与使用。SDK 位于仓库 `sdks/go/` 目录，是一个独立的 Go module，包含客户端（WebSocket / gRPC / QUIC / KCP 四种传输）、消息类型以及代理（proxy）后端支持。协议层面的细节（子协议、消息信封、断连码）请参阅[《客户端协议参考》](../protocol.md)，本文不再重复。
+本文介绍官方 Go 客户端 SDK 的安装与使用。SDK 位于仓库 `sdks/go/` 目录，是一个独立的 Go module，包含客户端（WebSocket / gRPC / QUIC / KCP 四种传输）与消息类型。协议层面的细节（子协议、消息信封、断连码）请参阅[《客户端协议参考》](../protocol.md)，本文不再重复。
 
 ## 概述
 
@@ -13,7 +13,7 @@
   - 恢复订阅（流式回放 + `RecoverComplete`）、Presence（事件/快照/查询）、Survey（发起与应答）、GapNotice；
   - 心跳（ping/pong，含服务端 Ping 应答）；
   - 代理后端支持：在业务服务中以 gRPC 实现 RPC 处理、认证、ACL 与生命周期钩子，供服务端回调。
-- **依赖**：`gorilla/websocket`、`google.golang.org/grpc`、`github.com/quic-go/quic-go`、`github.com/xtaci/kcp-go/v5`、`google.golang.org/protobuf`、`github.com/google/uuid`，以及同仓库的 `github.com/messageloopio/messageloop/shared`（生成代码与序列化器）。仓库内通过 `replace github.com/messageloopio/messageloop/shared => ./../../shared` 指向本地目录。
+- **依赖**：`gorilla/websocket`、`google.golang.org/grpc`、`github.com/quic-go/quic-go`、`github.com/xtaci/kcp-go/v5`、`google.golang.org/protobuf`、`github.com/google/uuid`，以及同仓库的 `github.com/messageloopio/messageloop/protocol`（生成代码与序列化器）。仓库内通过 `replace github.com/messageloopio/messageloop/protocol => ./../../protocol` 指向本地目录。
 - **与其他 SDK 的关系**：TypeScript SDK 提供等价能力，API 设计与本文描述的概念一一对应，参见[《TypeScript SDK 指南》](08-sdk-ts.md)。
 
 ## 安装
@@ -404,43 +404,9 @@ log.Printf("RPC response: %s", resp.String())
 
 ### 代理（proxy）后端
 
-RPC 的业务实现位于代理后端：服务端把客户端 RPC 请求转发到后端 gRPC 服务（`proxy/v2` 的 `ProxyService`），后端处理后返回。SDK 的 `proxy.go` 提供整套后端实现骨架：
+RPC 的业务实现位于代理后端：服务端把客户端 RPC 请求转发到后端 gRPC 服务（`proxy/v2` 的 `ProxyService`），后端处理后返回。
 
-- `RPCHandler` 接口：`HandleRPC(ctx context.Context, req *RPCRequest) (*RPCResponse, error)`，其中 `RPCRequest{ID, Channel, Method, Payload *Message}`、`RPCResponse{Payload *Message, Error *sharedv2.Error}`；
-- `AuthHandler`：`Authenticate(ctx, *AuthenticateRequest) (*AuthenticateResponse, error)`，配合 `UserInfo`（含 ID 与可选 `Namespace`）返回用户信息；
-- `ACLHandler`：`CheckSubscribeACL(ctx, channel, token string) error` 与 `CheckPublishACL(ctx, channel, token string) error`；
-- `LifecycleHandler`：`OnConnected` / `OnDisconnected`（携带 sessionID 与 username）/ `OnSubscribed` / `OnUnsubscribed` 生命周期钩子；
-- 默认实现 `RPCHandlerImpl` / `AuthHandlerImpl` / `ACLHandlerImpl` / `LifecycleHandlerImpl`（未实现时返回 `UNIMPLEMENTED`/`AUTH_NOT_IMPLEMENTED` 或放行）；
-- `HandlerImpl`：嵌入上述四个默认实现并实现 `ProxyServiceServer`，可整体作为 gRPC handler 注册；其 `RPCHandler` / `AuthHandler` / `ACLHandler` / `LifecycleHandler` 四个字段非空时优先于对应内嵌默认实现（覆盖模式）。
-
-启动代理服务：
-
-```go
-handler := &messageloopgo.HandlerImpl{
-	RPCHandler: myRPCHandler,   // 自定义 RPC 处理
-	AuthHandler: &myAuthHandler{},
-	ACLHandler: &myACLHandler{},
-	LifecycleHandler: &myLifecycleHandler{},
-}
-proxy, err := messageloopgo.NewProxyServer(
-	messageloopgo.ProxyServerOptions{Addr: ":9001", Insecure: true},
-	handler,
-)
-// proxy 实现 lynx.Service 生命周期接口：Start(ctx) / Stop(ctx)
-```
-
-`NewProxyServer(opts ProxyServerOptions, handler proxypb.ProxyServiceServer) (*ProxyServer, error)` 创建 gRPC 代理服务。注意：`Insecure=false` 时服务端当前仍以明文监听（构造器不安装 TLS 凭据）并打印警告，需要 TLS 时请在前面自行挂 TLS 终结层。服务端侧的代理集成（路由、超时）见[《架构指南》](01-architecture.md) 与[《配置参考》](02-configuration.md)。
-
-### RPCMux：RPC 路由与中间件
-
-`mux.go` 提供 `RPCMux` 多路复用器，实现 `RPCHandler` 接口，可直接作为 `HandlerImpl.RPCHandler` 使用：
-
-- `NewRPCMux() *RPCMux`；
-- `(*RPCMux) Handle(method string, handler RPCHandlerFunc)`——按方法名注册处理器，重复注册会覆盖；
-- `(*RPCMux) Use(middleware RPCMiddleware)`——注册中间件，按注册顺序包裹：先注册者最外层（`m1 -> m2 -> handler`）；
-- 未注册的方法返回 `UNKNOWN_METHOD` 错误（`rpc_error` 类型）。
-
-其中 `RPCHandlerFunc` 即 `func(ctx context.Context, req *RPCRequest) (*RPCResponse, error)`，`RPCMiddleware` 即 `func(next RPCHandlerFunc) RPCHandlerFunc`。`example/proxyserver` 同时演示了 switch 分发与 RPCMux + 中间件（日志、panic 恢复）两种后端写法。
+后端实现框架**不在 SDK 中**：SDK 是纯客户端库；后端骨架（能力接口、`(channel, method)` 双 glob 路由的 `RPCMux`、gRPC 桥接与错误映射）由 `protocol` 模块的 `protocol/proxyserver` 包提供，后端实现方 `go get github.com/messageloopio/messageloop/protocol` 即得，详见[《Server API 参考》](03-server-api.md)的[《实现 Proxy 后端》](03-server-api.md#实现-proxy-后端protocolproxyserver)一节。可运行示例：`sdks/go/example/proxyserver`（基于 `protocol/proxyserver`）。
 
 ## 错误处理
 
@@ -466,7 +432,7 @@ proxy, err := messageloopgo.NewProxyServer(
 | `dynamicsub` | 动态订阅管理：连接后逐个订阅、定时退订 |
 | `protobuf` | 使用 `EncodingProtobuf` 的 WebSocket 客户端与发布 |
 | `wsrpc` | 在 WebSocket 连接上发起 RPC 调用并读取响应 |
-| `proxyserver` | 代理后端 gRPC 服务：RPC 处理（switch 与 RPCMux 两种写法）、认证、ACL、生命周期钩子 |
+| `proxyserver` | 代理后端 gRPC 服务：基于 `protocol/proxyserver` 框架的 RPC 路由（channel+method 双 glob）、认证、ACL、生命周期钩子 |
 
 ## 迁移
 

@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
-	github.com/messageloopio/messageloop/shared v1.0.0-rc.1
+	github.com/messageloopio/messageloop/protocol v1.0.0-rc.1
 	github.com/quic-go/quic-go v0.62.0
 	github.com/xtaci/kcp-go/v5 v5.6.72
 	google.golang.org/grpc v1.83.2
@@ -13,6 +13,7 @@ require (
 )
 
 require (
+	github.com/gobwas/glob v1.0.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
 	github.com/klauspost/reedsolomon v1.12.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
@@ -35,4 +36,4 @@ require (
 // monolith, which no longer contains the googleapis packages.
 replace google.golang.org/genproto => google.golang.org/genproto v0.0.0-20260911204522-f61a6ca850bd
 
-replace github.com/messageloopio/messageloop/shared => ./../../shared
+replace github.com/messageloopio/messageloop/protocol => ./../../protocol

@@ -10,7 +10,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/messageloopio/messageloop/internal/authz"
-	serverv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/server/v2"
+	serverv2 "github.com/messageloopio/messageloop/protocol/genproto/messageloop/server/v2"
 )
 
 // The Server API scope census (design §2.5, mechanism gap G2 — the Server API plane

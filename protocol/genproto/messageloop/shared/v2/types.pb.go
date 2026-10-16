@@ -320,7 +320,7 @@ const file_messageloop_shared_v2_types_proto_rawDesc = "" +
 	"\x18GAP_REASON_EMPTY_EXPIRED\x10\x03\x12\x1a\n" +
 	"\x16GAP_REASON_EPOCH_RESET\x10\x04\x12\x15\n" +
 	"\x11GAP_REASON_MIDDLE\x10\x05\x12\x1f\n" +
-	"\x1bGAP_REASON_REPLAY_TRUNCATED\x10\x06BUZSgithub.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2;sharedv2b\x06proto3"
+	"\x1bGAP_REASON_REPLAY_TRUNCATED\x10\x06BWZUgithub.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2;sharedv2b\x06proto3"
 
 var (
 	file_messageloop_shared_v2_types_proto_rawDescOnce sync.Once

@@ -12,8 +12,8 @@ import (
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
+	clientpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/client/v2"
+	sharedpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2"
 )
 
 // TestClientDisconnectCodeEnvelope verifies that a DISCONNECT_ERROR envelope

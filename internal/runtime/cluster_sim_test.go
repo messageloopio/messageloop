@@ -16,10 +16,10 @@ import (
 
 	"github.com/messageloopio/messageloop/internal/cluster"
 	"github.com/messageloopio/messageloop/internal/cluster/sim"
-	"github.com/messageloopio/messageloop/internal/protocol"
 	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/internal/session"
-	"github.com/messageloopio/messageloop/shared"
+	"github.com/messageloopio/messageloop/internal/wire"
+	"github.com/messageloopio/messageloop/protocol"
 )
 
 // simNoopTransport backs the re-attachment in the LocalDetachAttach scenario.

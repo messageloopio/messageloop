@@ -7,8 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/messageloopio/messageloop/internal/protocol"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
+	"github.com/messageloopio/messageloop/internal/wire"
+	clientpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/client/v2"
 )
 
 // TestVersionGate_RejectsUnsupportedVersions proves the Connect version gate

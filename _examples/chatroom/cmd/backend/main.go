@@ -7,6 +7,8 @@
 //   - ACL: private:* channels require a per-subscription token
 //   - Lifecycle hooks: announce connect/disconnect to the lobby
 //
+// It is built on the proxyserver framework from the protocol module.
+//
 // Run it with: go run ./_examples/chatroom/cmd/backend
 package main
 
@@ -16,21 +18,22 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"net"
 	"strings"
 	"time"
 
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
+	"google.golang.org/grpc"
 
 	"github.com/messageloopio/messageloop/_examples/chatroom/internal/chatroom"
-	messageloopgo "github.com/messageloopio/messageloop/sdks/go"
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
+	proxy "github.com/messageloopio/messageloop/protocol/genproto/messageloop/proxy/v2"
+	sharedv2 "github.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2"
+	"github.com/messageloopio/messageloop/protocol/proxyserver"
 )
 
 // apiAddr points at the demo server's api gRPC API; align with config.yaml.
 const (
-	apiAddr   = chatroom.DefaultAPIAddr
-	apiToken  = "chatroom-api-token-0123456789"
+	apiAddr     = chatroom.DefaultAPIAddr
+	apiToken    = "chatroom-api-token-0123456789"
 	backendAddr = ":8090"
 )
 
@@ -45,22 +48,20 @@ func main() {
 	}
 	defer api.Close()
 
-	service := &messageloopgo.HandlerImpl{}
-	service.RPCHandler = newRPCMux(api)
-	service.AuthHandler = &authService{}
-	service.ACLHandler = &aclService{}
-	service.LifecycleHandler = &lifecycleService{api: api, room: chatroom.Lobby}
+	grpcServer := grpc.NewServer()
+	proxyserver.New(proxyserver.Options{
+		RPC:       newRPCMux(api),
+		Auth:      proxyserver.AuthHandlerFunc((&authService{}).Authenticate),
+		ACL:       &aclService{},
+		Lifecycle: &lifecycleService{api: api, room: chatroom.Lobby},
+	}).RegisterGRPC(grpcServer)
 
-	server, err := messageloopgo.NewProxyServer(messageloopgo.ProxyServerOptions{
-		Addr:     addr,
-		Insecure: true,
-	}, service)
+	listener, err := net.Listen("tcp", addr)
 	if err != nil {
-		log.Fatalf("create proxy server: %v", err)
+		log.Fatalf("listen %s: %v", addr, err)
 	}
-
 	log.Printf("chatroom backend listening on %s (api api %s)", addr, apiAddr)
-	if err := server.Start(context.Background()); err != nil {
+	if err := grpcServer.Serve(listener); err != nil {
 		log.Fatalf("proxy server: %v", err)
 	}
 }
@@ -68,39 +69,25 @@ func main() {
 // ---------------------------------------------------------------------------
 // Auth
 
-// authService resolves a demo token ("token-alice", ...) into a user.
+// authService resolves a demo token ("token-alice", ...) into a user. A
+// returned error becomes the in-band AUTH_ERROR response.
 type authService struct{}
 
-// Authenticate implements messageloopgo.AuthHandler.
-func (s *authService) Authenticate(ctx context.Context, req *messageloopgo.AuthenticateRequest) (*messageloopgo.AuthenticateResponse, error) {
-	if req.Token == "" {
-		return &messageloopgo.AuthenticateResponse{
-			Error: &sharedv2.Error{
-				Code:    "INVALID_CREDENTIALS",
-				Type:    "auth_error",
-				Message: "token is required",
-			},
-		}, nil
+func (s *authService) Authenticate(ctx context.Context, req *proxy.AuthenticateRequest) (*proxy.UserInfo, error) {
+	if req.GetToken() == "" {
+		return nil, rpcError("INVALID_CREDENTIALS", "token is required")
 	}
-	user, ok := chatroom.LookupByToken(req.Token)
+	user, ok := chatroom.LookupByToken(req.GetToken())
 	if !ok {
-		return &messageloopgo.AuthenticateResponse{
-			Error: &sharedv2.Error{
-				Code:    "INVALID_CREDENTIALS",
-				Type:    "auth_error",
-				Message: "unknown token: " + req.Token,
-			},
-		}, nil
+		return nil, rpcError("INVALID_CREDENTIALS", "unknown token: "+req.GetToken())
 	}
-	log.Printf("[auth] client=%s user=%s role=%s", req.ClientID, user.Name, user.Role)
-	return &messageloopgo.AuthenticateResponse{
-		UserInfo: &messageloopgo.UserInfo{
-			ID:         user.ID,
-			Username:   user.Name,
-			Token:      req.Token,
-			ClientType: req.ClientType,
-			ClientID:   req.ClientID,
-		},
+	log.Printf("[auth] client=%s user=%s role=%s", req.GetClientId(), user.Name, user.Role)
+	return &proxy.UserInfo{
+		Id:         user.ID,
+		Username:   user.Name,
+		Token:      req.GetToken(),
+		ClientType: req.GetClientType(),
+		ClientId:   req.GetClientId(),
 	}, nil
 }
 
@@ -108,21 +95,22 @@ func (s *authService) Authenticate(ctx context.Context, req *messageloopgo.Authe
 // ACL
 
 // aclService gates private:* channels behind a per-subscription/per-publish
-// token so the demo can show both allow and deny paths.
+// token so the demo can show both allow and deny paths. Any returned error
+// denies the operation.
 type aclService struct{}
 
-// CheckSubscribeACL implements messageloopgo.ACLHandler.
-func (s *aclService) CheckSubscribeACL(ctx context.Context, channel, token string) error {
-	if strings.HasPrefix(channel, chatroom.PrivateChannelPrefix) && token == "" {
-		return status.Error(codes.PermissionDenied, "private channel requires a subscription token")
+// CheckSubscribeACL implements proxyserver.ACLHandler.
+func (s *aclService) CheckSubscribeACL(ctx context.Context, req *proxy.SubscribeAclRequest) error {
+	if strings.HasPrefix(req.GetChannel(), chatroom.PrivateChannelPrefix) && req.GetToken() == "" {
+		return fmt.Errorf("private channel requires a subscription token")
 	}
 	return nil
 }
 
-// CheckPublishACL implements messageloopgo.ACLHandler.
-func (s *aclService) CheckPublishACL(ctx context.Context, channel, token string) error {
-	if strings.HasPrefix(channel, chatroom.PrivateChannelPrefix) && token == "" {
-		return status.Error(codes.PermissionDenied, "private channel requires a publish token")
+// CheckPublishACL implements proxyserver.ACLHandler.
+func (s *aclService) CheckPublishACL(ctx context.Context, req *proxy.PublishAclRequest) error {
+	if strings.HasPrefix(req.GetChannel(), chatroom.PrivateChannelPrefix) && req.GetToken() == "" {
+		return fmt.Errorf("private channel requires a publish token")
 	}
 	return nil
 }
@@ -130,40 +118,47 @@ func (s *aclService) CheckPublishACL(ctx context.Context, channel, token string)
 // ---------------------------------------------------------------------------
 // RPC
 
-// newRPCMux registers the demo RPC methods with middleware.
-func newRPCMux(api *chatroom.APIClient) *messageloopgo.RPCMux {
+// newRPCMux registers the demo RPC methods with middleware. Routes match
+// (channel, method) patterns; these commands are channel-agnostic, so they
+// register via HandleMethod.
+func newRPCMux(api *chatroom.APIClient) *proxyserver.RPCMux {
 	rpc := &rpcService{api: api, room: chatroom.Lobby}
-	mux := messageloopgo.NewRPCMux()
+	mux := proxyserver.NewRPCMux()
 	mux.Use(loggingMiddleware)
-	mux.Handle("chat.roll", rpc.handleRoll)
-	mux.Handle("chat.stats", rpc.handleStats)
-	mux.Handle("chat.history", rpc.handleHistory)
-	mux.Handle("chat.kick", rpc.handleKick)
-	mux.Handle("chat.whoami", rpc.handleWhoami)
+	must(mux.HandleMethod("chat.roll", rpc.handleRoll))
+	must(mux.HandleMethod("chat.stats", rpc.handleStats))
+	must(mux.HandleMethod("chat.history", rpc.handleHistory))
+	must(mux.HandleMethod("chat.kick", rpc.handleKick))
+	must(mux.HandleMethod("chat.whoami", rpc.handleWhoami))
 	return mux
+}
+
+func must(err error) {
+	if err != nil {
+		log.Fatalf("route registration failed: %v", err)
+	}
 }
 
 // rpcService implements the chat commands.
 type rpcService struct {
-	api *chatroom.APIClient
-	room  string
+	api  *chatroom.APIClient
+	room string
 }
 
 // handleRoll returns a dice roll. Demonstrates the simplest RPC round-trip.
-func (s *rpcService) handleRoll(ctx context.Context, req *messageloopgo.RPCRequest) (*messageloopgo.RPCResponse, error) {
+func (s *rpcService) handleRoll(ctx context.Context, req *proxy.RPCRequest) (*proxy.RPCResponse, error) {
 	n := rand.Intn(6) + 1
-	return &messageloopgo.RPCResponse{
-		Payload: messageloopgo.NewMessageWithData("chat.roll.response",
-			messageloopgo.NewTextData(fmt.Sprintf("dice = %d", n))),
+	return &proxy.RPCResponse{
+		Payload: proxyserver.NewTextPayload(fmt.Sprintf("dice = %d", n)),
 	}, nil
 }
 
 // handleStats calls the api GetChannels + GetHistory APIs and returns a
 // human-readable summary. Demonstrates backend -> api API integration.
-func (s *rpcService) handleStats(ctx context.Context, req *messageloopgo.RPCRequest) (*messageloopgo.RPCResponse, error) {
+func (s *rpcService) handleStats(ctx context.Context, req *proxy.RPCRequest) (*proxy.RPCResponse, error) {
 	channels, err := s.api.Channels(ctx)
 	if err != nil {
-		return rpcError("API_ERROR", "GetChannels failed: "+err.Error()), nil
+		return nil, rpcError("API_ERROR", "GetChannels failed: "+err.Error())
 	}
 	var b strings.Builder
 	b.WriteString("active channels:\n")
@@ -180,55 +175,49 @@ func (s *rpcService) handleStats(ctx context.Context, req *messageloopgo.RPCRequ
 			b.WriteString(fmt.Sprintf("  #%d %s\n", pub.GetPosition().GetOffset(), pub.Id))
 		}
 	}
-	return &messageloopgo.RPCResponse{
-		Payload: messageloopgo.NewMessageWithData("chat.stats.response",
-			messageloopgo.NewTextData(b.String())),
+	return &proxy.RPCResponse{
+		Payload: proxyserver.NewTextPayload(b.String()),
 	}, nil
 }
 
 // handleHistory returns persisted channel history via the api GetHistory API.
-func (s *rpcService) handleHistory(ctx context.Context, req *messageloopgo.RPCRequest) (*messageloopgo.RPCResponse, error) {
+func (s *rpcService) handleHistory(ctx context.Context, req *proxy.RPCRequest) (*proxy.RPCResponse, error) {
 	limit := 20
-	if req.Payload != nil {
+	if payload := req.GetPayload(); payload != nil {
 		var n int
-		_ = req.Payload.DataAs(&n)
+		_ = proxyserver.PayloadJSON(payload, &n)
 		if n > 0 && n <= 100 {
 			limit = n
 		}
 	}
 	history, err := s.api.History(ctx, s.room, 0, limit)
 	if err != nil {
-		return rpcError("API_ERROR", "GetHistory failed: "+err.Error()), nil
+		return nil, rpcError("API_ERROR", "GetHistory failed: "+err.Error())
 	}
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("history of %s (%d entries):\n", s.room, len(history)))
 	for _, pub := range history {
 		b.WriteString(fmt.Sprintf("  #%d %s\n", pub.GetPosition().GetOffset(), pub.Id))
 	}
-	return &messageloopgo.RPCResponse{
-		Payload: messageloopgo.NewMessageWithData("chat.history.response",
-			messageloopgo.NewTextData(b.String())),
+	return &proxy.RPCResponse{
+		Payload: proxyserver.NewTextPayload(b.String()),
 	}, nil
 }
 
 // handleKick force-disconnects a user through the api Disconnect API and
 // announces it to the lobby.
-func (s *rpcService) handleKick(ctx context.Context, req *messageloopgo.RPCRequest) (*messageloopgo.RPCResponse, error) {
-	target := ""
-	if req.Payload != nil {
-		_ = req.Payload.DataAs(&target)
-	}
-	target = strings.TrimSpace(target)
+func (s *rpcService) handleKick(ctx context.Context, req *proxy.RPCRequest) (*proxy.RPCResponse, error) {
+	target := strings.TrimSpace(proxyserver.PayloadText(req.GetPayload()))
 	if target == "" {
-		return rpcError("INVALID_INPUT", "usage: /kick <user-name>"), nil
+		return nil, rpcError("INVALID_INPUT", "usage: /kick <user-name>")
 	}
 	user, ok := chatroom.Users[chatroom.TokenForName(target)]
 	if !ok {
-		return rpcError("UNKNOWN_USER", "no such user: "+target), nil
+		return nil, rpcError("UNKNOWN_USER", "no such user: "+target)
 	}
 	results, err := s.api.DisconnectUser(ctx, user.ID, 3400, "kicked by api")
 	if err != nil {
-		return rpcError("API_ERROR", "Disconnect failed: "+err.Error()), nil
+		return nil, rpcError("API_ERROR", "Disconnect failed: "+err.Error())
 	}
 	kicked := 0
 	for _, ok := range results {
@@ -239,34 +228,31 @@ func (s *rpcService) handleKick(ctx context.Context, req *messageloopgo.RPCReque
 	_ = s.api.PublishToChannel(ctx, s.room, "kick-"+target,
 		&chatroom.ChatMessage{User: "system", Kind: "system", Text: target + " was kicked (" + fmt.Sprint(kicked) + " session(s))"},
 		false)
-	return &messageloopgo.RPCResponse{
-		Payload: messageloopgo.NewMessageWithData("chat.kick.response",
-			messageloopgo.NewTextData(fmt.Sprintf("kicked %s: %d session(s) disconnected", target, kicked))),
+	return &proxy.RPCResponse{
+		Payload: proxyserver.NewTextPayload(fmt.Sprintf("kicked %s: %d session(s) disconnected", target, kicked)),
 	}, nil
 }
 
 // handleWhoami echoes the RPC metadata back. Demonstrates that RPC requests
 // reach the backend with id/channel/method context.
-func (s *rpcService) handleWhoami(ctx context.Context, req *messageloopgo.RPCRequest) (*messageloopgo.RPCResponse, error) {
-	return &messageloopgo.RPCResponse{
-		Payload: messageloopgo.NewMessageWithData("chat.whoami.response",
-			messageloopgo.NewTextData(fmt.Sprintf("rpc id=%s channel=%s method=%s", req.ID, req.Channel, req.Method))),
+func (s *rpcService) handleWhoami(ctx context.Context, req *proxy.RPCRequest) (*proxy.RPCResponse, error) {
+	return &proxy.RPCResponse{
+		Payload: proxyserver.NewTextPayload(fmt.Sprintf("rpc id=%s channel=%s method=%s", req.GetId(), req.GetChannel(), req.GetMethod())),
 	}, nil
 }
 
-// rpcError builds an RPC response carrying a sharedv2.Error.
-func rpcError(code, message string) *messageloopgo.RPCResponse {
-	return &messageloopgo.RPCResponse{
-		Error: &sharedv2.Error{Code: code, Type: "rpc_error", Message: message},
-	}
+// rpcError builds an error carrying a sharedv2.Error; the framework places
+// it in the response's in-band error field verbatim.
+func rpcError(code, message string) error {
+	return proxyserver.NewError(&sharedv2.Error{Code: code, Type: "rpc_error", Message: message})
 }
 
 // loggingMiddleware logs every RPC invocation.
-func loggingMiddleware(next messageloopgo.RPCHandlerFunc) messageloopgo.RPCHandlerFunc {
-	return func(ctx context.Context, req *messageloopgo.RPCRequest) (*messageloopgo.RPCResponse, error) {
+func loggingMiddleware(next proxyserver.RPCHandlerFunc) proxyserver.RPCHandlerFunc {
+	return func(ctx context.Context, req *proxy.RPCRequest) (*proxy.RPCResponse, error) {
 		start := time.Now()
 		resp, err := next(ctx, req)
-		log.Printf("[rpc] channel=%s method=%s duration=%v", req.Channel, req.Method, time.Since(start))
+		log.Printf("[rpc] channel=%s method=%s duration=%v", req.GetChannel(), req.GetMethod(), time.Since(start))
 		return resp, err
 	}
 }
@@ -277,31 +263,31 @@ func loggingMiddleware(next messageloopgo.RPCHandlerFunc) messageloopgo.RPCHandl
 // lifecycleService logs lifecycle hooks and announces joins/leaves to the
 // lobby via the api API.
 type lifecycleService struct {
-	api *chatroom.APIClient
-	room  string
+	api  *chatroom.APIClient
+	room string
 }
 
-// OnConnected implements messageloopgo.LifecycleHandler.
-func (s *lifecycleService) OnConnected(ctx context.Context, sessionID, username string) error {
-	log.Printf("[lifecycle] connected session=%s user=%s", sessionID, username)
-	return s.announce(username + " joined the room")
+// OnConnected implements proxyserver.LifecycleHandler.
+func (s *lifecycleService) OnConnected(ctx context.Context, req *proxy.OnConnectedRequest) error {
+	log.Printf("[lifecycle] connected session=%s user=%s", req.GetSessionId(), req.GetUsername())
+	return s.announce(req.GetUsername() + " joined the room")
 }
 
-// OnDisconnected implements messageloopgo.LifecycleHandler.
-func (s *lifecycleService) OnDisconnected(ctx context.Context, sessionID, username string) error {
-	log.Printf("[lifecycle] disconnected session=%s user=%s", sessionID, username)
-	return s.announce(username + " left the room")
+// OnDisconnected implements proxyserver.LifecycleHandler.
+func (s *lifecycleService) OnDisconnected(ctx context.Context, req *proxy.OnDisconnectedRequest) error {
+	log.Printf("[lifecycle] disconnected session=%s user=%s", req.GetSessionId(), req.GetUsername())
+	return s.announce(req.GetUsername() + " left the room")
 }
 
-// OnSubscribed implements messageloopgo.LifecycleHandler.
-func (s *lifecycleService) OnSubscribed(ctx context.Context, sessionID, channel, username string) error {
-	log.Printf("[lifecycle] subscribed session=%s channel=%s user=%s", sessionID, channel, username)
+// OnSubscribed implements proxyserver.LifecycleHandler.
+func (s *lifecycleService) OnSubscribed(ctx context.Context, req *proxy.OnSubscribedRequest) error {
+	log.Printf("[lifecycle] subscribed session=%s channel=%s user=%s", req.GetSessionId(), req.GetChannel(), req.GetUsername())
 	return nil
 }
 
-// OnUnsubscribed implements messageloopgo.LifecycleHandler.
-func (s *lifecycleService) OnUnsubscribed(ctx context.Context, sessionID, channel, username string) error {
-	log.Printf("[lifecycle] unsubscribed session=%s channel=%s user=%s", sessionID, channel, username)
+// OnUnsubscribed implements proxyserver.LifecycleHandler.
+func (s *lifecycleService) OnUnsubscribed(ctx context.Context, req *proxy.OnUnsubscribedRequest) error {
+	log.Printf("[lifecycle] unsubscribed session=%s channel=%s user=%s", req.GetSessionId(), req.GetChannel(), req.GetUsername())
 	return nil
 }
 

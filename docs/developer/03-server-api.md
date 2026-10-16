@@ -243,7 +243,7 @@ service 型后端的专属指标(`messageloop_proxy_service_*`,按 `service` 标
 
 ## 实现 Proxy 后端（shared/proxyserver）
 
-Go 后端不必从零实现 `messageloop.proxy.v2.ProxyService` 的 9 个方法:`shared` 模块（依赖 `go get github.com/messageloopio/messageloop/shared`）提供 `shared/proxyserver` 基础框架——按能力实现接口，装配进 `proxyserver.New`，剩下的载荷转换、错误映射、id 回显、panic 兜底和未配置能力的 `Unimplemented` 应答都由框架承担：
+Go 后端不必从零实现 `messageloop.proxy.v2.ProxyService` 的 9 个方法:`protocol` 模块（依赖 `go get github.com/messageloopio/messageloop/protocol`）提供 `protocol/proxyserver` 基础框架——按能力实现接口，装配进 `proxyserver.New`，剩下的载荷转换、错误映射、id 回显、panic 兜底和未配置能力的 `Unimplemented` 应答都由框架承担：
 
 ```go
 mux := proxyserver.NewRPCMux()
@@ -267,7 +267,7 @@ proxyserver.New(proxyserver.Options{
 - **错误双通道**：RPC/鉴权/ACL/API Key 的响应带内带 `error` 字段（业务语义，直达调用方）；生命周期钩子响应无该字段，handler 失败映射为 gRPC `Internal` status（服务端按 proxy 错误处理）。ACL 拒绝即 handler 返回非 nil error（默认码 `PERMISSION_DENIED`/`acl_error`）。
 - **载荷**：`PayloadText`/`PayloadBinary`/`PayloadJSON`/`NewTextPayload`/`NewBinaryPayload`/`NewJSONPayload` 覆盖 `sharedv2.Payload` 的三态 oneof（json 变体即 `google.protobuf.Struct`）；`content_type` 取 `text/plain`/`application/octet-stream`/`application/json`，与 SDK 的 MIME 前缀判别兼容。
 
-完整可运行示例见 `sdks/go/example/proxyserver`（基于 Go SDK 的同构封装；`sdks/go` 的 `RPCMux`/handler 接口与 shared 框架语义一致）。
+完整可运行示例见 `sdks/go/example/proxyserver`（基于 `protocol/proxyserver`;SDK 本体是纯客户端库,不含后端框架）。
 
 ## RPC 参考
 
@@ -340,7 +340,7 @@ proxyserver.New(proxyserver.Options{
 
 - 对展开后的每个会话逐一执行断开。每个会话独立得到一个布尔结果：会话存在且断开成功为 `true`；会话不存在或断开过程出错为 `false`。RPC 本身不会因为个别会话失败而返回错误。
 - 按 user 展开与 Publish 相同：始终校验 session lease 的 `UserID`，索引陈旧条目被跳过；`users` 中的空字符串或缺失 `namespace` 返回 `InvalidArgument` 且不扫描。
-- 服务端会以指定的 `code` 与 `reason` 构造 `Disconnect` 并关闭客户端连接，客户端在协议层收到对应的断开通知（见[《客户端协议参考》](../protocol.md) 中的 Disconnect Codes 一节）。`code` 由调用方决定，服务端不做合法性校验；源码中内置的常量定义于 internal/protocol/disconnect.go，例如：
+- 服务端会以指定的 `code` 与 `reason` 构造 `Disconnect` 并关闭客户端连接，客户端在协议层收到对应的断开通知（见[《客户端协议参考》](../protocol.md) 中的 Disconnect Codes 一节）。`code` 由调用方决定，服务端不做合法性校验；源码中内置的常量定义于 internal/wire/disconnect.go，例如：
 
 | 常量 | code | reason |
 | --- | --- | --- |

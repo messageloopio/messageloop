@@ -17,18 +17,18 @@ import (
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/internal/authz"
 	clusterpkg "github.com/messageloopio/messageloop/internal/cluster"
-	"github.com/messageloopio/messageloop/internal/protocol"
 	"github.com/messageloopio/messageloop/internal/redistest"
 	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/internal/serverapi"
 	"github.com/messageloopio/messageloop/internal/session"
 	"github.com/messageloopio/messageloop/internal/survey"
+	"github.com/messageloopio/messageloop/internal/wire"
 	"github.com/messageloopio/messageloop/pkg/redisbroker"
+	"github.com/messageloopio/messageloop/protocol"
+	clientpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/client/v2"
+	serverv2 "github.com/messageloopio/messageloop/protocol/genproto/messageloop/server/v2"
+	sharedpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2"
 	"github.com/messageloopio/messageloop/proxy"
-	"github.com/messageloopio/messageloop/shared"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
-	serverv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/server/v2"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
 )
 
 const clusterRedisIntegrationDB = 15

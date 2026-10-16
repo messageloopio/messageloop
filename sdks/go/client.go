@@ -11,8 +11,8 @@ import (
 
 	"github.com/google/uuid"
 
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
+	clientpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/client/v2"
+	sharedv2 "github.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2"
 )
 
 // transport is the interface for sending/receiving messages.
@@ -590,13 +590,13 @@ func (c *client) handleMessage(msg *clientpb.OutboundMessage, gen uint64) {
 	case *clientpb.OutboundMessage_Connected:
 		c.handleConnected(env.Connected, gen)
 
-		case *clientpb.OutboundMessage_Error:
-			// If the error references a pending RPC request, a pending
-			// publish, a pending subscribe/unsubscribe, a pending presence
-			// query or a pending survey, deliver it to the waiting caller so
-			// the call fails fast with the server error instead of hanging
-			// until the context deadline.
-			if !c.deliverPending(msg) && !c.rejectPendingAck(msg) && !c.rejectPendingSubAck(msg) && !c.rejectPendingUnsubAck(msg) && !c.deliverPresence(msg) && !c.deliverSurveyError(msg) {
+	case *clientpb.OutboundMessage_Error:
+		// If the error references a pending RPC request, a pending
+		// publish, a pending subscribe/unsubscribe, a pending presence
+		// query or a pending survey, deliver it to the waiting caller so
+		// the call fails fast with the server error instead of hanging
+		// until the context deadline.
+		if !c.deliverPending(msg) && !c.rejectPendingAck(msg) && !c.rejectPendingSubAck(msg) && !c.rejectPendingUnsubAck(msg) && !c.deliverPresence(msg) && !c.deliverSurveyError(msg) {
 			if dis, ok := disconnectFromError(env.Error); ok {
 				// The gRPC stream has no close frame: the server encodes the
 				// numeric disconnect code in the error envelope metadata, and

@@ -51,7 +51,7 @@ redisbroker 是五组符号的最重外部消费者(Publication 等 100+ 处)。
 
 ## 2. 允许改动的文件
 
-- 新增:`internal/protocol/`、`internal/channel/`、`internal/occupancy/`、`internal/stream/` 下文件(git mv 自根目录对应文件);根 `aliases.go`
+- 新增:`internal/wire/`、`internal/channel/`、`internal/occupancy/`、`internal/stream/` 下文件(git mv 自根目录对应文件);根 `aliases.go`
 - 修改:`defaults.go`(仅移除 `DefaultHistoryLimit`)、`pkg/redisbroker/*.go`(仅 import 与限定名替换)、`docs/v2/README.md`(状态行)、本规格 §8
 - 测试搬运(见 §3.3):仅当测试只依赖被搬符号时随行;否则留根
 - `error_codes_test.go`:普查扫描路径适配(见 §3.4)
@@ -80,7 +80,7 @@ redisbroker 是五组符号的最重外部消费者(Publication 等 100+ 处)。
 
 ### 3.4 error_codes_test 注意
 
-`error_codes_test.go` 是全仓错误码普查(按 emission site 扫描生产文件)。`disconnect.go` 搬到 `internal/protocol/disconnect.go` 后,若测试硬编码了文件路径/目录清单,需适配为新路径;普查断言的码表内容不变。
+`error_codes_test.go` 是全仓错误码普查(按 emission site 扫描生产文件)。`disconnect.go` 搬到 `internal/wire/disconnect.go` 后,若测试硬编码了文件路径/目录清单,需适配为新路径;普查断言的码表内容不变。
 
 ## 4. 算法(本 PR 无算法,只有组织原则)
 

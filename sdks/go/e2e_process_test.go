@@ -20,7 +20,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 
-	serverv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/server/v2"
+	serverv2 "github.com/messageloopio/messageloop/protocol/genproto/messageloop/server/v2"
 )
 
 // This file is the two-process black-box smoke e2e (PR-KA-D9): the test builds
@@ -46,11 +46,11 @@ const (
 
 // e2eServerProcess describes a spawned cmd/server child process.
 type e2eServerProcess struct {
-	wsURL      string
-	grpcAddr   string
+	wsURL    string
+	grpcAddr string
 	apiAddr  string
 	apiToken string
-	pid        int
+	pid      int
 }
 
 // e2eLogBuffer is a goroutine-safe buffer collecting the child process output
@@ -267,8 +267,8 @@ func startE2EServer(t *testing.T, binPath, brokerType, redisAddr, redisPassword 
 	httpAddr := e2eFreeAddr(t)
 	wsAddr := e2eFreeAddr(t)
 	srv := &e2eServerProcess{
-		wsURL:      "ws://" + wsAddr + "/ws",
-		grpcAddr:   e2eFreeAddr(t),
+		wsURL:    "ws://" + wsAddr + "/ws",
+		grpcAddr: e2eFreeAddr(t),
 		apiAddr:  e2eFreeAddr(t),
 		apiToken: e2eAPIToken(),
 	}

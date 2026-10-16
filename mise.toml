@@ -16,7 +16,7 @@ golangci-lint = "2.12.2"   # 全家族统一（torchwood / lynx 同版本）
 shell = "sh -o errexit -c"
 
 [tasks."generate-protocol"]
-description = "buf generate（shared/genproto + sdks/ts/src/proto）"
+description = "buf generate（protocol/genproto + sdks/ts/src/proto）"
 run = "buf generate"
 
 [tasks."upgrade-lynx"]
@@ -34,7 +34,7 @@ run = [
 [tasks."release-tag"]
 description = "打单个模块的 annotated tag 并推送"
 usage = '''
-arg "<version>" env="VERSION" help="tag 版本；子模块传 shared/vX.Y.Z 或 sdks/go/vX.Y.Z"
+arg "<version>" env="VERSION" help="tag 版本；子模块传 protocol/vX.Y.Z 或 sdks/go/vX.Y.Z"
 arg "<comment>" env="COMMENT" help="annotated tag 说明"
 '''
 run = '''
@@ -43,13 +43,13 @@ git push origin "$usage_version"
 '''
 
 [tasks."release-all"]
-description = "按固定顺序为根模块、shared、sdks/go 打 tag 并推送"
+description = "按固定顺序为根模块、protocol、sdks/go 打 tag 并推送"
 usage = '''
 arg "<version>" env="VERSION" help="版本号，如 v0.2.0"
 arg "<comment>" env="COMMENT" help="annotated tag 说明"
 '''
 run = '''
-for prefix in "" shared sdks/go; do
+for prefix in "" protocol sdks/go; do
   tag="${prefix:+$prefix/}$usage_version"
   git tag -a "$tag" -m "$usage_comment"
   git push origin "$tag"

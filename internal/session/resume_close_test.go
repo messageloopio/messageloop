@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
+	clientpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/client/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

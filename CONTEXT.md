@@ -59,7 +59,7 @@ graph TD
 
 ### shared（独立 Go module）
 
-`github.com/messageloopio/messageloop/shared`（go 1.25.5，仅依赖 grpc/protobuf），根模块 `require v0.2.0 + replace ./shared`。独立的意义：`sdks/go` 复用 wire 契约而不拖入服务端实现。生产 285 行。
+`github.com/messageloopio/messageloop/protocol`（go 1.25.5，依赖 grpc/protobuf/gobwas/glob），根模块 `require + replace ./protocol`。独立的意义：`sdks/go` 复用 wire 契约而不拖入服务端实现，proxy 后端复用 `protocol/proxyserver` 框架。
 
 - **`Marshaler`**（marshaler.go:12）：5 方法（Marshal / MarshalAppend / Unmarshal / Name / **IsJSONWire**）。3 个生产 adapter 同文件（JSON / Protobuf / protoJSON 单例），全仓 35 文件 import。`IsJSONWire` 是 D12 落地：禁止用 `Name()` 字符串分支嗅探线格式（唯一消费者 hub 的 jsonRaw splice，hub.go:462）。
 - **`PositionFrom`**（position.go:16，仅 23 行但语义 load-bearing，KD-K22）：Position 的唯一构造点，5 个生产调用全经它。

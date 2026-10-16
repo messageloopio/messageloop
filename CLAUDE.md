@@ -162,13 +162,13 @@ The system abstracts connection handling via the **Transport** interface (`inter
 
 ### Protocol
 
-Client protocol messages defined in `shared/genproto/messageloop/client/v2/`:
+Client protocol messages defined in `protocol/genproto/messageloop/client/v2/`:
 - `InboundMessage` - Client-to-server with oneof envelope: Connect, Subscribe, Publish, RpcRequest, Survey, Ping, etc.
 - `OutboundMessage` - Server-to-client with oneof envelope: Connected, SubscribeAck, PublishAck, Publication, RpcReply, SurveyResult, etc.
 - `Message` - Wrapper containing Channel, Id, Offset, and Payload
 - `Publication` - Contains Envelopes (array of Message)
 
-Marshalers live in `shared/marshaler.go` (import `github.com/messageloopio/messageloop/shared`):
+Marshalers live in `protocol/marshaler.go` (import `github.com/messageloopio/messageloop/protocol`):
 - `JSONMarshaler{}` - Standard JSON encoding
 - `ProtobufMarshaler{}` - Protobuf binary encoding
 - `ProtoJSONMarshaler` - Protobuf JSON encoding
@@ -185,7 +185,7 @@ Marshalers live in `shared/marshaler.go` (import `github.com/messageloopio/messa
 
 ### Disconnect Handling
 
-Typed `Disconnect` errors (`internal/protocol/disconnect.go`) signal intentional connection termination with codes:
+Typed `Disconnect` errors (`internal/wire/disconnect.go`) signal intentional connection termination with codes:
 - **3000** - Connection closed (clean disconnect, or network loss)
 - **3500-3509** - Terminal errors: InvalidToken, BadRequest, Stale, ForceNoReconnect, ConnectionLimit, ChannelLimit, InappropriateProtocol, PermissionDenied, NotAvailable, TooManyErrors
 - **3511** - IdleTimeout (heartbeat detected inactivity)
@@ -200,7 +200,7 @@ Typed `Disconnect` errors (`internal/protocol/disconnect.go`) signal intentional
 - `internal/survey/` - Survey leaf types (orchestration stays on Node)
 - `cmd/server/` - Server entry point using `lynx` framework
 - `config/` - Configuration structures
-- `shared/` - Separate Go module (`github.com/messageloopio/messageloop/shared`) with shared marshalers and generated protobuf Go code
+- `protocol/` - Separate Go module (`github.com/messageloopio/messageloop/protocol`) with wire marshalers, generated protobuf Go code, and the proxyserver backend framework
 - `proto/messageloop/` - Protobuf definitions (source)
 - `genproto/` - Generated protobuf (local replace to shared/)
 - `pkg/transport/ws/` - WebSocket transport implementation

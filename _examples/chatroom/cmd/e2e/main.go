@@ -36,8 +36,8 @@ import (
 )
 
 var (
-	wsURL      = "ws://127.0.0.1:9080/ws"
-	grpcURL    = "127.0.0.1:9090"
+	wsURL    = "ws://127.0.0.1:9080/ws"
+	grpcURL  = "127.0.0.1:9090"
 	apiAddr  = chatroom.DefaultAPIAddr
 	apiToken = "chatroom-admin-token-0123456789"
 

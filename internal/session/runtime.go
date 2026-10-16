@@ -14,12 +14,12 @@ import (
 	"github.com/messageloopio/messageloop/internal/cluster"
 	"github.com/messageloopio/messageloop/internal/metrics"
 	"github.com/messageloopio/messageloop/internal/occupancy"
-	"github.com/messageloopio/messageloop/internal/protocol"
 	"github.com/messageloopio/messageloop/internal/stream"
 	"github.com/messageloopio/messageloop/internal/survey"
+	"github.com/messageloopio/messageloop/internal/wire"
+	"github.com/messageloopio/messageloop/protocol"
+	clientpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/client/v2"
 	"github.com/messageloopio/messageloop/proxy"
-	"github.com/messageloopio/messageloop/shared"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
 )
 
 // Local type aliases so the git-mv'd files keep using short names (body

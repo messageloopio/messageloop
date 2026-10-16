@@ -13,9 +13,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/messageloopio/messageloop/config"
-	"github.com/messageloopio/messageloop/shared"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
+	"github.com/messageloopio/messageloop/protocol"
+	clientpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/client/v2"
+	sharedv2 "github.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2"
 )
 
 // countingRecoveryBroker wraps fakeEpochHistoryBroker with a History call

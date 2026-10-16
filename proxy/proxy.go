@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	proxypb "github.com/messageloopio/messageloop/shared/genproto/messageloop/proxy/v2"
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
+	proxypb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/proxy/v2"
+	sharedv2 "github.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2"
 )
 
 // Proxy defines the interface for proxying RPC requests to backend services.

@@ -7,7 +7,7 @@ import (
 
 	"github.com/gobwas/glob"
 
-	proxypb "github.com/messageloopio/messageloop/shared/genproto/messageloop/proxy/v2"
+	proxypb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/proxy/v2"
 )
 
 // Middleware wraps an RPCHandlerFunc. Middleware registered via Use runs in

@@ -7,8 +7,8 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/messageloopio/messageloop/internal/protocol"
 	"github.com/messageloopio/messageloop/internal/session"
+	"github.com/messageloopio/messageloop/internal/wire"
 )
 
 // msgTypeFromSubprotocol returns the WebSocket message type for the given negotiated subprotocol.

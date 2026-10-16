@@ -527,7 +527,7 @@ Common error codes (this table mirrors the `Error.code` comment in `proto/messag
 
 ## Disconnect Codes
 
-When the server closes a connection, it sends a disconnect with a numeric code. Codes are defined in `internal/protocol/disconnect.go`; the client should treat them as advisory (reconnect unless told not to):
+When the server closes a connection, it sends a disconnect with a numeric code. Codes are defined in `internal/wire/disconnect.go`; the client should treat them as advisory (reconnect unless told not to):
 
 | Code | Name | Reconnect | Description |
 | --- | --- | --- | --- |

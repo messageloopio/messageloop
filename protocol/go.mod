@@ -1,4 +1,4 @@
-module github.com/messageloopio/messageloop/shared
+module github.com/messageloopio/messageloop/protocol
 
 go 1.25.5
 

@@ -16,13 +16,13 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	"github.com/messageloopio/messageloop/internal/protocol"
 	"github.com/messageloopio/messageloop/internal/survey"
+	"github.com/messageloopio/messageloop/internal/wire"
 	"github.com/messageloopio/messageloop/pkg/topics"
+	"github.com/messageloopio/messageloop/protocol"
+	clientpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/client/v2"
+	sharedv2 "github.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2"
 	"github.com/messageloopio/messageloop/proxy"
-	"github.com/messageloopio/messageloop/shared"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
 )
 
 // NewClient creates a client session bound to a transport connection. The

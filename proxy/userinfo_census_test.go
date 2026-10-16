@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
-	proxypb "github.com/messageloopio/messageloop/shared/genproto/messageloop/proxy/v2"
+	proxypb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/proxy/v2"
 )
 
 // normalizeFieldName collapses a field name to a comparison key that is

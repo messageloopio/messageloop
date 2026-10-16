@@ -15,8 +15,8 @@ import (
 	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
 
+	clientpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/client/v2"
 	"github.com/messageloopio/messageloop/proxy"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
 )
 
 // SessionState is the lifecycle state of a Session (KD-K2). Detached is only

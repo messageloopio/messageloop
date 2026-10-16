@@ -12,9 +12,9 @@ import (
 
 	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/internal/session"
-	"github.com/messageloopio/messageloop/shared"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
+	"github.com/messageloopio/messageloop/protocol"
+	clientpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/client/v2"
+	sharedpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2"
 )
 
 // Handler upgrades HTTP requests to WebSocket connections and binds each
@@ -185,4 +185,3 @@ func logReadError(ctx context.Context, err error) {
 		log.ErrorContext(ctx, "websocket read error", err)
 	}
 }
-

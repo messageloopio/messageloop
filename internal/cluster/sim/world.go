@@ -6,10 +6,10 @@ import (
 	"time"
 
 	clusterpkg "github.com/messageloopio/messageloop/internal/cluster"
-	"github.com/messageloopio/messageloop/internal/protocol"
 	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/internal/session"
-	"github.com/messageloopio/messageloop/shared"
+	"github.com/messageloopio/messageloop/internal/wire"
+	"github.com/messageloopio/messageloop/protocol"
 )
 
 // World is the deterministic two-node fencing fixture: nodes A and B are real

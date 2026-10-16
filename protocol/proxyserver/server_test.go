@@ -10,8 +10,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	proxypb "github.com/messageloopio/messageloop/shared/genproto/messageloop/proxy/v2"
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
+	proxypb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/proxy/v2"
+	sharedv2 "github.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2"
 )
 
 func TestServerRPCEchoAndErrorMapping(t *testing.T) {
@@ -239,17 +239,4 @@ func (l *lifecycleFuncs) OnDisconnected(ctx context.Context, req *proxypb.OnDisc
 		return nil
 	}
 	return l.onDisconnected(ctx, req)
-}
-
-// AuthHandlerFunc and APIKeyHandlerFunc adapt functions to their interfaces.
-type AuthHandlerFunc func(ctx context.Context, req *proxypb.AuthenticateRequest) (*proxypb.UserInfo, error)
-
-func (f AuthHandlerFunc) Authenticate(ctx context.Context, req *proxypb.AuthenticateRequest) (*proxypb.UserInfo, error) {
-	return f(ctx, req)
-}
-
-type APIKeyHandlerFunc func(ctx context.Context, req *proxypb.AuthenticateAPIKeyRequest) (*proxypb.APIKeyInfo, error)
-
-func (f APIKeyHandlerFunc) AuthenticateAPIKey(ctx context.Context, req *proxypb.AuthenticateAPIKeyRequest) (*proxypb.APIKeyInfo, error) {
-	return f(ctx, req)
 }

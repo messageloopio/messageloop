@@ -14,7 +14,7 @@ package proxyserver
 import (
 	"context"
 
-	proxypb "github.com/messageloopio/messageloop/shared/genproto/messageloop/proxy/v2"
+	proxypb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/proxy/v2"
 )
 
 // RPCHandler handles client RPC requests forwarded by the MessageLoop server.
@@ -61,4 +61,20 @@ type LifecycleHandler interface {
 // the caller); a returned error is mapped to the in-band AUTH_ERROR response.
 type APIKeyHandler interface {
 	AuthenticateAPIKey(ctx context.Context, req *proxypb.AuthenticateAPIKeyRequest) (*proxypb.APIKeyInfo, error)
+}
+
+// AuthHandlerFunc adapts a function to AuthHandler.
+type AuthHandlerFunc func(ctx context.Context, req *proxypb.AuthenticateRequest) (*proxypb.UserInfo, error)
+
+// Authenticate implements AuthHandler.
+func (f AuthHandlerFunc) Authenticate(ctx context.Context, req *proxypb.AuthenticateRequest) (*proxypb.UserInfo, error) {
+	return f(ctx, req)
+}
+
+// APIKeyHandlerFunc adapts a function to APIKeyHandler.
+type APIKeyHandlerFunc func(ctx context.Context, req *proxypb.AuthenticateAPIKeyRequest) (*proxypb.APIKeyInfo, error)
+
+// AuthenticateAPIKey implements APIKeyHandler.
+func (f APIKeyHandlerFunc) AuthenticateAPIKey(ctx context.Context, req *proxypb.AuthenticateAPIKeyRequest) (*proxypb.APIKeyInfo, error) {
+	return f(ctx, req)
 }

@@ -9,7 +9,7 @@
 package serverv2
 
 import (
-	v2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
+	v2 "github.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -1430,7 +1430,7 @@ const file_messageloop_server_v2_api_proto_rawDesc = "" +
 	"\vGetPresence\x12).messageloop.server.v2.GetPresenceRequest\x1a*.messageloop.server.v2.GetPresenceResponse\x12a\n" +
 	"\n" +
 	"GetHistory\x12(.messageloop.server.v2.GetHistoryRequest\x1a).messageloop.server.v2.GetHistoryResponse\x12d\n" +
-	"\vGetChannels\x12).messageloop.server.v2.GetChannelsRequest\x1a*.messageloop.server.v2.GetChannelsResponseBUZSgithub.com/messageloopio/messageloop/shared/genproto/messageloop/server/v2;serverv2b\x06proto3"
+	"\vGetChannels\x12).messageloop.server.v2.GetChannelsRequest\x1a*.messageloop.server.v2.GetChannelsResponseBWZUgithub.com/messageloopio/messageloop/protocol/genproto/messageloop/server/v2;serverv2b\x06proto3"
 
 var (
 	file_messageloop_server_v2_api_proto_rawDescOnce sync.Once

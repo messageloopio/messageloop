@@ -11,10 +11,10 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/messageloopio/messageloop/internal/protocol"
 	"github.com/messageloopio/messageloop/internal/session"
+	"github.com/messageloopio/messageloop/internal/wire"
 	"github.com/messageloopio/messageloop/pkg/transport/framing"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
+	clientpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/client/v2"
 )
 
 // ErrTransportClosed is returned by WriteMany after the transport has been closed.

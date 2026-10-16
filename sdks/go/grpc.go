@@ -11,7 +11,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/proto"
 
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
+	clientpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/client/v2"
 )
 
 // rawFrame is a type alias for raw protobuf bytes.

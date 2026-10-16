@@ -1,3 +1,7 @@
+// Example proxyserver demonstrates implementing a MessageLoop proxy backend
+// with the proxyserver framework from the protocol module: implement only the
+// capabilities you need, route RPC by (channel, method) patterns, and let the
+// framework handle payload conversion, error mapping and gRPC wiring.
 package main
 
 import (
@@ -11,496 +15,158 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
-	messageloopgo "github.com/messageloopio/messageloop/sdks/go"
-	proxypb "github.com/messageloopio/messageloop/shared/genproto/messageloop/proxy/v2"
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
+	proxy "github.com/messageloopio/messageloop/protocol/genproto/messageloop/proxy/v2"
+	sharedv2 "github.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2"
+	"github.com/messageloopio/messageloop/protocol/proxyserver"
 )
 
-// ============================================================================
-// Approach 1: Traditional switch-based handler
-// ============================================================================
-
-// MyRPCHandler implements custom RPC handling using a switch statement.
-// This approach works well for simple cases but can become unwieldy
-// as the number of methods grows.
-type MyRPCHandler struct{}
-
-func (h *MyRPCHandler) HandleRPC(ctx context.Context, req *messageloopgo.RPCRequest) (*messageloopgo.RPCResponse, error) {
-	log.Printf("[RPC] channel=%s method=%s", req.Channel, req.Method)
-
-	switch req.Method {
-	case "echo":
-		// Echo back the request
-		return &messageloopgo.RPCResponse{
-			Payload: req.Payload,
-		}, nil
-
-	case "getUser":
-		// Example: Get user by ID
-		var userID string
-		if req.Payload != nil {
-			_ = req.Payload.DataAs(&userID)
-		}
-		respMsg := messageloopgo.NewMessageWithData("getUser.response", messageloopgo.NewTextData("User: "+userID))
-		return &messageloopgo.RPCResponse{
-			Payload: respMsg,
-		}, nil
-
-	case "sum":
-		// Example: Parse and calculate sum
-		var data string
-		if req.Payload != nil {
-			_ = req.Payload.DataAs(&data)
-		}
-		var a, b int
-		if _, err := fmt.Sscanf(data, "%d,%d", &a, &b); err == nil {
-			result := fmt.Sprintf("%d", a+b)
-			respMsg := messageloopgo.NewMessageWithData("sum.response", messageloopgo.NewTextData(result))
-			return &messageloopgo.RPCResponse{
-				Payload: respMsg,
-			}, nil
-		}
-		return &messageloopgo.RPCResponse{
-			Error: &sharedv2.Error{
-				Code:    "INVALID_INPUT",
-				Type:    "validation_error",
-				Message: "Expected format: a,b (e.g., 10,20)",
-			},
-		}, nil
-
-	default:
-		return &messageloopgo.RPCResponse{
-			Error: &sharedv2.Error{
-				Code:    "UNKNOWN_METHOD",
-				Type:    "rpc_error",
-				Message: "Unknown method: " + req.Method,
-			},
-		}, nil
-	}
-}
-
-// ============================================================================
-// Approach 2: RPCMux-based handler (recommended for larger services)
-// ============================================================================
-
-// newRPCMux creates an RPC multiplexer with handlers and middleware.
-// This approach provides better organization and extensibility.
-func newRPCMux() *messageloopgo.RPCMux {
-	mux := messageloopgo.NewRPCMux()
-
-	// Register middleware (applied in registration order: logging -> recovery -> handler)
-	mux.Use(loggingMiddleware)
-	mux.Use(recoveryMiddleware)
-
-	// Register handlers
-	mux.Handle("echo", handleEcho)
-	mux.Handle("getUser", handleGetUser)
-	mux.Handle("sum", handleSum)
-
-	return mux
-}
-
-// loggingMiddleware logs RPC requests and their duration.
-func loggingMiddleware(next messageloopgo.RPCHandlerFunc) messageloopgo.RPCHandlerFunc {
-	return func(ctx context.Context, req *messageloopgo.RPCRequest) (*messageloopgo.RPCResponse, error) {
-		start := time.Now()
-		resp, err := next(ctx, req)
-		duration := time.Since(start)
-
-		if err != nil {
-			log.Printf("[RPC] method=%s duration=%v error=%v", req.Method, duration, err)
-		} else if resp.Error != nil {
-			log.Printf("[RPC] method=%s duration=%v error_code=%s", req.Method, duration, resp.Error.Code)
-		} else {
-			log.Printf("[RPC] method=%s duration=%v success=true", req.Method, duration)
-		}
-
-		return resp, err
-	}
-}
-
-// recoveryMiddleware recovers from panics and returns an error response.
-func recoveryMiddleware(next messageloopgo.RPCHandlerFunc) messageloopgo.RPCHandlerFunc {
-	return func(ctx context.Context, req *messageloopgo.RPCRequest) (resp *messageloopgo.RPCResponse, err error) {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("[RPC] PANIC: method=%s recovered=%v", req.Method, r)
-				resp = &messageloopgo.RPCResponse{
-					Error: &sharedv2.Error{
-						Code:    "INTERNAL_ERROR",
-						Type:    "server_error",
-						Message: fmt.Sprintf("Internal server error: %v", r),
-					},
-				}
-				err = nil
-			}
-		}()
-		return next(ctx, req)
-	}
-}
-
-// handleEcho echoes back the request.
-func handleEcho(ctx context.Context, req *messageloopgo.RPCRequest) (*messageloopgo.RPCResponse, error) {
-	return &messageloopgo.RPCResponse{
-		Payload: req.Payload,
-	}, nil
-}
-
-// handleGetUser simulates getting user info.
-func handleGetUser(ctx context.Context, req *messageloopgo.RPCRequest) (*messageloopgo.RPCResponse, error) {
-	var userID string
-	if req.Payload != nil {
-		_ = req.Payload.DataAs(&userID)
-	}
-	respMsg := messageloopgo.NewMessageWithData("getUser.response", messageloopgo.NewTextData("User: "+userID))
-	return &messageloopgo.RPCResponse{
-		Payload: respMsg,
-	}, nil
-}
-
-// handleSum calculates the sum of two numbers.
-func handleSum(ctx context.Context, req *messageloopgo.RPCRequest) (*messageloopgo.RPCResponse, error) {
-	var data string
-	if req.Payload != nil {
-		_ = req.Payload.DataAs(&data)
-	}
-	var a, b int
-	if _, err := fmt.Sscanf(data, "%d,%d", &a, &b); err != nil {
-		return &messageloopgo.RPCResponse{
-			Error: &sharedv2.Error{
-				Code:    "INVALID_INPUT",
-				Type:    "validation_error",
-				Message: "Expected format: a,b (e.g., 10,20)",
-			},
-		}, nil
-	}
-
-	result := fmt.Sprintf("%d", a+b)
-	respMsg := messageloopgo.NewMessageWithData("sum.response", messageloopgo.NewTextData(result))
-	return &messageloopgo.RPCResponse{
-		Payload: respMsg,
-	}, nil
-}
-
-// MyAuthHandler implements custom authentication.
-type MyAuthHandler struct{}
-
-func (h *MyAuthHandler) Authenticate(ctx context.Context, req *messageloopgo.AuthenticateRequest) (*messageloopgo.AuthenticateResponse, error) {
-	log.Printf("[Auth] client_id=%s client_type=%s", req.ClientID, req.ClientType)
-
-	// Simple authentication: accept any non-empty client_id/token
-	if req.ClientID == "" || req.Token == "" {
-		return &messageloopgo.AuthenticateResponse{
-			Error: &sharedv2.Error{
-				Code:    "INVALID_CREDENTIALS",
-				Type:    "auth_error",
-				Message: "Client ID and token are required",
-			},
-		}, nil
-	}
-
-	// Return user info on successful auth
-	return &messageloopgo.AuthenticateResponse{
-		UserInfo: &messageloopgo.UserInfo{
-			ID:         "user-" + req.ClientID,
-			Username:   req.ClientID,
-			Token:      req.Token,
-			ClientType: req.ClientType,
-			ClientID:   req.ClientID,
-		},
-	}, nil
-}
-
-// MyACLHandler implements custom ACL checks.
-type MyACLHandler struct{}
-
-func (h *MyACLHandler) CheckSubscribeACL(ctx context.Context, channel, token string) error {
-	log.Printf("[SubscribeACL] channel=%s token=%s", channel, token)
-
-	// Simple ACL: allow all channels starting with "public."
-	// Require valid token for "private." channels
-	if hasPrefix(channel, "private.") && token == "" {
-		return status.Error(codes.PermissionDenied, "Authentication required for private channels")
-	}
-
-	return nil
-}
-
-func (h *MyACLHandler) CheckPublishACL(ctx context.Context, channel, token string) error {
-	log.Printf("[PublishACL] channel=%s token=%s", channel, token)
-
-	// Simple ACL: allow all channels starting with "public."
-	// Require valid token for "private." channels
-	if hasPrefix(channel, "private.") && token == "" {
-		return status.Error(codes.PermissionDenied, "Authentication required for private channels")
-	}
-
-	return nil
-}
-
-// MyLifecycleHandler implements custom lifecycle hooks.
-type MyLifecycleHandler struct{}
-
-func (h *MyLifecycleHandler) OnConnected(ctx context.Context, sessionID, username string) error {
-	log.Printf("[Lifecycle] Client connected: sessionID=%s username=%s", sessionID, username)
-	return nil
-}
-
-func (h *MyLifecycleHandler) OnDisconnected(ctx context.Context, sessionID, username string) error {
-	log.Printf("[Lifecycle] Client disconnected: sessionID=%s username=%s", sessionID, username)
-	return nil
-}
-
-func (h *MyLifecycleHandler) OnSubscribed(ctx context.Context, sessionID, channel, username string) error {
-	log.Printf("[Lifecycle] Client subscribed: sessionID=%s channel=%s username=%s", sessionID, channel, username)
-	return nil
-}
-
-func (h *MyLifecycleHandler) OnUnsubscribed(ctx context.Context, sessionID, channel, username string) error {
-	log.Printf("[Lifecycle] Client unsubscribed: sessionID=%s channel=%s username=%s", sessionID, channel, username)
-	return nil
-}
-
-// MyProxyService combines all handlers.
-type MyProxyService struct {
-	proxypb.UnimplementedProxyServiceServer
-	rpcHandler       messageloopgo.RPCHandler
-	authHandler      messageloopgo.AuthHandler
-	aclHandler       messageloopgo.ACLHandler
-	lifecycleHandler messageloopgo.LifecycleHandler
-}
-
-// RPC implements ProxyServiceServer.RPC.
-func (s *MyProxyService) RPC(ctx context.Context, req *proxypb.RPCRequest) (*proxypb.RPCResponse, error) {
-	log.Printf("[RPC Request] id=%s channel=%s method=%s", req.Id, req.Channel, req.Method)
-
-	// Convert Payload to Message (the proxy/v2 wire already carries the
-	// shared.v2 payload type the SDK uses natively).
-	var payload *messageloopgo.Message
-	if pbPayload := req.GetPayload(); pbPayload != nil {
-		payload = messageloopgo.PayloadToMessage(pbPayload, "")
-	}
-
-	rpcReq := &messageloopgo.RPCRequest{
-		ID:      req.Id,
-		Channel: req.Channel,
-		Method:  req.Method,
-		Payload: payload,
-	}
-
-	resp, err := s.rpcHandler.HandleRPC(ctx, rpcReq)
-	if err != nil {
-		log.Printf("[RPC Error] id=%s error=%s", req.Id, err.Error())
-		return &proxypb.RPCResponse{
-			Id: req.Id,
-			Error: &sharedv2.Error{
-				Code:    "INTERNAL_ERROR",
-				Type:    "server_error",
-				Message: err.Error(),
-			},
-		}, nil
-	}
-
-	if resp == nil {
-		log.Printf("[RPC Error] id=%s handler returned a nil response", req.Id)
-		return nil, status.Error(codes.Internal, "RPC handler returned a nil response")
-	}
-
-	// Convert Message to Payload
-	var respPayload *sharedv2.Payload
-	if resp.Payload != nil {
-		if p, err := resp.Payload.ToPayload(); err == nil {
-			respPayload = p
-		}
-	}
-
-	if resp.Error != nil {
-		log.Printf("[RPC Response] id=%s error_code=%s error_type=%s error_msg=%s", req.Id, resp.Error.Code, resp.Error.Type, resp.Error.Message)
-	} else {
-		log.Printf("[RPC Response] id=%s success=true", req.Id)
-	}
-
-	return &proxypb.RPCResponse{
-		Id:      req.Id,
-		Error:   resp.Error,
-		Payload: respPayload,
-	}, nil
-}
-
-// Authenticate implements ProxyServiceServer.Authenticate.
-func (s *MyProxyService) Authenticate(ctx context.Context, req *proxypb.AuthenticateRequest) (*proxypb.AuthenticateResponse, error) {
-	log.Printf("[Authenticate Request] client_id=%s client_type=%s", req.ClientId, req.ClientType)
-
-	authReq := &messageloopgo.AuthenticateRequest{
-		ClientID:   req.ClientId,
-		Token:      req.Token,
-		ClientType: req.ClientType,
-	}
-
-	resp, err := s.authHandler.Authenticate(ctx, authReq)
-	if err != nil {
-		log.Printf("[Authenticate Error] client_id=%s error=%s", req.ClientId, err.Error())
-		return &proxypb.AuthenticateResponse{
-			Error: &sharedv2.Error{
-				Code:    "AUTH_ERROR",
-				Type:    "auth_error",
-				Message: err.Error(),
-			},
-		}, nil
-	}
-
-	if resp == nil {
-		log.Printf("[Authenticate Error] client_id=%s handler returned a nil response", req.ClientId)
-		return nil, status.Error(codes.Internal, "auth handler returned a nil response")
-	}
-
-	if resp.Error != nil {
-		log.Printf("[Authenticate Response] client_id=%s error_code=%s error_type=%s", req.ClientId, resp.Error.Code, resp.Error.Type)
-	} else if resp.UserInfo != nil {
-		log.Printf("[Authenticate Response] client_id=%s user_id=%s success=true", req.ClientId, resp.UserInfo.ID)
-	} else {
-		log.Printf("[Authenticate Response] client_id=%s success=true", req.ClientId)
-	}
-
-	return &proxypb.AuthenticateResponse{
-		Error:    resp.Error,
-		UserInfo: resp.UserInfo.ToProto(),
-	}, nil
-}
-
-// SubscribeAcl implements ProxyServiceServer.SubscribeAcl.
-func (s *MyProxyService) SubscribeAcl(ctx context.Context, req *proxypb.SubscribeAclRequest) (*proxypb.SubscribeAclResponse, error) {
-	log.Printf("[SubscribeAcl Request] channel=%s token=%s", req.Channel, req.Token)
-
-	err := s.aclHandler.CheckSubscribeACL(ctx, req.Channel, req.Token)
-	if err != nil {
-		log.Printf("[SubscribeAcl Response] channel=%s denied: %s", req.Channel, err.Error())
-		return &proxypb.SubscribeAclResponse{}, status.Error(codes.PermissionDenied, err.Error())
-	}
-
-	log.Printf("[SubscribeAcl Response] channel=%s allowed=true", req.Channel)
-	return &proxypb.SubscribeAclResponse{}, nil
-}
-
-// PublishAcl implements ProxyServiceServer.PublishAcl.
-func (s *MyProxyService) PublishAcl(ctx context.Context, req *proxypb.PublishAclRequest) (*proxypb.PublishAclResponse, error) {
-	log.Printf("[PublishAcl Request] channel=%s token=%s", req.Channel, req.Token)
-
-	err := s.aclHandler.CheckPublishACL(ctx, req.Channel, req.Token)
-	if err != nil {
-		log.Printf("[PublishAcl Response] channel=%s denied: %s", req.Channel, err.Error())
-		return &proxypb.PublishAclResponse{}, status.Error(codes.PermissionDenied, err.Error())
-	}
-
-	log.Printf("[PublishAcl Response] channel=%s allowed=true", req.Channel)
-	return &proxypb.PublishAclResponse{}, nil
-}
-
-// OnConnected implements ProxyServiceServer.OnConnected.
-func (s *MyProxyService) OnConnected(ctx context.Context, req *proxypb.OnConnectedRequest) (*proxypb.OnConnectedResponse, error) {
-	log.Printf("[OnConnected Request] session_id=%s username=%s", req.SessionId, req.Username)
-
-	if err := s.lifecycleHandler.OnConnected(ctx, req.SessionId, req.Username); err != nil {
-		log.Printf("[OnConnected Error] session_id=%s error=%s", req.SessionId, err.Error())
-		return nil, status.Error(codes.Internal, err.Error())
-	}
-
-	log.Printf("[OnConnected Response] session_id=%s success=true", req.SessionId)
-	return &proxypb.OnConnectedResponse{}, nil
-}
-
-// OnSubscribed implements ProxyServiceServer.OnSubscribed.
-func (s *MyProxyService) OnSubscribed(ctx context.Context, req *proxypb.OnSubscribedRequest) (*proxypb.OnSubscribedResponse, error) {
-	log.Printf("[OnSubscribed Request] session_id=%s channel=%s username=%s", req.SessionId, req.Channel, req.Username)
-
-	if err := s.lifecycleHandler.OnSubscribed(ctx, req.SessionId, req.Channel, req.Username); err != nil {
-		log.Printf("[OnSubscribed Error] error=%s", err.Error())
-		return nil, status.Error(codes.Internal, err.Error())
-	}
-
-	log.Printf("[OnSubscribed Response] success=true")
-	return &proxypb.OnSubscribedResponse{}, nil
-}
-
-// OnUnsubscribed implements ProxyServiceServer.OnUnsubscribed.
-func (s *MyProxyService) OnUnsubscribed(ctx context.Context, req *proxypb.OnUnsubscribedRequest) (*proxypb.OnUnsubscribedResponse, error) {
-	log.Printf("[OnUnsubscribed Request] session_id=%s channel=%s username=%s", req.SessionId, req.Channel, req.Username)
-
-	if err := s.lifecycleHandler.OnUnsubscribed(ctx, req.SessionId, req.Channel, req.Username); err != nil {
-		log.Printf("[OnUnsubscribed Error] error=%s", err.Error())
-		return nil, status.Error(codes.Internal, err.Error())
-	}
-
-	log.Printf("[OnUnsubscribed Response] success=true")
-	return &proxypb.OnUnsubscribedResponse{}, nil
-}
-
-// OnDisconnected implements ProxyServiceServer.OnDisconnected.
-func (s *MyProxyService) OnDisconnected(ctx context.Context, req *proxypb.OnDisconnectedRequest) (*proxypb.OnDisconnectedResponse, error) {
-	log.Printf("[OnDisconnected Request] session_id=%s username=%s", req.SessionId, req.Username)
-
-	if err := s.lifecycleHandler.OnDisconnected(ctx, req.SessionId, req.Username); err != nil {
-		log.Printf("[OnDisconnected Error] session_id=%s error=%s", req.SessionId, err.Error())
-		return nil, status.Error(codes.Internal, err.Error())
-	}
-
-	log.Printf("[OnDisconnected Response] session_id=%s success=true", req.SessionId)
-	return &proxypb.OnDisconnectedResponse{}, nil
-}
-
-func hasPrefix(s, prefix string) bool {
-	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
-}
-
 func main() {
-	// Choose RPC handler approach:
-	//
-	// Approach 1: Traditional switch-based handler (simpler for few methods)
-	// rpcHandler := &MyRPCHandler{}
-	//
-	// Approach 2: RPCMux-based handler (recommended for larger services)
-	// - Better organization with explicit method registration
-	// - Middleware support for logging, recovery, auth, etc.
-	// - Easy to extend with new methods
-	rpcHandler := newRPCMux()
+	mux := proxyserver.NewRPCMux()
 
-	// Create the proxy service with custom handlers
-	handler := &MyProxyService{
-		rpcHandler:       rpcHandler,
-		authHandler:      &MyAuthHandler{},
-		aclHandler:       &MyACLHandler{},
-		lifecycleHandler: &MyLifecycleHandler{},
-	}
+	// Middleware runs in registration order. Panic recovery is built into
+	// the framework (a panicking handler becomes an in-band INTERNAL_ERROR),
+	// so only cross-cutting concerns belong here.
+	mux.Use(logging)
 
-	// Create gRPC server
+	// Routes match (channel, method) glob patterns; first registered wins.
+	must(mux.Handle("chat.*", "echo", handleEcho))
+	must(mux.Handle("chat.*", "getUser", handleGetUser))
+	must(mux.Handle("*", "sum", handleSum))
+
 	grpcServer := grpc.NewServer()
-	proxypb.RegisterProxyServiceServer(grpcServer, handler)
+	proxyserver.New(proxyserver.Options{
+		RPC:  mux, // capabilities left nil answer gRPC Unimplemented
+		Auth: proxyserver.AuthHandlerFunc(auth),
+		ACL:  aclHandler{},
+		Lifecycle: lifecycleFuncs{
+			onConnected: func(ctx context.Context, req *proxy.OnConnectedRequest) error {
+				log.Printf("[Lifecycle] connected: session=%s username=%s", req.GetSessionId(), req.GetUsername())
+				return nil
+			},
+			onDisconnected: func(ctx context.Context, req *proxy.OnDisconnectedRequest) error {
+				log.Printf("[Lifecycle] disconnected: session=%s username=%s", req.GetSessionId(), req.GetUsername())
+				return nil
+			},
+		},
+	}).RegisterGRPC(grpcServer)
 
-	// Listen on port
 	addr := ":9001"
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		log.Fatalf("Failed to listen on %s: %v", addr, err)
 	}
-
 	log.Printf("Proxy server starting on %s...", addr)
 
-	// Start server in background
 	go func() {
 		if err := grpcServer.Serve(listener); err != nil {
 			log.Fatalf("Server error: %v", err)
 		}
 	}()
 
-	// Wait for interrupt signal
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
-
 	log.Println("Shutting down proxy server...")
 	grpcServer.GracefulStop()
 	log.Println("Server stopped")
+}
+
+func handleEcho(ctx context.Context, req *proxy.RPCRequest) (*proxy.RPCResponse, error) {
+	return &proxy.RPCResponse{Payload: req.GetPayload()}, nil
+}
+
+func handleGetUser(ctx context.Context, req *proxy.RPCRequest) (*proxy.RPCResponse, error) {
+	var userID string
+	if err := proxyserver.PayloadJSON(req.GetPayload(), &userID); err != nil {
+		userID = proxyserver.PayloadText(req.GetPayload())
+	}
+	return &proxy.RPCResponse{Payload: proxyserver.NewTextPayload("User: " + userID)}, nil
+}
+
+func handleSum(ctx context.Context, req *proxy.RPCRequest) (*proxy.RPCResponse, error) {
+	var a, b int
+	if _, err := fmt.Sscanf(proxyserver.PayloadText(req.GetPayload()), "%d,%d", &a, &b); err != nil {
+		// NewError carries a custom in-band error code back to the caller;
+		// a plain error would map to INTERNAL_ERROR instead.
+		return nil, proxyserver.NewError(&sharedv2.Error{
+			Code:    "INVALID_INPUT",
+			Type:    "validation_error",
+			Message: "Expected format: a,b (e.g. 10,20)",
+		})
+	}
+	return &proxy.RPCResponse{Payload: proxyserver.NewTextPayload(fmt.Sprintf("%d", a+b))}, nil
+}
+
+func auth(ctx context.Context, req *proxy.AuthenticateRequest) (*proxy.UserInfo, error) {
+	if req.GetClientId() == "" || req.GetToken() == "" {
+		return nil, fmt.Errorf("client ID and token are required")
+	}
+	return &proxy.UserInfo{
+		Id:         "user-" + req.GetClientId(),
+		Username:   req.GetClientId(),
+		Token:      req.GetToken(),
+		ClientType: req.GetClientType(),
+		ClientId:   req.GetClientId(),
+	}, nil
+}
+
+// aclHandler denies private channels without a token; a returned error
+// denies the operation (default code PERMISSION_DENIED).
+type aclHandler struct{}
+
+func (aclHandler) CheckSubscribeACL(ctx context.Context, req *proxy.SubscribeAclRequest) error {
+	const privatePrefix = "private."
+	if len(req.GetChannel()) >= len(privatePrefix) && req.GetChannel()[:len(privatePrefix)] == privatePrefix && req.GetToken() == "" {
+		return fmt.Errorf("authentication required for private channels")
+	}
+	return nil
+}
+
+func (aclHandler) CheckPublishACL(ctx context.Context, req *proxy.PublishAclRequest) error {
+	return nil
+}
+
+// lifecycleFuncs adapts the two hooks this example cares about; the other
+// two default to success.
+type lifecycleFuncs struct {
+	onConnected    func(ctx context.Context, req *proxy.OnConnectedRequest) error
+	onDisconnected func(ctx context.Context, req *proxy.OnDisconnectedRequest) error
+}
+
+func (l lifecycleFuncs) OnConnected(ctx context.Context, req *proxy.OnConnectedRequest) error {
+	if l.onConnected == nil {
+		return nil
+	}
+	return l.onConnected(ctx, req)
+}
+
+func (l lifecycleFuncs) OnDisconnected(ctx context.Context, req *proxy.OnDisconnectedRequest) error {
+	if l.onDisconnected == nil {
+		return nil
+	}
+	return l.onDisconnected(ctx, req)
+}
+
+func (lifecycleFuncs) OnSubscribed(ctx context.Context, req *proxy.OnSubscribedRequest) error {
+	return nil
+}
+
+func (lifecycleFuncs) OnUnsubscribed(ctx context.Context, req *proxy.OnUnsubscribedRequest) error {
+	return nil
+}
+
+func logging(next proxyserver.RPCHandlerFunc) proxyserver.RPCHandlerFunc {
+	return func(ctx context.Context, req *proxy.RPCRequest) (*proxy.RPCResponse, error) {
+		start := time.Now()
+		resp, err := next(ctx, req)
+		log.Printf("[RPC] channel=%s method=%s duration=%v error=%v", req.GetChannel(), req.GetMethod(), time.Since(start), err)
+		return resp, err
+	}
+}
+
+func must(err error) {
+	if err != nil {
+		log.Fatalf("route registration failed: %v", err)
+	}
 }

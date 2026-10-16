@@ -9,7 +9,7 @@
 package proxyv2pb
 
 import (
-	v2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
+	v2 "github.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -1281,7 +1281,7 @@ const file_messageloop_proxy_v2_proxy_proto_rawDesc = "" +
 	"\fOnSubscribed\x12).messageloop.proxy.v2.OnSubscribedRequest\x1a*.messageloop.proxy.v2.OnSubscribedResponse\x12k\n" +
 	"\x0eOnUnsubscribed\x12+.messageloop.proxy.v2.OnUnsubscribedRequest\x1a,.messageloop.proxy.v2.OnUnsubscribedResponse\x12k\n" +
 	"\x0eOnDisconnected\x12+.messageloop.proxy.v2.OnDisconnectedRequest\x1a,.messageloop.proxy.v2.OnDisconnectedResponse\x12w\n" +
-	"\x12AuthenticateAPIKey\x12/.messageloop.proxy.v2.AuthenticateAPIKeyRequest\x1a0.messageloop.proxy.v2.AuthenticateAPIKeyResponseBUZSgithub.com/messageloopio/messageloop/shared/genproto/messageloop/proxy/v2;proxyv2pbb\x06proto3"
+	"\x12AuthenticateAPIKey\x12/.messageloop.proxy.v2.AuthenticateAPIKeyRequest\x1a0.messageloop.proxy.v2.AuthenticateAPIKeyResponseBWZUgithub.com/messageloopio/messageloop/protocol/genproto/messageloop/proxy/v2;proxyv2pbb\x06proto3"
 
 var (
 	file_messageloop_proxy_v2_proxy_proto_rawDescOnce sync.Once

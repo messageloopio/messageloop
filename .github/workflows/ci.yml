@@ -55,9 +55,13 @@ jobs:
       - name: Test with race detector
         run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
-      - name: Test shared module
-        working-directory: shared
+      - name: Test protocol module
+        working-directory: protocol
         run: go test ./...
+
+      - name: Test proxyserver package
+        working-directory: protocol/proxyserver
+        run: go test -race ./...
 
       - name: Test Go SDK module
         working-directory: sdks/go

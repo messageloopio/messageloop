@@ -11,8 +11,8 @@ import (
 	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/internal/serverapi"
 	"github.com/messageloopio/messageloop/pkg/transport/grpc"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
-	serverv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/server/v2"
+	clientpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/client/v2"
+	serverv2 "github.com/messageloopio/messageloop/protocol/genproto/messageloop/server/v2"
 )
 
 // TestPrepareServer_RegistersOnlyAPIService verifies the Server API listener

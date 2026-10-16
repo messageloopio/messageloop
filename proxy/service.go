@@ -13,7 +13,7 @@ import (
 	"google.golang.org/grpc"
 
 	mlmetrics "github.com/messageloopio/messageloop/internal/metrics"
-	proxypb "github.com/messageloopio/messageloop/shared/genproto/messageloop/proxy/v2"
+	proxypb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/proxy/v2"
 )
 
 // ErrNoHealthyInstance is returned when a service-type proxy resolves no

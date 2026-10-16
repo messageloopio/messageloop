@@ -13,8 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/messageloopio/messageloop/config"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
+	clientpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/client/v2"
+	sharedpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2"
 )
 
 func policyBoolPtr(v bool) *bool { return &v }

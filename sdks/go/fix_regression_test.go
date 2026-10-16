@@ -9,12 +9,20 @@ import (
 	"testing"
 	"time"
 
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
-	proxypb "github.com/messageloopio/messageloop/shared/genproto/messageloop/proxy/v2"
+	clientpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/client/v2"
+	sharedv2 "github.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2"
 )
+
+// newTestTextPayload builds a text sharedv2.Payload for survey/RPC tests.
+func newTestTextPayload(t *testing.T, s string) *sharedv2.Payload {
+	t.Helper()
+	m := NewMessageWithData("test", NewTextData(s))
+	p, err := m.ToPayload()
+	if err != nil {
+		t.Fatalf("ToPayload: %v", err)
+	}
+	return p
+}
 
 // TestClientHandleConnectedCloseRace reproduces P0-2: handleConnected and
 // Close() racing on connectedCh must not panic from closing a nil channel.
@@ -586,106 +594,6 @@ func TestClientRPCDefaultTimeout(t *testing.T) {
 	if time.Since(start) > 5*time.Second {
 		t.Fatal("RPC hung past the default timeout")
 	}
-}
-
-// --- Proxy nil-response guards (P1-F6) ---
-
-type stubNilHandler struct{}
-
-func (h *stubNilHandler) HandleRPC(ctx context.Context, req *RPCRequest) (*RPCResponse, error) {
-	return nil, nil
-}
-
-func TestHandlerImplRPCNilResponse(t *testing.T) {
-	h := &HandlerImpl{}
-	h.RPCHandler = &stubNilHandler{}
-
-	resp, err := h.RPC(context.Background(), &proxypb.RPCRequest{Id: "1", Channel: "svc", Method: "echo"})
-	if err == nil {
-		t.Fatal("RPC succeeded, want Internal error for nil response")
-	}
-	if status.Code(err) != codes.Internal {
-		t.Fatalf("RPC error = %v, want Internal", err)
-	}
-	if resp != nil {
-		t.Fatalf("resp = %v, want nil on error", resp)
-	}
-}
-
-type stubNilAuthHandler struct{}
-
-func (h *stubNilAuthHandler) Authenticate(ctx context.Context, req *AuthenticateRequest) (*AuthenticateResponse, error) {
-	return nil, nil
-}
-
-func TestHandlerImplAuthNilResponse(t *testing.T) {
-	h := &HandlerImpl{}
-	h.AuthHandler = &stubNilAuthHandler{}
-
-	resp, err := h.Authenticate(context.Background(), &proxypb.AuthenticateRequest{ClientId: "c1"})
-	if err == nil || status.Code(err) != codes.Internal {
-		t.Fatalf("Authenticate = (%v, %v), want Internal error", resp, err)
-	}
-}
-
-// --- Lifecycle handler params (P1-F8, breaking change) ---
-
-func TestHandlerImplLifecycleSubscribedParams(t *testing.T) {
-	h := &HandlerImpl{}
-	calls := make(chan []string, 2)
-	h.LifecycleHandler = &recordingLifecycleHandler{calls: calls}
-
-	_, err := h.OnSubscribed(context.Background(), &proxypb.OnSubscribedRequest{
-		SessionId: "s1", Channel: "ch1", Username: "u1",
-	})
-	if err != nil {
-		t.Fatalf("OnSubscribed failed: %v", err)
-	}
-	select {
-	case got := <-calls:
-		if len(got) != 3 || got[0] != "s1" || got[1] != "ch1" || got[2] != "u1" {
-			t.Fatalf("OnSubscribed params = %v, want [s1 ch1 u1]", got)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("lifecycle handler not called")
-	}
-
-	_, err = h.OnUnsubscribed(context.Background(), &proxypb.OnUnsubscribedRequest{
-		SessionId: "s2", Channel: "ch2", Username: "u2",
-	})
-	if err != nil {
-		t.Fatalf("OnUnsubscribed failed: %v", err)
-	}
-	select {
-	case got := <-calls:
-		if len(got) != 3 || got[0] != "s2" || got[1] != "ch2" || got[2] != "u2" {
-			t.Fatalf("OnUnsubscribed params = %v, want [s2 ch2 u2]", got)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("lifecycle handler not called")
-	}
-}
-
-type recordingLifecycleHandler struct {
-	calls chan []string
-}
-
-func (h *recordingLifecycleHandler) OnConnected(ctx context.Context, sessionID, username string) error {
-	return nil
-}
-
-func (h *recordingLifecycleHandler) OnDisconnected(ctx context.Context, sessionID, username string) error {
-	return nil
-}
-
-func (h *recordingLifecycleHandler) OnSubscribed(ctx context.Context, sessionID, channel, username string) error {
-	h.calls <- []string{sessionID, channel, username}
-	return nil
-}
-
-func (h *recordingLifecycleHandler) OnUnsubscribed(ctx context.Context, sessionID, channel, username string) error {
-	h.calls <- []string{sessionID, channel, username}
-	return nil
 }
 
 // TestClientConnectCloseDuringWait verifies P1-F6: a Connect blocked in its

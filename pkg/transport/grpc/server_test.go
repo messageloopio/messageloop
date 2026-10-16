@@ -6,8 +6,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/messageloopio/messageloop/internal/runtime"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
-	serverv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/server/v2"
+	clientpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/client/v2"
+	serverv2 "github.com/messageloopio/messageloop/protocol/genproto/messageloop/server/v2"
 )
 
 func TestPrepareClientServer_RegistersOnlyMessageLoopService(t *testing.T) {

@@ -14,14 +14,14 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/messageloopio/messageloop/internal/authz"
-	"github.com/messageloopio/messageloop/internal/protocol"
 	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/internal/serverapi"
 	"github.com/messageloopio/messageloop/internal/session"
 	"github.com/messageloopio/messageloop/internal/stream"
-	"github.com/messageloopio/messageloop/shared"
-	serverv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/server/v2"
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
+	"github.com/messageloopio/messageloop/internal/wire"
+	"github.com/messageloopio/messageloop/protocol"
+	serverv2 "github.com/messageloopio/messageloop/protocol/genproto/messageloop/server/v2"
+	sharedv2 "github.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2"
 )
 
 const bufSize = 1024 * 1024

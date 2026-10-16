@@ -5,7 +5,7 @@ package messageloop.shared.v2;
 
 import "google/protobuf/struct.proto";
 
-option go_package = "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2;sharedv2";
+option go_package = "github.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2;sharedv2";
 
 message Error {
   // Well-known string codes (not an enum). This is the single code table;

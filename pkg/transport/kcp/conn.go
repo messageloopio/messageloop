@@ -9,7 +9,7 @@ import (
 
 	kcpgo "github.com/xtaci/kcp-go/v5"
 
-	"github.com/messageloopio/messageloop/shared"
+	"github.com/messageloopio/messageloop/protocol"
 )
 
 // closeGrace bounds how long a Close waits before tearing down the KCP

@@ -10,11 +10,11 @@ import (
 	"github.com/messageloopio/messageloop/internal/cluster"
 	"github.com/messageloopio/messageloop/internal/metrics"
 	"github.com/messageloopio/messageloop/internal/occupancy"
-	"github.com/messageloopio/messageloop/internal/protocol"
 	"github.com/messageloopio/messageloop/internal/session"
 	"github.com/messageloopio/messageloop/internal/stream"
 	"github.com/messageloopio/messageloop/internal/survey"
-	"github.com/messageloopio/messageloop/shared"
+	"github.com/messageloopio/messageloop/internal/wire"
+	"github.com/messageloopio/messageloop/protocol"
 )
 
 // --- internal/protocol ---

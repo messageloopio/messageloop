@@ -186,7 +186,7 @@ curl -s http://127.0.0.1:8080/metrics | grep '^messageloop_'
 
 ## 5. 断连码参考
 
-`Disconnect` 是携带 `Code` 与 `Reason` 的结构体并实现 `error` 接口（internal/protocol/disconnect.go）：核心代码以返回错误的方式表达"应断开此连接"，`Session.HandleMessage` 用 `errors.As` 识别后关闭连接，传输层把 Code 与 Reason 交给客户端（WebSocket 用 close 帧的 code/reason；gRPC 流先投递 `DISCONNECT_ERROR` 错误信封，数值码编码在信封 metadata 的 `disconnect_code` 条目中）。`Code` 为 0 表示正常关闭（WebSocket 端映射为 1000）。
+`Disconnect` 是携带 `Code` 与 `Reason` 的结构体并实现 `error` 接口（internal/wire/disconnect.go）：核心代码以返回错误的方式表达"应断开此连接"，`Session.HandleMessage` 用 `errors.As` 识别后关闭连接，传输层把 Code 与 Reason 交给客户端（WebSocket 用 close 帧的 code/reason；gRPC 流先投递 `DISCONNECT_ERROR` 错误信封，数值码编码在信封 metadata 的 `disconnect_code` 条目中）。`Code` 为 0 表示正常关闭（WebSocket 端映射为 1000）。
 
 下表列出全部内置断连码。"服务端是否触发"标注该码当前在源码中是否有实际触发点：
 
@@ -206,7 +206,7 @@ curl -s http://127.0.0.1:8080/metrics | grep '^messageloop_'
 | 3511 | `DisconnectIdleTimeout` | `idle timeout` | 心跳检测到超时未活动（`server.heartbeat.idle_timeout`，默认 300 秒） | 是 | 定期发送 Ping 保活（见[《客户端协议参考》](../protocol.md)的心跳小节） |
 | 3512 | `DisconnectSlowConsumer` | `slow consumer` | 客户端消费速度跟不上，写失败或写队列满触发 | 是 | 加快消费；客户端能力与频道吞吐不匹配 |
 | 3513 | `DisconnectInternal` | `internal error` | connect 路径内部错误（如集群状态同步失败），连接被强制关闭 | 是 | 不要在同一连接上重试；检查服务端日志与集群/Redis 状态后重新连接 |
-| 3514 | `DisconnectUnsupportedVersion` | `unsupported version` | Connect 携带的协议版本低于服务端版本门（internal/protocol/version.go） | 是 | 升级 SDK 到与服务端兼容的版本 |
+| 3514 | `DisconnectUnsupportedVersion` | `unsupported version` | Connect 携带的协议版本低于服务端版本门（internal/wire/version.go） | 是 | 升级 SDK 到与服务端兼容的版本 |
 
 说明：
 

@@ -10,12 +10,12 @@ import (
 	"github.com/lynx-go/x/log"
 	"github.com/quic-go/quic-go"
 
-	"github.com/messageloopio/messageloop/internal/protocol"
 	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/internal/session"
-	"github.com/messageloopio/messageloop/shared"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
+	"github.com/messageloopio/messageloop/internal/wire"
+	"github.com/messageloopio/messageloop/protocol"
+	clientpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/client/v2"
+	sharedpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2"
 )
 
 // streamAcceptTimeout bounds how long the server waits for the client to

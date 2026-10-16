@@ -113,7 +113,7 @@
 - `internal/runtime/node.go:151`：`authorizer, _ = NewAuthorizer(空配置)` 二次吞错，若失败 `node.authorizer` 为 nil，后续 `Decide` panic。修复：失败时返回构造错误。
 - `node.go:442/456/467/535/551/564`：saga 回滚错误静默吞掉无日志，留下 hub/broker/metrics 不一致且无迹可查。修复：rollback 内至少 Warn 级日志。
 - `node.go:193-219`：broker 启动错误的异步上报对无 `Ready()` 的 broker 失效，注释承诺与实现不符。
-- `internal/protocol/disconnect.go` 3506-3509 四个码定义并导出但生产代码从未使用（如 3509 TooManyErrors 本可用于"错误过多即断开"）。要么接入要么删除。
+- `internal/wire/disconnect.go` 3506-3509 四个码定义并导出但生产代码从未使用（如 3509 TooManyErrors 本可用于"错误过多即断开"）。要么接入要么删除。
 - `session.go:707-712`：enqueue 在 `ctx.Done()` 分支放弃等待但帧仍留队列稍后写出，调用方观察到失败而客户端实际收到帧，语义含糊。
 - `client.go:958/1046` 等把 `err.Error()` 直接塞进对客户端的 Error.Message，`HTTPStatusError.Error()` 会带上后端原始响应体，可能泄漏后端内部细节。
 
@@ -127,7 +127,7 @@
 
 - `docs/protocol.md:64-95`：Inbound 表缺 `presence_query`（`protocol/client/v2/service.proto:32`），Outbound 表缺 `presence`（field 15）与 `presence_event`（field 16）。
 - `pkg/transport/grpc/transport.go:147`、`transport_test.go:346`：注释写断开码区间 "3500-3512"，码表已到 3514。
-- `docs/protocol.md:525`：`disconnect.go` 已迁至 `internal/protocol/disconnect.go`。
+- `docs/protocol.md:525`：`disconnect.go` 已迁至 `internal/wire/disconnect.go`。
 - ALPN/子协议→Marshaler 映射存在三份（`shared/streamframe.go:39` 的 `MarshalerForALPN` 实际无人调用，属死代码；`quic/handler.go:37-43` 内联重复；`ws/handler.go:117`）。建议 QUIC handler 改用该函数或删除。
 - `heartbeatReadTimeout` 在 `ws/handler.go:136` 与 `quic/handler.go:122` 逐字重复。
 
@@ -144,7 +144,7 @@
 
 **Minor**
 
-- `sdks/go` 全部 10 个测试文件（其 go.mod 未依赖 testify）、`shared/marshaler_test.go`、`internal/protocol/disconnect_test.go` 等用裸 `t.Fatal/t.Error`，与 AGENTS.md 的 testify 约定不一致。
+- `sdks/go` 全部 10 个测试文件（其 go.mod 未依赖 testify）、`shared/marshaler_test.go`、`internal/wire/disconnect_test.go` 等用裸 `t.Fatal/t.Error`，与 AGENTS.md 的 testify 约定不一致。
 - Benchmark 分布不均：`Hub.BroadcastPublication` 大扇出、ws/grpc 传输层、redisbroker 发布路径均无基准。
 - `internal/session/heartbeat.go:30` 的 `defaultJitter` 真实抖动分布永不执行（测试用 `SetJitterForTest` 固定）。
 

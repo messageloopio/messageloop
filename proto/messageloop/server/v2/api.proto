@@ -7,7 +7,7 @@ import "messageloop/shared/v2/errors.proto";
 import "messageloop/shared/v2/types.proto";
 
 // buf:lint:ignore FILE_SAME_GO_PACKAGE
-option go_package = "github.com/messageloopio/messageloop/shared/genproto/messageloop/server/v2;serverv2";
+option go_package = "github.com/messageloopio/messageloop/protocol/genproto/messageloop/server/v2;serverv2";
 
 service APIService {
   rpc Publish(PublishRequest) returns (PublishResponse);

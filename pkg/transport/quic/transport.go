@@ -6,10 +6,10 @@ import (
 
 	"github.com/quic-go/quic-go"
 
-	"github.com/messageloopio/messageloop/internal/protocol"
 	"github.com/messageloopio/messageloop/internal/session"
+	"github.com/messageloopio/messageloop/internal/wire"
 	"github.com/messageloopio/messageloop/pkg/transport/framing"
-	"github.com/messageloopio/messageloop/shared"
+	"github.com/messageloopio/messageloop/protocol"
 )
 
 // ErrTransportClosed is returned by Write after the transport has been closed.

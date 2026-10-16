@@ -13,8 +13,8 @@ import (
 
 	"github.com/messageloopio/messageloop/config"
 	intsurvey "github.com/messageloopio/messageloop/internal/survey"
-	clientpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2"
-	sharedpb "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
+	clientpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/client/v2"
+	sharedpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2"
 )
 
 // userPrincipal is a local copy of the helper that moved with the authorizer

@@ -6,7 +6,7 @@ package messageloop.proxy.v2;
 import "messageloop/shared/v2/errors.proto";
 import "messageloop/shared/v2/types.proto";
 
-option go_package = "github.com/messageloopio/messageloop/shared/genproto/messageloop/proxy/v2;proxyv2pb";
+option go_package = "github.com/messageloopio/messageloop/protocol/genproto/messageloop/proxy/v2;proxyv2pb";
 
 service ProxyService {
   // RPC 调用

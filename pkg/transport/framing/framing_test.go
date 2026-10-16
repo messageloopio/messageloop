@@ -10,8 +10,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/messageloopio/messageloop/internal/protocol"
-	"github.com/messageloopio/messageloop/shared"
+	"github.com/messageloopio/messageloop/internal/wire"
+	"github.com/messageloopio/messageloop/protocol"
 )
 
 // failingMarshaler fails every Marshal so the disconnect-frame error path can

@@ -126,7 +126,7 @@ const file_messageloop_shared_v2_errors_proto_rawDesc = "" +
 	"\x04code\x18\x01 \x01(\tR\x04code\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x18\n" +
 	"\amessage\x18\x03 \x01(\tR\amessage\x123\n" +
-	"\bmetadata\x18\x04 \x01(\v2\x17.google.protobuf.StructR\bmetadataBUZSgithub.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2;sharedv2b\x06proto3"
+	"\bmetadata\x18\x04 \x01(\v2\x17.google.protobuf.StructR\bmetadataBWZUgithub.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2;sharedv2b\x06proto3"
 
 var (
 	file_messageloop_shared_v2_errors_proto_rawDescOnce sync.Once

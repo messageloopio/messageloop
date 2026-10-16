@@ -142,7 +142,7 @@ MessageLoop 的核心设计目标可以归纳为四点：
 
 1. 若已鉴权再发 Connect，返回 `DisconnectBadRequest`。
 2. 客户端可携带 `SessionId` 请求恢复；会话 ID 在鉴权之前就写入（鉴权代理需要它）。
-3. 鉴权：若带 `Token`，查找方法为 `$authenticate`（`SystemMethodAuthenticate`）的代理并调用 `Authenticate`；`requireAuth` 开启但没有可验证 token 的代理时拒绝（`DisconnectInvalidToken`）。Connect 的协议版本过低时以 3514（`DisconnectUnsupportedVersion`，internal/protocol/disconnect.go 的版本门）拒绝。
+3. 鉴权：若带 `Token`，查找方法为 `$authenticate`（`SystemMethodAuthenticate`）的代理并调用 `Authenticate`；`requireAuth` 开启但没有可验证 token 的代理时拒绝（`DisconnectInvalidToken`）。Connect 的协议版本过低时以 3514（`DisconnectUnsupportedVersion`，internal/wire/disconnect.go 的版本门）拒绝。
 4. **命名空间解析**：鉴权代理响应 `UserInfo.namespace` 优先，回退静态 `server.namespace`；两者皆空且 `requireAuth` 开启时 Connect 被拒（`NAMESPACE_REQUIRED` 错误信封 + 3500 断连）。会话绑定 namespace 后，所有客户端可见 channel 必须位于其下（见下文命名空间守卫）；resume 时 namespace 不一致与跨用户接管同样按 3500 拒绝。
 5. 恢复：本地会话存在则会话指针不动——先查 `maxConnsPerUser`（跨用户走 `PrepareSessionUser`，失败则旧会话保持 Attached、新连接收到 `DisconnectConnectionLimit`），再 `Detach` 旧附件、`Attach` 新附件；Attach 失败走 `Close(DisconnectInternal)`。新连接上的临时 Authenticating 会话不进 Hub，读循环 shell 委托给被恢复的会话。本地不存在则尝试跨节点恢复（`resumeRemoteSession`，见[《分布式集群指南》](04-cluster.md)）。未鉴权连接不能驱逐仍被服务的会话。
 6. `AddClient` 注册 + 连接指标计费，集群模式下同步会话状态（本机 resume 走 same-fence Bind，版本 +1 后 owner 仍是自己）。
@@ -315,7 +315,7 @@ type Transport interface {
 
 `RawCodec` 允许把已序列化的 protobuf 字节（rawFrame）直接发送，避免二次序列化；也兼容普通 `proto.Message`。其 `Name()` 返回 `"messageloop-proto"` 而不是默认的 `"proto"`，避免在进程级 codec 注册表中覆盖标准 proto codec，并采用每服务器 `ForceServerCodec` 注入。名称同时是内容子类型标签，须与 Go SDK 客户端（sdks/go/grpc.go）使用的 codec 名称一致。
 
-### 4.5 Marshaler 与编码协商（shared/marshaler.go）
+### 4.5 Marshaler 与编码协商（protocol/marshaler.go）
 
 `Marshaler` 接口提供 `Marshal`/`MarshalAppend`/`Unmarshal`/`Name`：
 
@@ -485,7 +485,7 @@ Occupancy 事件不是 Publication（走 broker 的实时 `occupancy` 消息类�
   │◄── HistoryResponse ────┤◄────────── publications ────┤◄── 环形缓冲/Stream│
 ```
 
-## 7. 断连模型（internal/protocol/disconnect.go）
+## 7. 断连模型（internal/wire/disconnect.go）
 
 `Disconnect` 是携带 `Code` 与 `Reason` 的结构体并实现 `error` 接口：核心代码以返回错误的方式表达"应断开此连接"，`Session.HandleMessage` 用 `errors.As` 识别后调用 `close(disconnect)`，传输层把 Code 与 Reason 交给客户端（WebSocket 用 close 帧的 code/reason；gRPC 用 `DISCONNECT_ERROR` 错误信封，数值码编码在 metadata 的 `disconnect_code` 条目中）。`Code` 为 0 时表示正常关闭（WebSocket 端映射为 1000）。
 
@@ -505,7 +505,7 @@ Occupancy 事件不是 Publication（走 broker 的实时 `occupancy` 消息类�
 | 3511 | `DisconnectIdleTimeout` | 心跳检测到超时未活动 |
 | 3512 | `DisconnectSlowConsumer` | 客户端消费速度跟不上（写失败或写队列满触发） |
 | 3513 | `DisconnectInternal` | connect 路径内部错误（如集群状态同步失败），连接被强制关闭 |
-| 3514 | `DisconnectUnsupportedVersion` | Connect 携带的协议版本低于服务端版本门（internal/protocol/version.go） |
+| 3514 | `DisconnectUnsupportedVersion` | Connect 携带的协议版本低于服务端版本门（internal/wire/version.go） |
 
 3510 在代码中未定义。客户端如何解读这些代码（重连策略、错误展示）见 [《客户端协议参考》](../protocol.md) 的 Disconnect Codes 一节。
 
@@ -536,13 +536,13 @@ Occupancy 事件不是 Publication（走 broker 的实时 `occupancy` 消息类�
 | internal/occupancy/ | Occupancy 叶子类型：`occupancy.go`、`presence.go`、`presence_event.go`、`defaults.go` |
 | internal/survey/ | Survey 叶子类型（编排留在 `internal/runtime` Node 上） |
 | internal/authz/ | Authorizer（`authorizer.go`）与求值辅助 |
-| internal/protocol/ | 协议常量：`disconnect.go`（断连码）、`version.go`（协议版本门） |
+| internal/wire/ | 协议常量：`disconnect.go`（断连码）、`version.go`（协议版本门） |
 | internal/cluster/ | 集群控制面契约（`contracts.go`、`state.go`、`epoch.go`、`user_index.go`）与子包 `hmac/`、`sim/` |
 | internal/serverapi/ | Server API gRPC API：`admin_server.go`、`api_handler.go`、`auth.go`（认证链：三凭证路径 + 缓存/去重/熔断）、`scope.go`（授权 scope 层：能力表 + 请求遍历改写） |
 | internal/metrics/ | Prometheus 指标定义（`metrics.go`） |
 | cmd/server/ | 可执行入口：`main.go`（装配与监听器）、`runtime.go`（gRPC 预绑定与启动顺序）、`envconfig.go`（`MESSAGELOOP_*` 环境变量覆盖） |
 | config/ | 配置结构（`config.go`）与校验 |
-| shared/ | 独立 Go 模块：marshaler 实现（`marshaler.go`）、流帧与 ALPN 常量（`streamframe.go`）与生成的 protobuf 代码（`shared/genproto/`） |
+| protocol/ | 独立 Go 模块：marshaler 实现（`marshaler.go`）、流帧与 ALPN 常量（`streamframe.go`）、生成的 protobuf 代码（`protocol/genproto/`）与 proxyserver 后端框架 |
 | proto/ | buf module 根；protobuf 源定义在 `proto/messageloop/`（client/、server/、shared/、proxy/ 四域，目录镜像 `messageloop.*` 包命名空间） |
 | pkg/transport/ws/ | WebSocket 传输：`server.go`、`handler.go`、`transport.go` |
 | pkg/transport/grpc/ | gRPC 流传输：`client_server.go`、`server.go`、`handler.go`、`transport.go`、`codec.go` |

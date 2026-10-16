@@ -16,10 +16,10 @@ import (
 	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/pkg/transport/grpc"
+	"github.com/messageloopio/messageloop/protocol"
+	serverv2 "github.com/messageloopio/messageloop/protocol/genproto/messageloop/server/v2"
+	sharedv2 "github.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2"
 	"github.com/messageloopio/messageloop/proxy"
-	"github.com/messageloopio/messageloop/shared"
-	serverv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/server/v2"
-	sharedv2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
 )
 
 // The Server API key rejection semantics matrix (design §2.4), driven end to

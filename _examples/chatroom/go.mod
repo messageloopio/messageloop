@@ -3,13 +3,14 @@ module github.com/messageloopio/messageloop/_examples/chatroom
 go 1.26.5
 
 require (
+	github.com/messageloopio/messageloop/protocol v1.0.0-rc.1
 	github.com/messageloopio/messageloop/sdks/go v0.0.0
-	github.com/messageloopio/messageloop/shared v1.0.0-rc.1
 	google.golang.org/grpc v1.83.2
 	google.golang.org/protobuf v1.36.12
 )
 
 require (
+	github.com/gobwas/glob v1.0.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
@@ -28,4 +29,4 @@ require (
 
 replace github.com/messageloopio/messageloop/sdks/go => ../../sdks/go
 
-replace github.com/messageloopio/messageloop/shared => ../../shared
+replace github.com/messageloopio/messageloop/protocol => ../../protocol

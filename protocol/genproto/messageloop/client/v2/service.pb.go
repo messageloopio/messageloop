@@ -7,7 +7,7 @@
 package clientv2
 
 import (
-	v2 "github.com/messageloopio/messageloop/shared/genproto/messageloop/shared/v2"
+	v2 "github.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -2533,7 +2533,7 @@ const file_messageloop_client_v2_service_proto_rawDesc = "" +
 	"\x15RECOVER_STATE_SKIPPED\x10\x03\x12\x18\n" +
 	"\x14RECOVER_STATE_FAILED\x10\x042v\n" +
 	"\x12MessageLoopService\x12`\n" +
-	"\vMessageLoop\x12%.messageloop.client.v2.InboundMessage\x1a&.messageloop.client.v2.OutboundMessage(\x010\x01BUZSgithub.com/messageloopio/messageloop/shared/genproto/messageloop/client/v2;clientv2b\x06proto3"
+	"\vMessageLoop\x12%.messageloop.client.v2.InboundMessage\x1a&.messageloop.client.v2.OutboundMessage(\x010\x01BWZUgithub.com/messageloopio/messageloop/protocol/genproto/messageloop/client/v2;clientv2b\x06proto3"
 
 var (
 	file_messageloop_client_v2_service_proto_rawDescOnce sync.Once
