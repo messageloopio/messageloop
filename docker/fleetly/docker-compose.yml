@@ -13,8 +13,25 @@
 # - 域名 = 平台 Route（ml 9080 http / ml-grpc 9090 h2c / ml-api 9091 h2c），
 #   TLS 在平台边缘终结（LE staging CA，*.dev.fleetly.run 通配解析已在位）。
 
+networks:
+  default:
+    external: true
+    name: default
+
+secrets:
+  # ADR-0074 external 声明律：secret 值经 fleetly secrets put 预置，compose 只声明。
+  ml-api-tokens:
+    external: true
+  mlbridge-yaml:
+    external: true
+  ml-tw-projects:
+    external: true
+
 volumes:
+  # ADR-0074 external 声明律：平台预建 + 显式 external（卷名 dns label，name: 映射）。
   redis_data:
+    external: true
+    name: redis-data
 
 services:
   # ==================== redis（AOF：streams 历史 + broker epoch） ====================
@@ -85,10 +102,11 @@ services:
         exec /usr/local/bin/mlbridge
     networks:
       - default
-      # 跨 Project 引用（F1.8 ADR-0013 附录 A.2）：目标 = torchwood 项目的
-      # default 网（peer declare/approve 后挂靠；__TW_PROJECT_ID__ 部署时渲染）。
-      # 挂靠侧别名不传播，目标侧 server 的别名（进程名）可解析。
-      - "project:__TW_PROJECT_ID__/default"
+      # 跨 Project 引用（F1.8 ADR-0013 附录 A.2）：project:<id>/<net> 形态
+      # 属 spec_file 方言（ADR-0074：官方 schema 网络键字符集不容冒号斜杠，
+      # compose 受理面不承载）——跨项目附件经 spec_file 部署步补挂
+      # （cutover 部署序：compose --wait 成功后取冻结 Spec 改 networks
+      # 再 --spec-file 重部署），peer declare/approve 前置不变。
     secrets: [ml-tw-projects, ml-api-tokens]
     healthcheck:
       # TCP 存活（busybox nc）：无 HTTP 端口；配置类故障 = 进程退出 = 探针失败。
