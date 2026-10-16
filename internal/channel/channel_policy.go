@@ -4,7 +4,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/messageloopio/messageloop/config"
+	"github.com/messageloopio/messageloop/internal/config"
 )
 
 // ErrHistoryDisabled is returned by Node.Publish when the channel policy

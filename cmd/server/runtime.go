@@ -7,11 +7,11 @@ import (
 
 	"github.com/lynx-go/lynx"
 
-	"github.com/messageloopio/messageloop/config"
+	"github.com/messageloopio/messageloop/internal/config"
+	proxyproxy "github.com/messageloopio/messageloop/internal/proxy"
 	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/internal/serverapi"
 	"github.com/messageloopio/messageloop/pkg/transport/grpc"
-	proxyproxy "github.com/messageloopio/messageloop/proxy"
 )
 
 type preparedGRPCServers struct {

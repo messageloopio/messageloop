@@ -20,16 +20,16 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/messageloopio/messageloop/config"
 	"github.com/messageloopio/messageloop/internal/cluster"
+	"github.com/messageloopio/messageloop/internal/config"
 	mlmetrics "github.com/messageloopio/messageloop/internal/metrics"
+	proxyproxy "github.com/messageloopio/messageloop/internal/proxy"
 	"github.com/messageloopio/messageloop/internal/runtime"
 	"github.com/messageloopio/messageloop/internal/stream"
 	"github.com/messageloopio/messageloop/pkg/redisbroker"
 	"github.com/messageloopio/messageloop/pkg/transport/kcp"
 	"github.com/messageloopio/messageloop/pkg/transport/quic"
 	"github.com/messageloopio/messageloop/pkg/transport/ws"
-	proxyproxy "github.com/messageloopio/messageloop/proxy"
 )
 
 var (

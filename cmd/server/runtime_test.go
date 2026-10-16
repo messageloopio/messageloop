@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/messageloopio/messageloop/config"
+	"github.com/messageloopio/messageloop/internal/config"
 	"github.com/messageloopio/messageloop/internal/runtime"
 )
 

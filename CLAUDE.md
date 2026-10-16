@@ -68,7 +68,7 @@ The server exposes four required listeners plus an optional QUIC listener:
 
 ## Configuration
 
-Config structure defined in `config/config.go` with example in `config-example.yaml`:
+Config structure defined in `internal/config/config.go` with example in `config-example.yaml`:
 - **server** - Admin HTTP address (ops), Server API gRPC address, heartbeat idle timeout (default: `300s`), RPC timeout (default: `30s`), per-user and per-client limits, built-in ACL rules, optional `require_auth`
 - **transport** - WebSocket, client gRPC streaming, and optional QUIC listeners, plus TLS, compression, and write timeouts
 - **broker** - Type selection (`memory` or `redis`) with Redis connection, stream, and history settings
@@ -117,7 +117,7 @@ Config structure defined in `config/config.go` with example in `config-example.y
 - Rules support AllowSubscribe, AllowPublish (by user ID, `*` for any), and DenyAll
 - Evaluated on every Subscribe and Publish operation
 
-**Proxy** (`proxy/`) - Backend service integration for RPC requests:
+**Proxy** (`internal/proxy/`) - Backend service integration for RPC requests:
 - Supports HTTP and gRPC backends
 - Routes RPC requests based on channel patterns
 - Three-tier timeout control: client-level, global, and proxy-specific
@@ -199,7 +199,7 @@ Typed `Disconnect` errors (`internal/wire/disconnect.go`) signal intentional con
 - `internal/session/` - Session Plane: Session, Hub, Transport, Heartbeat, Runtime seam
 - `internal/survey/` - Survey leaf types (orchestration stays on Node)
 - `cmd/server/` - Server entry point using `lynx` framework
-- `config/` - Configuration structures
+- `internal/config/` - Configuration structures
 - `protocol/` - Separate Go module (`github.com/messageloopio/messageloop/protocol`) with wire marshalers, generated protobuf Go code, and the proxyserver backend framework
 - `proto/messageloop/` - Protobuf definitions (source)
 - `genproto/` - Generated protobuf (local replace to shared/)
@@ -208,7 +208,7 @@ Typed `Disconnect` errors (`internal/wire/disconnect.go`) signal intentional con
 - `pkg/transport/quic/` - QUIC client transport implementation
 - `pkg/topics/` - Topic matching algorithms for wildcard subscriptions
 - `pkg/redisbroker/` - Redis-based distributed broker implementation
-- `proxy/` - RPC proxy backend integration
+- `internal/proxy/` - RPC proxy backend integration
 - `sdks/go/` - Go client SDK with client.go, websocket.go, grpc.go, proxy.go, mux.go, options.go
 - `sdks/go/example/` - Go SDK example apps (basicwebsocket, basicgrpc, dynamicsub, protobuf, wsrpc, proxyserver)
 - `sdks/ts/` - TypeScript/JavaScript client SDK

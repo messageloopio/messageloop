@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/messageloopio/messageloop/config"
+	"github.com/messageloopio/messageloop/internal/config"
 	clientpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/client/v2"
 	sharedpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2"
 )

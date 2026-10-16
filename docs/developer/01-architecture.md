@@ -50,7 +50,7 @@ MessageLoop 的核心设计目标可以归纳为四点：
 | `Presence` | internal/occupancy/、pkg/redisbroker/presence_redis.go | 频道内在线成员追踪与 join/leave 事件分发 |
 | `Survey` | internal/survey/survey.go、internal/runtime/node.go | 向频道订阅者广播请求并带超时收集响应 |
 | `Authorizer` | internal/authz/authorizer.go | 单一授权求值器：一个 `Decide`、一张 `server.authorizer` 表、一种通配语言；频道策略 Effects 与 Server API 能力位闭集 |
-| `Proxy` | proxy/ | RPC 转发与鉴权/ACL/生命周期钩子的后端集成 |
+| `Proxy` | internal/proxy/ | RPC 转发与鉴权/ACL/生命周期钩子的后端集成 |
 | `Cluster` | internal/runtime/cluster.go 及 cluster_*.go（契约在 internal/cluster） | 可选的 Redis 支撑分布式控制面（详见[《分布式集群指南》](04-cluster.md)） |
 | `Metrics` | internal/metrics/metrics.go | Prometheus 指标收集（详见[《可观测性指南》](05-observability.md)） |
 
@@ -268,7 +268,7 @@ join/leave 事件以 **Occupancy** 概念分发：每次 Join/Leave 取一个单
 
 **无代理 RPC**：`handleRPC` 遇 `proxy.ErrNoProxyFound` 回顶层 Error `code=NO_PROXY` `type=request_error`，不回显请求体。
 
-### 3.8 Proxy（proxy/proxy.go、router.go、http.go、grpc.go）
+### 3.8 Proxy（internal/proxy/proxy.go、router.go、http.go、grpc.go）
 
 `Proxy` 接口提供两类能力：RPC 转发（`RPC`）与后端集成钩子（`Authenticate`、`SubscribeAcl`、`PublishAcl`、`OnConnected`、`OnSubscribed`、`OnUnsubscribed`、`OnDisconnected`），后者在客户端连接生命周期中被 Node/Session 调用。
 
@@ -541,7 +541,7 @@ Occupancy 事件不是 Publication（走 broker 的实时 `occupancy` 消息类�
 | internal/serverapi/ | Server API gRPC API：`admin_server.go`、`api_handler.go`、`auth.go`（认证链：三凭证路径 + 缓存/去重/熔断）、`scope.go`（授权 scope 层：能力表 + 请求遍历改写） |
 | internal/metrics/ | Prometheus 指标定义（`metrics.go`） |
 | cmd/server/ | 可执行入口：`main.go`（装配与监听器）、`runtime.go`（gRPC 预绑定与启动顺序）、`envconfig.go`（`MESSAGELOOP_*` 环境变量覆盖） |
-| config/ | 配置结构（`config.go`）与校验 |
+| internal/config/ | 配置结构（`config.go`）与校验 |
 | protocol/ | 独立 Go 模块：marshaler 实现（`marshaler.go`）、流帧与 ALPN 常量（`streamframe.go`）、生成的 protobuf 代码（`protocol/genproto/`）与 proxyserver 后端框架 |
 | proto/ | buf module 根；protobuf 源定义在 `proto/messageloop/`（client/、server/、shared/、proxy/ 四域，目录镜像 `messageloop.*` 包命名空间） |
 | pkg/transport/ws/ | WebSocket 传输：`server.go`、`handler.go`、`transport.go` |
@@ -550,6 +550,6 @@ Occupancy 事件不是 Publication（走 broker 的实时 `occupancy` 消息类�
 | pkg/transport/kcp/ | 可选 KCP 传输：`server.go`、`conn.go`、`handler.go`、`tls.go`、`transport.go` |
 | pkg/topics/ | 主题匹配与命名空间：`matcher.go`、`cstrie.go`、`trie.go`、`naive.go`、`inverted_bitmap.go`、`optimized_inverted_bitmap.go`、`namespace.go` |
 | pkg/redisbroker/ | Redis Broker（`redis.go`、`pubsub.go`、`history.go`、`options.go`、`message.go`、`client.go`）、Redis Presence（`presence_redis.go`）与集群支撑（`cluster_directory.go`、`cluster_command_bus.go`、`cluster_query_store.go`） |
-| proxy/ | RPC 代理：`proxy.go`、`router.go`、`http.go`、`grpc.go` |
-| sdks/go/ | Go SDK（`client.go`、`websocket.go`、`grpc.go`、`quic.go`、`kcp.go`、`message.go`、`presence.go`、`survey.go`、`gap.go`、`disconnect.go`、`proxy.go`、`mux.go`、`options.go`）与示例（`example/`） |
+| internal/proxy/ | RPC 代理：`proxy.go`、`router.go`、`http.go`、`grpc.go` |
+| sdks/go/ | Go SDK（`client.go`、`websocket.go`、`grpc.go`、`quic.go`、`kcp.go`、`message.go`、`presence.go`、`survey.go`、`gap.go`、`disconnect.go`、`options.go`）与示例（`example/`） |
 | sdks/ts/ | TypeScript SDK（`src/` 与示例 `examples/`） |

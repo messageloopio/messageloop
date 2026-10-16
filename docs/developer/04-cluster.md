@@ -39,7 +39,7 @@ MessageLoop 可以以两种形态运行：
 
 ### 2.2 cluster 配置段
 
-配置结构见 `config/config.go` 的 `ClusterConfig`，共五个字段：
+配置结构见 `internal/config/config.go` 的 `ClusterConfig`，共五个字段：
 
 | 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |

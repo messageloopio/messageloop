@@ -6,7 +6,7 @@ import (
 	"hash/fnv"
 	"time"
 
-	"github.com/messageloopio/messageloop/config"
+	"github.com/messageloopio/messageloop/internal/config"
 	"github.com/messageloopio/messageloop/internal/authz"
 	"github.com/messageloopio/messageloop/internal/channel"
 	"github.com/messageloopio/messageloop/internal/cluster"
@@ -16,7 +16,7 @@ import (
 	"github.com/messageloopio/messageloop/internal/stream"
 	"github.com/messageloopio/messageloop/internal/survey"
 	clientpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/client/v2"
-	"github.com/messageloopio/messageloop/proxy"
+	"github.com/messageloopio/messageloop/internal/proxy"
 )
 
 // nodeRuntime adapts *Node onto session.Runtime without exporting Node methods

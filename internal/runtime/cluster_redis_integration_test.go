@@ -14,7 +14,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 
-	"github.com/messageloopio/messageloop/config"
+	"github.com/messageloopio/messageloop/internal/config"
 	"github.com/messageloopio/messageloop/internal/authz"
 	clusterpkg "github.com/messageloopio/messageloop/internal/cluster"
 	"github.com/messageloopio/messageloop/internal/redistest"
@@ -28,7 +28,7 @@ import (
 	clientpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/client/v2"
 	serverv2 "github.com/messageloopio/messageloop/protocol/genproto/messageloop/server/v2"
 	sharedpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2"
-	"github.com/messageloopio/messageloop/proxy"
+	"github.com/messageloopio/messageloop/internal/proxy"
 )
 
 const clusterRedisIntegrationDB = 15

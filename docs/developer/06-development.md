@@ -25,7 +25,7 @@
 | `internal/cluster/` | 集群控制面契约（`contracts.go`、`epoch.go`、`user_index.go`）与 `hmac/`、`sim/` |
 | `internal/serverapi/` | Server API（`server.go`、`api_handler.go`） |
 | `cmd/server/` | 服务端入口 `main.go`、gRPC 启动预检 `runtime.go`、环境变量覆盖 `envconfig.go`，基于 `lynx` 框架 |
-| `config/` | 配置结构体定义与校验（`config.go`） |
+| `internal/config/` | 配置结构体定义与校验（`config.go`） |
 | `proto/messageloop/` | Protobuf 源文件（单一 buf module），下分 `shared/v2/`、`client/v2/`、`server/v2/`、`proxy/v2/` |
 | `protocol/` | 独立 Go 模块 `github.com/messageloopio/messageloop/protocol`；`genproto/` 为生成代码，`marshaler.go` 为 JSON/Protobuf 序列化器，`streamframe.go` 为 QUIC/KCP 的流帧与 ALPN 常量，`proxyserver/` 为 Proxy 后端实现框架 |
 | `pkg/transport/ws/` | WebSocket 传输实现（含集成测试） |
@@ -34,7 +34,7 @@
 | `pkg/transport/kcp/` | 可选 KCP 客户端传输（TLS 加密的 KCP 会话 + 长度前缀帧，ALPN 协商编码） |
 | `pkg/topics/` | 主题匹配器：`cstrie`（默认并发实现）、`trie`、`naive`、`inverted_bitmap` 等，及命名空间校验 `namespace.go` |
 | `pkg/redisbroker/` | Redis broker 实现：Streams 历史、Pub/Sub 实时分发、Redis 支撑的 presence 与集群控制面（目录/命令总线/查询存储） |
-| `proxy/` | RPC 代理后端集成（HTTP/gRPC 后端、路由、超时） |
+| `internal/proxy/` | RPC 代理后端集成（HTTP/gRPC 后端、路由、超时） |
 | `sdks/go/` | 独立 Go 模块 `github.com/messageloopio/messageloop/sdks/go`：客户端 SDK（`client.go`、`websocket.go`、`grpc.go`、`quic.go`、`kcp.go`、`message.go`、`presence.go`、`survey.go`、`gap.go`、`disconnect.go`、`proxy.go`、`mux.go`、`options.go`）与 `example/` 示例 |
 | `sdks/ts/` | TypeScript SDK（`@messageloop/sdk`），含 `src/`、`test/` 与生成的 `src/proto/` |
 | `_examples/chatroom/` | 独立 Go 模块的端到端演示应用（`cmd/backend`、`e2e`、`goclient`、`web`）；CI 会构建它 |

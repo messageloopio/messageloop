@@ -179,8 +179,8 @@ curl -s http://127.0.0.1:8080/metrics | grep '^messageloop_'
 | 集群：修复循环失败 | `cluster repair failed`（Warn） | internal/runtime/cluster_repair.go |
 | 关停排空超时 | `shutdown: timed out draining client connections`（Warn） | internal/runtime/node.go |
 | Server API 调用 | `server side API Publish/Disconnect/Subscribe/...`（Info） | internal/serverapi/api_handler.go |
-| 服务发现 proxy：实例进出 | `service proxy membership event`（Info，含 `service`、`event`、`instance`、`endpoint`） | proxy/service.go |
-| 服务发现 proxy：无健康实例 | `service proxy has no healthy instance`（Warn，含 `service`） | proxy/service.go |
+| 服务发现 proxy：实例进出 | `service proxy membership event`（Info，含 `service`、`event`、`instance`、`endpoint`） | internal/proxy/service.go |
+| 服务发现 proxy：无健康实例 | `service proxy has no healthy instance`（Warn，含 `service`） | internal/proxy/service.go |
 
 观察建议：以 Debug 级别运行可获得完整的消息收发轨迹，但消息体全文会进入日志（含 payload），生产环境仅在排查时临时开启。
 

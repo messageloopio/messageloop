@@ -1,12 +1,12 @@
 # 配置参考
 
-本文档是 MessageLoop 配置项的逐字段权威参考。所有字段名、类型、默认值与校验规则均对照源码核实（`config/config.go`、`internal/runtime/defaults.go`、`internal/stream/defaults.go`、`cmd/server/main.go`、`cmd/server/runtime.go`、`cmd/server/envconfig.go`、`pkg/redisbroker/options.go`、`proxy/`、`pkg/transport/` 下各传输）。协议与部署层面的说明见[《客户端协议参考》](../protocol.md) 与[《部署指南》](../deployment.md)。
+本文档是 MessageLoop 配置项的逐字段权威参考。所有字段名、类型、默认值与校验规则均对照源码核实（`internal/config/config.go`、`internal/runtime/defaults.go`、`internal/stream/defaults.go`、`cmd/server/main.go`、`cmd/server/runtime.go`、`cmd/server/envconfig.go`、`pkg/redisbroker/options.go`、`internal/proxy/`、`pkg/transport/` 下各传输）。协议与部署层面的说明见[《客户端协议参考》](../protocol.md) 与[《部署指南》](../deployment.md)。
 
 ## 概述
 
 服务器通过单个 YAML 文件配置，路径由 `--config` 启动参数指定（默认 `./config.yaml`）。启动流程：
 
-1. lynx 框架读取 YAML 并反序列化为 `config.Config`（结构定义见 `config/config.go`）；
+1. lynx 框架读取 YAML 并反序列化为 `config.Config`（结构定义见 `internal/config/config.go`）；
 2. 调用 `Config.Validate()`，校验失败则启动中止并返回 `invalid config: ...`；
 3. 各组件构造时应用默认值（见下文各节"默认值"）。
 
@@ -36,7 +36,7 @@
 
 ### Config.Validate() 校验规则
 
-`Validate()`（config/config.go）按以下顺序检查，返回第一条错误：
+`Validate()`（internal/config/config.go）按以下顺序检查，返回第一条错误：
 
 1. **传输地址必填**：`transport.websocket.addr`、`transport.websocket.path` 与 `transport.grpc.addr` 均必填（启动接线无条件构造 WebSocket 与客户端 gRPC 监听器，缺失地址会错绑或 panic）。`transport.quic.addr` / `transport.kcp.addr` 可选，空值表示不启动对应监听器；二者非空时必须配置 TLS 证书对或 `insecure: true`。
 2. **时长格式**：以下字段若非空必须是合法的 Go duration 字符串（如 `"30s"`、`"1m30s"`）：`server.heartbeat.idle_timeout`、`server.heartbeat.ping_interval`、`server.heartbeat.ping_timeout`、`server.rpc_timeout`、`transport.websocket.read_timeout` / `write_timeout`、`transport.grpc.write_timeout`、`transport.quic.write_timeout` / `read_timeout`、`transport.kcp.write_timeout` / `read_timeout`。
@@ -53,7 +53,7 @@
 13. **namespace**：`server.namespace` 非空时按 `topics.ValidateNamespace` 校验标识符（`[a-z0-9-]`、1-32 字符、以 `[a-z0-9]` 开头结尾）；为空且 `require_auth` 为 false 时必须提供（没有代理可以提供 namespace，fail-closed）。
 14. **Server API 地址必填**：`server.api.addr` 必填（`prepareGRPCServers` 无条件预绑定该监听器）。
 
-不在 `Validate()` 内的校验：`cluster.node_id` 必填在 `ClusterOptions.Normalize()`（internal/cluster/contracts.go）与启动接线（cmd/server/main.go 的 `normalizeClusterOptions`）两处检查；`hmac_key_file` 的文件读取与密钥长度在启动接线 `ClusterConfig.ResolveHMACKey()`（config/config.go）执行，失败即拒绝启动；proxy 条目的 `endpoint` / `service` 互斥与 `routing` 语义在启动接线 `Node.SetupProxy`（internal/runtime/node.go）内逐条 `proxy.ProxyConfig.Validate`（proxy/proxy.go）检查，先于任何代理后端构造——同样启动即失败，但报错时机在 `Validate()` 之后（见 [proxy 节](#proxy-节)）。
+不在 `Validate()` 内的校验：`cluster.node_id` 必填在 `ClusterOptions.Normalize()`（internal/cluster/contracts.go）与启动接线（cmd/server/main.go 的 `normalizeClusterOptions`）两处检查；`hmac_key_file` 的文件读取与密钥长度在启动接线 `ClusterConfig.ResolveHMACKey()`（internal/config/config.go）执行，失败即拒绝启动；proxy 条目的 `endpoint` / `service` 互斥与 `routing` 语义在启动接线 `Node.SetupProxy`（internal/runtime/node.go）内逐条 `proxy.ProxyConfig.Validate`（internal/proxy/proxy.go）检查，先于任何代理后端构造——同样启动即失败，但报错时机在 `Validate()` 之后（见 [proxy 节](#proxy-节)）。
 
 ### 常量与默认值分布
 
@@ -67,7 +67,7 @@
 | `DefaultShutdownTimeout` | 10s | internal/runtime/defaults.go | 优雅关闭时排空连接的上限（进程级整体关闭由 lynx 的 30s 兜底） |
 | `DefaultHistoryLimit` | 1000 | internal/stream/defaults.go | `History` 未指定 limit 时的返回条数上限 |
 | `MaxPresenceSnapshotClients` | 256 | internal/occupancy/defaults.go | presence 快照 clients 条数全局默认 |
-| `DefaultRPCTimeout` | 30s | proxy/proxy.go | `server.rpc_timeout` 与 `proxy[].timeout` 的默认 |
+| `DefaultRPCTimeout` | 30s | internal/proxy/proxy.go | `server.rpc_timeout` 与 `proxy[].timeout` 的默认 |
 | 各传输写超时 | 10s | pkg/transport/{ws,grpc,quic,kcp}/ | 对应 `write_timeout` 未配置时的兜底 |
 | QUIC 默认 idle/keepalive | 5min / 15s | pkg/transport/quic/server.go | 未联动心跳配置时的 QUIC 会话默认 |
 | KCP 默认窗口 | 256/256 | pkg/transport/kcp/server.go | KCP 会话窗口 |
@@ -455,7 +455,7 @@ registry:
 
 补充事实：
 
-- **继承的精确语义**：`validateRegistry`（config/config.go，位于 broker 校验之后、cluster 校验之前）逐字段比较，标量零值（`""` / `0`）视为「未设置」并取 `broker.redis` 对应字段的**配置值**——是 YAML 里写了什么，不是 broker 的生效默认。继承结果就地回填进配置，cmd/server 装配（`newRegistryResolver`）直接消费解析后的值。
+- **继承的精确语义**：`validateRegistry`（internal/config/config.go，位于 broker 校验之后、cluster 校验之前）逐字段比较，标量零值（`""` / `0`）视为「未设置」并取 `broker.redis` 对应字段的**配置值**——是 YAML 里写了什么，不是 broker 的生效默认。继承结果就地回填进配置，cmd/server 装配（`newRegistryResolver`）直接消费解析后的值。
 - `registry.redis` 的字段集比 `broker.redis` 小：没有 `max_retries` / `stream_max_length` / `stream_approximate` / `history_ttl` / `consumer_group`（发现栈不写 Stream、不参与历史）。
 - registry 恒使用独立 `*redis.Client`：注册轮询与事件订阅不与 broker 数据面抢连接池。
 - `registry.*` 各键不在环境变量白名单（见[环境变量覆盖](#环境变量覆盖cmdserverenvconfiggo)），只能写配置文件。
@@ -536,8 +536,8 @@ proxy:
 **校验时机（全部启动即失败，不留运行期惊喜）**，分三层：
 
 1. `Config.Validate()`（校验规则 8）：`registry.enabled` 未开启时出现任何 `service` 条目即拒绝；
-2. `Node.SetupProxy`（internal/runtime/node.go，启动接线）：逐条 `proxy.ProxyConfig.Validate`（proxy/proxy.go）——`endpoint` 与 `service` 必须恰有其一；`routing` 值域检查（**对 endpoint 型后端也执行**，只是其取值不生效）；service 型配置遇 nil resolver（registry 未构建）拒绝。先于任何后端构造，失败即启动中止；
-3. `ToProxyConfig`（config/config.go）：`timeout` duration 解析失败同样启动中止。
+2. `Node.SetupProxy`（internal/runtime/node.go，启动接线）：逐条 `proxy.ProxyConfig.Validate`（internal/proxy/proxy.go）——`endpoint` 与 `service` 必须恰有其一；`routing` 值域检查（**对 endpoint 型后端也执行**，只是其取值不生效）；service 型配置遇 nil resolver（registry 未构建）拒绝。先于任何后端构造，失败即启动中止；
+3. `ToProxyConfig`（internal/config/config.go）：`timeout` duration 解析失败同样启动中止。
 
 **其他行为事实**：
 
@@ -548,7 +548,7 @@ proxy:
 
 ### 代理钩子
 
-`Proxy` 接口（proxy/proxy.go）定义了 8 个钩子，分别在以下时机调用：
+`Proxy` 接口（internal/proxy/proxy.go）定义了 8 个钩子，分别在以下时机调用：
 
 | 钩子 | 触发时机 | 路由匹配方式 |
 | --- | --- | --- |

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/messageloopio/messageloop/config"
 	channelpkg "github.com/messageloopio/messageloop/internal/channel"
+	"github.com/messageloopio/messageloop/internal/config"
 	"github.com/messageloopio/messageloop/pkg/topics"
 )
 

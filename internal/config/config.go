@@ -12,7 +12,7 @@ import (
 	"github.com/lynx-go/x/log"
 
 	"github.com/messageloopio/messageloop/pkg/topics"
-	"github.com/messageloopio/messageloop/proxy"
+	"github.com/messageloopio/messageloop/internal/proxy"
 )
 
 // CapabilityNames is the closed set of Server API capability names accepted

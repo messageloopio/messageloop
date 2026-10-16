@@ -15,10 +15,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	"github.com/messageloopio/messageloop/config"
+	"github.com/messageloopio/messageloop/internal/config"
 	clientpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/client/v2"
 	sharedv2 "github.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2"
-	"github.com/messageloopio/messageloop/proxy"
+	"github.com/messageloopio/messageloop/internal/proxy"
 )
 
 func (c *capturingTransport) getMessage(i int) []byte {

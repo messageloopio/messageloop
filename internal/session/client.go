@@ -22,7 +22,7 @@ import (
 	"github.com/messageloopio/messageloop/protocol"
 	clientpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/client/v2"
 	sharedv2 "github.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2"
-	"github.com/messageloopio/messageloop/proxy"
+	"github.com/messageloopio/messageloop/internal/proxy"
 )
 
 // NewClient creates a client session bound to a transport connection. The

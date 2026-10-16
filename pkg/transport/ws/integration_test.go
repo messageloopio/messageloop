@@ -11,7 +11,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
 
-	"github.com/messageloopio/messageloop/config"
+	"github.com/messageloopio/messageloop/internal/config"
 	"github.com/messageloopio/messageloop/internal/runtime"
 	ws "github.com/messageloopio/messageloop/pkg/transport/ws"
 	"github.com/messageloopio/messageloop/protocol"

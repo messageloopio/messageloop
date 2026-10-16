@@ -20,7 +20,7 @@ import (
 
 	"github.com/messageloopio/messageloop/internal/authz"
 	"github.com/messageloopio/messageloop/pkg/topics"
-	"github.com/messageloopio/messageloop/proxy"
+	"github.com/messageloopio/messageloop/internal/proxy"
 )
 
 // The Server API key authentication chain (design §2.3): a unary interceptor
