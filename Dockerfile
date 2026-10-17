@@ -11,10 +11,10 @@ FROM golang:${GO_VERSION} AS builder
 WORKDIR /src
 
 # Copy the module manifests first so dependency download stays cached across
-# source changes. The ./shared module is pulled in through the replace
+# source changes. The ./protocol module is pulled in through the replace
 # directive in go.mod.
 COPY go.mod go.sum ./
-COPY shared/go.mod shared/go.sum ./shared/
+COPY protocol/go.mod protocol/go.sum ./protocol/
 RUN --mount=type=cache,target=/go/pkg/mod \
     go mod download
 
