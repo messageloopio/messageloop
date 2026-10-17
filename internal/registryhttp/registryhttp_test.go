@@ -107,7 +107,7 @@ func do(t *testing.T, method, url string, body string) (*http.Response, string) 
 	require.NoError(t, err)
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	bodyBytes, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 	return resp, strings.TrimSpace(string(bodyBytes))
@@ -184,11 +184,11 @@ func TestHeartbeat(t *testing.T) {
 	srv, f := newTestServer(t)
 	_, _ = do(t, http.MethodPost, srv.URL+"/registry/v1/services/acme/instances", `{"id":"i-1","address":"h:1"}`)
 
-	resp, body := do(t, http.MethodPut, srv.URL+"/registry/v1/services/acme/instances/i-1/heartbeat", "")
+	resp, _ := do(t, http.MethodPut, srv.URL+"/registry/v1/services/acme/instances/i-1/heartbeat", "")
 	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
 
 	// Unknown instance → 404, the re-register signal for registrants.
-	resp, body = do(t, http.MethodPut, srv.URL+"/registry/v1/services/acme/instances/ghost/heartbeat", "")
+	resp, body := do(t, http.MethodPut, srv.URL+"/registry/v1/services/acme/instances/ghost/heartbeat", "")
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 	assert.Contains(t, body, "not registered")
 
