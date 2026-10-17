@@ -13,9 +13,9 @@ env set`/`configs set`/`domains add` 等旧面均不存在）。
 | 项 | 形态 |
 |---|---|
 | app 名 | `messageloop`（项目 = `messageloop`；跨 Project 互访 torchwood 走 F1.8 peer） |
-| 服务 | `redis`（AOF 卷 = streams 历史 + broker epoch）、`messageloop`（WS 9080 / 客户端 gRPC 9090 / Server API 9091 / health 8080 回环）、`mlbridge`（ProxyService gRPC 9070，栈内私有） |
+| 服务 | `redis`（AOF 卷 = streams 历史 + broker epoch）、`messageloop`（WS 9080 / 客户端 gRPC 9090 / Server API 9091 / admin 8080 token 面，registry 目录 API 所在）、`mlbridge`（ProxyService gRPC 9070，栈内私有，经 registry 自注册） |
 | 网络 | 项目网 `default` + mlbridge 跨挂 torchwood 项目网（`project:<TW_PROJECT_ID>/default`，peer declare/approve 后生效——compose 占位部署时渲染） |
-| 密钥 | Project Secret 文件注入 + sh -c 包装（`ml-api-tokens`=`MESSAGELOOP_SERVER_API_AUTH_TOKENS` 与 `MLBRIDGE_MESSAGELOOP_API_TOKEN` 同值；`ml-tw-projects` = torchwood 项目 JSON） |
+| 密钥 | Project Secret 文件注入 + sh -c 包装（`ml-api-tokens`=`MESSAGELOOP_SERVER_API_AUTH_TOKENS` 与 `MLBRIDGE_MESSAGELOOP_API_TOKEN` 同值；`ml-http-token`=`MESSAGELOOP_SERVER_HTTP_AUTH_TOKEN` 与 `MLBRIDGE_REGISTRY_TOKEN` 同值，admin 面鉴权 + 注册面同一张票；`ml-tw-projects` = torchwood 项目 JSON） |
 | 配置 | `mlbridge.yaml`（proxy 接线，config-file-only 键）经 **Secret 文件**投递：`--config /run/secrets/mlbridge-yaml`。fleetly 的 Config 挂载面（config_refs）运行期材料化未落地（挂账），Secret 文件面是等价投递通道（值非敏感，interim 形态） |
 | 入口 | Route 三条：`ml.dev.fleetly.run`（9080 http，WS upgrade 透传 `/ws`）+ `ml-grpc.dev.fleetly.run`（9090 h2c）+ `ml-api.dev.fleetly.run`（9091 h2c）；TLS 平台边缘终结（LE staging CA） |
 
@@ -28,6 +28,8 @@ fleetly volumes create --project $P redis_data
 
 TOK="$(openssl rand -hex 32)"
 fleetly secrets put --project $P --value "$TOK" ml-api-tokens
+HTTPTOK="$(openssl rand -hex 32)"
+fleetly secrets put --project $P --value "$HTTPTOK" ml-http-token
 # torchwood 项目接线（api_key 来自 torchwood Console 的 scoped key）
 fleetly secrets put --project $P --value '[{"project_id":"<tw-proj>","api_key":"<sk-...>"}]' ml-tw-projects
 fleetly secrets put --project $P --value "$(cat docker/fleetly/mlbridge.yaml)" mlbridge-yaml
@@ -65,5 +67,35 @@ fleetly routes create --project $P --host ml-api.dev.fleetly.run --app $A --proc
 | 文件 | 用途 |
 |---|---|
 | `docker-compose.yml` | 三服务受控子集（含跨 Project 网络占位） |
-| `mlbridge.yaml` | Secret 投递源（proxy 接线 config-file-only 键；与 docker/dokploy/ 同步义务不变） |
+| `mlbridge.yaml` | Secret 投递源（proxy/registry 接线 config-file-only 键；与 docker/dokploy/ 同步义务至 dokploy 退役为止） |
 | `cutover-runbook.md` | v0.1 割接 runbook（历史参考；实录以 fleetly 仓 runbook 为准） |
+
+## 6. registry 服务注册发现（messageloop ≥ v1.4.0-rc.2 / mlbridge ≥ registry 支持版）
+
+proxy 从静态 `endpoint: mlbridge:9070` 切到 `service: mlbridge`：mlbridge
+启动时向 admin 面 `/registry/v1` 目录 API 自注册（TTL 30s、心跳 10s、
+SIGTERM 排水相先注销），messageloop 经 Rendezvous hash 按实例动态解析。
+本文件三处改动即全部接线：
+
+1. `mlbridge.yaml`（messageloop 侧）：`registry.enabled: true` + proxy 条目
+   `endpoint` → `service: mlbridge`（config-file-only 键，Config 重传滚动生效）；
+2. compose：`MESSAGELOOP_SERVER_HTTP_ADDR` 0.0.0.0:8080 +
+   `MESSAGELOOP_SERVER_HTTP_AUTH_TOKEN`（G5 fail-closed；admin 面不经
+   平台 Route 对外，仅栈内 mlbridge 访问），healthcheck 带 Bearer 头；
+3. compose：mlbridge 侧 `MLBRIDGE_REGISTRY_*` 四键（address 显式给 compose
+   服务名 `mlbridge:9070`——默认 hostname 是容器 ID，跨容器不可解析）。
+
+**在役栈升级序**（现役 R1 → registry 形态；成对升级纪律不变）：
+
+```sh
+HTTPTOK="$(openssl rand -hex 32)"
+fleetly secrets put --project $P --value "$HTTPTOK" ml-http-token
+fleetly secrets put --project $P --value "$(cat docker/fleetly/mlbridge.yaml)" mlbridge-yaml
+# 两镜像升到 registry 支持版（messageloop ≥ rc.2 / mlbridge ≥ registry 支持版）改 sha tag 后：
+fleetly deploy --app $A --compose-file /tmp/ml-compose.yaml --wait
+# 验证：GET http://<messageloop>:8080/registry/v1/services/mlbridge（带 Bearer）应列出 mlbridge 实例
+```
+
+升级窗口语义：新 messageloop 起来前 mlbridge 注册会 fail-fast 重启（编排层
+退避自愈）；老 messageloop 无 `/registry/v1` 会 404——先升 messageloop、
+后升 mlbridge，或一次性 `--wait` 全栈滚动。

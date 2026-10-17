@@ -5,23 +5,35 @@
 # 上传：fleetly configs set messageloop mlbridge.yaml --from-file docker/fleetly/mlbridge.yaml
 # 内容变更 = 新 Config 对象 + 引用服务滚动，随下次部署生效（OT-3/IMPL-T1-4）。
 #
-# proxy 后端是 config-file-only 配置（MESSAGELOOP_* 环境变量表刻意不含它，
-# 见 cmd/server/envconfig.go）；require_auth 与它语义绑定（认证交给桥），
-# 一并在此声明。其余全部配置键由 compose 的 MESSAGELOOP_* 环境变量提供。
+# proxy 后端与 registry 是 config-file-only 配置（MESSAGELOOP_* 环境变量表
+# 刻意不含它们，见 cmd/server/envconfig.go）；require_auth 与 proxy 语义绑定
+# （认证交给桥），一并在此声明。其余全部配置键由 compose 的 MESSAGELOOP_*
+# 环境变量提供。
+#
+# 服务注册发现（messageloop ≥ v1.4.0-rc.2）：proxy 从静态 endpoint 切到
+# service——mlbridge（≥ registry 支持版）启动时经 /registry/v1 目录 API 自注册
+# （MLBRIDGE_REGISTRY_* 环境变量接线，token 与 admin 面同源 secret
+# ml-http-token），实例条目 TTL 30s、心跳 10s、SIGTERM 排水相先注销。
+# registry.redis 未列出的字段逐字段继承 broker.redis（= compose 里
+# MESSAGELOOP_BROKER_REDIS_ADDR → redis:6379），registry 恒用独立连接池。
 #
 # 单条 "*"/"*" 路由覆盖桥的全部调用点：$authenticate（连接认证）、
 # subscribe/publish ACL 逐请求校验、生命周期钩子（计量与撤销索引），
-# 以及客户端 RPC send/history（写穿）。endpoint 是 compose 服务名（平台
-# 网络内别名 = 服务名）；栈内私网明文即可。
+# 以及客户端 RPC send/history（写穿）。service 条目按实例动态解析，
+# 栈内私网明文即可。
 #
-# 注意：docker/dokploy/mlbridge.yaml 是现役 dokploy 栈的 bind mount 源，
-# 割接验收前两份必须同步改动；dokploy 栈退役后本文件为唯一真源。
+# 注意：docker/dokploy/mlbridge.yaml 是旧 dokploy 栈的 bind mount 源，
+# 该栈退役割接前两份必须同步改动；fleetly 现役后本文件为唯一真源。
 server:
   require_auth: true
 
+registry:
+  enabled: true
+  backend: redis
+
 proxy:
   - name: mlbridge
-    endpoint: "mlbridge:9070"
+    service: mlbridge            # registry 服务名;与 MLBRIDGE_REGISTRY_SERVICE 一致;与 endpoint 互斥
     timeout: 30s
     api_auth: true
     grpc:

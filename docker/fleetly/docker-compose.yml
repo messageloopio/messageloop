@@ -22,6 +22,8 @@ secrets:
   # ADR-0074 external 声明律：secret 值经 fleetly secrets put 预置，compose 只声明。
   ml-api-tokens:
     external: true
+  ml-http-token:
+    external: true
   mlbridge-yaml:
     external: true
   ml-tw-projects:
@@ -49,30 +51,34 @@ services:
   messageloop:
     image: ghcr.io/messageloopio/messageloop:sha-b009c71
     # 平台 command 覆盖 ENTRYPOINT → 写全命令；--config 指认 Secret 文件投递的
-    # mlbridge.yaml（proxy 接线是 config-file-only），鉴权 token 同源文件导出。
+    # mlbridge.yaml（proxy/registry 接线是 config-file-only），鉴权 token 同源
+    # 文件导出；admin 面 token 供 mlbridge 经 /registry/v1 自注册（同值 secret）。
     command:
       - sh
       - -c
       - |
         set -eu
         export MESSAGELOOP_SERVER_API_AUTH_TOKENS="$(cat /run/secrets/ml-api-tokens)"
+        export MESSAGELOOP_SERVER_HTTP_AUTH_TOKEN="$(cat /run/secrets/ml-http-token)"
         exec /usr/local/bin/messageloop --config /run/secrets/mlbridge-yaml
     networks: [default]
-    secrets: [ml-api-tokens, mlbridge-yaml]
+    secrets: [ml-api-tokens, ml-http-token, mlbridge-yaml]
     ports:
       - "9080"
       - "9090"
       - "9091"
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health"]
+      # admin 面带 token（G5 门：非回环绑定必须配 auth_token，/health 也不例外）。
+      test: ["CMD", "sh", "-c", "wget -q -O /dev/null --header \"Authorization: Bearer $(cat /run/secrets/ml-http-token)\" http://127.0.0.1:8080/health"]
       start_period: 15s
     environment:
       # —— 鉴权：经 mlbridge 代理认证（Torchwood 凭证），无本地命名空间 ——
       MESSAGELOOP_SERVER_REQUIRE_AUTH: "true"
       # —— 监听地址（--config 取代镜像默认配置基线，addr 类键必须给全）——
-      # 8080 绑回环：/health、/metrics 不对外；非回环绑定必须同时配
-      # MESSAGELOOP_SERVER_HTTP_AUTH_TOKEN（fail-closed）。
-      MESSAGELOOP_SERVER_HTTP_ADDR: "127.0.0.1:8080"
+      # admin 8080 绑 0.0.0.0：/registry/v1 目录 API 要被 mlbridge 容器访问
+      # （服务注册发现）；非回环绑定必须同时配 MESSAGELOOP_SERVER_HTTP_AUTH_TOKEN
+      # （G5 fail-closed），token 不经平台 Route 对外。
+      MESSAGELOOP_SERVER_HTTP_ADDR: "0.0.0.0:8080"
       MESSAGELOOP_SERVER_API_ADDR: "0.0.0.0:9091"
       MESSAGELOOP_TRANSPORT_WEBSOCKET_ADDR: "0.0.0.0:9080"
       MESSAGELOOP_TRANSPORT_WEBSOCKET_PATH: "/ws"
@@ -99,6 +105,7 @@ services:
         set -eu
         export MLBRIDGE_TORCHWOOD_PROJECTS="$(cat /run/secrets/ml-tw-projects)"
         export MLBRIDGE_MESSAGELOOP_API_TOKEN="$(cat /run/secrets/ml-api-tokens)"
+        export MLBRIDGE_REGISTRY_TOKEN="$(cat /run/secrets/ml-http-token)"
         exec /usr/local/bin/mlbridge
     networks:
       - default
@@ -107,7 +114,7 @@ services:
       # compose 受理面不承载）——跨项目附件经 spec_file 部署步补挂
       # （cutover 部署序：compose --wait 成功后取冻结 Spec 改 networks
       # 再 --spec-file 重部署），peer declare/approve 前置不变。
-    secrets: [ml-tw-projects, ml-api-tokens]
+    secrets: [ml-tw-projects, ml-api-tokens, ml-http-token]
     healthcheck:
       # TCP 存活（busybox nc）：无 HTTP 端口；配置类故障 = 进程退出 = 探针失败。
       test: ["CMD", "nc", "-z", "127.0.0.1", "9070"]
@@ -117,6 +124,12 @@ services:
       MLBRIDGE_TORCHWOOD_BASE_URL: "http://server:9080"
       # admin 面：栈内 messageloop（别名 = 服务名）。
       MLBRIDGE_MESSAGELOOP_API_ADDR: "messageloop:9091"
+      # 服务注册发现：向 messageloop admin 面 /registry/v1 自注册；address
+      # 显式给 compose 服务名——默认 hostname（容器 ID）跨容器不可解析。
+      MLBRIDGE_REGISTRY_ENABLED: "true"
+      MLBRIDGE_REGISTRY_SERVER_URL: "http://messageloop:8080"
+      MLBRIDGE_REGISTRY_SERVICE: "mlbridge"
+      MLBRIDGE_REGISTRY_ADDRESS: "mlbridge:9070"
       # 会话索引：与 broker 共用栈内 redis（键前缀 mlb:*）。
       MLBRIDGE_REDIS_ADDR: "redis:6379"
       # 写穿：send RPC 先落 TW 文档再经 Server API 扇出。
