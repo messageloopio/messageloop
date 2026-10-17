@@ -3,7 +3,7 @@ module github.com/messageloopio/messageloop/_examples/chatroom
 go 1.26.5
 
 require (
-	github.com/messageloopio/messageloop/protocol v1.0.0-rc.1
+	github.com/messageloopio/messageloop/protocol v1.0.0-rc.2
 	github.com/messageloopio/messageloop/sdks/go v0.0.0
 	google.golang.org/grpc v1.83.2
 	google.golang.org/protobuf v1.36.12
