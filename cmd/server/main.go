@@ -33,10 +33,6 @@ import (
 	"github.com/messageloopio/messageloop/pkg/transport/ws"
 )
 
-var (
-	version string
-)
-
 func main() {
 	runner := lynx.NewRunner(func(app lynx.App) error {
 		cfg := &config.Config{}
@@ -161,7 +157,6 @@ func main() {
 		return nil
 	},
 		lynx.WithName("MessageLoop"),
-		lynx.WithVersion(version),
 		lynx.WithBindFlagsFunc(lynx.DefaultBindFlagsFunc),
 		lynx.WithBindConfigFunc(bindConfigWithEnv),
 		lynx.WithShutdownTimeout(30*time.Second),
