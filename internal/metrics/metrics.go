@@ -72,6 +72,16 @@ type Metrics struct {
 	OccupancyGenDiscards         prometheus.Counter
 	LiveDropTotal                prometheus.Counter
 	LiveDegradedChannels         prometheus.Gauge
+	// Broadcast batching (server.broadcast): batch size by flush trigger,
+	// flush duration, buffered payload bytes, and how often the bounded
+	// buffer blocked the delivery worker (backpressure engaged). A
+	// pending-bytes gauge pinned at the budget plus rising backpressure
+	// means the channel's message rate exceeds the node's fan-out capacity
+	// — scale out, do not retune the batching parameters.
+	BroadcastBatchMessages          *prometheus.HistogramVec
+	BroadcastBatchFlushSeconds      prometheus.Histogram
+	BroadcastBatchPendingBytes      prometheus.Gauge
+	BroadcastBatchBackpressureTotal prometheus.Counter
 	// Proxy service discovery (v1.1 design §4.6). All four are labeled by the
 	// registry service name ("service"); the membership counter adds the
 	// event label. They are wired into ServiceProxy through the same
@@ -282,6 +292,28 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Namespace: "messageloop",
 			Name:      "live_degraded_channels",
 			Help:      "Current number of channels marked degraded by live delivery pressure: an occupancy event dropped on a full delivery queue, or a publication dense-seq jump. Cleared on the channel's next successful enqueue and reset on reconnect.",
+		}),
+		BroadcastBatchMessages: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: "messageloop",
+			Name:      "broadcast_batch_messages",
+			Help:      "Publications per batched broadcast frame, labeled by the flush trigger (delay = window expired, messages = size cap, explicit = oversize bypass drain, shutdown = final flush).",
+			Buckets:   []float64{1, 2, 4, 8, 16, 32, 64, 128},
+		}, []string{"trigger"}),
+		BroadcastBatchFlushSeconds: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Namespace: "messageloop",
+			Name:      "broadcast_batch_flush_seconds",
+			Help:      "Duration in seconds of one batched broadcast fan-out (marshal through last write confirmation).",
+			Buckets:   prometheus.DefBuckets,
+		}),
+		BroadcastBatchPendingBytes: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: "messageloop",
+			Name:      "broadcast_batch_pending_bytes",
+			Help:      "Raw payload bytes currently held in broadcast batching buffers across all channels. Sustained operation at the configured max_batch_bytes ceiling means backpressure is engaged: the channel's message rate exceeds this node's fan-out capacity.",
+		}),
+		BroadcastBatchBackpressureTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "messageloop",
+			Name:      "broadcast_batch_backpressure_total",
+			Help:      "Total number of broadcast batching appends that blocked the delivery worker because the channel buffer was full (the bounded-buffer backpressure contract at work).",
 		}),
 		ProxyServiceInstances: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Namespace: "messageloop",

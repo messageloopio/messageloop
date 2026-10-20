@@ -360,7 +360,26 @@ func (h *Hub) NumSubscribers(ch string) int {
 	return h.subShards[index(ch, numHubShards)].NumSubscribers(ch)
 }
 
+// BroadcastPublication fans one publication out to every subscriber of ch.
+// It is the single-publication form of BroadcastPublications and shares its
+// entire delivery machinery.
 func (h *Hub) BroadcastPublication(ch string, pub *Publication) error {
+	return h.BroadcastPublications(ch, []*Publication{pub})
+}
+
+// BroadcastPublications fans a batch of publications for one channel out to
+// every subscriber in a single frame per wire encoding: the batch's messages
+// ride one Publication envelope (clientpb.Publication.Messages is repeated),
+// so the per-subscriber enqueue and write-confirm cost is paid once per
+// batch instead of once per message. All publications must belong to ch,
+// arrive in offset order, and carry an offset > 0 — the batching delivery
+// path (internal/runtime publicationBatcher) guarantees all three, and
+// transient (offset 0) publications always go through the single form. A
+// one-element slice behaves exactly like the pre-batching fan-out.
+func (h *Hub) BroadcastPublications(ch string, pubs []*Publication) error {
+	if len(pubs) == 0 {
+		return nil
+	}
 	subscribers := h.mergeMatchingSubscribers(ch)
 	if len(subscribers) == 0 {
 		return nil
@@ -378,44 +397,79 @@ func (h *Hub) BroadcastPublication(ch string, pub *Publication) error {
 	ctx, cancel := context.WithTimeout(context.Background(), broadcastWriteBudget)
 	defer cancel()
 
-	// Create Payload from publication data, preserving the original
+	// One clientpb.Message per publication, preserving the original payload
 	// oneof variant (Binary/Text/JSON). The message position carries the
-	// broker StreamEpoch plus the channel offset.
-	payload := pub.PayloadProtoV2()
-
-	// jsonRaw carries the original payload bytes when the publication is a
-	// valid JSON object: JSON-encoding subscribers get them spliced into the
-	// frame verbatim instead of a json.Unmarshal→structpb→protojson round
-	// trip, which loses integer precision beyond 2^53 (float64) and key
-	// order. Non-object JSON (arrays, scalars) cannot be represented by
-	// structpb and keeps the PayloadProtoV2 degrade-to-text behavior.
-	var jsonRaw []byte
-	if pub.Kind == PayloadKindJSON && isJSONObject(pub.Payload) {
-		jsonRaw = bytes.TrimSpace(pub.Payload)
+	// broker StreamEpoch plus the channel offset, and maxOffset feeds the
+	// delivered-offset bookkeeping below.
+	msgs := make([]*clientpb.Message, len(pubs))
+	maxOffset := uint64(0)
+	for i, pub := range pubs {
+		if pub.Offset > maxOffset {
+			maxOffset = pub.Offset
+		}
+		msgs[i] = &clientpb.Message{
+			Channel:  ch,
+			Id:       publicationMessageID(ch, pub.Offset),
+			Position: shared.PositionFrom(pub.Epoch, pub.Offset, true),
+			Payload:  pub.PayloadProtoV2(),
+			Metadata: func() *sharedv2.Metadata {
+				if len(pub.Metadata) == 0 {
+					return nil
+				}
+				return &sharedv2.Metadata{Entries: pub.Metadata}
+			}(),
+		}
 	}
-	// jsonPlaceholderPayload stands in for the payload while the JSON frame
-	// is marshaled, so protojson emits the empty-Struct splice point.
-	jsonPlaceholderPayload := &sharedv2.Payload{
-		ContentType: pub.ContentType,
-		Data:        &sharedv2.Payload_Json{Json: &structpb.Struct{}},
+	// realPayloads keeps each message's constructed payload so the JSON
+	// placeholder swap in the marshal loop is a pointer shuffle, not a
+	// re-marshal.
+	realPayloads := make([]*sharedv2.Payload, len(msgs))
+	for i, msg := range msgs {
+		realPayloads[i] = msg.Payload
 	}
 
-	msg := &clientpb.Message{
-		Channel:  ch,
-		Id:       publicationMessageID(ch, pub.Offset),
-		Position: shared.PositionFrom(pub.Epoch, pub.Offset, true),
-		Payload:  payload,
-		Metadata: func() *sharedv2.Metadata {
-			if len(pub.Metadata) == 0 {
-				return nil
+	// jsonRaws carries the original payload bytes when every publication in
+	// the batch is a valid JSON object: JSON-encoding subscribers get them
+	// spliced into the frame verbatim instead of a
+	// json.Unmarshal→structpb→protojson round trip, which loses integer
+	// precision beyond 2^53 (float64) and key order. All-or-nothing on
+	// purpose: a mixed batch cannot splice per message without paying the
+	// round trip for the rest anyway, and the whole-batch protojson path
+	// stays correct for every payload kind. Non-object JSON (arrays,
+	// scalars) cannot be represented by structpb and would degrade to text
+	// regardless.
+	var jsonRaws [][]byte
+	if len(pubs) == 1 {
+		pub := pubs[0]
+		if pub.Kind == PayloadKindJSON && isJSONObject(pub.Payload) {
+			jsonRaws = [][]byte{bytes.TrimSpace(pub.Payload)}
+		}
+	} else {
+		candidates := make([][]byte, len(pubs))
+		for i, pub := range pubs {
+			if pub.Kind != PayloadKindJSON || !isJSONObject(pub.Payload) {
+				candidates = nil
+				break
 			}
-			return &sharedv2.Metadata{Entries: pub.Metadata}
-		}(),
+			candidates[i] = bytes.TrimSpace(pub.Payload)
+		}
+		jsonRaws = candidates
+	}
+	// jsonPlaceholders stand in for the payloads while the JSON frame is
+	// marshaled, so protojson emits one empty-Struct splice point per
+	// message. Each keeps its publication's ContentType: the spliced raw
+	// bytes replace only the data site, the content type renders as-is.
+	jsonPlaceholders := make([]*sharedv2.Payload, len(pubs))
+	for i, pub := range pubs {
+		jsonPlaceholders[i] = &sharedv2.Payload{
+			ContentType: pub.ContentType,
+			Data:        &sharedv2.Payload_Json{Json: &structpb.Struct{}},
+		}
 	}
 
 	out := MakeOutboundMessage(nil, func(out *clientpb.OutboundMessage) {
 		out.Envelope = &clientpb.OutboundMessage_Publication{Publication: &clientpb.Publication{
-			Messages: []*clientpb.Message{msg},
+			Messages: msgs,
 		}}
 	})
 
@@ -440,28 +494,33 @@ func (h *Hub) BroadcastPublication(ch string, pub *Publication) error {
 		var b []byte
 		var err error
 		spliced := false
-		if jsonRaw != nil && m.IsJSONWire() {
-			// Swap in the empty-Struct placeholder so protojson emits the
-			// splice point, then graft the raw payload bytes in. The loop is
-			// sequential: the swap is restored before the next encoding
+		if jsonRaws != nil && m.IsJSONWire() {
+			// Swap in the empty-Struct placeholders so protojson emits the
+			// splice points, then graft the raw payload bytes in. The loop
+			// is sequential: the swap is restored before the next encoding
 			// marshals, and sendFrame's re-marshal fallback always sees the
-			// real payload.
-			msg.Payload = jsonPlaceholderPayload
+			// real payloads.
+			for i, msg := range msgs {
+				msg.Payload = jsonPlaceholders[i]
+			}
 			b, err = m.MarshalAppend((*buf)[:0], out)
-			msg.Payload = payload
+			for i, msg := range msgs {
+				msg.Payload = realPayloads[i]
+			}
 			if err == nil {
 				var ok bool
-				b, ok = spliceRawJSONPayload(b, jsonRaw)
+				b, ok = spliceRawJSONPayloads(b, jsonRaws)
 				if ok {
-					// spliceRawJSONPayload returns a fresh slice, so the
+					// spliceRawJSONPayloads returns a fresh slice, so the
 					// pooled buffer needs no copy below.
 					spliced = true
 				} else {
-					// Defensive: the placeholder did not render (a protojson
+					// Defensive: a placeholder did not render (a protojson
 					// behavior change would be the only cause). Re-marshal
-					// with the real payload and take the copying path — the
-					// placeholder frame carries an empty object and must not
-					// reach subscribers, and its bytes alias the pooled buffer.
+					// with the real payloads and take the copying path —
+					// the placeholder frame carries empty objects and must
+					// not reach subscribers, and its bytes alias the pooled
+					// buffer.
 					b, err = m.MarshalAppend((*buf)[:0], out)
 				}
 			}
@@ -549,9 +608,12 @@ func (h *Hub) BroadcastPublication(ch string, pub *Publication) error {
 	}
 
 	// Record the last successfully delivered offset per exact subscription.
-	// Transient publications (offset 0) never update the bookkeeping.
-	if pub.Offset > 0 {
-		h.recordDeliveredOffsets(ch, pub.Offset, clients, delivered)
+	// Transient publications (offset 0) never update the bookkeeping. A
+	// batch shares one frame per subscriber — all its messages deliver or
+	// fail together — so the batch maximum is the correct per-subscription
+	// record.
+	if maxOffset > 0 {
+		h.recordDeliveredOffsets(ch, maxOffset, clients, delivered)
 	}
 
 	return nil
@@ -577,15 +639,35 @@ const jsonPayloadSplicePoint = `"json":{}`
 // the real payload instead of using the returned frame, whose bytes alias
 // the caller's buffer and carry an empty object at the payload site.
 func spliceRawJSONPayload(frame, raw []byte) ([]byte, bool) {
-	i := bytes.Index(frame, []byte(jsonPayloadSplicePoint))
-	if i < 0 {
-		return nil, false
+	return spliceRawJSONPayloads(frame, [][]byte{raw})
+}
+
+// spliceRawJSONPayloads replaces each empty-Struct placeholder in frame with
+// the corresponding raw payload bytes, in message order, returning a fresh
+// slice. ok is false when any placeholder is missing — the frame must then
+// be re-marshaled with the real payloads (defensive; a protojson behavior
+// change would be the only cause). Each search resumes after the previously
+// inserted raw bytes: a spliced JSON object may itself contain the literal
+// splice-point sequence (a nested "json" key), which must never be
+// mistaken for the next placeholder.
+func spliceRawJSONPayloads(frame []byte, raws [][]byte) ([]byte, bool) {
+	point := []byte(jsonPayloadSplicePoint)
+	out := frame
+	pos := 0
+	for _, raw := range raws {
+		i := bytes.Index(out[pos:], point)
+		if i < 0 {
+			return nil, false
+		}
+		i += pos
+		// `"json":` is kept from the placeholder; only the `{}` is replaced.
+		next := make([]byte, 0, len(out)+len(raw)-2)
+		next = append(next, out[:i+len(point)-2]...)
+		next = append(next, raw...)
+		next = append(next, out[i+len(point):]...)
+		out = next
+		pos = i + len(point) - 2 + len(raw)
 	}
-	// `"json":` is kept from the placeholder; only the `{}` is replaced.
-	out := make([]byte, 0, len(frame)+len(raw)-2)
-	out = append(out, frame[:i+len(jsonPayloadSplicePoint)-2]...)
-	out = append(out, raw...)
-	out = append(out, frame[i+len(jsonPayloadSplicePoint):]...)
 	return out, true
 }
 

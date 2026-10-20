@@ -37,6 +37,13 @@ type ChannelPolicy struct {
 	MaxSurveyTimeout      time.Duration
 	LegacyPresenceChannel bool
 	PresenceSnapshotLimit int
+	// Batching overrides the server.broadcast switch for this channel:
+	// nil inherits the global setting, true forces batching on (subject to
+	// the subscriber threshold), false keeps the channel unbatched. It is
+	// the policy table's first pointer field because the fallback value
+	// lives in the global server.broadcast block, which the policy layer
+	// does not see.
+	Batching *bool
 }
 
 // DefaultChannelPolicy returns the pre-policy behavior: history on, presence
@@ -72,6 +79,7 @@ type CompiledPolicySpec struct {
 	maxSurveyTimeoutSet   bool
 	legacyPresenceChannel *bool
 	presenceSnapshotLimit *int
+	batching              *bool
 }
 
 // CompilePolicySpec converts a config spec into the parsed Overlay form.
@@ -89,6 +97,7 @@ func CompilePolicySpec(spec config.ChannelPolicySpec) CompiledPolicySpec {
 		maxSurveySubscribers:  spec.MaxSurveySubscribers,
 		legacyPresenceChannel: spec.LegacyPresenceChannel,
 		presenceSnapshotLimit: spec.PresenceSnapshotLimit,
+		batching:              spec.Batching,
 	}
 	if spec.HistoryTTL != "" {
 		if d, err := time.ParseDuration(spec.HistoryTTL); err == nil {
@@ -143,6 +152,9 @@ func Overlay(pol ChannelPolicy, spec CompiledPolicySpec) ChannelPolicy {
 	}
 	if spec.presenceSnapshotLimit != nil {
 		pol.PresenceSnapshotLimit = *spec.presenceSnapshotLimit
+	}
+	if spec.batching != nil {
+		pol.Batching = spec.batching
 	}
 	return pol
 }

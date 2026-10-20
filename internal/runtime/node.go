@@ -39,6 +39,11 @@ type Node struct {
 	metrics          *Metrics
 	surveys          map[string]*Survey
 	surveyMu         sync.RWMutex
+	// batcher merges high-occupancy channels' publications into one frame
+	// per flush window (server.broadcast). nil = disabled: the broker
+	// handler calls the hub fan-out directly, byte-identical to the
+	// pre-batching path.
+	batcher *publicationBatcher
 	// authorizer is the single authorization evaluator; it is never nil
 	// (PR-KA-A4). It replaced the ACL engine and the channel policy engine.
 	authorizer *Authorizer
@@ -146,6 +151,19 @@ func NewNode(cfg *config.Server) *Node {
 
 	node.broker = NewMemoryBroker(MemoryBrokerOptions{})
 
+	// Broadcast batching (server.broadcast). A nil block keeps the batcher
+	// nil: the broker handler stays the direct hub call. Resolve failures
+	// cannot normally happen (config.Validate rejects invalid values before
+	// startup), but NewNode must not fail the server over one — warn and
+	// stay disabled, matching the authorizer fallback discipline.
+	if cfg != nil && cfg.Broadcast != nil {
+		if settings, err := cfg.Broadcast.Resolve(); err != nil {
+			log.WarnContext(context.Background(), "broadcast batching disabled: invalid configuration", "error", err)
+		} else {
+			node.batcher = newPublicationBatcher(node, settings)
+		}
+	}
+
 	// The single authorization table. An empty server.authorizer (or a nil
 	// cfg) compiles to the pre-policy defaults (history on, presence on,
 	// survey off, subscribe/publish open), so an unconfigured server behaves
@@ -220,9 +238,13 @@ func (n *Node) Run(ctx context.Context) error {
 		// C6: catch-up gap notifications fan out to local subscribers via the
 		// same second-pipe pattern as occupancy (the broker knows no sessions).
 		n.broker.SetGapHandler(n.onGap)
-		if err := n.broker.Start(ctx, func(ch string, pub *Publication) error {
+		deliver := func(ch string, pub *Publication) error {
 			return n.hub.BroadcastPublication(ch, pub)
-		}); err != nil {
+		}
+		if n.batcher != nil {
+			deliver = n.batcher.Deliver
+		}
+		if err := n.broker.Start(ctx, deliver); err != nil {
 			log.ErrorContext(ctx, "broker stopped with error", err)
 			startErr <- err
 		}
@@ -243,6 +265,12 @@ func (n *Node) Run(ctx context.Context) error {
 func (n *Node) Shutdown() {
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultShutdownTimeout)
 	defer cancel()
+
+	// Flush and stop the batching layer before draining clients, so buffered
+	// publications reach their subscribers instead of racing the disconnect.
+	if n.batcher != nil {
+		n.batcher.Close()
+	}
 
 	// Signal the disconnect code to indicate server-initiated shutdown.
 	done := make(chan struct{})

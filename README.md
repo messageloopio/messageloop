@@ -135,7 +135,7 @@ MessageLoop reads a single YAML file passed through `--config`.
 
 | Section | Purpose | Key Fields |
 | --- | --- | --- |
-| `server` | Server-side listeners and core runtime behavior | `http.addr`, `api.addr`, `api.tls.*`, `heartbeat.idle_timeout`, `rpc_timeout`, `limits.*`, `authorizer.rules` |
+| `server` | Server-side listeners and core runtime behavior | `http.addr`, `api.addr`, `api.tls.*`, `heartbeat.idle_timeout`, `rpc_timeout`, `limits.*`, `authorizer.rules`, `broadcast.*` |
 | `transport.websocket` | WebSocket listener configuration | `addr`, `path`, `check_origin`, `compression`, `write_timeout`, `tls.*` |
 | `transport.grpc` | Client gRPC streaming listener configuration | `addr`, `write_timeout`, `tls.*` |
 | `broker` | Messaging backend selection | `type`, `redis.*` |
@@ -166,6 +166,26 @@ Behavior notes:
 - When no rule matches a channel, the default policy applies (subscribe and publish are allowed, survey is off).
 - Rules are evaluated in configuration order and later rules override earlier ones (not first-match); a deny cannot be punched through by a more specific allow.
 - The old `server.acl` block was removed: configuration that still contains it fails validation.
+
+### Broadcast Batching (Large Channels)
+
+```yaml
+server:
+  broadcast:
+    max_delay: 8ms          # flush window; (0s, 500ms]
+    max_messages: 32        # batch size cap
+    max_batch_bytes: 16384  # raw payload byte budget; 2× must fit limits.max_message_size
+    min_subscribers: 256    # activation threshold (local subscriber count)
+    idle_reap: 30s          # idle accumulator TTL
+  authorizer:
+    rules:
+      - pattern: "game.*"
+        batching: true      # per-pattern override (false keeps a channel unbatched)
+```
+
+Omitting `server.broadcast` disables batching entirely: every publication fans out immediately, one frame per subscriber. When enabled, a channel whose local subscriber count reaches `min_subscribers` merges the publications arriving within `max_delay` (or up to `max_messages` / `max_batch_bytes`) into **one multi-message frame** — the per-subscriber enqueue and write-confirmation cost is paid once per batch instead of once per message, which is what makes single-channel fan-out at tens of thousands of subscribers affordable. Transient events (presence join/leave) never batch; recovery/replay is untouched.
+
+Memory safety is structural, not tunable: each channel's buffer is bounded by both caps and a full buffer **blocks the producing delivery worker** (backpressure along the broker's existing chain) instead of growing or dropping. `messageloop_broadcast_batch_pending_bytes` pinned at the ceiling plus rising `messageloop_broadcast_batch_backpressure_total` means the channel's rate exceeds the node's fan-out capacity — add nodes rather than retuning. See `docs/design/2026-10-20-broadcast-batching.md` for the full design.
 
 ### Proxy Routing
 

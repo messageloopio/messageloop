@@ -119,6 +119,13 @@ type Server struct {
 	// allow lists / deny_all / Effects. It replaces the old server.acl and
 	// server.channels blocks.
 	Authorizer AuthorizerConfig `yaml:"authorizer" json:"authorizer" mapstructure:"authorizer"`
+	// Broadcast configures broadcast delivery batching. Nil (the default)
+	// disables batching entirely: every publication fans out immediately,
+	// one frame per subscriber. When set, channels with at least
+	// BatchingDefaults.MinSubscribers local subscribers batch their
+	// publications into one multi-message frame per flush window; a channel
+	// policy (server.authorizer effects batching) overrides per pattern.
+	Broadcast *BatchingConfig `yaml:"broadcast" json:"broadcast" mapstructure:"broadcast"`
 	// ACL and Channels are removed in PR-KA-A4 (KD-K31: no compatibility
 	// period). The fields stay declared so YAML still parses and Validate can
 	// reject them explicitly — nothing else may read them.
@@ -191,6 +198,11 @@ type ChannelPolicySpec struct {
 	MaxSurveyTimeout      string `yaml:"max_survey_timeout" json:"max_survey_timeout" mapstructure:"max_survey_timeout"`
 	LegacyPresenceChannel *bool  `yaml:"legacy_presence_channel" json:"legacy_presence_channel" mapstructure:"legacy_presence_channel"`
 	PresenceSnapshotLimit *int   `yaml:"presence_snapshot_limit" json:"presence_snapshot_limit" mapstructure:"presence_snapshot_limit"`
+	// Batching overrides the server.broadcast switch for matching channels:
+	// true forces batching on (subject to the subscriber threshold), false
+	// keeps the channel unbatched even when server.broadcast is enabled.
+	// nil inherits the global setting.
+	Batching *bool `yaml:"batching" json:"batching" mapstructure:"batching"`
 }
 
 // ACLConfig is the removed server.acl block (PR-KA-A4 / KD-K31: no
@@ -215,6 +227,121 @@ type Limits struct {
 	MaxSubscriptionsPerClient int `yaml:"max_subscriptions_per_client" json:"max_subscriptions_per_client" mapstructure:"max_subscriptions_per_client"` // 0 = unlimited
 	MaxPublishesPerSecond     int `yaml:"max_publishes_per_second" json:"max_publishes_per_second" mapstructure:"max_publishes_per_second"`             // 0 = unlimited
 	MaxMessageSize            int `yaml:"max_message_size" json:"max_message_size" mapstructure:"max_message_size"`                                     // bytes, 0 = default (64KB), applies uniformly to WebSocket, gRPC, QUIC, and KCP transports
+}
+
+// defaultMaxMessageSize mirrors runtime.DefaultMaxMessageSize (internal
+// packages cannot import each other's cycle side; config cannot import
+// runtime). Validate pins the batching frame budget against it.
+const defaultMaxMessageSize = 64 * 1024
+
+// Batching defaults applied by BatchingConfig.Resolve for zero fields.
+const (
+	DefaultBatchMaxDelay       = 8 * time.Millisecond
+	DefaultBatchMaxMessages    = 32
+	DefaultBatchMaxBytes       = 16 * 1024
+	DefaultBatchMinSubscribers = 256
+	DefaultBatchIdleReap       = 30 * time.Second
+	// batchFrameInflationFactor is the JSON-wire size safety factor applied
+	// to the accumulated raw payload bytes: binary payloads inflate through
+	// base64 (~×1.37) plus protojson escaping and envelope overhead. The
+	// Validate gate (2 × max_batch_bytes ≤ effective max_message_size) keeps
+	// a full batch under the outbound frame cap for every wire encoding.
+	batchFrameInflationFactor = 2
+	// minBatchMaxBytes and maxBatchMaxDelay bound sane batching parameters.
+	minBatchMaxBytes = 1024
+	maxBatchMaxDelay = 500 * time.Millisecond
+)
+
+// BatchingConfig is the server.broadcast block. A nil block disables
+// broadcast batching; presence enables it with these parameters (zero fields
+// take the documented defaults at Resolve time).
+type BatchingConfig struct {
+	// MaxDelay is the collection window: a buffered publication waits at
+	// most this long before its batch is flushed. Duration string;
+	// default 8ms, must be in (0, 500ms].
+	MaxDelay string `yaml:"max_delay" json:"max_delay" mapstructure:"max_delay"`
+	// MaxMessages caps the batch size in publications; default 32, must be ≥ 2.
+	MaxMessages int `yaml:"max_messages" json:"max_messages" mapstructure:"max_messages"`
+	// MaxBatchBytes caps the accumulated raw payload bytes per batch;
+	// default 16KiB, must be ≥ 1KiB. A single publication larger than the
+	// budget bypasses the buffer (sent unbatched, after draining any pending
+	// messages to preserve order).
+	MaxBatchBytes int `yaml:"max_batch_bytes" json:"max_batch_bytes" mapstructure:"max_batch_bytes"`
+	// MinSubscribers is the activation threshold: a channel batches only
+	// while its local subscriber count is at or above this. Below it the
+	// publication goes out immediately (small channels pay no added
+	// latency). Default 256.
+	MinSubscribers int `yaml:"min_subscribers" json:"min_subscribers" mapstructure:"min_subscribers"`
+	// IdleReap is how long an idle channel accumulator (no publications)
+	// stays allocated before it is reaped. Duration string; default 30s.
+	IdleReap string `yaml:"idle_reap" json:"idle_reap" mapstructure:"idle_reap"`
+}
+
+// BatchingSettings is the resolved form of BatchingConfig: durations parsed,
+// defaults applied. Produced by Resolve after config.Validate has rejected
+// invalid values.
+type BatchingSettings struct {
+	MaxDelay       time.Duration
+	MaxMessages    int
+	MaxBatchBytes  int
+	MinSubscribers int
+	IdleReap       time.Duration
+}
+
+// EffectiveMaxMessageSize returns server.limits.max_message_size with the
+// 64KB default applied (the value every outbound frame is capped at).
+func (c *Config) EffectiveMaxMessageSize() int {
+	if c.Server.Limits.MaxMessageSize > 0 {
+		return c.Server.Limits.MaxMessageSize
+	}
+	return defaultMaxMessageSize
+}
+
+// Resolve parses duration strings and applies defaults. It returns an error
+// for values config.Validate would have rejected; callers before Validate
+// (NewNode) log and fall back to the zero-value disabled state instead of
+// failing startup.
+func (b *BatchingConfig) Resolve() (BatchingSettings, error) {
+	s := BatchingSettings{
+		MaxDelay:       DefaultBatchMaxDelay,
+		MaxMessages:    DefaultBatchMaxMessages,
+		MaxBatchBytes:  DefaultBatchMaxBytes,
+		MinSubscribers: DefaultBatchMinSubscribers,
+		IdleReap:       DefaultBatchIdleReap,
+	}
+	if b.MaxDelay != "" {
+		d, err := time.ParseDuration(b.MaxDelay)
+		if err != nil {
+			return s, fmt.Errorf("invalid duration for broadcast.batching.max_delay: %w", err)
+		}
+		s.MaxDelay = d
+	}
+	if b.IdleReap != "" {
+		d, err := time.ParseDuration(b.IdleReap)
+		if err != nil {
+			return s, fmt.Errorf("invalid duration for broadcast.batching.idle_reap: %w", err)
+		}
+		s.IdleReap = d
+	}
+	if b.MaxMessages > 0 {
+		s.MaxMessages = b.MaxMessages
+	}
+	if b.MaxBatchBytes > 0 {
+		s.MaxBatchBytes = b.MaxBatchBytes
+	}
+	if b.MinSubscribers > 0 {
+		s.MinSubscribers = b.MinSubscribers
+	}
+	if s.MaxDelay <= 0 || s.MaxDelay > maxBatchMaxDelay {
+		return s, fmt.Errorf("broadcast.batching.max_delay must be in (0, %s], got %s", maxBatchMaxDelay, s.MaxDelay)
+	}
+	if s.MaxMessages < 2 {
+		return s, fmt.Errorf("broadcast.batching.max_messages must be >= 2, got %d", s.MaxMessages)
+	}
+	if s.MaxBatchBytes < minBatchMaxBytes {
+		return s, fmt.Errorf("broadcast.batching.max_batch_bytes must be >= %d, got %d", minBatchMaxBytes, s.MaxBatchBytes)
+	}
+	return s, nil
 }
 
 type HttpServer struct {
@@ -631,6 +758,23 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	// Validate broadcast batching (server.broadcast). The frame-budget gate
+	// keeps a full batch under the outbound frame cap for every wire
+	// encoding: accumulated raw payload bytes inflate on the JSON wire
+	// (base64 for binary payloads, protojson escaping), so the budget times
+	// the inflation factor must fit max_message_size.
+	if c.Server.Broadcast != nil {
+		s, err := c.Server.Broadcast.Resolve()
+		if err != nil {
+			return err
+		}
+		if budget := batchFrameInflationFactor * s.MaxBatchBytes; budget > c.EffectiveMaxMessageSize() {
+			return fmt.Errorf(
+				"broadcast.batching.max_batch_bytes (%d) × %d exceeds server.limits.max_message_size (%d effective); lower max_batch_bytes or raise max_message_size",
+				s.MaxBatchBytes, batchFrameInflationFactor, c.EffectiveMaxMessageSize())
+		}
+	}
+
 	// The removed authorization blocks must not reappear (KD-K31: no
 	// compatibility period). The fields stay declared so YAML still parses
 	// and this explicit check can reject them.
@@ -900,7 +1044,8 @@ func channelPolicySpecSet(spec ChannelPolicySpec) bool {
 		spec.MaxSurveySubscribers != nil ||
 		spec.MaxSurveyTimeout != "" ||
 		spec.LegacyPresenceChannel != nil ||
-		spec.PresenceSnapshotLimit != nil
+		spec.PresenceSnapshotLimit != nil ||
+		spec.Batching != nil
 }
 
 // validateChannelPolicySpec validates the scalar constraints shared by the
