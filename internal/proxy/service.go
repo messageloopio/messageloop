@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lynx-go/lynx/contrib/registry"
-	"github.com/lynx-go/x/log"
+	"github.com/lynxland/lynx/contrib/registry"
+	"github.com/lynxland/x/log"
 	"google.golang.org/grpc"
 
 	mlmetrics "github.com/messageloopio/messageloop/internal/metrics"

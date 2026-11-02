@@ -10,7 +10,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/lynx-go/x/log"
+	"github.com/lynxland/x/log"
 
 	proxypb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/proxy/v2"
 )

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lynx-go/x/log"
+	"github.com/lynxland/x/log"
 
 	"github.com/messageloopio/messageloop/internal/proxy"
 	"github.com/messageloopio/messageloop/pkg/topics"

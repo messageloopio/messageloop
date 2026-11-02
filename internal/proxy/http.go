@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/lynx-go/x/log"
+	"github.com/lynxland/x/log"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 

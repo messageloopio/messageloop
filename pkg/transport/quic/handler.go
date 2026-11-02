@@ -7,7 +7,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/lynx-go/x/log"
+	"github.com/lynxland/x/log"
 	"github.com/quic-go/quic-go"
 
 	"github.com/messageloopio/messageloop/internal/runtime"

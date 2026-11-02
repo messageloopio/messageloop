@@ -4,7 +4,7 @@ import (
 	"context"
 	"sort"
 
-	"github.com/lynx-go/x/log"
+	"github.com/lynxland/x/log"
 )
 
 // ExpandUserSessions resolves (namespace, userID) to the deduplicated, sorted

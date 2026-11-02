@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lynx-go/lynx/contrib/registry"
-	registryredis "github.com/lynx-go/lynx/contrib/registry-redis"
+	"github.com/lynxland/lynx/contrib/registry"
+	registryredis "github.com/lynxland/lynx/contrib/registry-redis"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

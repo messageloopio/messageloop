@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/lynx-go/x/log"
+	"github.com/lynxland/x/log"
 	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
 

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lynx-go/lynx/contrib/registry"
+	"github.com/lynxland/lynx/contrib/registry"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"

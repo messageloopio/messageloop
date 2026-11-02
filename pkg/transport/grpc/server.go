@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lynx-go/lynx"
-	"github.com/lynx-go/x/log"
+	"github.com/lynxland/lynx"
+	"github.com/lynxland/x/log"
 	googlegrpc "google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	_ "google.golang.org/grpc/encoding/gzip"

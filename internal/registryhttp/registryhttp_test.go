@@ -11,7 +11,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/lynx-go/lynx/contrib/registry"
+	"github.com/lynxland/lynx/contrib/registry"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

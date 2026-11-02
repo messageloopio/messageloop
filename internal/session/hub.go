@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/lynx-go/x/log"
+	"github.com/lynxland/x/log"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/messageloopio/messageloop/pkg/topics"

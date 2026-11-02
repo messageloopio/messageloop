@@ -5,7 +5,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/lynx-go/lynx"
+	"github.com/lynxland/lynx"
 
 	"github.com/messageloopio/messageloop/internal/config"
 	proxyproxy "github.com/messageloopio/messageloop/internal/proxy"

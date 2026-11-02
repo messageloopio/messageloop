@@ -8,11 +8,11 @@ require (
 	github.com/gobwas/glob v1.0.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
-	github.com/lynx-go/lynx v1.20.0
-	github.com/lynx-go/lynx/contrib/registry v1.20.0
-	github.com/lynx-go/lynx/contrib/registry-redis v1.20.0
-	github.com/lynx-go/lynx/contrib/zap v1.20.0
-	github.com/lynx-go/x v0.1.0
+	github.com/lynxland/lynx v1.21.0
+	github.com/lynxland/lynx/contrib/registry v1.21.0
+	github.com/lynxland/lynx/contrib/registry-redis v1.21.0
+	github.com/lynxland/lynx/contrib/zap v1.21.0
+	github.com/lynxland/x v0.2.0
 	github.com/messageloopio/messageloop/protocol v1.0.0-rc.2
 	github.com/prometheus/client_golang v1.25.0
 	github.com/prometheus/client_model v0.6.3
@@ -67,7 +67,7 @@ require (
 	go.uber.org/zap v1.28.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/crypto v0.57.0 // indirect
-	golang.org/x/net v0.59.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260904194346-d0f1323225a4 // indirect

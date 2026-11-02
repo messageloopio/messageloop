@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/lynx-go/x/log"
+	"github.com/lynxland/x/log"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/messageloopio/messageloop/internal/cluster"

@@ -24,9 +24,9 @@ ARG COMMIT=
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 go build -trimpath -ldflags "-s -w \
-    -X github.com/lynx-go/lynx/buildinfo.Version=${VERSION} \
-    -X github.com/lynx-go/lynx/buildinfo.Commit=${COMMIT} \
-    -X github.com/lynx-go/lynx/buildinfo.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o /out/messageloop ./cmd/server
+    -X github.com/lynxland/lynx/buildinfo.Version=${VERSION} \
+    -X github.com/lynxland/lynx/buildinfo.Commit=${COMMIT} \
+    -X github.com/lynxland/lynx/buildinfo.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o /out/messageloop ./cmd/server
 
 FROM alpine:${ALPINE_VERSION}
 RUN apk add --no-cache ca-certificates \

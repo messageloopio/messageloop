@@ -5,7 +5,7 @@ import (
 	"errors"
 	"sort"
 
-	"github.com/lynx-go/x/log"
+	"github.com/lynxland/x/log"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 

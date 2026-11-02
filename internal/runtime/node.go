@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/lynx-go/lynx/contrib/registry"
-	"github.com/lynx-go/x/log"
+	"github.com/lynxland/lynx/contrib/registry"
+	"github.com/lynxland/x/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/protobuf/proto"
 

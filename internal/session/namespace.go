@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/lynx-go/x/log"
+	"github.com/lynxland/x/log"
 
 	"github.com/messageloopio/messageloop/pkg/topics"
 	clientpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/client/v2"

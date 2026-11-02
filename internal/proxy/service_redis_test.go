@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lynx-go/lynx/contrib/registry"
-	registryredis "github.com/lynx-go/lynx/contrib/registry-redis"
+	"github.com/lynxland/lynx/contrib/registry"
+	registryredis "github.com/lynxland/lynx/contrib/registry-redis"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/redis/go-redis/v9"

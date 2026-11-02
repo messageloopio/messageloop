@@ -7,7 +7,7 @@ MessageLoop 服务器在进程内提供三类可观测性出口：
 - **管理面 HTTP 服务器**：监听 `server.http.addr`（默认 `127.0.0.1:8080`，为空时回退到该值，见[《配置参考》](02-configuration.md)的 server 节），只挂载两个端点：
   - `GET /health` —— 健康检查，返回 JSON 状态；
   - `GET /metrics` —— Prometheus 指标，文本格式。
-- **结构化日志**：由 lynx 框架输出（日志后端为 zap），核心包通过 `github.com/lynx-go/x/log` 写入带上下文的键值对日志。
+- **结构化日志**：由 lynx 框架输出（日志后端为 zap），核心包通过 `github.com/lynxland/x/log` 写入带上下文的键值对日志。
 - **客户端可见的断连码（disconnect codes）**：连接被服务端关闭时，传输层把数值代码与原因文本交给客户端（见[《客户端协议参考》](../protocol.md)），是客户端侧可观测性的主要来源。
 
 管理面 HTTP 服务器与面向客户端的监听器相互独立，不承载任何业务流量。
@@ -151,7 +151,7 @@ curl -s http://127.0.0.1:8080/metrics | grep '^messageloop_'
 
 - 日志由 lynx 框架管理，后端为 zap（cmd/server/main.go）；
 - 命令行参数 `--log-level` 控制日志级别，默认 `info`；
-- 核心包使用 `github.com/lynx-go/x/log` 输出结构化键值对日志；WebSocket 处理器会把 `client_id` 注入日志上下文（pkg/transport/ws/handler.go），单条连接的生命周期日志可据此串联。
+- 核心包使用 `github.com/lynxland/x/log` 输出结构化键值对日志；WebSocket 处理器会把 `client_id` 注入日志上下文（pkg/transport/ws/handler.go），单条连接的生命周期日志可据此串联。
 
 ### 4.2 常见日志事件
 

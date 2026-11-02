@@ -7,7 +7,7 @@ package serverapi
 import (
 	"context"
 
-	"github.com/lynx-go/x/log"
+	"github.com/lynxland/x/log"
 	"github.com/prometheus/client_golang/prometheus"
 	googlegrpc "google.golang.org/grpc"
 

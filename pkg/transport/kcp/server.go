@@ -10,8 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/lynx-go/lynx"
-	"github.com/lynx-go/x/log"
+	"github.com/lynxland/lynx"
+	"github.com/lynxland/x/log"
 	kcpgo "github.com/xtaci/kcp-go/v5"
 
 	"github.com/messageloopio/messageloop/internal/runtime"

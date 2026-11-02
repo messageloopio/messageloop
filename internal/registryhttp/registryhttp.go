@@ -20,7 +20,7 @@ import (
 	"net"
 	"net/http"
 
-	"github.com/lynx-go/lynx/contrib/registry"
+	"github.com/lynxland/lynx/contrib/registry"
 )
 
 // maxBodyBytes bounds a register request body. Instances carry small

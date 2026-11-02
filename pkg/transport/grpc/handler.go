@@ -4,7 +4,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/lynx-go/x/log"
+	"github.com/lynxland/x/log"
 	googlegrpc "google.golang.org/grpc"
 	"google.golang.org/grpc/peer"
 

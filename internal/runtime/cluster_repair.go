@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lynx-go/x/log"
+	"github.com/lynxland/x/log"
 )
 
 const (

@@ -22,12 +22,12 @@ run = "buf generate"
 [tasks."upgrade-lynx"]
 description = "更新 lynx 框架与 contrib 依赖并 tidy"
 run = [
-  "go get -u github.com/lynx-go/x",
-  "go get -u github.com/lynx-go/lynx",
-  "go get -u github.com/lynx-go/lynx/contrib/zap",
-  "go get -u github.com/lynx-go/lynx/contrib/pubsub",
-  "go get -u github.com/lynx-go/lynx/contrib/kafka",
-  "go get -u github.com/lynx-go/lynx/contrib/schedule",
+  "go get -u github.com/lynxland/x",
+  "go get -u github.com/lynxland/lynx",
+  "go get -u github.com/lynxland/lynx/contrib/zap",
+  "go get -u github.com/lynxland/lynx/contrib/pubsub",
+  "go get -u github.com/lynxland/lynx/contrib/kafka",
+  "go get -u github.com/lynxland/lynx/contrib/schedule",
   "go mod tidy",
 ]
 

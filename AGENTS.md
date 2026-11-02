@@ -67,7 +67,7 @@ import (
     sharedv2 "github.com/messageloopio/messageloop/protocol/genproto/messageloop/shared/v2"
     clientpb "github.com/messageloopio/messageloop/protocol/genproto/messageloop/client/v2"
     "github.com/messageloopio/messageloop/proxy"
-    "github.com/lynx-go/x/log"
+    "github.com/lynxland/x/log"
     "github.com/samber/lo"
     "google.golang.org/protobuf/proto"
 )

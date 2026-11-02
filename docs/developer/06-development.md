@@ -252,7 +252,7 @@ npm test           # Jest 测试（ts-jest，测试位于 test/）
 - `task release-all`：依次为三个模块打 annotated tag 并推送：`v0.2.0`（根）、`shared/v0.2.0`（shared 模块）、`sdks/go/v0.2.0`（Go SDK）。标签格式为 `git tag -a <tag> -m <comment>` 后 `git push origin <tag>`，三组标签共享同一版本号，用目录前缀区分模块。
 - `task release-tag`：单独打一个标签并推送（`task release-tag Version=v0.2.0` 形式覆盖变量）。
 - `task release-sdk-ts`：在 `sdks/ts/` 下执行 `npm exec rimraf -- dist` 清理、`npm run build` 构建、`npm publish --access public --registry https://registry.npmjs.org/` 发布。注意 npm 包版本（`package.json` 的 `version`，当前 `1.2.0`）独立于 Go 侧标签，需要单独递增。
-- `task upgrade-lynx`：批量升级 `lynx` 框架及 contrib 依赖（`go get -u github.com/lynx-go/x` 等）后 `go mod tidy`。
+- `task upgrade-lynx`：批量升级 `lynx` 框架及 contrib 依赖（`go get -u github.com/lynxland/x` 等）后 `go mod tidy`。
 
 自动化发布有两条路：Go 侧标签由 `task release-*` 手动打；容器镜像由 `docker-publish.yml` 在 push `main`（`latest`）与 `v*` 标签（semver）时自动发布到 GHCR。CI 在 push/PR 合并前自动执行构建、vet、带竞态与覆盖率的测试以及 golangci-lint。
 

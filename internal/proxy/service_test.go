@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lynx-go/lynx/contrib/registry"
+	"github.com/lynxland/lynx/contrib/registry"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"

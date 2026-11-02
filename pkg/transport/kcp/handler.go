@@ -8,7 +8,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/lynx-go/x/log"
+	"github.com/lynxland/x/log"
 	kcpgo "github.com/xtaci/kcp-go/v5"
 
 	"github.com/messageloopio/messageloop/internal/runtime"
